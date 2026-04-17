@@ -5,5 +5,5 @@
   "graphs": {
     "linkedin_job_agent": "./linkedin_agent/agent.py:graph"
   },
-  "env": ".env"
+  "env": "linkedin_agent/.env"
 }

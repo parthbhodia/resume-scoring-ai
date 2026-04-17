@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resume Generator — Parth Bhodia</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --surface2: #1c2128;
+      --border:   #30363d;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --blue:     #58a6ff;
+      --blue-dim: #1f6feb;
+      --green:    #3fb950;
+      --red:      #f85149;
+      --yellow:   #d29922;
+      --orange:   #e3b341;
+      --radius:   8px;
+    }
+
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 28px; display: flex; align-items: center; gap: 10px; }
+    header h1 { font-size: 16px; font-weight: 600; }
+    header span { font-size: 12px; color: var(--muted); }
+
+    .layout { display: grid; grid-template-columns: 1fr 310px; height: calc(100vh - 49px); }
+
+    .main { padding: 22px 26px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+    .card-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 14px; }
+
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .field label { display: block; font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+
+    input, textarea, select {
+      width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); font-size: 13px; font-family: inherit; padding: 8px 10px; outline: none;
+      transition: border-color .15s;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--blue-dim); box-shadow: 0 0 0 3px rgba(31,111,235,.15); }
+    input::placeholder, textarea::placeholder { color: var(--muted); }
+    textarea { resize: vertical; min-height: 190px; line-height: 1.6; }
+    select option { background: var(--surface); }
+
+    .model-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+    .model-pill { background: var(--bg); border: 1px solid var(--border); border-radius: 20px; color: var(--muted); font-size: 11px; font-family: inherit; padding: 4px 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: border-color .15s, color .15s, background .15s; }
+    .model-pill:hover { border-color: var(--blue); color: var(--text); }
+    .model-pill.active { border-color: var(--blue); background: rgba(31,111,235,.15); color: var(--blue); }
+    .pill-tag { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; opacity: .65; }
+
+    .btn-primary { margin-top: 14px; width: 100%; background: var(--blue-dim); color: #fff; border: none; border-radius: 6px; padding: 10px 20px; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: background .15s, opacity .15s; }
+    .btn-primary:hover:not(:disabled) { background: #388bfd; }
+    .btn-primary:disabled { opacity: .6; cursor: not-allowed; }
+
+    .spinner { width: 13px; height: 13px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Status bar ───────────────────────────────────── */
+    .status-bar { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); padding: 10px 0 4px; }
+    .status-bar .spinner { border-color: rgba(139,148,158,.3); border-top-color: var(--muted); }
+
+    /* ── Live preview ─────────────────────────────────── */
+    .live-preview {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      font-family: "Menlo","Consolas","Monaco",monospace; font-size: 11px; line-height: 1.55;
+      color: #7ee787; padding: 10px 12px; max-height: 180px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    .live-preview-label { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 5px; display: flex; align-items: center; gap: 6px; }
+    .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 1s infinite; flex-shrink: 0; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* ── Sources ──────────────────────────────────────── */
+    .sources-box { margin-top: 12px; }
+    .sources-header { font-size: 11px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; padding: 6px 0; }
+    .sources-header:hover { color: var(--text); }
+    .sources-list { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+    .source-item { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; padding: 5px 8px; background: var(--surface2); border-radius: 5px; border: 1px solid var(--border); }
+    .source-favicon { width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0; margin-top: 1px; }
+    .source-title { color: var(--blue); text-decoration: none; line-height: 1.4; word-break: break-all; }
+    .source-title:hover { text-decoration: underline; }
+
+    /* ── Tabs ────────────────────────────────────────── */
+    #resultCard { display: none; }
+    .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 14px; gap: 0; }
+    .tab { padding: 7px 13px; font-size: 11px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s, border-color .15s; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Info tab ─────────────────────────────────────── */
+    .status-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 20px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    .status-badge.success { background: rgba(63,185,80,.15); color: var(--green); }
+    .status-badge.error   { background: rgba(248,81,73,.15);  color: var(--red); }
+    .result-meta { font-size: 12px; color: var(--muted); line-height: 2; }
+    .result-meta strong { color: var(--text); }
+
+    .btn-pdf  { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; background: var(--green); color: #000; border: none; border-radius: 6px; padding: 7px 13px; font-size: 12px; font-weight: 700; cursor: pointer; text-decoration: none; transition: opacity .15s; }
+    .btn-pdf:hover { opacity: .85; }
+    .btn-ghost { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; margin-left: 6px; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 7px 13px; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; transition: border-color .15s, color .15s; }
+    .btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
+
+    .error-text { font-size: 11px; color: var(--red); background: rgba(248,81,73,.08); border: 1px solid rgba(248,81,73,.25); border-radius: 6px; padding: 10px; margin-top: 8px; font-family: "Menlo","Consolas",monospace; white-space: pre-wrap; word-break: break-all; }
+
+    /* ── Ratings ─────────────────────────────────────── */
+    .match-header { display: flex; align-items: center; gap: 20px; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+    .match-score-block { text-align: center; flex-shrink: 0; }
+    .match-score-num { font-size: 48px; font-weight: 800; line-height: 1; letter-spacing: -2px; }
+    .match-score-num.high   { color: var(--green); }
+    .match-score-num.medium { color: var(--orange); }
+    .match-score-num.low    { color: var(--red); }
+    .match-score-denom { font-size: 18px; color: var(--muted); font-weight: 500; }
+    .match-score-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+    .match-verdict { font-size: 13px; color: var(--text); line-height: 1.6; }
+
+    .criteria-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 18px; }
+    .criteria-table th { text-align: left; font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+    .criteria-table td { padding: 9px 10px; border-bottom: 1px solid rgba(48,54,61,.4); vertical-align: middle; }
+    .criteria-table tr:last-child td { border-bottom: none; }
+    .criteria-table tr:hover td { background: rgba(88,166,255,.04); }
+    .criteria-name { color: var(--text); font-weight: 500; }
+    .criteria-notes { color: var(--muted); line-height: 1.5; }
+
+    .weight-badge { display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 3px; }
+    .weight-badge.High   { background: rgba(248,81,73,.15);  color: var(--red);    border: 1px solid rgba(248,81,73,.3); }
+    .weight-badge.Medium { background: rgba(210,153,34,.15); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
+    .weight-badge.Low    { background: rgba(48,54,61,.5);    color: var(--muted);  border: 1px solid var(--border); }
+
+    .score-cell { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .score-num { font-weight: 700; font-size: 12px; min-width: 28px; }
+    .score-num.high   { color: var(--green); }
+    .score-num.medium { color: var(--orange); }
+    .score-num.low    { color: var(--red); }
+    .score-mini-bar { flex: 1; min-width: 50px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .score-mini-fill { height: 100%; border-radius: 2px; }
+
+    .analysis-section { margin-bottom: 14px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+    .analysis-section-header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 12px; font-weight: 600; }
+    .analysis-section-header.green  { background: rgba(63,185,80,.1);  color: var(--green);  border-bottom: 1px solid rgba(63,185,80,.2); }
+    .analysis-section-header.yellow { background: rgba(210,153,34,.1); color: var(--yellow); border-bottom: 1px solid rgba(210,153,34,.2); }
+    .analysis-section ul { list-style: none; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .analysis-section li { font-size: 12px; color: var(--muted); line-height: 1.6; padding-left: 16px; position: relative; }
+    .analysis-section li::before { position: absolute; left: 0; top: 0; font-size: 11px; }
+    .analysis-section.works li::before  { content: '✓'; color: var(--green); }
+    .analysis-section.gaps  li::before  { content: '↗'; color: var(--yellow); }
+
+    .verdict-box { background: var(--surface2); border: 1px solid var(--border); border-left: 3px solid var(--blue-dim); border-radius: 0 6px 6px 0; padding: 10px 14px; font-size: 12px; color: var(--text); line-height: 1.7; margin-top: 14px; }
+
+    /* ── Diff ────────────────────────────────────────── */
+    .diff-stats { font-size: 11px; color: var(--muted); margin-bottom: 8px; display: flex; gap: 12px; }
+    .diff-stats .adds    { color: var(--green); font-weight: 600; }
+    .diff-stats .removes { color: var(--red);   font-weight: 600; }
+    .diff-view { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: auto; max-height: 400px; font-family: "Menlo","Consolas","Monaco",monospace; font-size: 11px; line-height: 1.6; }
+    .diff-line { display: flex; padding: 0 10px; white-space: pre; border-left: 3px solid transparent; }
+    .diff-line.add     { background: rgba(63,185,80,.1);  border-left-color: var(--green); }
+    .diff-line.remove  { background: rgba(248,81,73,.1);  border-left-color: var(--red); }
+    .diff-line.hunk    { background: rgba(88,166,255,.07); border-left-color: var(--blue); color: var(--muted); }
+    .diff-line.context { color: var(--muted); }
+    .diff-gutter { width: 18px; flex-shrink: 0; opacity: .5; user-select: none; }
+
+    /* ── Sidebar ─────────────────────────────────────── */
+    .sidebar { border-left: 1px solid var(--border); background: var(--surface); overflow-y: auto; display: flex; flex-direction: column; }
+    .sidebar-header { padding: 14px 14px 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+    .sidebar-header h2 { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .count-badge { background: var(--border); color: var(--muted); font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 20px; }
+    .resume-list { padding: 3px 0; flex: 1; }
+    .resume-item { padding: 8px 14px; border-bottom: 1px solid rgba(48,54,61,.5); display: flex; align-items: center; justify-content: space-between; gap: 6px; cursor: pointer; transition: background .1s; position: relative; }
+    .resume-item:hover { background: rgba(88,166,255,.05); }
+    .resume-item.selected { background: rgba(31,111,235,.12); }
+    .resume-item.selected::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--blue); }
+    .resume-item:last-child { border-bottom: none; }
+    .resume-item-name { font-size: 11px; color: var(--text); font-weight: 500; line-height: 1.4; word-break: break-word; }
+    .resume-item-sub  { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .item-actions { display: flex; gap: 3px; flex-shrink: 0; }
+    .item-btn { font-size: 10px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-family: inherit; transition: border-color .1s, color .1s; white-space: nowrap; }
+    .item-btn:hover { border-color: var(--blue); color: var(--blue); }
+    .item-btn.use-base { border-color: var(--blue-dim); color: var(--blue); background: rgba(31,111,235,.1); }
+    .pdf-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .pdf-dot.has-pdf { background: var(--green); }
+    .pdf-dot.no-pdf  { background: var(--border); }
+    .skeleton { background: linear-gradient(90deg, var(--border) 25%, #3d444d 50%, var(--border) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; height: 11px; margin: 9px 14px; }
+    @keyframes shimmer { to { background-position: -200% 0; } }
+
+    @media (max-width: 780px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { border-left: none; border-top: 1px solid var(--border); height: 260px; }
+      .row2 { grid-template-columns: 1fr; }
+      .ratings-grid { grid-template-columns: repeat(3,1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Resume Generator</h1>
+  <span>Parth Bhodia · Gemini + Google Search</span>
+</header>
+
+<div class="layout">
+
+  <div class="main">
+
+    <!-- Form -->
+    <div class="card">
+      <div class="card-title">✦ New Resume</div>
+
+      <div class="row2">
+        <div class="field">
+          <label>Company</label>
+          <input id="company" type="text" placeholder="e.g. Stripe" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label>Role</label>
+          <input id="role" type="text" placeholder="e.g. Senior Full-Stack Engineer" autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="field" style="margin-bottom:12px">
+        <label>Job Description</label>
+        <textarea id="jd" placeholder="Paste the full JD here…"></textarea>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label>Base Resume <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px">(optional)</span></label>
+          <select id="baseSelect">
+            <option value="">— None (fresh generation) —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Model</label>
+          <div class="model-pills">
+            <button class="model-pill active" data-model="gemini-2.5-flash" onclick="selectModel(this)">2.5 Flash <span class="pill-tag">smart</span></button>
+            <button class="model-pill" data-model="gemini-2.0-flash" onclick="selectModel(this)">2.0 Flash <span class="pill-tag">stable</span></button>
+            <button class="model-pill" data-model="gemini-2.0-flash-lite" onclick="selectModel(this)">2.0 Lite <span class="pill-tag">fast</span></button>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn-primary" id="generateBtn" onclick="generate()">
+        <span id="btnIcon">✦</span>
+        <span id="btnText">Generate Resume</span>
+      </button>
+    </div>
+
+    <!-- Streaming progress (shown while running) -->
+    <div class="card" id="progressCard" style="display:none">
+      <div class="card-title">⚡ Generating</div>
+      <div class="status-bar">
+        <div class="spinner"></div>
+        <span id="statusMsg">Starting…</span>
+      </div>
+
+      <!-- Live LaTeX preview -->
+      <div id="previewWrap" style="display:none;margin-top:12px">
+        <div class="live-preview-label"><div class="live-dot"></div> Live LaTeX</div>
+        <div class="live-preview" id="livePreview"></div>
+      </div>
+
+      <!-- Sources -->
+      <div id="sourcesWrap" class="sources-box" style="display:none">
+        <div class="sources-header" onclick="toggleSources()">
+          🔍 <span id="sourcesLabel">Sites visited</span>
+          <span id="sourcesChevron" style="margin-left:auto;font-size:10px">▼</span>
+        </div>
+        <div class="sources-list" id="sourcesList" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div class="card" id="resultCard">
+      <div class="card-title">📄 Result</div>
+      <div id="resultBody"></div>
+    </div>
+
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>Resume Library</h2>
+      <span class="count-badge" id="countBadge">—</span>
+    </div>
+    <div class="resume-list" id="libraryList">
+      <div class="skeleton"></div>
+      <div class="skeleton" style="width:70%"></div>
+      <div class="skeleton" style="width:85%"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let _resumes = [];
+
+  // ── Utilities ─────────────────────────────────────────────────────────────
+  function escHtml(s) {
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+  function scoreColor(n)    { return n >= 8 ? "high" : n >= 6 ? "medium" : "low"; }
+  function scoreBarColor(n) { return n >= 8 ? "var(--green)" : n >= 6 ? "var(--orange)" : "var(--red)"; }
+  function selectModel(el)  { document.querySelectorAll(".model-pill").forEach(p => p.classList.remove("active")); el.classList.add("active"); }
+  function getModel()       { return (document.querySelector(".model-pill.active") || {}).dataset?.model || "gemini-2.5-flash"; }
+
+  // ── Sources panel ─────────────────────────────────────────────────────────
+  function toggleSources() {
+    const list = document.getElementById("sourcesList");
+    const chev = document.getElementById("sourcesChevron");
+    const open = list.style.display === "none";
+    list.style.display = open ? "flex" : "none";
+    chev.textContent   = open ? "▲" : "▼";
+  }
+
+  function showSources(urls) {
+    const wrap  = document.getElementById("sourcesWrap");
+    const list  = document.getElementById("sourcesList");
+    const label = document.getElementById("sourcesLabel");
+    label.textContent = `${urls.length} site${urls.length !== 1 ? "s" : ""} visited`;
+    list.innerHTML = urls.map(u => {
+      const domain = (() => { try { return new URL(u.url).hostname; } catch { return ""; } })();
+      return `<div class="source-item">
+        <img class="source-favicon" src="https://www.google.com/s2/favicons?sz=16&domain=${domain}" onerror="this.style.display='none'" />
+        <a class="source-title" href="${escHtml(u.url)}" target="_blank" rel="noopener">${escHtml(u.title || u.url)}</a>
+      </div>`;
+    }).join("");
+    wrap.style.display = "block";
+    // Auto-expand
+    document.getElementById("sourcesList").style.display = "flex";
+    document.getElementById("sourcesChevron").textContent = "▲";
+  }
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+  function switchTab(tabId) {
+    document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tabId));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === tabId));
+  }
+
+  // ── Library ───────────────────────────────────────────────────────────────
+  async function loadLibrary() {
+    try {
+      const res = await fetch("/api/resumes");
+      _resumes = await res.json();
+      document.getElementById("countBadge").textContent = _resumes.length;
+      const sel = document.getElementById("baseSelect");
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">— None (fresh generation) —</option>';
+      _resumes.forEach(r => {
+        const o = document.createElement("option");
+        o.value = r.folder; o.textContent = r.folder.replace(/_/g," ");
+        sel.appendChild(o);
+      });
+      if (cur) sel.value = cur;
+      renderLibraryList();
+    } catch { document.getElementById("libraryList").innerHTML = '<div style="padding:14px;color:var(--red);font-size:12px">Failed to load.</div>'; }
+  }
+
+  function renderLibraryList() {
+    const list    = document.getElementById("libraryList");
+    const curBase = document.getElementById("baseSelect").value;
+    if (!_resumes.length) { list.innerHTML = '<div style="padding:14px;color:var(--muted);font-size:12px">No resumes yet.</div>'; return; }
+    list.innerHTML = _resumes.map(r => {
+      const pdfFile = r.pdf_files[0] || "";
+      const pdfUrl  = pdfFile ? `/pdf/${r.folder}/${pdfFile}` : null;
+      const isBase  = r.folder === curBase;
+      return `<div class="resume-item ${isBase?"selected":""}" id="item-${r.folder}">
+        <div style="flex:1;min-width:0" onclick="${pdfUrl?`window.open('${pdfUrl}','_blank')`:'void(0)'}">
+          <div class="resume-item-name">${escHtml(r.folder.replace(/_/g," "))}</div>
+          <div class="resume-item-sub">${r.tex_files.length} tex · ${r.pdf_files.length} pdf</div>
+        </div>
+        <div class="item-actions">
+          <button class="item-btn ${isBase?"use-base":""}" onclick="setBase('${r.folder}')">${isBase?"✓ base":"use base"}</button>
+          ${pdfUrl?`<button class="item-btn" onclick="window.open('${pdfUrl}','_blank')">pdf</button>`:""}
+        </div>
+        <div class="pdf-dot ${r.has_pdf?"has-pdf":"no-pdf"}"></div>
+      </div>`;
+    }).join("");
+  }
+
+  function setBase(folder) {
+    const sel = document.getElementById("baseSelect");
+    sel.value = sel.value === folder ? "" : folder;
+    renderLibraryList();
+  }
+
+  // ── Generate (streaming) ──────────────────────────────────────────────────
+  let _resultData = { diff: null, ratings: null, folder: null, tex_path: null, pdf_url: null, baseFolder: null };
+
+  async function generate() {
+    const company    = document.getElementById("company").value.trim();
+    const role       = document.getElementById("role").value.trim();
+    const jd         = document.getElementById("jd").value.trim();
+    const model      = getModel();
+    const baseFolder = document.getElementById("baseSelect").value || null;
+
+    if (!company || !role || !jd) { alert("Please fill in Company, Role, and Job Description."); return; }
+
+    // ── UI reset ─────────────────────────────────────────────────────────────
+    const btn = document.getElementById("generateBtn");
+    btn.disabled = true;
+    document.getElementById("btnIcon").outerHTML = '<div class="spinner" id="btnIcon"></div>';
+    document.getElementById("btnText").textContent = "Generating…";
+
+    document.getElementById("progressCard").style.display = "block";
+    document.getElementById("resultCard").style.display   = "none";
+    document.getElementById("previewWrap").style.display  = "none";
+    document.getElementById("sourcesWrap").style.display  = "none";
+    document.getElementById("livePreview").textContent    = "";
+    document.getElementById("statusMsg").textContent      = "Starting…";
+
+    _resultData = { diff: null, ratings: null, folder: null, tex_path: null, pdf_url: null, baseFolder };
+
+    document.getElementById("progressCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    // ── Stream ────────────────────────────────────────────────────────────────
+    try {
+      const res = await fetch("/api/generate-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company, role, job_description: jd, model, base_folder: baseFolder }),
+        signal: AbortSignal.timeout(240_000),
+      });
+
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let   buffer  = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try { handleEvent(JSON.parse(line.slice(6))); } catch {}
+        }
+      }
+    } catch (err) {
+      showError(err.message);
+    }
+
+    // Restore button
+    btn.disabled = false;
+    document.getElementById("btnIcon").outerHTML = '<span id="btnIcon">✦</span>';
+    document.getElementById("btnText").textContent = "Generate Resume";
+  }
+
+  // ── Event handler ─────────────────────────────────────────────────────────
+  function handleEvent(e) {
+    switch (e.event) {
+
+      case "status":
+        document.getElementById("statusMsg").textContent = e.msg;
+        break;
+
+      case "chunk": {
+        const preview = document.getElementById("livePreview");
+        document.getElementById("previewWrap").style.display = "block";
+        preview.textContent += e.text;
+        preview.scrollTop = preview.scrollHeight;
+        break;
+      }
+
+      case "sources":
+        showSources(e.urls);
+        break;
+
+      case "ratings":
+        _resultData.ratings = e.data;
+        break;
+
+      case "diff":
+        _resultData.diff    = e.data;
+        _resultData.adds    = e.adds;
+        _resultData.removes = e.removes;
+        break;
+
+      case "saved":
+        _resultData.folder   = e.folder;
+        _resultData.tex_path = e.tex_path;
+        break;
+
+      case "pdf":
+        _resultData.pdf_url = e.url;
+        break;
+
+      case "done":
+        document.getElementById("progressCard").style.display = "none";
+        renderResult();
+        loadLibrary();
+        break;
+
+      case "error":
+        document.getElementById("progressCard").style.display = "none";
+        showError(e.msg);
+        break;
+    }
+  }
+
+  // ── Render final result ───────────────────────────────────────────────────
+  function renderResult() {
+    const { diff, ratings, folder, tex_path, pdf_url, baseFolder, adds, removes } = _resultData;
+    const hasPdf     = !!pdf_url;
+    const hasRatings = !!ratings;
+    const hasDiff    = !!(diff && diff.length);
+
+    const scoreLabel = hasRatings
+      ? `Analysis  ${ratings.match_score ?? ratings.overall ?? "?"}%`
+      : "Analysis";
+    const changesLabel = hasDiff ? `Changes  +${adds} −${removes}` : "Changes";
+
+    const tabs = [
+      { id: "tab-info",    label: "Info" },
+      { id: "tab-ratings", label: scoreLabel },
+      { id: "tab-diff",    label: changesLabel },
+    ];
+
+    const tabsHtml = `<div class="tabs">${tabs.map((t, i) =>
+      `<div class="tab ${i===0?"active":""}" data-tab="${t.id}" onclick="switchTab('${t.id}')">${escHtml(t.label)}</div>`
+    ).join("")}</div>`;
+
+    // ── Info tab ──────────────────────────────────────────────────────────
+    const infoHtml = `<div class="tab-panel active" id="tab-info">
+      <div class="status-badge success">✓ Generated</div>
+      <div class="result-meta">
+        <div><strong>Folder</strong>&ensp;${escHtml(folder||"")}</div>
+        <div><strong>PDF</strong>&ensp;${hasPdf
+          ? '<span style="color:var(--green)">compiled ✓</span>'
+          : '<span style="color:var(--yellow)">not compiled</span>'}</div>
+        ${baseFolder ? `<div><strong>Base</strong>&ensp;${escHtml(baseFolder)}</div>` : ""}
+      </div>
+      <div>
+        ${hasPdf ? `<a class="btn-pdf" href="${escHtml(pdf_url)}" target="_blank">⬇ Open PDF</a>` : ""}
+        <button class="btn-ghost" onclick="copyPath('${escHtml(tex_path||"")}')">📋 Copy .tex path</button>
+      </div>
+    </div>`;
+
+    // ── Ratings tab ───────────────────────────────────────────────────────
+    let ratingsHtml = `<div class="tab-panel" id="tab-ratings">`;
+    if (hasRatings) {
+      const score    = ratings.match_score ?? ratings.overall ?? 0;
+      const scoreClass = score >= 75 ? "high" : score >= 55 ? "medium" : "low";
+
+      // Score header
+      ratingsHtml += `
+        <div class="match-header">
+          <div class="match-score-block">
+            <div class="match-score-num ${scoreClass}">${score}</div>
+            <div class="match-score-denom">/ 100</div>
+            <div class="match-score-label">Match Score</div>
+          </div>
+          <div class="match-verdict">${escHtml(ratings.verdict || "")}</div>
+        </div>`;
+
+      // Criteria table
+      if (ratings.criteria && ratings.criteria.length) {
+        ratingsHtml += `
+          <table class="criteria-table">
+            <thead><tr>
+              <th>Criteria</th><th>Weight</th><th style="width:110px">Score</th><th>Notes</th>
+            </tr></thead>
+            <tbody>${ratings.criteria.map(c => {
+              const s   = c.score || 0;
+              const cls = s >= 8 ? "high" : s >= 5 ? "medium" : "low";
+              const bar = scoreBarColor(s);
+              const w   = c.weight || "Medium";
+              return `<tr>
+                <td class="criteria-name">${escHtml(c.name || "")}</td>
+                <td><span class="weight-badge ${escHtml(w)}">${escHtml(w)}</span></td>
+                <td>
+                  <div class="score-cell">
+                    <span class="score-num ${cls}">${s}/10</span>
+                    <div class="score-mini-bar"><div class="score-mini-fill" style="width:${s*10}%;background:${bar}"></div></div>
+                  </div>
+                </td>
+                <td class="criteria-notes">${escHtml(c.notes || "")}</td>
+              </tr>`;
+            }).join("")}</tbody>
+          </table>`;
+      }
+
+      // What's Working
+      if (ratings.whats_working && ratings.whats_working.length) {
+        ratingsHtml += `
+          <div class="analysis-section works">
+            <div class="analysis-section-header green">✅ What's Working</div>
+            <ul>${ratings.whats_working.map(w => `<li>${escHtml(w)}</li>`).join("")}</ul>
+          </div>`;
+      }
+
+      // Gaps
+      if (ratings.gaps && ratings.gaps.length) {
+        ratingsHtml += `
+          <div class="analysis-section gaps">
+            <div class="analysis-section-header yellow">↗ Gaps to Address on the Call</div>
+            <ul>${ratings.gaps.map(g => `<li>${escHtml(g)}</li>`).join("")}</ul>
+          </div>`;
+      }
+
+    } else {
+      ratingsHtml += `<div style="color:var(--muted);font-size:13px;padding:8px 0">Analysis not available — model was overloaded.</div>`;
+    }
+    ratingsHtml += `</div>`;
+
+    // ── Changes tab ───────────────────────────────────────────────────────
+    let diffHtml = `<div class="tab-panel" id="tab-diff">`;
+    if (hasDiff) {
+      const lines = diff.map(l => {
+        const g = l.type==="add" ? "+" : l.type==="remove" ? "−" : l.type==="hunk" ? "⋯" : " ";
+        return `<div class="diff-line ${l.type}"><span class="diff-gutter">${g}</span>${escHtml(l.text)}</div>`;
+      }).join("");
+      diffHtml += `
+        <div class="diff-stats">
+          <span class="adds">+${adds} added</span>
+          <span class="removes">−${removes} removed</span>
+          <span style="color:var(--muted)">vs <strong style="color:var(--text)">${escHtml(baseFolder||"")}</strong></span>
+        </div>
+        <div class="diff-view">${lines}</div>`;
+    } else {
+      diffHtml += `<div style="color:var(--muted);font-size:13px;padding:8px 0">Select a Base Resume to see what changed.</div>`;
+    }
+    diffHtml += `</div>`;
+
+    const resultCard = document.getElementById("resultCard");
+    document.getElementById("resultBody").innerHTML = tabsHtml + infoHtml + ratingsHtml + diffHtml;
+    resultCard.style.display = "block";
+    resultCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    switchTab(hasRatings ? "tab-ratings" : "tab-info");
+  }
+
+  function showError(msg) {
+    const resultCard = document.getElementById("resultCard");
+    document.getElementById("resultBody").innerHTML = `
+      <div class="status-badge error">✕ Failed</div>
+      <div class="error-text">${escHtml(msg)}</div>`;
+    resultCard.style.display = "block";
+  }
+
+  function copyPath(path) {
+    navigator.clipboard.writeText(path).then(() => alert("Copied: " + path));
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  loadLibrary();
+</script>
+</body>
+</html>

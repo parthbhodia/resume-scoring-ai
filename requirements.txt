@@ -2,6 +2,7 @@
 langgraph>=0.3.27
 langgraph-sdk>=0.1.66
 langgraph-checkpoint>=2.0.23
+langgraph-cli[inmem]>=0.4.0
 langchain>=0.3.0
 langchain-core>=0.2.38
 langchain-anthropic>=0.1.0
@@ -9,6 +10,7 @@ langchain-anthropic>=0.1.0
 # LLM Providers (add others as needed)
 langchain-openai>=0.2.0
 langchain-google-genai>=1.0.0
+langchain-xai>=0.2.0
 
 # Tools and utilities
 langsmith>=0.1.63
@@ -26,6 +28,10 @@ linkedin-api>=2.3.1
 # Uncomment if you want to use linkedin-jobs-scraper
 # linkedin-jobs-scraper>=1.15.0
 # selenium>=4.15.0
+
+# Browser automation for Easy Apply — required for apply_to_job
+# After installing, run: playwright install chromium
+playwright>=1.40.0
 
 # HTTP and async
 httpx>=0.25.0

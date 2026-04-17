@@ -272,7 +272,18 @@ class LinkedInAPIProfileClient:
             }
             
             return formatted_profile
-            
+
+        except KeyError as e:
+            # linkedin-api logs data["message"] when status!=200; LinkedIn sometimes omits "message" -> KeyError
+            if e.args and e.args[0] == "message":
+                print(
+                    "Error fetching profile via API: LinkedIn returned an error response without a "
+                    "'message' field (linkedin-api quirk). Often means session expired, challenge, or "
+                    "rate limit — using static fallback profile."
+                )
+                return None
+            print(f"Error fetching profile via API: {e}")
+            return None
         except Exception as e:
             print(f"Error fetching profile via API: {e}")
             return None
