@@ -1,8 +1,12 @@
 """
 Resume Generator GUI — Starlette backend
-Run:
+Run locally:
   cd C:/Users/parth/job-search
   .venv/Scripts/python.exe resume_gui/app.py
+
+Deploy on Railway:
+  Set env vars: GOOGLE_API_KEY, LIBRARY_ROOT, ALLOWED_ORIGINS
+  Railway auto-detects the Procfile and runs: uvicorn resume_gui.app:app --host 0.0.0.0 --port $PORT
 """
 
 import asyncio
@@ -27,6 +31,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / "linkedin_agent" / ".env")
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, FileResponse
 from starlette.routing import Route
@@ -36,8 +42,14 @@ import uvicorn
 
 from resume_library import list_resumes, stream_latex_resume
 
-LIBRARY_ROOT = "C:/Users/parth/OneDrive/Documents/resume"
-HTML_FILE = Path(__file__).parent / "index.html"
+# ── Config (env-var driven for Railway) ──────────────────────────────────────
+LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", "C:/Users/parth/OneDrive/Documents/resume")
+HTML_FILE       = Path(__file__).parent / "index.html"
+PORT            = int(os.environ.get("PORT", 8765))
+
+# CORS: allow localhost dev + deployed frontend
+_raw_origins    = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8765")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 
 async def homepage(request: Request):
@@ -66,13 +78,13 @@ async def api_generate_stream(request: Request):
             yield {"data": json.dumps({"event": "error", "msg": "company, role, and job_description required"})}
         return EventSourceResponse(err_gen())
 
-    loop = asyncio.get_event_loop()
+    loop  = asyncio.get_event_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
     def run_sync():
         for event in stream_latex_resume(company, role, jd, model=model, base_folder=base_folder):
             asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
-        asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()  # sentinel
+        asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
 
     threading.Thread(target=run_sync, daemon=True).start()
 
@@ -102,15 +114,26 @@ async def serve_pdf(request: Request):
 
 
 routes = [
-    Route("/", homepage),
-    Route("/api/resumes", api_resumes),
-    Route("/api/generate-stream", api_generate_stream, methods=["POST"]),
-    Route("/pdf/{folder}/{filename}", serve_pdf),
+    Route("/",                              homepage),
+    Route("/api/resumes",                   api_resumes),
+    Route("/api/generate-stream",           api_generate_stream, methods=["POST"]),
+    Route("/pdf/{folder}/{filename}",       serve_pdf),
 ]
 
-app = Starlette(routes=routes)
+middleware = [
+    Middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_origin_regex=r"https://.*\.github\.io",   # allow any GitHub Pages domain
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type"],
+        allow_credentials=False,
+    ),
+]
+
+app = Starlette(routes=routes, middleware=middleware)
 
 if __name__ == "__main__":
-    port = 8765
-    logger.info(f"Resume Generator starting on http://localhost:{port}")
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    host = "0.0.0.0" if os.environ.get("RAILWAY_ENVIRONMENT") else "127.0.0.1"
+    logger.info(f"Resume Generator starting on http://{host}:{PORT}")
+    uvicorn.run(app, host=host, port=PORT, log_level="info")
