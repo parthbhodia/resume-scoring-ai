@@ -39,8 +39,8 @@ jobs:
         env:
           NEXT_PUBLIC_BASE_PATH:        /resume-scoring-ai
           NEXT_PUBLIC_API_URL:          ${{ secrets.RAILWAY_API_URL }}
-          NEXT_PUBLIC_SUPABASE_URL:     ${{ secrets.SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:  ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
         run: npm run build
 
       - name: Add .nojekyll
