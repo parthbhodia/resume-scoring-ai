@@ -1,8 +1,9 @@
 "use client";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source } from "@/lib/types";
-import { apiUrl, scoreColor } from "@/lib/utils";
-import { upsertResume } from "@/lib/supabase";
+import { apiUrl } from "@/lib/utils";
+import { upsertResume, getSupabaseClient } from "@/lib/supabase";
+import type { User } from "@supabase/supabase-js";
 
 import ScoreRing    from "./ScoreRing";
 import CriteriaTable from "./CriteriaTable";
@@ -36,6 +37,44 @@ export default function ResumeBuilder() {
   // Live LaTeX preview (accumulated chunks during streaming)
   const [preview, setPreview] = useState("");
 
+  // PDF upload state
+  const [candidateProfile,    setCandidateProfile]    = useState<string | null>(null);
+  const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(null);
+  const [uploadingPdf,        setUploadingPdf]        = useState(false);
+  const [uploadError,         setUploadError]         = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Signed-in user
+  const [user, setUser] = useState<User | null>(null);
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_ev, s) => setUser(s?.user ?? null));
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handlePdfUpload = useCallback(async (file: File) => {
+    if (!file.type.includes("pdf")) {
+      setUploadError("Please upload a PDF file.");
+      return;
+    }
+    setUploadingPdf(true);
+    setUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const resp = await fetch(apiUrl("/api/upload-resume"), { method: "POST", body: formData });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(json.error ?? "Upload failed");
+      setCandidateProfile(json.text);
+      setUploadedFileName(file.name);
+    } catch (e: unknown) {
+      setUploadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploadingPdf(false);
+    }
+  }, []);
+
   const generate = useCallback(async () => {
     if (!company.trim() || !role.trim() || !jd.trim()) {
       setError("Company, role, and job description are required.");
@@ -53,7 +92,10 @@ export default function ResumeBuilder() {
       const resp = await fetch(apiUrl("/api/generate-stream"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ company, role, job_description: jd, model, base_folder: baseFolder }),
+        body: JSON.stringify({
+          company, role, job_description: jd, model, base_folder: baseFolder,
+          candidate_profile: candidateProfile,
+        }),
       });
 
       if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
@@ -133,10 +175,9 @@ export default function ResumeBuilder() {
       setGenerating(false);
       setStatusMsg("");
     }
-  }, [company, role, jd, model, baseFolder]);
+  }, [company, role, jd, model, baseFolder, candidateProfile]);
 
   const ratings = result?.ratings;
-
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", minHeight: "100vh" }}>
       {/* ── Main ─────────────────────────────────────────────── */}
@@ -149,8 +190,25 @@ export default function ResumeBuilder() {
           </div>
           <span style={{ color: "var(--dim)", fontSize: 12 }}>/</span>
           <span style={{ color: "var(--muted)", fontSize: 12 }}>
-            Parth Bhodia · Gemini + Search
+            Gemini + Search
           </span>
+          {/* User info */}
+          {user && (
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 12, color: "var(--dim)" }}>{user.email}</span>
+              <button
+                onClick={() => getSupabaseClient().auth.signOut()}
+                style={{
+                  fontSize: 11, padding: "4px 10px",
+                  background: "var(--surface2)", border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)", color: "var(--muted)",
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ── Form ── */}
@@ -165,6 +223,67 @@ export default function ResumeBuilder() {
           <Field label="Job description" style={{ gridColumn: "1 / -1" }}>
             <textarea value={jd} onChange={e => setJd(e.target.value)} placeholder="Paste the job description…" style={{ minHeight: 130 }} />
           </Field>
+        </div>
+
+        {/* ── PDF Upload ── */}
+        <SectionLabel>Candidate profile</SectionLabel>
+        <div style={{ marginBottom: 20 }}>
+          {candidateProfile ? (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "10px 14px",
+              background: "var(--green-bg)", border: "1px solid rgba(52,211,153,0.25)",
+              borderRadius: "var(--radius)", fontSize: 12,
+            }}>
+              <span style={{ color: "var(--green)" }}>✓</span>
+              <span style={{ color: "var(--text)", flex: 1 }}>
+                Custom profile loaded: <strong>{uploadedFileName}</strong>
+              </span>
+              <button
+                onClick={() => { setCandidateProfile(null); setUploadedFileName(null); }}
+                style={{ background: "none", border: "none", color: "var(--dim)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}
+                title="Remove uploaded profile"
+              >
+                ×
+              </button>
+            </div>
+          ) : (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handlePdfUpload(f); }}
+              style={{
+                border: "1px dashed var(--border-h)", borderRadius: "var(--radius)",
+                padding: "18px 14px", textAlign: "center",
+                cursor: uploadingPdf ? "not-allowed" : "pointer",
+                color: "var(--dim)", fontSize: 12, lineHeight: 1.7,
+                transition: "border-color 0.15s",
+              }}
+            >
+              {uploadingPdf ? (
+                <span style={{ color: "var(--muted)" }}>Extracting text from PDF…</span>
+              ) : (
+                <>
+                  <span style={{ display: "block", color: "var(--muted)", marginBottom: 4 }}>
+                    Upload a PDF resume to use as candidate profile
+                  </span>
+                  <span style={{ fontSize: 11 }}>
+                    Click or drag &amp; drop · If not uploaded, uses default profile
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+          {uploadError && (
+            <div style={{ marginTop: 6, color: "var(--red)", fontSize: 11 }}>{uploadError}</div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            style={{ display: "none" }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handlePdfUpload(f); e.target.value = ""; }}
+          />
         </div>
 
         {/* ── Settings ── */}

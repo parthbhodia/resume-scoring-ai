@@ -34,6 +34,7 @@ export interface ResumeRecord {
   score: number | null;
   verdict: string | null;
   created_at: string;
+  user_id?: string;
   criteria?: Criterion[];
 }
 

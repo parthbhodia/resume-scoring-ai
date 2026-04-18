@@ -10,12 +10,15 @@ Deploy on Railway:
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
 import sys
 import threading
 from pathlib import Path
+
+import pdfplumber
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -65,13 +68,14 @@ async def api_resumes(request: Request):
 async def api_generate_stream(request: Request):
     """SSE endpoint — streams events as the resume is generated."""
     body        = await request.json()
-    company     = (body.get("company") or "").strip()
-    role        = (body.get("role") or "").strip()
-    jd          = (body.get("job_description") or "").strip()
-    model       = (body.get("model") or "gemini-2.5-flash").strip()
-    base_folder = (body.get("base_folder") or "").strip() or None
+    company           = (body.get("company") or "").strip()
+    role              = (body.get("role") or "").strip()
+    jd                = (body.get("job_description") or "").strip()
+    model             = (body.get("model") or "gemini-2.5-flash").strip()
+    base_folder       = (body.get("base_folder") or "").strip() or None
+    candidate_profile = (body.get("candidate_profile") or "").strip() or None
 
-    logger.info(f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}")
+    logger.info(f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  |  custom_profile={bool(candidate_profile)}")
 
     if not company or not role or not jd:
         async def err_gen():
@@ -82,7 +86,7 @@ async def api_generate_stream(request: Request):
     queue: asyncio.Queue = asyncio.Queue()
 
     def run_sync():
-        for event in stream_latex_resume(company, role, jd, model=model, base_folder=base_folder):
+        for event in stream_latex_resume(company, role, jd, model=model, base_folder=base_folder, candidate_profile=candidate_profile):
             asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
         asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
 
@@ -96,6 +100,26 @@ async def api_generate_stream(request: Request):
             yield {"data": json.dumps(item)}
 
     return EventSourceResponse(event_gen())
+
+
+async def api_upload_resume(request: Request):
+    """Extract plain text from an uploaded PDF resume."""
+    try:
+        form    = await request.form()
+        file    = form.get("file")
+        if file is None:
+            return JSONResponse({"error": "No file uploaded"}, status_code=400)
+        content = await file.read()
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            pages_text = [page.extract_text() or "" for page in pdf.pages]
+        text = "\n".join(pages_text).strip()
+        if not text:
+            return JSONResponse({"error": "Could not extract text from PDF"}, status_code=422)
+        logger.info(f"PDF upload  |  {len(text)} chars extracted from {getattr(file, 'filename', 'upload.pdf')}")
+        return JSONResponse({"text": text})
+    except Exception as exc:
+        logger.exception("PDF upload failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 async def serve_pdf(request: Request):
@@ -117,6 +141,7 @@ routes = [
     Route("/",                              homepage),
     Route("/api/resumes",                   api_resumes),
     Route("/api/generate-stream",           api_generate_stream, methods=["POST"]),
+    Route("/api/upload-resume",             api_upload_resume,   methods=["POST"]),
     Route("/pdf/{folder}/{filename}",       serve_pdf),
 ]
 

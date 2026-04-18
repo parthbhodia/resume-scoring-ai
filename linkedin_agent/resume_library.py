@@ -472,7 +472,7 @@ def generate_latex_resume(
 # STREAM — same pipeline but yields SSE-friendly event dicts in real-time
 # ============================================================================
 
-def _build_prompts(company, role, job_description, base_body, reference_tex):
+def _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=None):
     """Shared prompt builder used by both stream and non-stream paths."""
     system_prompt = (
         "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
@@ -493,53 +493,61 @@ def _build_prompts(company, role, job_description, base_body, reference_tex):
             f"\n---\nCURRENT RESUME BODY (use as starting point, tailor for {role} at {company}):\n"
             f"{base_body[:2500]}\n"
         )
+
+    if candidate_profile:
+        profile_section = candidate_profile[:4000]
+    else:
+        profile_section = (
+            "Name: Parth Bhodia\n"
+            "Location: Jersey City, NJ (NYC metro)\n"
+            "Email: parthbhodia08@gmail.com | Phone: +1 (443) 929-4371\n"
+            "Website: parthbhodia.com | LinkedIn: linkedin.com/in/parthbhodia\n\n"
+            "EXPERIENCE:\n"
+            "1. Full-Stack Software Engineer, Eccalon LLC (May 2022 – Present, Remote)\n"
+            "   - React + Node.js end-to-end features for federal/enterprise platforms, 100,000+ users\n"
+            "   - PostgreSQL schema for high-traffic multi-tenant CMS\n"
+            "   - gRPC streaming pipelines for real-time audio/text, mission-critical\n"
+            "   - AWS Bedrock LLM contract analytics tool — 50% efficiency gain\n"
+            "   - AWS Cognito + Lambda + API Gateway — secure auth\n"
+            "   - WCAG 2.1 compliance (ARIA) for CMMC vendor certification platform\n"
+            "   - BERT + XGBoost + TensorFlow — Code Compliant tool, SBOM reports, foreign code detection for US govt\n"
+            "   - Page hydration + API batching (Chrome 6-connection limit) — frontend perf\n"
+            "   - Tech: React, Redux, Node.js, Python, PostgreSQL, REST APIs, gRPC, AWS, TypeScript, Docker, Git\n\n"
+            "2. Research Software Engineer, UMBC (Jan 2022 – Dec 2022, Halethorpe MD)\n"
+            "   - Java Spring Boot + RabbitMQ + gRPC distributed backend, real-time geospatial sync\n"
+            "   - GIS anomaly detection — Elasticsearch + Kibana\n"
+            "   - Kubernetes deployment — minikube/lab\n"
+            "   - Tech: Java, Spring Boot, RabbitMQ, gRPC, Elasticsearch, Kibana, Kubernetes\n\n"
+            "3. Software Engineer, Tata Communications Ltd. (July 2018 – May 2021, Mumbai)\n"
+            "   - Analytics dashboard (React + Django/Python) — 10,000+ users, 36% APAC revenue increase\n"
+            "   - Python route optimization tool with REST API\n"
+            "   - Jenkins CI/CD, mentored junior engineers\n"
+            "   - Tech: React, JavaScript, Django, Python, MySQL, REST APIs, Jenkins, Git\n\n"
+            "PROJECTS:\n"
+            "- VibeIMG (2024): AI image gen SaaS — React+Redux, FastAPI, Stripe, Replicate Flux; "
+            "dual LLM pipeline (xAI primary, Groq fallback); 60% latency improvement (25s->10s); profitable\n"
+            "- Real-Time Tweet Sentiment Pipeline (Jan-Mar 2026): GCP: Twitter/X API -> Pub/Sub -> Dataflow -> "
+            "Spanner (Change Streams) -> Cloud Functions -> NL API; ~2-5s latency\n"
+            "- Nutri AI Scan (Oct 2022 - Feb 2023): Vue.js + OpenCV + MongoDB; 2nd place CBIC UMBC (25+ teams)\n\n"
+            "EDUCATION:\n"
+            "- MS Computer Science, UMBC (Aug 2021 - May 2023), Baltimore, MD\n"
+            "- BE Information Technology, University of Mumbai (Aug 2014 - May 2018), Mumbai, IN\n\n"
+            "SKILLS:\n"
+            "Frontend: React, Redux, Vue.js, JavaScript/TypeScript (ES6+), HTML5, CSS3, WCAG 2.1/ARIA\n"
+            "Backend & APIs: Node.js, REST APIs, GraphQL, Django, Spring Boot, gRPC, FastAPI\n"
+            "AI/GenAI: AWS Bedrock, TensorFlow, BERT, XGBoost, OpenCV, xAI, Groq, Replicate Flux\n"
+            "Data & Infra: PostgreSQL, MySQL, MongoDB, Elasticsearch, RabbitMQ, Docker\n"
+            "Cloud: AWS (Bedrock, Lambda, Cognito, API Gateway), GCP (Pub/Sub, Dataflow, Spanner, Cloud Functions, NL API)\n"
+            "DevOps & Testing: Jenkins, Git, CI/CD, Unit Testing, Integration Testing\n"
+            "Languages: Python, JavaScript/TypeScript, Java, SQL\n"
+        )
+
     user_prompt = (
         f"Generate a tailored LaTeX resume body for this application:\n\n"
         f"TARGET ROLE: {role}\nTARGET COMPANY: {company}\n\n"
         f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
         f"---\nCANDIDATE PROFILE (USE ONLY THESE FACTS):\n\n"
-        f"Name: Parth Bhodia\n"
-        f"Location: Jersey City, NJ (NYC metro)\n"
-        f"Email: parthbhodia08@gmail.com | Phone: +1 (443) 929-4371\n"
-        f"Website: parthbhodia.com | LinkedIn: linkedin.com/in/parthbhodia\n\n"
-        f"EXPERIENCE:\n"
-        f"1. Full-Stack Software Engineer, Eccalon LLC (May 2022 – Present, Remote)\n"
-        f"   - React + Node.js end-to-end features for federal/enterprise platforms, 100,000+ users\n"
-        f"   - PostgreSQL schema for high-traffic multi-tenant CMS\n"
-        f"   - gRPC streaming pipelines for real-time audio/text, mission-critical\n"
-        f"   - AWS Bedrock LLM contract analytics tool — 50% efficiency gain\n"
-        f"   - AWS Cognito + Lambda + API Gateway — secure auth\n"
-        f"   - WCAG 2.1 compliance (ARIA) for CMMC vendor certification platform\n"
-        f"   - BERT + XGBoost + TensorFlow — Code Compliant tool, SBOM reports, foreign code detection for US govt\n"
-        f"   - Page hydration + API batching (Chrome 6-connection limit) — frontend perf\n"
-        f"   - Tech: React, Redux, Node.js, Python, PostgreSQL, REST APIs, gRPC, AWS, TypeScript, Docker, Git\n\n"
-        f"2. Research Software Engineer, UMBC (Jan 2022 – Dec 2022, Halethorpe MD)\n"
-        f"   - Java Spring Boot + RabbitMQ + gRPC distributed backend, real-time geospatial sync\n"
-        f"   - GIS anomaly detection — Elasticsearch + Kibana\n"
-        f"   - Kubernetes deployment — minikube/lab\n"
-        f"   - Tech: Java, Spring Boot, RabbitMQ, gRPC, Elasticsearch, Kibana, Kubernetes\n\n"
-        f"3. Software Engineer, Tata Communications Ltd. (July 2018 – May 2021, Mumbai)\n"
-        f"   - Analytics dashboard (React + Django/Python) — 10,000+ users, 36% APAC revenue increase\n"
-        f"   - Python route optimization tool with REST API\n"
-        f"   - Jenkins CI/CD, mentored junior engineers\n"
-        f"   - Tech: React, JavaScript, Django, Python, MySQL, REST APIs, Jenkins, Git\n\n"
-        f"PROJECTS:\n"
-        f"- VibeIMG (2024): AI image gen SaaS — React+Redux, FastAPI, Stripe, Replicate Flux; "
-        f"dual LLM pipeline (xAI primary, Groq fallback); 60% latency improvement (25s->10s); profitable\n"
-        f"- Real-Time Tweet Sentiment Pipeline (Jan-Mar 2026): GCP: Twitter/X API -> Pub/Sub -> Dataflow -> "
-        f"Spanner (Change Streams) -> Cloud Functions -> NL API; ~2-5s latency\n"
-        f"- Nutri AI Scan (Oct 2022 - Feb 2023): Vue.js + OpenCV + MongoDB; 2nd place CBIC UMBC (25+ teams)\n\n"
-        f"EDUCATION:\n"
-        f"- MS Computer Science, UMBC (Aug 2021 - May 2023), Baltimore, MD\n"
-        f"- BE Information Technology, University of Mumbai (Aug 2014 - May 2018), Mumbai, IN\n\n"
-        f"SKILLS:\n"
-        f"Frontend: React, Redux, Vue.js, JavaScript/TypeScript (ES6+), HTML5, CSS3, WCAG 2.1/ARIA\n"
-        f"Backend & APIs: Node.js, REST APIs, GraphQL, Django, Spring Boot, gRPC, FastAPI\n"
-        f"AI/GenAI: AWS Bedrock, TensorFlow, BERT, XGBoost, OpenCV, xAI, Groq, Replicate Flux\n"
-        f"Data & Infra: PostgreSQL, MySQL, MongoDB, Elasticsearch, RabbitMQ, Docker\n"
-        f"Cloud: AWS (Bedrock, Lambda, Cognito, API Gateway), GCP (Pub/Sub, Dataflow, Spanner, Cloud Functions, NL API)\n"
-        f"DevOps & Testing: Jenkins, Git, CI/CD, Unit Testing, Integration Testing\n"
-        f"Languages: Python, JavaScript/TypeScript, Java, SQL\n"
+        f"{profile_section}"
         f"{base_section}"
         f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:2500]}\n\n"
         f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
@@ -637,6 +645,7 @@ def stream_latex_resume(
     compile_pdf: bool = True,
     model: str = "gemini-2.5-flash",
     base_folder: Optional[str] = None,
+    candidate_profile: Optional[str] = None,
 ):
     """
     Generator that yields SSE-style event dicts while generating the resume.
@@ -668,7 +677,7 @@ def stream_latex_resume(
             logger.info(f"Base resume  |  {base_folder}  ({len(base_body)} chars)")
 
         client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-        system_prompt, user_prompt = _build_prompts(company, role, job_description, base_body, reference_tex)
+        system_prompt, user_prompt = _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=candidate_profile)
 
         _fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
         _seen = set()

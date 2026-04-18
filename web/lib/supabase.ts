@@ -4,7 +4,7 @@ import type { ResumeRecord, Criterion, RatingsData } from "./types";
 // Lazy singleton — avoids crashing at build time when env vars aren't set
 let _client: SupabaseClient | null = null;
 
-function getClient(): SupabaseClient {
+export function getSupabaseClient(): SupabaseClient {
   if (_client) return _client;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -16,7 +16,7 @@ function getClient(): SupabaseClient {
 /* ── Resume CRUD ─────────────────────────────────────────── */
 
 export async function fetchResumes(): Promise<ResumeRecord[]> {
-  const { data, error } = await getClient()
+  const { data, error } = await getSupabaseClient()
     .from("resumes")
     .select("*, criteria(*)")
     .order("created_at", { ascending: false });
@@ -33,7 +33,11 @@ export async function upsertResume(
   pdfUrl: string | null,
   ratings: RatingsData | null,
 ): Promise<string> {
-  const db = getClient();
+  const db = getSupabaseClient();
+
+  // Include the signed-in user's id so RLS policies apply
+  const { data: { session } } = await db.auth.getSession();
+  const user_id = session?.user?.id ?? null;
 
   const { data, error } = await db
     .from("resumes")
@@ -47,6 +51,7 @@ export async function upsertResume(
         pdf_url: pdfUrl,
         score: ratings?.match_score ?? null,
         verdict: ratings?.verdict ?? null,
+        user_id,
       },
       { onConflict: "folder" },
     )

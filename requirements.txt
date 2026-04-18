@@ -49,6 +49,10 @@ pydantic-settings>=2.1.0
 # chromadb>=0.4.0
 # faiss-cpu>=1.7.4
 
+# PDF text extraction (for resume upload feature)
+pdfplumber>=0.11.0
+python-multipart>=0.0.9
+
 # Development and testing
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
