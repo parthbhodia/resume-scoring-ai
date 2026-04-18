@@ -183,26 +183,29 @@ export default function ResumeBuilder() {
       {/* ── Main ─────────────────────────────────────────────── */}
       <main style={{ padding: "26px 34px", overflowY: "auto" }}>
 
-        {/* Nav */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 26 }}>
-          <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: -0.3 }}>
-            <span style={{ color: "var(--accent)" }}>R</span>esume Builder
+        {/* Nav — glass bar */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10, marginBottom: 32,
+          padding: "12px 0", borderBottom: "1px solid var(--border)",
+        }}>
+          <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: -0.4 }}>
+            Resume Builder
           </div>
-          <span style={{ color: "var(--dim)", fontSize: 12 }}>/</span>
-          <span style={{ color: "var(--muted)", fontSize: 12 }}>
+          <span style={{ color: "var(--dim)", fontSize: 13 }}>·</span>
+          <span style={{ color: "var(--muted)", fontSize: 13, letterSpacing: -0.2 }}>
             Gemini + Search
           </span>
           {/* User info */}
           {user && (
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 12, color: "var(--dim)" }}>{user.email}</span>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 13, color: "var(--dim)", letterSpacing: -0.2 }}>{user.email}</span>
               <button
                 onClick={() => getSupabaseClient().auth.signOut()}
                 style={{
-                  fontSize: 11, padding: "4px 10px",
-                  background: "var(--surface2)", border: "1px solid var(--border)",
-                  borderRadius: "var(--radius)", color: "var(--muted)",
-                  cursor: "pointer", fontFamily: "inherit",
+                  fontSize: 13, padding: "6px 14px",
+                  background: "var(--surface2)", border: "none",
+                  borderRadius: 980, color: "var(--muted)",
+                  cursor: "pointer", fontFamily: "inherit", letterSpacing: -0.2,
                 }}
               >
                 Sign out
@@ -231,17 +234,17 @@ export default function ResumeBuilder() {
           {candidateProfile ? (
             <div style={{
               display: "flex", alignItems: "center", gap: 10,
-              padding: "10px 14px",
-              background: "var(--green-bg)", border: "1px solid rgba(52,211,153,0.25)",
-              borderRadius: "var(--radius)", fontSize: 12,
+              padding: "12px 16px",
+              background: "var(--green-bg)",
+              borderRadius: "var(--radius)", fontSize: 13, letterSpacing: -0.2,
             }}>
               <span style={{ color: "var(--green)" }}>✓</span>
               <span style={{ color: "var(--text)", flex: 1 }}>
-                Custom profile loaded: <strong>{uploadedFileName}</strong>
+                Custom profile loaded — <strong>{uploadedFileName}</strong>
               </span>
               <button
                 onClick={() => { setCandidateProfile(null); setUploadedFileName(null); }}
-                style={{ background: "none", border: "none", color: "var(--dim)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}
+                style={{ background: "none", border: "none", color: "var(--dim)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
                 title="Remove uploaded profile"
               >
                 ×
@@ -253,22 +256,23 @@ export default function ResumeBuilder() {
               onDragOver={e => e.preventDefault()}
               onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handlePdfUpload(f); }}
               style={{
-                border: "1px dashed var(--border-h)", borderRadius: "var(--radius)",
-                padding: "18px 14px", textAlign: "center",
+                background: "var(--surface2)",
+                borderRadius: "var(--radius-lg)",
+                padding: "20px 16px", textAlign: "center",
                 cursor: uploadingPdf ? "not-allowed" : "pointer",
-                color: "var(--dim)", fontSize: 12, lineHeight: 1.7,
-                transition: "border-color 0.15s",
+                letterSpacing: -0.2, lineHeight: 1.6,
+                transition: "background 0.15s",
               }}
             >
               {uploadingPdf ? (
-                <span style={{ color: "var(--muted)" }}>Extracting text from PDF…</span>
+                <span style={{ color: "var(--muted)", fontSize: 13 }}>Extracting text from PDF…</span>
               ) : (
                 <>
-                  <span style={{ display: "block", color: "var(--muted)", marginBottom: 4 }}>
-                    Upload a PDF resume to use as candidate profile
+                  <span style={{ display: "block", color: "var(--muted)", fontSize: 14, marginBottom: 4 }}>
+                    Upload a PDF resume
                   </span>
-                  <span style={{ fontSize: 11 }}>
-                    Click or drag &amp; drop · If not uploaded, uses default profile
+                  <span style={{ fontSize: 12, color: "var(--dim)" }}>
+                    Click or drag &amp; drop · Replaces default profile
                   </span>
                 </>
               )}
@@ -301,7 +305,7 @@ export default function ResumeBuilder() {
 
         {/* ── Generate ── */}
         {error && (
-          <div style={{ marginBottom: 14, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: "var(--radius)", color: "var(--red)", fontSize: 12 }}>
+          <div style={{ marginBottom: 14, padding: "10px 14px", background: "var(--red-bg)", borderRadius: "var(--radius)", color: "var(--red)", fontSize: 13, letterSpacing: -0.2 }}>
             {error}
           </div>
         )}
@@ -309,13 +313,13 @@ export default function ResumeBuilder() {
           onClick={generate}
           disabled={generating}
           style={{
-            width: "100%", padding: 12, marginBottom: 32,
+            width: "100%", padding: "12px 15px", marginBottom: 32,
             background: generating ? "var(--surface2)" : "var(--accent)",
             color: generating ? "var(--muted)" : "#fff",
             border: "none", borderRadius: "var(--radius)",
-            fontSize: 14, fontWeight: 500, fontFamily: "inherit",
+            fontSize: 17, fontWeight: 400, fontFamily: "inherit",
             cursor: generating ? "not-allowed" : "pointer",
-            letterSpacing: -0.2, transition: "all 0.2s",
+            letterSpacing: -0.3, transition: "background 0.2s",
           }}
         >
           {generating ? statusMsg || "Generating…" : "Generate resume"}
@@ -326,11 +330,12 @@ export default function ResumeBuilder() {
           <div style={{ marginBottom: 24 }}>
             <SectionLabel>Live preview</SectionLabel>
             <div style={{
-              background: "var(--surface)", border: "1px solid var(--border)",
-              borderRadius: "var(--radius)", padding: "12px 14px",
+              background: "var(--surface2)",
+              borderRadius: "var(--radius-lg)", padding: "12px 14px",
               maxHeight: 220, overflow: "auto",
+              boxShadow: "var(--shadow)",
             }}>
-              <pre style={{ fontSize: 10, lineHeight: 1.6, color: "var(--green)", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+              <pre style={{ fontSize: 11, lineHeight: 1.6, color: "var(--green)", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
                 {preview}
               </pre>
             </div>
@@ -344,8 +349,8 @@ export default function ResumeBuilder() {
 
             {/* Header */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 22 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--dim)" }}>Result</span>
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>· {company} — {role}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2 }}>Result</span>
+              <span style={{ fontSize: 13, color: "var(--dim)" }}>· {company} — {role}</span>
             </div>
 
             {/* Score row */}
@@ -359,9 +364,9 @@ export default function ResumeBuilder() {
                   {/* What's working + Gaps */}
                   {ratings.whats_working?.length > 0 && (
                     <div style={{ marginTop: 14 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.6px", color: "var(--green)", marginBottom: 6 }}>What&apos;s working</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--green)", marginBottom: 6, letterSpacing: -0.2 }}>What&apos;s working</div>
                       {ratings.whats_working.map((w, i) => (
-                        <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "var(--muted)", marginBottom: 4, lineHeight: 1.5 }}>
+                        <div key={i} style={{ display: "flex", gap: 8, fontSize: 13, color: "var(--muted)", marginBottom: 4, lineHeight: 1.5, letterSpacing: -0.2 }}>
                           <span style={{ color: "var(--green)", flexShrink: 0 }}>✓</span>{w}
                         </div>
                       ))}
@@ -369,9 +374,9 @@ export default function ResumeBuilder() {
                   )}
                   {ratings.gaps?.length > 0 && (
                     <div style={{ marginTop: 12 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.6px", color: "var(--orange)", marginBottom: 6 }}>Gaps to address</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--orange)", marginBottom: 6, letterSpacing: -0.2 }}>Gaps to address</div>
                       {ratings.gaps.map((g, i) => (
-                        <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "var(--muted)", marginBottom: 4, lineHeight: 1.5 }}>
+                        <div key={i} style={{ display: "flex", gap: 8, fontSize: 13, color: "var(--muted)", marginBottom: 4, lineHeight: 1.5, letterSpacing: -0.2 }}>
                           <span style={{ color: "var(--red)", flexShrink: 0 }}>→</span>{g}
                         </div>
                       ))}
@@ -394,11 +399,11 @@ export default function ResumeBuilder() {
                 };
                 return (
                   <button key={t} onClick={() => setActiveTab(t)} style={{
-                    padding: "9px 18px", fontSize: 12, fontWeight: 500,
+                    padding: "9px 18px", fontSize: 13, fontWeight: activeTab === t ? 500 : 400,
                     background: "transparent", border: "none",
                     borderBottom: `2px solid ${activeTab === t ? "var(--accent)" : "transparent"}`,
                     color: activeTab === t ? "var(--accent)" : "var(--dim)",
-                    cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+                    cursor: "pointer", fontFamily: "inherit", letterSpacing: -0.2, transition: "all 0.15s",
                   }}>
                     {labels[t]}
                   </button>
@@ -435,7 +440,7 @@ export default function ResumeBuilder() {
 /* ── Small helpers ───────────────────────────────────────── */
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--dim)", marginBottom: 12 }}>
+    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--dim)", marginBottom: 10, letterSpacing: -0.1 }}>
       {children}
     </div>
   );
@@ -444,7 +449,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function Field({ label, children, style }: { label: string; children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <div style={style}>
-      <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "var(--muted)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+      <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--muted)", marginBottom: 6, letterSpacing: -0.1 }}>
         {label}
       </label>
       {children}

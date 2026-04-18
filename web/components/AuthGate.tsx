@@ -55,20 +55,20 @@ function LoginScreen() {
       minHeight: "100vh", background: "var(--bg)",
     }}>
       <div style={{
-        background: "var(--surface)", border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)", padding: "40px 48px",
-        display: "flex", flexDirection: "column", alignItems: "center", gap: 20,
-        minWidth: 320,
+        background: "var(--surface2)",
+        borderRadius: "var(--radius-lg)", padding: "48px 52px",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 24,
+        minWidth: 340, boxShadow: "var(--shadow)",
       }}>
-        <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: -0.4 }}>
-          <span style={{ color: "var(--accent)" }}>R</span>esume Builder
+        <div style={{ fontSize: 21, fontWeight: 600, letterSpacing: -0.5, color: "var(--text)" }}>
+          Resume Builder
         </div>
-        <p style={{ color: "var(--muted)", fontSize: 13, textAlign: "center", lineHeight: 1.6 }}>
+        <p style={{ color: "var(--muted)", fontSize: 14, textAlign: "center", lineHeight: 1.47, letterSpacing: -0.2 }}>
           Sign in to generate and save tailored resumes.
         </p>
 
         {error && (
-          <div style={{ color: "var(--red)", fontSize: 12, background: "var(--red-bg)", padding: "8px 12px", borderRadius: "var(--radius)", width: "100%", textAlign: "center" }}>
+          <div style={{ color: "var(--red)", fontSize: 13, background: "var(--red-bg)", padding: "10px 14px", borderRadius: "var(--radius)", width: "100%", textAlign: "center", letterSpacing: -0.2 }}>
             {error}
           </div>
         )}
@@ -79,11 +79,11 @@ function LoginScreen() {
           style={{
             display: "flex", alignItems: "center", gap: 10,
             padding: "10px 20px", width: "100%", justifyContent: "center",
-            background: loading ? "var(--surface2)" : "#fff",
-            color: "#1a1a1a", border: "none", borderRadius: "var(--radius)",
-            fontSize: 14, fontWeight: 500, fontFamily: "inherit",
+            background: loading ? "var(--surface3)" : "#ffffff",
+            color: "#1d1d1f", border: "none", borderRadius: "var(--radius)",
+            fontSize: 17, fontWeight: 400, fontFamily: "inherit",
             cursor: loading ? "not-allowed" : "pointer",
-            transition: "all 0.15s",
+            letterSpacing: -0.3, transition: "background 0.15s",
           }}
         >
           <GoogleIcon />

@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
-/* ── Design tokens ────────────────────────────────────────── */
+/* ── Apple-inspired dark design tokens ──────────────────────── */
 :root {
-  --bg:          #0f1219;
-  --surface:     #161b26;
-  --surface2:    #1c2233;
-  --surface3:    #232a3b;
+  --bg:          #000000;
+  --surface:     #1c1c1e;
+  --surface2:    #272729;
+  --surface3:    #2a2a2d;
   --border:      rgba(255,255,255,0.08);
-  --border-h:    rgba(255,255,255,0.15);
-  --text:        #e8e9ed;
-  --muted:       #8b8fa3;
-  --dim:         #5c6070;
-  --accent:      #4f8ff7;
-  --accent-h:    #6ba3fa;
-  --accent-bg:   rgba(79,143,247,0.10);
+  --border-h:    rgba(255,255,255,0.14);
+  --text:        #ffffff;
+  --muted:       rgba(255,255,255,0.72);
+  --dim:         rgba(255,255,255,0.44);
+  --accent:      #0071e3;
+  --accent-h:    #0077ed;
+  --accent-bg:   rgba(0,113,227,0.12);
   --green:       #34d399;
   --green-bg:    rgba(52,211,153,0.12);
   --yellow:      #fbbf24;
@@ -21,6 +21,7 @@
   --red:         #f87171;
   --red-bg:      rgba(248,113,113,0.12);
   --orange:      #fb923c;
+  --shadow:      rgba(0,0,0,0.22) 3px 5px 30px 0px;
   --radius:      8px;
   --radius-lg:   12px;
 }
@@ -43,23 +44,25 @@
 
 html, body {
   height: 100%;
-  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: 'SF Pro Text', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.47;
+  letter-spacing: -0.2px;
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Scrollbar ───────────────────────────────────────────── */
+/* ── Scrollbar ────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
 
-/* ── Form elements ───────────────────────────────────────── */
+/* ── Form elements ────────────────────────────────────────── */
 input, textarea, select {
   font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
+  letter-spacing: -0.2px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -70,15 +73,17 @@ input, textarea, select {
   transition: border-color 0.15s;
 }
 input:hover, textarea:hover { border-color: var(--border-h); }
-input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,143,247,0.12); }
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0,113,227,0.18);
+}
 input::placeholder, textarea::placeholder { color: var(--dim); }
-textarea { resize: vertical; line-height: 1.6; }
+textarea { resize: vertical; line-height: 1.5; }
 select { appearance: none; cursor: pointer; }
 select option { background: var(--surface); }
 
-/* ── Animations ──────────────────────────────────────────── */
+/* ── Animations ───────────────────────────────────────────── */
 @keyframes fadeIn   { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes pulse-bg { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 
 .fade-in { animation: fadeIn 0.25s ease both; }
-
