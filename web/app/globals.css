@@ -81,3 +81,4 @@ select option { background: var(--surface); }
 @keyframes pulse-bg { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 
 .fade-in { animation: fadeIn 0.25s ease both; }
+
