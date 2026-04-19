@@ -16,7 +16,7 @@ import os
 import re
 import subprocess
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
@@ -25,6 +25,38 @@ from google import genai
 from google.genai import types
 
 logger = logging.getLogger(__name__)
+
+# Extra models to try when the primary hits quota errors (free tier is per-model).
+_GEMINI_FALLBACK_MODELS = (
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+)
+
+
+def _backoff_if_rate_limited(exc: BaseException, default_wait: float = 30.0) -> None:
+    """If Gemini returned 429, wait for the suggested window so the next call isn't in the same burst."""
+    msg = str(exc)
+    if "429" not in msg and "RESOURCE_EXHAUSTED" not in msg:
+        return
+    m = re.search(r"retry in ([0-9.]+)s", msg, re.I)
+    wait = float(m.group(1)) + 2.0 if m else default_wait
+    wait = min(max(wait, 5.0), 120.0)
+    logger.info(f"Gemini rate limited — waiting {wait:.1f}s before retry/fallback")
+    time.sleep(wait)
+
+
+def _model_chain(primary: str, extra: Tuple[str, ...] = _GEMINI_FALLBACK_MODELS) -> List[str]:
+    """Deduplicated list: primary first, then fallbacks not equal to primary."""
+    out: List[str] = []
+    seen: set[str] = set()
+    for m in (primary,) + extra:
+        if m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
 
 LIBRARY_ROOT = "C:/Users/parth/OneDrive/Documents/resume"
 PDFLATEX = "C:/Users/parth/AppData/Local/Programs/MiKTeX/miktex/bin/x64/pdflatex.exe"
@@ -215,18 +247,8 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
         f"RESUME BODY (LaTeX — ignore formatting commands, read only the content. This is the ONLY source of truth about the candidate):\n{latex_body[:6000]}"
     )
-    fallback_models = [
-        model,
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
-    ]
-    seen = set()
+    fallback_models = _model_chain(model)
     for i, m in enumerate(fallback_models):
-        if m in seen:
-            continue
-        seen.add(m)
         if i > 0:
             time.sleep(2)  # brief pause between retries
         try:
@@ -244,6 +266,7 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
             return result
         except Exception as exc:
             logger.warning(f"Rating call failed on {m}: {exc}")
+            _backoff_if_rate_limited(exc)
     return None
 
 
@@ -278,12 +301,8 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         f"OLD RESUME (LaTeX):\n{old_body[:4500]}\n\n"
         f"NEW RESUME (LaTeX):\n{new_body[:4500]}"
     )
-    fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite"]
-    seen = set()
+    fallback_models = _model_chain(model, ("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"))
     for i, m in enumerate(fallback_models):
-        if m in seen:
-            continue
-        seen.add(m)
         if i > 0:
             time.sleep(1)
         try:
@@ -303,6 +322,7 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
                 return changes
         except Exception as exc:
             logger.warning(f"Change explanation failed on {m}: {exc}")
+            _backoff_if_rate_limited(exc)
     return None
 
 
@@ -755,19 +775,13 @@ def stream_latex_resume(
         client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
         system_prompt, user_prompt = _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=candidate_profile)
 
-        _fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite"]
-        _seen = set()
-        active_model = model
+        _fallback_models = _model_chain(model)
 
         latex_body      = ""
         last_candidates = []
 
-        for _m in _fallback_models:
-            if _m in _seen:
-                continue
-            _seen.add(_m)
-            active_model = _m
-            yield {"event": "status", "msg": f"Searching Google + generating with {_m}…"}
+        for idx, _m in enumerate(_fallback_models):
+            yield {"event": "status", "msg": f"Searching Google for more information..."}
             logger.info(f"Starting stream  |  {_m}")
             t1 = time.time()
             try:
@@ -798,6 +812,9 @@ def stream_latex_resume(
                 yield {"event": "status", "msg": f"{_m} unavailable, trying next model…"}
                 latex_body = ""
                 last_candidates = []
+                _backoff_if_rate_limited(_e)
+            if idx + 1 < len(_fallback_models) and not latex_body:
+                time.sleep(1)
 
         logger.info(f"Stream complete  |  {time.time()-t1:.1f}s  |  {len(latex_body)} chars")
 
@@ -1032,12 +1049,8 @@ def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optio
         f"SOURCE URL: {url}\n\n"
         f"PAGE TEXT:\n{raw_text}"
     )
-    fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite"]
-    seen = set()
+    fallback_models = _model_chain(model)
     for i, m in enumerate(fallback_models):
-        if m in seen:
-            continue
-        seen.add(m)
         if i > 0:
             time.sleep(1)
         try:
@@ -1054,6 +1067,7 @@ def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optio
                 return data
         except Exception as exc:
             logger.warning(f"JD structuring failed on {m}: {exc}")
+            _backoff_if_rate_limited(exc)
     return None
 
 
