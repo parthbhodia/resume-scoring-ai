@@ -5,7 +5,7 @@ import AuthGate from "@/components/AuthGate";
 
 export const metadata: Metadata = {
   title: "Resume Builder",
-  description: "AI-powered resume tailoring with Gemini + Google Search grounding",
+  description: "AI-powered resume tailoring with live company research",
 };
 
 const GA_ID = "G-77DE1SKZVP";

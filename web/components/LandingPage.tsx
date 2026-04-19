@@ -95,7 +95,7 @@ export default function LandingPage() {
             borderRadius: 100, fontSize: 12, color: "var(--muted)", letterSpacing: -0.2,
           }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 8px var(--green)" }} />
-            Powered by Gemini 2.5 + live job search
+            Powered by proprietary AI + live job research
           </div>
 
           <h1 style={{
@@ -254,8 +254,8 @@ export default function LandingPage() {
             },
             {
               icon: <FeatureIcon><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6"/><path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></FeatureIcon>,
-              title: "ATS-optimized formatting",
-              body: "Clean LaTeX-rendered PDF that parses perfectly through Greenhouse, Workday, Lever, and every other applicant tracking system.",
+              title: "ATS-friendly PDF output",
+              body: "Clean, single-column PDF that extracts cleanly — no tables, images, or multi-column layouts that confuse resume parsers.",
               color: "var(--green)",
             },
             {
@@ -424,9 +424,9 @@ export default function LandingPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {[
             { q: "Is it really free?",               a: "Yes — generate as many tailored resumes as you want. No credit card, no trial, no paywall." },
-            { q: "Will an ATS read my resume?",      a: "Yes. We render to a clean LaTeX-based PDF that parses correctly through every major ATS (Greenhouse, Workday, Lever, Ashby, etc)." },
+            { q: "Will an ATS read my resume?",      a: "The output is a clean, single-column PDF with no tables or images — the format resume parsers handle best." },
             { q: "Do you store my resume?",          a: "Your resume is saved privately to your account so you can revisit past tailorings. Nothing is shared or sold." },
-            { q: "What AI model does it use?",       a: "Gemini 2.5 with live Google Search grounding — so it pulls fresh context about the company you're applying to, not just static training data." },
+            { q: "What AI powers it?",               a: "A proprietary AI pipeline with live web research — so it pulls fresh context about the company you're applying to, not just static training data." },
             { q: "How is this different from ChatGPT?", a: "ChatGPT gives you a wall of text. We give you a polished PDF, an objective match score, a side-by-side diff against your original, and a gap-analysis you can act on." },
           ].map((f, i) => (
             <details key={i} style={{
