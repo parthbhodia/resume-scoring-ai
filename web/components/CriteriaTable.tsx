@@ -18,10 +18,8 @@ export default function CriteriaTable({ criteria }: Props) {
             gap: 12,
             alignItems: "center",
             padding: "11px 14px",
-            background: alert ? "rgba(248,113,113,0.04)" : "var(--surface)",
+            background: alert ? "rgba(248,113,113,0.06)" : "var(--surface2)",
             borderRadius: "var(--radius)",
-            border: `1px solid ${alert ? "rgba(248,113,113,0.3)" : "var(--border)"}`,
-            transition: "border-color 0.15s",
           }}>
             {/* Name */}
             <div style={{ fontSize: 12, color: alert ? "var(--red)" : "var(--text)", lineHeight: 1.4 }}>
@@ -30,9 +28,9 @@ export default function CriteriaTable({ criteria }: Props) {
 
             {/* Weight badge */}
             <div style={{
-              fontSize: 10, fontWeight: 600, padding: "3px 8px",
+              fontSize: 11, fontWeight: 600, padding: "3px 8px",
               borderRadius: 4, textAlign: "center",
-              textTransform: "uppercase", letterSpacing: "0.5px",
+              letterSpacing: -0.1,
               background: wc.bg, color: wc.color,
             }}>
               {c.weight === "High" ? "High" : c.weight === "Medium" ? "Med" : "Low"}
@@ -54,7 +52,7 @@ export default function CriteriaTable({ criteria }: Props) {
             </div>
 
             {/* Notes */}
-            <div style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.5 }}>
+            <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.5 }}>
               {c.notes}
             </div>
           </div>

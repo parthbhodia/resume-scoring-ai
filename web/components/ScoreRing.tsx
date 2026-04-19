@@ -57,7 +57,7 @@ export default function ScoreRing({ score, size = 120 }: Props) {
           <span ref={valRef} style={{ fontSize: 30, fontWeight: 700, letterSpacing: -1.5, color }}>0</span>
           <span style={{ fontSize: 13, color: "var(--dim)", fontWeight: 400 }}>/100</span>
         </div>
-        <div style={{ fontSize: 10, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.6px", marginTop: 3 }}>
+        <div style={{ fontSize: 11, color: "var(--dim)", letterSpacing: -0.1, marginTop: 3 }}>
           Match score
         </div>
       </div>

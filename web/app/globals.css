@@ -83,7 +83,8 @@ select { appearance: none; cursor: pointer; }
 select option { background: var(--surface); }
 
 /* ── Animations ───────────────────────────────────────────── */
-@keyframes fadeIn   { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn   { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes pulse-bg { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+@keyframes spin     { to { transform: rotate(360deg); } }
 
-.fade-in { animation: fadeIn 0.25s ease both; }
+.fade-in { animation: fadeIn 0.3s cubic-bezier(0.4,0,0.2,1) both; }

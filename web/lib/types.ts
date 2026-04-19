@@ -18,6 +18,13 @@ export interface DiffLine {
   text: string;
 }
 
+export interface ChangeRationale {
+  type: "added" | "removed" | "rewrote";
+  text: string;
+  previous?: string;
+  why: string;
+}
+
 export interface Source {
   title: string;
   url: string;
@@ -46,6 +53,7 @@ export interface GenerationResult {
   diff: DiffLine[];
   adds: number;
   removes: number;
+  rationales: ChangeRationale[];
   sources: Source[];
   latexPreview: string;
   status: string;
@@ -57,6 +65,7 @@ export type SSEEvent =
   | { event: "chunk";   text: string }
   | { event: "sources"; urls: Source[] }
   | { event: "diff";    data: DiffLine[]; adds: number; removes: number }
+  | { event: "rationales"; data: ChangeRationale[] }
   | { event: "ratings"; data: RatingsData }
   | { event: "saved";   folder: string; tex_path: string }
   | { event: "pdf";     url: string }

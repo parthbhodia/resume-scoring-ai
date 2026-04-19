@@ -182,6 +182,12 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
     prompt = (
         "You are a brutally honest senior technical recruiter reviewing a software engineer's resume against a job description.\n"
         "Be specific, direct, and actionable — reference actual companies, projects, and metrics from the resume.\n\n"
+        "ABSOLUTE NO-HALLUCINATION RULE — violating this makes your output useless:\n"
+        "• You may ONLY cite employers, companies, institutions, metrics, numbers, technologies, and projects that appear VERBATIM in the RESUME BODY below.\n"
+        "• Do NOT invent, infer, or borrow facts from your training data, from the job description, or from typical candidates for this role.\n"
+        "• Before writing each bullet or note: quote the exact phrase from the resume you are relying on (mentally). If you cannot find it verbatim, DO NOT write that bullet.\n"
+        "• Never mention employers like 'Booz Allen', 'Google', 'Meta', etc. unless they appear in the resume. Never invent metrics like '1TB', '100M records', '5-person team' unless present.\n"
+        "• If the resume lacks evidence for a JD requirement, say so honestly — do not fabricate evidence to fill the gap.\n\n"
         "Return ONLY valid JSON (no markdown, no fences, no explanation):\n"
         "{\n"
         '  "match_score": <overall fit 0-100>,\n'
@@ -199,12 +205,12 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         "}\n\n"
         "Rules:\n"
         "- 6-10 criteria covering the most important JD requirements (mix of required and nice-to-have)\n"
-        "- Notes must name actual companies, projects, or metrics from the resume — never generic\n"
+        "- Notes must name actual companies, projects, or metrics from the RESUME BODY — never generic, never invented\n"
         "- gaps must include a concrete suggestion (e.g. 'Be honest: you understand X, built Y, learn fast')\n"
         "- match_score must be honest — do not inflate it\n"
         "- whats_working: 3-5 bullets, gaps: 2-4 bullets\n\n"
         f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
-        f"RESUME BODY (LaTeX — ignore formatting commands, read the content):\n{latex_body[:3000]}"
+        f"RESUME BODY (LaTeX — ignore formatting commands, read only the content. This is the ONLY source of truth about the candidate):\n{latex_body[:6000]}"
     )
     fallback_models = [
         model,
@@ -235,6 +241,65 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
             return result
         except Exception as exc:
             logger.warning(f"Rating call failed on {m}: {exc}")
+    return None
+
+
+def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippet: str) -> Optional[List[Dict]]:
+    """
+    Ask the LLM to diff two resume bodies and produce a human-readable change list
+    with a short rationale per change.
+
+    Returns a list of dicts:
+        [{"type": "added"|"removed"|"rewrote", "text": "...", "previous": "...", "why": "..."}]
+    """
+    prompt = (
+        "You compare two versions of a candidate's resume (OLD vs NEW) that were tailored for a specific job description.\n"
+        "Produce a plain-English change log so the candidate understands WHY each edit was made.\n\n"
+        "STRICT RULES:\n"
+        "• Only report MEANINGFUL content changes — ignore whitespace, LaTeX commands, punctuation, and formatting-only edits.\n"
+        "• Strip all LaTeX commands from the text you output (no \\resumeItem{}, \\textbf{}, etc). Return clean prose.\n"
+        "• Every bullet must trace to actual content in OLD or NEW — do not invent.\n"
+        "• Rationale ('why') must be ONE concise sentence (max 20 words) tied to the JOB DESCRIPTION — "
+        "e.g. 'JD emphasizes distributed systems, so the bullet now leads with gRPC + Kubernetes experience.'\n"
+        "• Skip pure reordering with no wording change.\n\n"
+        "Return ONLY valid JSON (no markdown, no fences):\n"
+        "{\n"
+        '  "changes": [\n'
+        '    {"type": "added",   "text": "<new bullet in plain prose>",  "why": "<why it was added>"},\n'
+        '    {"type": "removed", "text": "<old bullet in plain prose>",  "why": "<why it was dropped>"},\n'
+        '    {"type": "rewrote", "text": "<new version>", "previous": "<old version>", "why": "<why it was rewritten>"}\n'
+        "  ]\n"
+        "}\n\n"
+        "Rules: up to 15 changes total, most important first. If there are no meaningful changes return {\"changes\": []}.\n\n"
+        f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
+        f"OLD RESUME (LaTeX):\n{old_body[:4500]}\n\n"
+        f"NEW RESUME (LaTeX):\n{new_body[:4500]}"
+    )
+    fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
+    seen = set()
+    for i, m in enumerate(fallback_models):
+        if m in seen:
+            continue
+        seen.add(m)
+        if i > 0:
+            time.sleep(1)
+        try:
+            r = client.models.generate_content(
+                model=m,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.2),
+            )
+            text = (r.text or "").strip()
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+            data = json.loads(text)
+            changes = data.get("changes") if isinstance(data, dict) else None
+            if isinstance(changes, list):
+                if m != model:
+                    logger.info(f"Change explanations used fallback model: {m}")
+                return changes
+        except Exception as exc:
+            logger.warning(f"Change explanation failed on {m}: {exc}")
     return None
 
 
@@ -291,15 +356,19 @@ def generate_latex_resume(
     system_prompt = (
         "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
         "for software engineers. You will generate a complete LaTeX resume body tailored for a specific job.\n\n"
-        "CRITICAL RULES:\n"
-        "1. Use ONLY facts from the candidate profile — never fabricate achievements, companies, or metrics\n"
-        "2. Preserve all real quantifiable metrics (50%, 100K+ users, etc.) and use strong action verbs\n"
-        "3. Reorder and emphasize bullet points to match the job description keywords naturally\n"
-        "4. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
+        "STRICT NO-HALLUCINATION RULES — any violation makes the resume fraudulent and unusable:\n"
+        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named in the CANDIDATE PROFILE. "
+        "Do NOT add, infer, rename, or substitute any other employer or company name under any circumstances.\n"
+        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear are those explicitly stated in the CANDIDATE PROFILE. "
+        "Do NOT round up, extrapolate, or invent new figures.\n"
+        "3. FACTS ONLY: You may rephrase and reorder existing bullet points to match job keywords, but every single claim must trace back to an explicit fact in the CANDIDATE PROFILE. "
+        "Do not add achievements, tools, or responsibilities that are not in the profile.\n"
+        "4. VERIFICATION: Before writing each bullet point, ask yourself: 'Is this employer name / metric / claim verbatim in the CANDIDATE PROFILE?' If no, omit it.\n"
+        "5. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
         "   \\resumeItemListStart, \\resumeItem, \\resumeHeadingListStart, etc.\n"
-        "5. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
-        "6. Bold the most relevant skills and technologies for this specific job\n"
-        "7. Keep to 1 page — all 3 experience entries + 2 most relevant projects + education + skills"
+        "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
+        "7. Bold the most relevant skills and technologies for this specific job\n"
+        "8. Keep to 1 page — all experience entries + 2 most relevant projects + education + skills"
     )
 
     base_section = ""
@@ -477,15 +546,19 @@ def _build_prompts(company, role, job_description, base_body, reference_tex, can
     system_prompt = (
         "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
         "for software engineers. You will generate a complete LaTeX resume body tailored for a specific job.\n\n"
-        "CRITICAL RULES:\n"
-        "1. Use ONLY facts from the candidate profile — never fabricate achievements, companies, or metrics\n"
-        "2. Preserve all real quantifiable metrics (50%, 100K+ users, etc.) and use strong action verbs\n"
-        "3. Reorder and emphasize bullet points to match the job description keywords naturally\n"
-        "4. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
+        "STRICT NO-HALLUCINATION RULES — any violation makes the resume fraudulent and unusable:\n"
+        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named in the CANDIDATE PROFILE. "
+        "Do NOT add, infer, rename, or substitute any other employer or company name under any circumstances.\n"
+        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear are those explicitly stated in the CANDIDATE PROFILE. "
+        "Do NOT round up, extrapolate, or invent new figures.\n"
+        "3. FACTS ONLY: You may rephrase and reorder existing bullet points to match job keywords, but every single claim must trace back to an explicit fact in the CANDIDATE PROFILE. "
+        "Do not add achievements, tools, or responsibilities that are not in the profile.\n"
+        "4. VERIFICATION: Before writing each bullet point, ask yourself: 'Is this employer name / metric / claim verbatim in the CANDIDATE PROFILE?' If no, omit it.\n"
+        "5. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
         "   \\resumeItemListStart, \\resumeItem, \\resumeHeadingListStart, etc.\n"
-        "5. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
-        "6. Bold the most relevant skills and technologies for this specific job\n"
-        "7. Keep to 1 page — all 3 experience entries + 2 most relevant projects + education + skills"
+        "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
+        "7. Bold the most relevant skills and technologies for this specific job\n"
+        "8. Keep to 1 page — all experience entries + 2 most relevant projects + education + skills"
     )
     base_section = ""
     if base_body:
@@ -747,6 +820,16 @@ def stream_latex_resume(
             diff_lines, adds, removes = _compute_diff(base_body, latex_body)
             logger.info(f"Diff  |  +{adds}  -{removes}")
             yield {"event": "diff", "data": diff_lines, "adds": adds, "removes": removes}
+
+            # Human-readable change explanations (why each edit was made vs the JD)
+            yield {"event": "status", "msg": "Explaining changes…"}
+            try:
+                explanations = _explain_changes(client, model, base_body, latex_body, job_description[:1500])
+                if explanations:
+                    logger.info(f"Change rationales  |  {len(explanations)} items")
+                    yield {"event": "rationales", "data": explanations}
+            except Exception as exc:
+                logger.warning(f"Rationale generation failed: {exc}")
 
         # Ratings
         yield {"event": "status", "msg": "Rating resume against JD…"}

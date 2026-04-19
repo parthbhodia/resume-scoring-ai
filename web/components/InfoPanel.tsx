@@ -11,8 +11,8 @@ interface Props {
 
 function Row({ label, value, link }: { label: string; value: string; link?: string }) {
   return (
-    <div style={{ display: "flex", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-      <span style={{ fontSize: 11, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.5px", minWidth: 80, paddingTop: 1 }}>
+    <div style={{ display: "flex", gap: 12, padding: "10px 0" }}>
+      <span style={{ fontSize: 12, color: "var(--dim)", letterSpacing: -0.1, minWidth: 80, paddingTop: 1 }}>
         {label}
       </span>
       {link ? (

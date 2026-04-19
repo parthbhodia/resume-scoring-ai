@@ -15,8 +15,7 @@ export default function ModelPicker({ value, onChange }: Props) {
   return (
     <div style={{
       display: "flex",
-      background: "var(--surface)",
-      border: "1px solid var(--border)",
+      background: "var(--surface2)",
       borderRadius: "var(--radius)",
       overflow: "hidden",
     }}>

@@ -51,7 +51,10 @@ HTML_FILE       = Path(__file__).parent / "index.html"
 PORT            = int(os.environ.get("PORT", 8765))
 
 # CORS: allow localhost dev + deployed frontend
-_raw_origins    = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8765")
+_raw_origins    = os.environ.get(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:8765",
+)
 ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 

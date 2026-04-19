@@ -8,12 +8,11 @@ export default function SourcesPanel({ sources }: Props) {
   return (
     <div style={{
       background: "var(--surface2)",
-      border: "1px solid var(--border)",
       borderRadius: "var(--radius)",
       padding: "12px 14px",
       marginTop: 14,
     }}>
-      <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--dim)", marginBottom: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--dim)", letterSpacing: -0.1, marginBottom: 10 }}>
         Sites visited ({sources.length})
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -28,13 +27,9 @@ export default function SourcesPanel({ sources }: Props) {
                 padding: "4px 10px",
                 background: "var(--surface3)",
                 borderRadius: 20,
-                border: "1px solid var(--border)",
                 fontSize: 11, color: "var(--muted)",
                 textDecoration: "none",
-                transition: "border-color 0.15s",
               }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor = "var(--border-h)")}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border)")}
             >
               {/* favicon */}
               <img
