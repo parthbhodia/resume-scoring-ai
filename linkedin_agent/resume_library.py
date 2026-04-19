@@ -903,11 +903,9 @@ def _normalize_job_url(url: str) -> str:
     return url
 
 
-def _fetch_and_clean_html(url: str, timeout: int = 15) -> str:
-    """Fetch a job URL and return the visible text from the main content area."""
-    resp = requests.get(url, headers=_JD_FETCH_HEADERS, timeout=timeout, allow_redirects=True)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "lxml")
+def _extract_text_from_html(html: str) -> str:
+    """Parse an HTML document and return the most JD-like visible text block."""
+    soup = BeautifulSoup(html, "lxml")
 
     # Strip junk
     for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside", "form", "iframe", "svg"]):
@@ -938,6 +936,82 @@ def _fetch_and_clean_html(url: str, timeout: int = 15) -> str:
     best = re.sub(r"[ \t]+", " ", best)
     best = re.sub(r"\n{3,}", "\n\n", best).strip()
     return best[:12000]  # cap to keep prompt cost bounded
+
+
+def _fetch_and_clean_html(url: str, timeout: int = 15) -> str:
+    """Fast path: plain HTTP GET + server-rendered HTML. Great for Greenhouse/Lever/LinkedIn."""
+    resp = requests.get(url, headers=_JD_FETCH_HEADERS, timeout=timeout, allow_redirects=True)
+    resp.raise_for_status()
+    return _extract_text_from_html(resp.text)
+
+
+# Domains whose pages we know are JS-rendered SPAs — skip the HTTP fetch and go
+# straight to the headless browser to save a round trip.
+_SPA_HOSTS = (
+    "jobs.ashbyhq.com",
+    "google.com",           # www.google.com/about/careers/applications/...
+    "myworkdayjobs.com",    # Workday postings
+    "wd1.myworkdaysite.com",
+    "wd3.myworkdaysite.com",
+    "wd5.myworkdaysite.com",
+)
+
+
+def _is_spa_url(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return any(host == h or host.endswith("." + h) or host.endswith(h) for h in _SPA_HOSTS)
+
+
+def _fetch_via_browser(url: str, timeout: int = 25) -> str:
+    """
+    Slow path: launch headless Chromium, wait for client-side rendering, then
+    extract text. Used as a fallback when the HTTP fetcher can't find enough
+    content (e.g. Ashby, Google Careers, Workday).
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore
+    except ImportError:
+        logger.warning("playwright not installed — cannot fall back to headless browser")
+        return ""
+
+    t0 = time.time()
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(
+                    user_agent=_JD_FETCH_HEADERS["User-Agent"],
+                    locale="en-US",
+                    viewport={"width": 1280, "height": 1800},
+                )
+                page = context.new_page()
+                page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
+                # Give the SPA a moment to hydrate content into the DOM.
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                # Try to wait for substantive text to appear.
+                try:
+                    page.wait_for_function(
+                        "() => (document.body && document.body.innerText && document.body.innerText.length > 400)",
+                        timeout=6000,
+                    )
+                except Exception:
+                    pass
+                html = page.content()
+            finally:
+                browser.close()
+    except Exception as exc:
+        logger.warning(f"Headless fetch failed for {url}: {exc}")
+        return ""
+
+    text = _extract_text_from_html(html)
+    logger.info(f"Headless fetch  |  {url}  |  {time.time()-t0:.1f}s  |  {len(text)} chars")
+    return text
 
 
 def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optional[Dict]:
@@ -996,7 +1070,27 @@ def extract_jd_from_url(url: str, model: str = "gemini-2.5-flash") -> Dict:
     url = _normalize_job_url(url)
 
     t0 = time.time()
-    raw_text = _fetch_and_clean_html(url)
+    raw_text = ""
+    used_browser = False
+
+    # JS-heavy boards: skip straight to Playwright (HTTP body is usually an empty shell).
+    if _is_spa_url(url):
+        logger.info(f"SPA host — headless browser: {url}")
+        raw_text = _fetch_via_browser(url)
+        used_browser = True
+
+    if len(raw_text) < 200:
+        try:
+            http_text = _fetch_and_clean_html(url)
+            if len(http_text) >= len(raw_text):
+                raw_text = http_text
+        except Exception as exc:
+            logger.warning(f"HTTP fetch failed for {url}: {exc}")
+
+    if len(raw_text) < 200 and not used_browser:
+        logger.info(f"Thin HTTP content ({len(raw_text)} chars) — headless browser fallback: {url}")
+        raw_text = _fetch_via_browser(url)
+
     if len(raw_text) < 200:
         raise ValueError("Could not extract readable content from the page. It may be JS-rendered or auth-gated.")
 
