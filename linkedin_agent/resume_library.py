@@ -20,6 +20,7 @@ from typing import Dict, List, Optional
 
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse, parse_qs
 from google import genai
 from google.genai import types
 
@@ -277,7 +278,7 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         f"OLD RESUME (LaTeX):\n{old_body[:4500]}\n\n"
         f"NEW RESUME (LaTeX):\n{new_body[:4500]}"
     )
-    fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
+    fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite"]
     seen = set()
     for i, m in enumerate(fallback_models):
         if m in seen:
@@ -754,7 +755,7 @@ def stream_latex_resume(
         client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
         system_prompt, user_prompt = _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=candidate_profile)
 
-        _fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
+        _fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite"]
         _seen = set()
         active_model = model
 
@@ -873,6 +874,35 @@ _JD_FETCH_HEADERS = {
 }
 
 
+def _normalize_job_url(url: str) -> str:
+    """
+    Rewrite common job-board feed URLs to their canonical single-posting form.
+    Users often paste the URL from their browser address bar, which on many
+    boards is a feed/list page with the selected job as a query param rather
+    than the public canonical posting URL.
+    """
+    try:
+        p = urlparse(url)
+    except Exception:
+        return url
+
+    host  = (p.hostname or "").lower()
+    qs    = parse_qs(p.query)
+
+    # LinkedIn: /jobs/collections/... /jobs/search/... /jobs/... ?currentJobId=ID
+    #          → https://www.linkedin.com/jobs/view/{ID}
+    if host.endswith("linkedin.com"):
+        job_id = (qs.get("currentJobId") or qs.get("jobId") or qs.get("selectedJobId") or [None])[0]
+        if job_id and job_id.isdigit():
+            canonical = f"https://www.linkedin.com/jobs/view/{job_id}"
+            logger.info(f"Normalized LinkedIn URL  |  {url}  →  {canonical}")
+            return canonical
+
+    # Indeed: /viewjob?jk=XXXX is already canonical; nothing to do.
+    # Greenhouse / Lever / Ashby: already canonical in their public form.
+    return url
+
+
 def _fetch_and_clean_html(url: str, timeout: int = 15) -> str:
     """Fetch a job URL and return the visible text from the main content area."""
     resp = requests.get(url, headers=_JD_FETCH_HEADERS, timeout=timeout, allow_redirects=True)
@@ -928,7 +958,7 @@ def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optio
         f"SOURCE URL: {url}\n\n"
         f"PAGE TEXT:\n{raw_text}"
     )
-    fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
+    fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite"]
     seen = set()
     for i, m in enumerate(fallback_models):
         if m in seen:
@@ -962,6 +992,8 @@ def extract_jd_from_url(url: str, model: str = "gemini-2.5-flash") -> Dict:
     url = url.strip()
     if not re.match(r"^https?://", url):
         raise ValueError("URL must start with http:// or https://")
+
+    url = _normalize_job_url(url)
 
     t0 = time.time()
     raw_text = _fetch_and_clean_html(url)

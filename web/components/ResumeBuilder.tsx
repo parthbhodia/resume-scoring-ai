@@ -1,7 +1,7 @@
 "use client";
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale } from "@/lib/types";
-import { apiUrl } from "@/lib/utils";
+import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
 import { upsertResume, getSupabaseClient } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
@@ -43,9 +43,9 @@ export default function ResumeBuilder() {
   const [extractingJd, setExtractingJd] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
 
-  const importFromUrl = useCallback(async () => {
+  const importFromUrl = useCallback(async (): Promise<{ company?: string; role?: string; job_description?: string } | null> => {
     const url = jobUrl.trim();
-    if (!url) { setExtractError("Paste a job posting URL first."); return; }
+    if (!url) { setExtractError("Paste a job posting URL first."); return null; }
     setExtractingJd(true);
     setExtractError(null);
     try {
@@ -54,13 +54,19 @@ export default function ResumeBuilder() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
-      const json = await resp.json();
+      const json = await parseJsonOrThrow<{ error?: string; company?: string; role?: string; job_description?: string }>(resp);
       if (!resp.ok) throw new Error(json.error ?? "Couldn't extract JD from that URL.");
       if (json.company) setCompany(json.company);
       if (json.role)    setRole(json.role);
       if (json.job_description) setJd(json.job_description);
+      return {
+        company: json.company,
+        role: json.role,
+        job_description: json.job_description,
+      };
     } catch (e: unknown) {
       setExtractError(e instanceof Error ? e.message : String(e));
+      return null;
     } finally {
       setExtractingJd(false);
     }
@@ -82,9 +88,9 @@ export default function ResumeBuilder() {
       const formData = new FormData();
       formData.append("file", file);
       const resp = await fetch(apiUrl("/api/upload-resume"), { method: "POST", body: formData });
-      const json = await resp.json();
+      const json = await parseJsonOrThrow<{ error?: string; text?: string }>(resp);
       if (!resp.ok) throw new Error(json.error ?? "Upload failed");
-      setCandidateProfile(json.text);
+      setCandidateProfile(json.text ?? "");
       setUploadedFileName(file.name);
     } catch (e: unknown) {
       setUploadError(e instanceof Error ? e.message : String(e));
@@ -94,10 +100,43 @@ export default function ResumeBuilder() {
   }, []);
 
   const generate = useCallback(async () => {
-    if (!company.trim() || !role.trim() || !jd.trim()) {
-      setError("Please fill in company, role, and job description.");
+    let effCompany = company.trim();
+    let effRole    = role.trim();
+    let effJd      = jd.trim();
+
+    // If the user pasted a URL but any of the fields is empty, auto-import first.
+    if (jobUrl.trim() && (!effCompany || !effRole || !effJd)) {
+      setError(null);
+      setStatusMsg("Reading the job posting…");
+      setGenerating(true);
+      const extracted = await importFromUrl();
+      setGenerating(false);
+      setStatusMsg("");
+      if (extracted) {
+        if (!effCompany && extracted.company)         effCompany = extracted.company.trim();
+        if (!effRole    && extracted.role)            effRole    = extracted.role.trim();
+        if (!effJd      && extracted.job_description) effJd      = extracted.job_description.trim();
+      }
+    }
+
+    // Collect whatever's still missing and ask for just those.
+    const missing: string[] = [];
+    if (!effCompany) missing.push("company");
+    if (!effRole)    missing.push("role");
+    if (!effJd)      missing.push("job description");
+    if (missing.length) {
+      const label =
+        missing.length === 1 ? missing[0]
+        : missing.length === 2 ? `${missing[0]} and ${missing[1]}`
+        : `${missing.slice(0, -1).join(", ")}, and ${missing[missing.length - 1]}`;
+      setError(
+        jobUrl.trim()
+          ? `We couldn't pull the ${label} from that link — please fill it in manually.`
+          : `Please fill in the ${label}.`
+      );
       return;
     }
+
     setGenerating(true);
     setError(null);
     setResult(null);
@@ -111,7 +150,8 @@ export default function ResumeBuilder() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          company, role, job_description: jd, model, base_folder: baseFolder,
+          company: effCompany, role: effRole, job_description: effJd,
+          model, base_folder: baseFolder,
           candidate_profile: candidateProfile,
         }),
       });
@@ -147,7 +187,7 @@ export default function ResumeBuilder() {
             case "pdf":     acc.pdfUrl = apiUrl(ev.url); break;
             case "done":
               if (acc.folder) {
-                upsertResume(acc.folder, company, role, model, acc.texPath ?? "", acc.pdfUrl, acc.ratings).catch(console.error);
+                upsertResume(acc.folder, effCompany, effRole, model, acc.texPath ?? "", acc.pdfUrl, acc.ratings).catch(console.error);
                 // Auto-set this resume as base for the next generation's diff
                 setBaseFolder(acc.folder);
               }
@@ -164,7 +204,7 @@ export default function ResumeBuilder() {
       setGenerating(false);
       setStatusMsg("");
     }
-  }, [company, role, jd, baseFolder, candidateProfile]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
