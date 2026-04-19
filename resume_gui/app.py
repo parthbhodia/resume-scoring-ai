@@ -53,7 +53,14 @@ PORT            = int(os.environ.get("PORT", 8765))
 # CORS: allow localhost dev + deployed frontend
 _raw_origins    = os.environ.get(
     "ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:8765",
+    ",".join([
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "http://localhost:8765",
+        "https://www.resunova.io",
+        "https://resunova.io",
+    ]),
 )
 ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
@@ -171,7 +178,8 @@ middleware = [
     Middleware(
         CORSMiddleware,
         allow_origins=ALLOWED_ORIGINS,
-        allow_origin_regex=r"https://.*\.github\.io",   # allow any GitHub Pages domain
+        # Allow any GitHub Pages domain + any resunova.io subdomain
+        allow_origin_regex=r"https://(.*\.github\.io|(.*\.)?resunova\.io)",
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type"],
         allow_credentials=False,
