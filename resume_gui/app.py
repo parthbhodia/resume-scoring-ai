@@ -43,7 +43,7 @@ from sse_starlette.sse import EventSourceResponse
 
 import uvicorn
 
-from resume_library import list_resumes, stream_latex_resume
+from resume_library import list_resumes, stream_latex_resume, extract_jd_from_url
 
 # ── Config (env-var driven for Railway) ──────────────────────────────────────
 LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", "C:/Users/parth/OneDrive/Documents/resume")
@@ -125,6 +125,24 @@ async def api_upload_resume(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+async def api_extract_jd(request: Request):
+    """Fetch a job posting URL and extract structured {company, role, location, job_description}."""
+    try:
+        body = await request.json()
+        url  = (body.get("url") or "").strip()
+        if not url:
+            return JSONResponse({"error": "url required"}, status_code=400)
+        logger.info(f"EXTRACT-JD  |  {url}")
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, extract_jd_from_url, url)
+        return JSONResponse(data)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    except Exception as exc:
+        logger.exception("extract-jd failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 async def serve_pdf(request: Request):
     folder   = request.path_params["folder"]
     filename = request.path_params["filename"]
@@ -145,6 +163,7 @@ routes = [
     Route("/api/resumes",                   api_resumes),
     Route("/api/generate-stream",           api_generate_stream, methods=["POST"]),
     Route("/api/upload-resume",             api_upload_resume,   methods=["POST"]),
+    Route("/api/extract-jd",                api_extract_jd,      methods=["POST"]),
     Route("/pdf/{folder}/{filename}",       serve_pdf),
 ]
 

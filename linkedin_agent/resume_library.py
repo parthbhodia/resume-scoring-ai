@@ -18,6 +18,8 @@ import subprocess
 import time
 from typing import Dict, List, Optional
 
+import requests
+from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
 
@@ -855,3 +857,126 @@ def stream_latex_resume(
     except Exception as exc:
         logger.error(f"Stream error  |  {exc}", exc_info=True)
         yield {"event": "error", "msg": str(exc)}
+
+
+# ============================================================================
+# EXTRACT JD FROM URL — fetch a job posting URL and extract structured JD
+# ============================================================================
+
+_JD_FETCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _fetch_and_clean_html(url: str, timeout: int = 15) -> str:
+    """Fetch a job URL and return the visible text from the main content area."""
+    resp = requests.get(url, headers=_JD_FETCH_HEADERS, timeout=timeout, allow_redirects=True)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    # Strip junk
+    for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside", "form", "iframe", "svg"]):
+        tag.decompose()
+
+    # Try common JD containers first (Greenhouse, Lever, Ashby, generic)
+    candidates = []
+    selectors = [
+        "main",
+        "article",
+        "[class*='job-description']",
+        "[class*='jobDescription']",
+        "[class*='posting-requirements']",
+        "[class*='posting-page']",
+        "[id*='job-description']",
+        "[id*='content']",
+        "[data-qa='job-description']",
+    ]
+    for sel in selectors:
+        for el in soup.select(sel):
+            text = el.get_text(separator="\n", strip=True)
+            if len(text) > 300:
+                candidates.append(text)
+
+    best = max(candidates, key=len) if candidates else soup.get_text(separator="\n", strip=True)
+
+    # Collapse whitespace
+    best = re.sub(r"[ \t]+", " ", best)
+    best = re.sub(r"\n{3,}", "\n\n", best).strip()
+    return best[:12000]  # cap to keep prompt cost bounded
+
+
+def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optional[Dict]:
+    """Use Gemini to pull out company / role / cleaned JD from the scraped page text."""
+    prompt = (
+        "You are given the raw visible text of a job posting page. Extract the job posting fields.\n\n"
+        "Return ONLY valid JSON (no markdown, no fences):\n"
+        "{\n"
+        '  "company": "<company name as shown on the posting>",\n'
+        '  "role":    "<exact job title>",\n'
+        '  "location": "<location if shown, else empty string>",\n'
+        '  "job_description": "<the full JD text: responsibilities, qualifications, requirements. Preserve bullet structure. Strip nav, footer, legal boilerplate.>"\n'
+        "}\n\n"
+        "Rules:\n"
+        "- If the page does not look like a job posting, return {\"error\": \"not a job posting\"}.\n"
+        "- Do NOT invent fields. If company or role is missing, use empty string.\n"
+        "- The job_description field must contain real posting content, not navigation or cookie banners.\n\n"
+        f"SOURCE URL: {url}\n\n"
+        f"PAGE TEXT:\n{raw_text}"
+    )
+    fallback_models = [model, "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
+    seen = set()
+    for i, m in enumerate(fallback_models):
+        if m in seen:
+            continue
+        seen.add(m)
+        if i > 0:
+            time.sleep(1)
+        try:
+            r = client.models.generate_content(
+                model=m,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.1),
+            )
+            text = (r.text or "").strip()
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+            data = json.loads(text)
+            if isinstance(data, dict):
+                return data
+        except Exception as exc:
+            logger.warning(f"JD structuring failed on {m}: {exc}")
+    return None
+
+
+def extract_jd_from_url(url: str, model: str = "gemini-2.5-flash") -> Dict:
+    """
+    Public entry point used by the /api/extract-jd route.
+    Returns: {"company": str, "role": str, "location": str, "job_description": str}
+    Raises on fetch errors; raises ValueError if the page isn't a job posting.
+    """
+    url = url.strip()
+    if not re.match(r"^https?://", url):
+        raise ValueError("URL must start with http:// or https://")
+
+    t0 = time.time()
+    raw_text = _fetch_and_clean_html(url)
+    if len(raw_text) < 200:
+        raise ValueError("Could not extract readable content from the page. It may be JS-rendered or auth-gated.")
+
+    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    data = _structure_jd_with_llm(client, model, url, raw_text)
+    if not data or data.get("error"):
+        raise ValueError(data.get("error") if data else "Failed to parse job posting")
+
+    logger.info(f"Extracted JD from {url}  |  {time.time()-t0:.1f}s  |  {data.get('company')} / {data.get('role')}")
+    return {
+        "company":         data.get("company", "") or "",
+        "role":            data.get("role", "") or "",
+        "location":        data.get("location", "") or "",
+        "job_description": data.get("job_description", "") or "",
+    }

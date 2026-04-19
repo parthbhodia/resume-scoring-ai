@@ -39,6 +39,33 @@ export default function ResumeBuilder() {
   const [uploadError,         setUploadError]         = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [jobUrl,       setJobUrl]       = useState("");
+  const [extractingJd, setExtractingJd] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+
+  const importFromUrl = useCallback(async () => {
+    const url = jobUrl.trim();
+    if (!url) { setExtractError("Paste a job posting URL first."); return; }
+    setExtractingJd(true);
+    setExtractError(null);
+    try {
+      const resp = await fetch(apiUrl("/api/extract-jd"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(json.error ?? "Couldn't extract JD from that URL.");
+      if (json.company) setCompany(json.company);
+      if (json.role)    setRole(json.role);
+      if (json.job_description) setJd(json.job_description);
+    } catch (e: unknown) {
+      setExtractError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExtractingJd(false);
+    }
+  }, [jobUrl]);
+
   const [user, setUser] = useState<User | null>(null);
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -310,7 +337,43 @@ export default function ResumeBuilder() {
 
           {/* ── Step 2: Job target ── */}
           <StepCard step={2} title="Target job" subtitle="Tell us what you're applying for">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            {/* URL import — auto-fills company/role/JD */}
+            <Field label="Job posting link (optional)">
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={jobUrl}
+                  onChange={e => setJobUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !extractingJd) { e.preventDefault(); importFromUrl(); } }}
+                  placeholder="https://jobs.lever.co/..., https://boards.greenhouse.io/..., company career page"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  onClick={importFromUrl}
+                  disabled={extractingJd || !jobUrl.trim()}
+                  style={{
+                    padding: "0 16px", fontSize: 12, fontWeight: 600, letterSpacing: -0.2,
+                    background: extractingJd ? "var(--surface2)" : "var(--accent)",
+                    color: extractingJd ? "var(--dim)" : "#fff",
+                    border: "none", borderRadius: 8, cursor: extractingJd || !jobUrl.trim() ? "not-allowed" : "pointer",
+                    fontFamily: "inherit", opacity: !jobUrl.trim() ? 0.55 : 1,
+                    whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 6,
+                  }}
+                >
+                  {extractingJd ? (
+                    <>
+                      <span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
+                      Extracting…
+                    </>
+                  ) : "Import"}
+                </button>
+              </div>
+            </Field>
+            {extractError && (
+              <div style={{ marginTop: -6, marginBottom: 12, color: "var(--red)", fontSize: 12 }}>{extractError}</div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12, marginTop: 12 }}>
               <Field label="Company">
                 <input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Google" />
               </Field>
@@ -322,7 +385,7 @@ export default function ResumeBuilder() {
               <textarea
                 value={jd}
                 onChange={e => setJd(e.target.value)}
-                placeholder="Paste the full job description here — the more detail, the better the match…"
+                placeholder="Paste the full job description here — or import from a link above."
                 style={{ minHeight: 140, lineHeight: 1.55 }}
               />
             </Field>

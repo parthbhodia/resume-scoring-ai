@@ -1,0 +1,12 @@
+{
+  "name": "Resunova",
+  "short_name": "Resunova",
+  "description": "AI resume tailoring for every job description",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0071e3",
+  "icons": [
+    { "src": "/favicon.ico", "sizes": "any", "type": "image/x-icon" }
+  ]
+}

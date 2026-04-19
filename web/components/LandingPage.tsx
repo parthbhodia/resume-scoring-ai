@@ -38,7 +38,7 @@ export default function LandingPage() {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
           <LogoMark size={28} />
-          <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: -0.5 }}>ResumeAI</span>
+          <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: -0.5 }}>Resunova</span>
         </div>
 
         <nav style={{ display: "flex", alignItems: "center", gap: 28 }}>
@@ -494,9 +494,9 @@ export default function LandingPage() {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <LogoMark size={20} />
-          <span>ResumeAI · Built for job seekers, by job seekers</span>
+          <span>Resunova · Built for job seekers, by job seekers</span>
         </div>
-        <div>© {new Date().getFullYear()} ResumeAI</div>
+        <div>© {new Date().getFullYear()} Resunova</div>
       </footer>
     </div>
   );
