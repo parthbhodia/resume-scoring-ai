@@ -37,7 +37,10 @@ jobs:
 
       - name: Build
         env:
-          NEXT_PUBLIC_BASE_PATH:        /resume-scoring-ai
+          # Empty basePath: site is served at custom-domain root. Absolute
+          # assetPrefix avoids /repo/_next 404s on www.resunova.io.
+          NEXT_PUBLIC_BASE_PATH: ""
+          NEXT_PUBLIC_ASSET_PREFIX: https://www.resunova.io
           NEXT_PUBLIC_API_URL:          ${{ secrets.RAILWAY_API_URL }}
           NEXT_PUBLIC_SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:  ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
