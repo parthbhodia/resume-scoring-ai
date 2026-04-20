@@ -27,23 +27,26 @@ from google.genai import types
 logger = logging.getLogger(__name__)
 
 # Extra models to try when the primary hits quota errors (free tier is per-model).
+# gemini-1.5-* are retired on the v1beta endpoint; including them just adds 404 noise.
 _GEMINI_FALLBACK_MODELS = (
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
 )
 
 
-def _backoff_if_rate_limited(exc: BaseException, default_wait: float = 30.0) -> None:
-    """If Gemini returned 429, wait for the suggested window so the next call isn't in the same burst."""
+def _backoff_if_rate_limited(exc: BaseException, default_wait: float = 5.0) -> None:
+    """
+    If Gemini returned 429, wait briefly before trying the *next* model in the
+    chain. We deliberately don't honor the full retry-in window: the suggested
+    delay is for retrying the SAME model, but we're moving on to a different
+    one which has its own quota bucket. Capped to keep total fail-fast latency
+    under ~15s across the whole chain.
+    """
     msg = str(exc)
     if "429" not in msg and "RESOURCE_EXHAUSTED" not in msg:
         return
-    m = re.search(r"retry in ([0-9.]+)s", msg, re.I)
-    wait = float(m.group(1)) + 2.0 if m else default_wait
-    wait = min(max(wait, 5.0), 120.0)
-    logger.info(f"Gemini rate limited — waiting {wait:.1f}s before retry/fallback")
+    wait = min(max(default_wait, 1.0), 8.0)
+    logger.info(f"Gemini rate limited — pausing {wait:.1f}s before next fallback model")
     time.sleep(wait)
 
 
