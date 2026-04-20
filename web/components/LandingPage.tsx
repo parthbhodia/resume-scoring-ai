@@ -29,7 +29,7 @@ export default function LandingPage() {
     <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
 
       {/* ── Sticky Nav ── */}
-      <header style={{
+      <header className="lp-header" style={{
         position: "sticky", top: 0, zIndex: 50,
         height: 60, padding: "0 36px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -41,7 +41,7 @@ export default function LandingPage() {
           <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: -0.5 }}>Resunova</span>
         </div>
 
-        <nav style={{ display: "flex", alignItems: "center", gap: 28 }}>
+        <nav className="lp-nav" style={{ display: "flex", alignItems: "center", gap: 28 }}>
           {[
             { lbl: "Features",    id: "features" },
             { lbl: "How it works", id: "how" },
@@ -98,7 +98,7 @@ export default function LandingPage() {
             Powered by proprietary AI + live job research
           </div>
 
-          <h1 style={{
+          <h1 className="lp-hero-h1" style={{
             fontSize: 56, fontWeight: 700, letterSpacing: -2.2,
             lineHeight: 1.05, marginBottom: 22,
           }}>
@@ -207,11 +207,11 @@ export default function LandingPage() {
       <section style={{ padding: "60px 24px", maxWidth: 1080, margin: "0 auto" }}>
         <div style={{ textAlign: "center", marginBottom: 48 }}>
           <SectionTag>The problem</SectionTag>
-          <h2 style={{ fontSize: 36, fontWeight: 700, letterSpacing: -1.4, marginTop: 12, lineHeight: 1.2 }}>
+          <h2 className="lp-h2" style={{ fontSize: 36, fontWeight: 700, letterSpacing: -1.4, marginTop: 12, lineHeight: 1.2 }}>
             You&apos;re sending the same resume to<br />every job. That&apos;s why you&apos;re not hearing back.
           </h2>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+        <div className="lp-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
           {[
             { stat: "75%", label: "of resumes get filtered out by ATS bots before a human ever reads them.", color: "var(--red)" },
             { stat: "6 sec", label: "is all a recruiter spends scanning your resume on the first pass.", color: "var(--orange)" },
@@ -236,7 +236,7 @@ export default function LandingPage() {
       <section id="features" style={{ padding: "80px 24px", maxWidth: 1080, margin: "0 auto" }}>
         <div style={{ textAlign: "center", marginBottom: 56 }}>
           <SectionTag>Features</SectionTag>
-          <h2 style={{ fontSize: 36, fontWeight: 700, letterSpacing: -1.4, marginTop: 12, lineHeight: 1.2 }}>
+          <h2 className="lp-h2" style={{ fontSize: 36, fontWeight: 700, letterSpacing: -1.4, marginTop: 12, lineHeight: 1.2 }}>
             Built to get you noticed.
           </h2>
           <p style={{ fontSize: 16, color: "var(--muted)", letterSpacing: -0.3, marginTop: 14, maxWidth: 540, margin: "14px auto 0", lineHeight: 1.6 }}>
@@ -244,7 +244,7 @@ export default function LandingPage() {
           </p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
+        <div className="lp-grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
           {[
             {
               icon: <FeatureIcon><path d="M5 7h14M5 12h14M5 17h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></FeatureIcon>,
@@ -296,12 +296,12 @@ export default function LandingPage() {
       <section id="how" style={{ padding: "80px 24px", maxWidth: 1080, margin: "0 auto" }}>
         <div style={{ textAlign: "center", marginBottom: 48 }}>
           <SectionTag>How it works</SectionTag>
-          <h2 style={{ fontSize: 36, fontWeight: 700, letterSpacing: -1.4, marginTop: 12, lineHeight: 1.2 }}>
+          <h2 className="lp-h2" style={{ fontSize: 36, fontWeight: 700, letterSpacing: -1.4, marginTop: 12, lineHeight: 1.2 }}>
             Three steps. Sixty seconds.
           </h2>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, position: "relative" }}>
+        <div className="lp-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, position: "relative" }}>
           {[
             { n: "1", title: "Upload your resume", body: "Drop your existing PDF — we extract every detail, no formatting needed." },
             { n: "2", title: "Paste the job description", body: "Add the company name, role, and full JD from LinkedIn, Greenhouse, or anywhere." },
@@ -331,7 +331,7 @@ export default function LandingPage() {
 
       {/* ── Live stats strip ── */}
       <section style={{ padding: "60px 24px", maxWidth: 1080, margin: "0 auto" }}>
-        <div style={{
+        <div className="lp-grid-4" style={{
           background: "var(--surface)", border: "1px solid var(--border)",
           borderRadius: 18, padding: "36px 32px",
           display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 24, textAlign: "center",
@@ -358,12 +358,12 @@ export default function LandingPage() {
       <section id="reviews" style={{ padding: "80px 24px", maxWidth: 1080, margin: "0 auto" }}>
         <div style={{ textAlign: "center", marginBottom: 48 }}>
           <SectionTag>Loved by job seekers</SectionTag>
-          <h2 style={{ fontSize: 36, fontWeight: 700, letterSpacing: -1.4, marginTop: 12, lineHeight: 1.2 }}>
+          <h2 className="lp-h2" style={{ fontSize: 36, fontWeight: 700, letterSpacing: -1.4, marginTop: 12, lineHeight: 1.2 }}>
             From rejection to offer letter.
           </h2>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+        <div className="lp-grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
           {[
             {
               quote: "I'd applied to 80 roles with zero callbacks. Tailored my resume with this for a Stripe role and got an interview the same week. Score went from 51 to 87.",
@@ -487,7 +487,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Footer ── */}
-      <footer style={{
+      <footer className="lp-footer" style={{
         padding: "32px 36px", borderTop: "1px solid var(--border)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         color: "var(--dim)", fontSize: 12, letterSpacing: -0.1,

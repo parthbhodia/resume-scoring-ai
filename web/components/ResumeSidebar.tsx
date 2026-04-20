@@ -36,7 +36,7 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
   );
 
   return (
-    <aside style={{
+    <aside className="rb-sidebar" style={{
       background: "var(--surface)",
       borderLeft: "1px solid var(--border)",
       display: "flex", flexDirection: "column",

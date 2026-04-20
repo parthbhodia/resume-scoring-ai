@@ -210,13 +210,13 @@ export default function ResumeBuilder() {
   const score   = ratings?.match_score ?? 0;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 288px", minHeight: "100vh", background: "var(--bg)" }}>
+    <div className="rb-root" style={{ display: "grid", gridTemplateColumns: "1fr 288px", minHeight: "100vh", background: "var(--bg)" }}>
 
       {/* ── Main ── */}
       <main style={{ overflowY: "auto", display: "flex", flexDirection: "column" }}>
 
         {/* Sticky nav */}
-        <header style={{
+        <header className="rb-header" style={{
           position: "sticky", top: 0, zIndex: 20,
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "0 48px", height: 54,
@@ -252,12 +252,12 @@ export default function ResumeBuilder() {
         </header>
 
         {/* Page content */}
-        <div style={{ padding: "44px 48px 80px", maxWidth: 820, margin: "0 auto", width: "100%" }}>
+        <div className="rb-page" style={{ padding: "44px 48px 80px", maxWidth: 820, margin: "0 auto", width: "100%" }}>
 
           {/* ── Hero (pre-generation) ── */}
           {!result && !generating && (
-            <div style={{ textAlign: "center", marginBottom: 48 }} className="fade-in">
-              <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: -1.2, lineHeight: 1.15, marginBottom: 12 }}>
+            <div style={{ textAlign: "center", marginBottom: 48 }} className="fade-in rb-hero">
+              <div className="rb-hero-title" style={{ fontSize: 34, fontWeight: 700, letterSpacing: -1.2, lineHeight: 1.15, marginBottom: 12 }}>
                 Tailor your resume to<br />any job description
               </div>
               <p style={{ fontSize: 15, color: "var(--muted)", letterSpacing: -0.3, marginBottom: 28, lineHeight: 1.6 }}>
@@ -413,7 +413,7 @@ export default function ResumeBuilder() {
               <div style={{ marginTop: -6, marginBottom: 12, color: "var(--red)", fontSize: 12 }}>{extractError}</div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12, marginTop: 12 }}>
+            <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12, marginTop: 12 }}>
               <Field label="Company">
                 <input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Google" />
               </Field>
@@ -517,7 +517,7 @@ export default function ResumeBuilder() {
               </div>
 
               {/* Score hero card */}
-              <div style={{
+              <div className="rb-score-card" style={{
                 background: "var(--surface)", border: "1px solid var(--border)",
                 borderRadius: 16, padding: "28px 28px 24px",
                 marginBottom: 16,
@@ -530,7 +530,7 @@ export default function ResumeBuilder() {
                   borderRadius: "50%", pointerEvents: "none",
                 }} />
 
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 24, position: "relative" }}>
+                <div className="rb-score-row" style={{ display: "flex", alignItems: "flex-start", gap: 24, position: "relative" }}>
                   <ScoreRing score={score} size={130} />
 
                   <div style={{ flex: 1, paddingTop: 4 }}>
@@ -572,7 +572,7 @@ export default function ResumeBuilder() {
 
               {/* Strengths + Gaps */}
               {(ratings.whats_working?.length > 0 || ratings.gaps?.length > 0) && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
                   {ratings.whats_working?.length > 0 && (
                     <div style={{
                       background: "var(--surface)", border: "1px solid rgba(52,211,153,0.18)",
