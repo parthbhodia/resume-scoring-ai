@@ -153,6 +153,7 @@ export default function ResumeBuilder() {
           company: effCompany, role: effRole, job_description: effJd,
           model, base_folder: baseFolder,
           candidate_profile: candidateProfile,
+          user_id: user?.id ?? null,
         }),
       });
 
@@ -184,7 +185,12 @@ export default function ResumeBuilder() {
             case "rationales": acc.rationales = ev.data as ChangeRationale[]; break;
             case "ratings": acc.ratings = ev.data as RatingsData; break;
             case "saved":   acc.folder = ev.folder; acc.texPath = ev.tex_path; break;
-            case "pdf":     acc.pdfUrl = apiUrl(ev.url); break;
+            case "pdf":
+              // Backend now returns an absolute Supabase Storage URL when the
+              // user is signed in (durable across redeploys). Fall back to the
+              // legacy /pdf/<folder>/<file> route if it's still a relative path.
+              acc.pdfUrl = /^https?:\/\//.test(ev.url) ? ev.url : apiUrl(ev.url);
+              break;
             case "done":
               if (acc.folder) {
                 upsertResume(acc.folder, effCompany, effRole, model, acc.texPath ?? "", acc.pdfUrl, acc.ratings).catch(console.error);
@@ -204,7 +210,7 @@ export default function ResumeBuilder() {
       setGenerating(false);
       setStatusMsg("");
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;

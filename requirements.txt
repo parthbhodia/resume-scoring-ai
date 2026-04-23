@@ -53,6 +53,9 @@ pydantic-settings>=2.1.0
 pdfplumber>=0.11.0
 python-multipart>=0.0.9
 
+# Supabase Storage — persists generated PDFs/.tex across Railway redeploys
+supabase>=2.5.0
+
 # Development and testing
 pytest>=7.4.0
 pytest-asyncio>=0.21.0

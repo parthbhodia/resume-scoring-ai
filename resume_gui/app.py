@@ -17,6 +17,7 @@ import os
 import sys
 import threading
 from pathlib import Path
+from typing import Optional
 
 import pdfplumber
 
@@ -44,6 +45,13 @@ from sse_starlette.sse import EventSourceResponse
 import uvicorn
 
 from resume_library import list_resumes, stream_latex_resume, extract_jd_from_url
+
+# Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
+# `python resume_gui/app.py` (local dev).
+try:
+    from resume_gui.storage import upload_pdf, upload_tex
+except ImportError:
+    from storage import upload_pdf, upload_tex  # type: ignore
 
 # ── Config (env-var driven for Railway) ──────────────────────────────────────
 LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", "C:/Users/parth/OneDrive/Documents/resume")
@@ -82,10 +90,19 @@ async def api_generate_stream(request: Request):
     role              = (body.get("role") or "").strip()
     jd                = (body.get("job_description") or "").strip()
     model             = (body.get("model") or "gemini-2.5-flash").strip()
+    # LLM_PROVIDER=grok in .env flips the default primary model to Grok without
+    # redeploying. Useful when Gemini free-tier is rate-limited and an xAI
+    # balance is available. Explicit model param in the body still wins.
+    if model.startswith("gemini") and os.environ.get("LLM_PROVIDER", "").lower() == "grok":
+        model = "grok-4-fast-non-reasoning"
     base_folder       = (body.get("base_folder") or "").strip() or None
     candidate_profile = (body.get("candidate_profile") or "").strip() or None
+    user_id           = (body.get("user_id") or "").strip() or None
 
-    logger.info(f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  |  custom_profile={bool(candidate_profile)}")
+    logger.info(
+        f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
+        f"|  custom_profile={bool(candidate_profile)}  |  user={user_id or 'anon'}"
+    )
 
     if not company or not role or not jd:
         async def err_gen():
@@ -96,7 +113,43 @@ async def api_generate_stream(request: Request):
     queue: asyncio.Queue = asyncio.Queue()
 
     def run_sync():
-        for event in stream_latex_resume(company, role, jd, model=model, base_folder=base_folder, candidate_profile=candidate_profile):
+        # Track local file paths from the "saved" event so we can upload to
+        # Supabase Storage when the matching "pdf" event fires.
+        saved_folder: Optional[str] = None
+        saved_tex_path: Optional[str] = None
+
+        for event in stream_latex_resume(
+            company, role, jd,
+            model=model, base_folder=base_folder, candidate_profile=candidate_profile,
+        ):
+            ev_name = event.get("event")
+
+            if ev_name == "saved":
+                saved_folder   = event.get("folder")
+                saved_tex_path = event.get("tex_path")
+                # Upload the .tex source straight away — even if pdflatex fails
+                # later, we still want the source preserved for diff/use-as-base.
+                if user_id and saved_folder and saved_tex_path:
+                    try:
+                        upload_tex(user_id, saved_folder, saved_tex_path)
+                    except Exception as exc:
+                        logger.warning(f"upload_tex failed: {exc}")
+
+            elif ev_name == "pdf" and user_id and saved_folder:
+                # The library emits a relative URL like "/pdf/<folder>/<file>.pdf".
+                # Resolve the local file path, push to Supabase Storage, and
+                # rewrite the event so the frontend gets a durable absolute URL.
+                rel_url  = event.get("url") or ""
+                filename = rel_url.rsplit("/", 1)[-1] if rel_url else None
+                if filename:
+                    pdf_path = os.path.join(LIBRARY_ROOT, saved_folder, filename)
+                    try:
+                        public = upload_pdf(user_id, saved_folder, pdf_path)
+                        if public:
+                            event = {**event, "url": public}
+                    except Exception as exc:
+                        logger.warning(f"upload_pdf failed: {exc}")
+
             asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
         asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
 

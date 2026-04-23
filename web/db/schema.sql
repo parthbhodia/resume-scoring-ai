@@ -44,3 +44,17 @@ alter table resume_signals enable row level security;
 create policy "anon full access" on resumes        for all using (true) with check (true);
 create policy "anon full access" on criteria       for all using (true) with check (true);
 create policy "anon full access" on resume_signals for all using (true) with check (true);
+
+-- ── Storage buckets ──────────────────────────────────────────────────────────
+-- Generated PDFs and .tex sources are uploaded by the Railway backend with
+-- the SUPABASE_SERVICE_ROLE_KEY (bypasses RLS). Buckets are public so the
+-- Download PDF link in the UI works without per-request signed URLs — paths
+-- include the user's UUID + a timestamped folder slug, so they're effectively
+-- unguessable.
+insert into storage.buckets (id, name, public)
+  values ('resume-pdfs', 'resume-pdfs', true)
+  on conflict (id) do nothing;
+
+insert into storage.buckets (id, name, public)
+  values ('resume-tex',  'resume-tex',  true)
+  on conflict (id) do nothing;

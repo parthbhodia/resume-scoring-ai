@@ -33,6 +33,14 @@ _GEMINI_FALLBACK_MODELS = (
     "gemini-2.0-flash-lite",
 )
 
+# Cross-provider fallback: when the entire Gemini chain is quota-exhausted,
+# roll over to Grok via xAI's OpenAI-compatible endpoint. Requires XAI_API_KEY.
+# grok-4-fast-non-reasoning is cheap (~$0.20/$0.50 per M tok) and supports
+# Live Search (xAI's equivalent of Google Search grounding).
+_GROK_FALLBACK_MODELS = (
+    "grok-4-fast-non-reasoning",
+)
+
 
 def _backoff_if_rate_limited(exc: BaseException, default_wait: float = 5.0) -> None:
     """
@@ -51,14 +59,86 @@ def _backoff_if_rate_limited(exc: BaseException, default_wait: float = 5.0) -> N
 
 
 def _model_chain(primary: str, extra: Tuple[str, ...] = _GEMINI_FALLBACK_MODELS) -> List[str]:
-    """Deduplicated list: primary first, then fallbacks not equal to primary."""
+    """Deduplicated list: primary first, then Gemini fallbacks, then Grok (if key set)."""
     out: List[str] = []
     seen: set[str] = set()
-    for m in (primary,) + extra:
+    candidates: Tuple[str, ...] = (primary,) + extra
+    if os.environ.get("XAI_API_KEY"):
+        candidates = candidates + _GROK_FALLBACK_MODELS
+    for m in candidates:
         if m not in seen:
             seen.add(m)
             out.append(m)
     return out
+
+
+# ── xAI / Grok provider ─────────────────────────────────────────────────────
+_xai_client = None
+
+
+def _is_grok(model: str) -> bool:
+    return model.lower().startswith("grok")
+
+
+def _get_xai_client():
+    """Lazy singleton — only imports openai + constructs client when first needed."""
+    global _xai_client
+    if _xai_client is not None:
+        return _xai_client
+    key = os.environ.get("XAI_API_KEY")
+    if not key:
+        raise RuntimeError("XAI_API_KEY not set — cannot use Grok")
+    from openai import OpenAI  # openai comes in via langchain-openai already
+    _xai_client = OpenAI(api_key=key, base_url="https://api.x.ai/v1")
+    return _xai_client
+
+
+def _stream_grok(model: str, system_prompt: str, user_prompt: str, temperature: float = 0.2):
+    """
+    Stream a Grok chat completion. Yields (text_chunk: str, sources: List[dict]).
+
+    NOTE: xAI deprecated the inline Live Search parameter in Apr 2026 in favor
+    of a separate Agent Tools API. Grounding is therefore NOT wired here — Grok
+    generates from its trained weights only. The Gemini path still has Google
+    Search grounding; Grok is used as a quota-exhausted fallback, so the
+    degraded-grounding case only kicks in when Gemini is fully rate-limited.
+    """
+    client = _get_xai_client()
+    stream = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt},
+        ],
+        temperature=temperature,
+        stream=True,
+    )
+    for chunk in stream:
+        try:
+            delta = chunk.choices[0].delta.content
+        except (AttributeError, IndexError):
+            delta = None
+        if delta:
+            yield delta, []
+
+
+def _json_grok(model: str, prompt: str, temperature: float = 0.2) -> Optional[Dict]:
+    """One-shot JSON call against Grok. Returns parsed dict or None on failure."""
+    try:
+        client = _get_xai_client()
+        r = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            response_format={"type": "json_object"},
+        )
+        text = (r.choices[0].message.content or "").strip()
+        text = re.sub(r"^```[a-z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+        return json.loads(text)
+    except Exception as exc:
+        logger.warning(f"Grok JSON call failed on {model}: {exc}")
+        return None
 
 
 LIBRARY_ROOT = "C:/Users/parth/OneDrive/Documents/resume"
@@ -255,15 +335,20 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         if i > 0:
             time.sleep(2)  # brief pause between retries
         try:
-            r = client.models.generate_content(
-                model=m,
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2),
-            )
-            text = (r.text or "").strip()
-            text = re.sub(r"^```[a-z]*\n?", "", text)
-            text = re.sub(r"\n?```$", "", text)
-            result = json.loads(text)
+            if _is_grok(m):
+                result = _json_grok(m, prompt, temperature=0.2)
+                if not result:
+                    continue
+            else:
+                r = client.models.generate_content(
+                    model=m,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.2),
+                )
+                text = (r.text or "").strip()
+                text = re.sub(r"^```[a-z]*\n?", "", text)
+                text = re.sub(r"\n?```$", "", text)
+                result = json.loads(text)
             if m != model:
                 logger.info(f"Ratings used fallback model: {m}")
             return result
@@ -304,20 +389,25 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         f"OLD RESUME (LaTeX):\n{old_body[:4500]}\n\n"
         f"NEW RESUME (LaTeX):\n{new_body[:4500]}"
     )
-    fallback_models = _model_chain(model, ("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"))
+    fallback_models = _model_chain(model, _GEMINI_FALLBACK_MODELS)
     for i, m in enumerate(fallback_models):
         if i > 0:
             time.sleep(1)
         try:
-            r = client.models.generate_content(
-                model=m,
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2),
-            )
-            text = (r.text or "").strip()
-            text = re.sub(r"^```[a-z]*\n?", "", text)
-            text = re.sub(r"\n?```$", "", text)
-            data = json.loads(text)
+            if _is_grok(m):
+                data = _json_grok(m, prompt, temperature=0.2)
+                if not data:
+                    continue
+            else:
+                r = client.models.generate_content(
+                    model=m,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.2),
+                )
+                text = (r.text or "").strip()
+                text = re.sub(r"^```[a-z]*\n?", "", text)
+                text = re.sub(r"\n?```$", "", text)
+                data = json.loads(text)
             changes = data.get("changes") if isinstance(data, dict) else None
             if isinstance(changes, list):
                 if m != model:
@@ -783,27 +873,42 @@ def stream_latex_resume(
         latex_body      = ""
         last_candidates = []
 
+        # Sources collected from whichever provider wins the fallback race.
+        grok_sources: List[Dict] = []
+
         for idx, _m in enumerate(_fallback_models):
-            yield {"event": "status", "msg": f"Searching Google for more information..."}
-            logger.info(f"Starting stream  |  {_m}")
+            provider = "Grok" if _is_grok(_m) else "Gemini"
+            yield {"event": "status", "msg": f"Generating with {_m} ({provider})…"}
+            logger.info(f"Starting stream  |  {_m}  |  provider={provider}")
             t1 = time.time()
             try:
-                stream = client.models.generate_content_stream(
-                    model=_m,
-                    contents=user_prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                        temperature=0.2,
-                        tools=[types.Tool(google_search=types.GoogleSearch())],
-                    ),
-                )
-                for chunk in stream:
-                    if getattr(chunk, "candidates", None):
-                        last_candidates = chunk.candidates
-                    text = getattr(chunk, "text", None)
-                    if text:
-                        latex_body += text
-                        yield {"event": "chunk", "text": text}
+                if _is_grok(_m):
+                    # xAI path — Live Search grounding
+                    for delta, srcs in _stream_grok(_m, system_prompt, user_prompt, 0.2):
+                        if delta:
+                            latex_body += delta
+                            yield {"event": "chunk", "text": delta}
+                        if srcs:
+                            grok_sources = srcs
+                else:
+                    # Gemini path — Google Search grounding
+                    stream = client.models.generate_content_stream(
+                        model=_m,
+                        contents=user_prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_prompt,
+                            temperature=0.2,
+                            tools=[types.Tool(google_search=types.GoogleSearch())],
+                        ),
+                    )
+                    for chunk in stream:
+                        if getattr(chunk, "candidates", None):
+                            last_candidates = chunk.candidates
+                        text = getattr(chunk, "text", None)
+                        if text:
+                            latex_body += text
+                            yield {"event": "chunk", "text": text}
+
                 if latex_body:
                     break  # got real content — exit fallback loop
                 else:
@@ -815,6 +920,7 @@ def stream_latex_resume(
                 yield {"event": "status", "msg": f"{_m} unavailable, trying next model…"}
                 latex_body = ""
                 last_candidates = []
+                grok_sources = []
                 _backoff_if_rate_limited(_e)
             if idx + 1 < len(_fallback_models) and not latex_body:
                 time.sleep(1)
@@ -827,8 +933,8 @@ def stream_latex_resume(
             latex_body = re.sub(r"^```[a-z]*\n?", "", latex_body)
             latex_body = re.sub(r"\n?```$", "", latex_body)
 
-        # Sources
-        sources = _extract_sources(last_candidates)
+        # Sources — from whichever provider actually ran
+        sources = _extract_sources(last_candidates) or grok_sources
         if sources:
             logger.info(f"Sources  |  {len(sources)} sites")
             yield {"event": "sources", "urls": sources}
