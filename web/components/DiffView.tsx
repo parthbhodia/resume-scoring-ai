@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { DiffLine, ChangeRationale } from "@/lib/types";
 
 interface Props {
@@ -8,6 +8,23 @@ interface Props {
   removes: number;
   rationales?: ChangeRationale[];
   baseFolder: string | null;
+  jdKeywords?: string[];
+}
+
+function highlightKeywords(text: string, keywords: string[]): React.ReactNode {
+  if (!keywords.length) return text;
+  const escaped = keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`(${escaped.join("|")})`, "gi");
+  const parts = text.split(re);
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1
+          ? <mark key={i} style={{ background: "rgba(251,191,36,0.28)", color: "var(--orange)", borderRadius: 2, padding: "0 2px", fontWeight: 600, fontStyle: "normal" }}>{part}</mark>
+          : part
+      )}
+    </>
+  );
 }
 
 /** Strip LaTeX commands and return human-readable prose. */
@@ -93,7 +110,7 @@ function diffToChanges(diff: DiffLine[]): Change[] {
   return out;
 }
 
-export default function DiffView({ diff, adds, removes, rationales, baseFolder }: Props) {
+export default function DiffView({ diff, adds, removes, rationales, baseFolder, jdKeywords = [] }: Props) {
   const changes: Change[] = useMemo(() => {
     if (rationales && rationales.length) {
       return rationales.map(r => ({
@@ -142,16 +159,22 @@ export default function DiffView({ diff, adds, removes, rationales, baseFolder }
       </div>
 
       {/* Human-readable changes */}
+      {jdKeywords.length > 0 && (
+        <div style={{ fontSize: 11, color: "var(--orange)", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "rgba(251,191,36,0.3)" }} />
+          JD keywords highlighted
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {changes.map((c, i) => (
-          <ChangeCard key={i} change={c} />
+          <ChangeCard key={i} change={c} jdKeywords={jdKeywords} />
         ))}
       </div>
     </div>
   );
 }
 
-function ChangeCard({ change }: { change: Change }) {
+function ChangeCard({ change, jdKeywords = [] }: { change: Change; jdKeywords?: string[] }) {
   const [open, setOpen] = useState(false);
 
   const meta =
@@ -196,7 +219,9 @@ function ChangeCard({ change }: { change: Change }) {
         lineHeight: 1.55,
         textDecoration: change.type === "removed" ? "line-through" : "none",
       }}>
-        {change.text}
+        {change.type !== "removed"
+          ? highlightKeywords(change.text, jdKeywords)
+          : change.text}
       </div>
 
       {/* Expanded "why" — shown on click (mobile-friendly) */}

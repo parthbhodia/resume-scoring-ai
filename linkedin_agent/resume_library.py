@@ -1170,6 +1170,11 @@ def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optio
         if i > 0:
             time.sleep(1)
         try:
+            if _is_grok(m):
+                data = _json_grok(m, prompt, temperature=0.1)
+                if data and isinstance(data, dict):
+                    return data
+                continue
             r = client.models.generate_content(
                 model=m,
                 contents=prompt,

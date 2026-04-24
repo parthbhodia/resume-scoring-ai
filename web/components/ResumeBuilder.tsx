@@ -13,6 +13,31 @@ import ResumeSidebar from "./ResumeSidebar";
 
 type Tab = "analysis" | "changes";
 
+function extractJdKeywords(jdText: string): string[] {
+  const STOP = new Set([
+    "the","and","or","for","with","that","this","will","have","from","they",
+    "your","our","are","been","can","has","its","not","but","you","all","any",
+    "may","some","such","use","used","using","must","also","well","very","more",
+    "most","than","each","into","about","other","their","which","when","what",
+    "how","who","where","why","able","need","work","team","role","join","help",
+    "make","both","then","there","these","those","would","could","should","shall",
+    "being","having","doing","made","take","come","became","strong","experience",
+    "including","required","preferred","position","years","skills","ability",
+    "knowledge","understanding","familiar","working","across","within","ensure",
+    "support","manage","build","design","develop","data",
+  ]);
+  const seen = new Map<string, string>();
+  const re = /\b([A-Z][A-Za-z0-9+#.]*(?:[-\/][A-Za-z0-9+#.]+)*|[a-z]{3,}(?:\.js|\.ts|\.py)?)\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(jdText)) !== null) {
+    const w = m[1];
+    if (w.length < 2 || STOP.has(w.toLowerCase())) continue;
+    const k = w.toLowerCase();
+    if (!seen.has(k)) seen.set(k, w);
+  }
+  return [...seen.values()].sort((a, b) => b.length - a.length);
+}
+
 const EMPTY_RESULT: GenerationResult = {
   folder: null, texPath: null, pdfUrl: null,
   ratings: null, diff: [], adds: 0, removes: 0, rationales: [],
@@ -31,7 +56,8 @@ export default function ResumeBuilder() {
   const [result,     setResult]     = useState<GenerationResult | null>(null);
   const [error,      setError]      = useState<string | null>(null);
   const [activeTab,  setActiveTab]  = useState<Tab>("analysis");
-  const [preview, setPreview] = useState("");
+  const [preview,    setPreview]    = useState("");
+  const [jdKeywords, setJdKeywords] = useState<string[]>([]);
 
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(null);
   const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(null);
@@ -142,6 +168,7 @@ export default function ResumeBuilder() {
     setResult(null);
     setPreview("");
     setStatusMsg("Connecting…");
+    setJdKeywords(extractJdKeywords(effJd));
 
     const acc: GenerationResult = { ...EMPTY_RESULT };
 
@@ -183,18 +210,21 @@ export default function ResumeBuilder() {
             case "sources": acc.sources = ev.urls as Source[]; break;
             case "diff":    acc.diff = ev.data as DiffLine[]; acc.adds = ev.adds; acc.removes = ev.removes; break;
             case "rationales": acc.rationales = ev.data as ChangeRationale[]; break;
-            case "ratings": acc.ratings = ev.data as RatingsData; break;
-            case "saved":   acc.folder = ev.folder; acc.texPath = ev.tex_path; break;
+            case "ratings":
+              acc.ratings = ev.data as RatingsData;
+              setResult({ ...acc });
+              break;
+            case "saved":
+              acc.folder = ev.folder; acc.texPath = ev.tex_path;
+              setResult({ ...acc }); // Show result card immediately
+              break;
             case "pdf":
-              // Backend now returns an absolute Supabase Storage URL when the
-              // user is signed in (durable across redeploys). Fall back to the
-              // legacy /pdf/<folder>/<file> route if it's still a relative path.
               acc.pdfUrl = /^https?:\/\//.test(ev.url) ? ev.url : apiUrl(ev.url);
+              setResult({ ...acc }); // Update PDF button in-place
               break;
             case "done":
               if (acc.folder) {
                 upsertResume(acc.folder, effCompany, effRole, model, acc.texPath ?? "", acc.pdfUrl, acc.ratings).catch(console.error);
-                // Auto-set this resume as base for the next generation's diff
                 setBaseFolder(acc.folder);
               }
               setResult({ ...acc });
@@ -512,7 +542,7 @@ export default function ResumeBuilder() {
           )}
 
           {/* ── Results ── */}
-          {result && ratings && (
+          {result && (
             <div className="fade-in">
 
               {/* Divider */}
@@ -537,18 +567,30 @@ export default function ResumeBuilder() {
                 }} />
 
                 <div className="rb-score-row" style={{ display: "flex", alignItems: "flex-start", gap: 24, position: "relative" }}>
-                  <ScoreRing score={score} size={130} />
+                  {ratings ? (
+                    <ScoreRing score={score} size={130} />
+                  ) : (
+                    <div style={{ width: 130, height: 130, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Spinner />
+                    </div>
+                  )}
 
                   <div style={{ flex: 1, paddingTop: 4 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 }}>
                       {company} · {role}
                     </div>
-                    <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: -0.6, color: "var(--text)", marginBottom: 8, lineHeight: 1.3 }}>
-                      {score >= 80 ? "Strong match" : score >= 65 ? "Good match" : score >= 50 ? "Moderate match" : "Needs work"}
-                    </div>
-                    <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: 0 }}>
-                      {ratings.verdict}
-                    </p>
+                    {ratings ? (
+                      <>
+                        <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: -0.6, color: "var(--text)", marginBottom: 8, lineHeight: 1.3 }}>
+                          {score >= 80 ? "Strong match" : score >= 65 ? "Good match" : score >= 50 ? "Moderate match" : "Needs work"}
+                        </div>
+                        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: 0 }}>
+                          {ratings.verdict}
+                        </p>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 13, color: "var(--dim)" }}>Analysing match…</div>
+                    )}
                   </div>
 
                   {/* PDF download */}
@@ -577,7 +619,7 @@ export default function ResumeBuilder() {
               </div>
 
               {/* Strengths + Gaps */}
-              {(ratings.whats_working?.length > 0 || ratings.gaps?.length > 0) && (
+              {ratings && (ratings.whats_working?.length > 0 || ratings.gaps?.length > 0) && (
                 <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
                   {ratings.whats_working?.length > 0 && (
                     <div style={{
@@ -656,11 +698,11 @@ export default function ResumeBuilder() {
                 })}
               </div>
 
-              {activeTab === "analysis" && (
+              {activeTab === "analysis" && ratings && (
                 <CriteriaTable criteria={ratings.criteria} />
               )}
               {activeTab === "changes" && (
-                <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={baseFolder} />
+                <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={baseFolder} jdKeywords={jdKeywords} />
               )}
 
               {/* Start over nudge */}
@@ -680,17 +722,6 @@ export default function ResumeBuilder() {
             </div>
           )}
 
-          {/* Result with no ratings */}
-          {result && !ratings && (
-            <div style={{ textAlign: "center", color: "var(--dim)", fontSize: 13, padding: "24px 0" }}>
-              Generation complete — analysis not available.
-              {result.pdfUrl && (
-                <a href={result.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: 12, color: "var(--accent)", fontSize: 13 }}>
-                  Download PDF →
-                </a>
-              )}
-            </div>
-          )}
 
         </div>
       </main>
