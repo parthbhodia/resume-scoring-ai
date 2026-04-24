@@ -97,7 +97,7 @@ async def api_generate_stream(request: Request):
         model = "grok-4-fast-non-reasoning"
     base_folder       = (body.get("base_folder") or "").strip() or None
     candidate_profile = (body.get("candidate_profile") or "").strip() or None
-    user_id           = (body.get("user_id") or "").strip() or None
+    user_id           = (body.get("user_id") or "").strip() or "local"
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
