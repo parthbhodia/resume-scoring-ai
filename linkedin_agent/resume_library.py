@@ -822,14 +822,27 @@ def _save_and_compile(company, role, latex_body, compile_pdf=True):
                 result["compiled"] = True
                 logger.info(f"PDF compiled  |  {time.time()-t:.1f}s")
             else:
+                # Surface the failure — previously this was silently swallowed
+                # into result["compile_error"], which broke the Supabase upload
+                # chain because the "pdf" event never fired. Log the tail so
+                # missing LaTeX packages etc. are debuggable from Railway logs.
+                tail = (proc.stdout[-800:] if proc.stdout else "") or (proc.stderr[-800:] if proc.stderr else "")
                 result["compiled"]      = False
-                result["compile_error"] = proc.stdout[-500:] if proc.stdout else proc.stderr[-500:]
+                result["compile_error"] = tail or f"exit={proc.returncode}"
+                logger.warning(
+                    f"PDF compile FAILED  |  exit={proc.returncode}  |  tex={tex_path}\n"
+                    f"pdflatex tail:\n{tail}"
+                )
         except Exception as exc:
             result["compiled"]      = False
             result["compile_error"] = str(exc)
+            logger.warning(f"PDF compile EXCEPTION  |  {exc}")
     else:
         result["compiled"]      = False
         result["compile_note"]  = "pdflatex not found or disabled."
+        logger.warning(
+            f"pdflatex not found  |  PDFLATEX={PDFLATEX}  |  exists={os.path.exists(PDFLATEX) if PDFLATEX else False}"
+        )
     return result
 
 

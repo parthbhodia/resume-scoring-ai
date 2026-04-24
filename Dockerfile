@@ -1,11 +1,14 @@
 # Railway build — Python backend with LaTeX support + headless Chromium
 FROM python:3.11-slim
 
-# Install texlive for PDF compilation
+# Install texlive for PDF compilation.
+# texlive-fonts-extra is required for `marvosym` (used by the resume preamble
+# for phone/email icons). Without it pdflatex exits 1 and no PDF is produced.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         texlive-latex-base \
         texlive-fonts-recommended \
+        texlive-fonts-extra \
         texlive-latex-extra && \
     rm -rf /var/lib/apt/lists/*
 
