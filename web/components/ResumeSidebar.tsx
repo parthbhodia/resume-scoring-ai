@@ -104,57 +104,107 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
               const sc = r.score;
               const isActive = r.folder === activeFolder;
               return (
-                <button
+                <div
                   key={r.id}
-                  onClick={() => onSelect(r.folder)}
                   style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "9px 10px", borderRadius: 8, cursor: "pointer", width: "100%",
+                    display: "flex", alignItems: "center", gap: 4,
+                    padding: "4px 6px 4px 10px", borderRadius: 8, width: "100%",
                     background: isActive ? "var(--accent-bg)" : "transparent",
                     border: isActive ? "1px solid rgba(0,113,227,0.25)" : "1px solid transparent",
-                    textAlign: "left", transition: "all 0.12s", fontFamily: "inherit",
+                    transition: "all 0.12s",
                   }}
                   onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "var(--surface2)"; }}
                   onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
                 >
-                  {/* Score badge */}
-                  <div style={{
-                    width: 28, height: 28, borderRadius: 7, flexShrink: 0,
-                    background: sc != null
-                      ? (sc >= 75 ? "rgba(52,211,153,0.12)" : sc >= 55 ? "rgba(251,191,36,0.12)" : "rgba(248,113,113,0.12)")
-                      : "var(--surface3)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    {sc != null ? (
-                      <span style={{
-                        fontSize: 9, fontWeight: 700, letterSpacing: -0.2,
-                        color: sc >= 75 ? "var(--green)" : sc >= 55 ? "var(--yellow)" : "var(--red)",
-                      }}>
-                        {sc}
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: 9, color: "var(--dim)" }}>—</span>
-                    )}
-                  </div>
+                  {/* Main row — click to use as base */}
+                  <button
+                    onClick={() => onSelect(r.folder)}
+                    title="Use as base for next generation"
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      flex: 1, minWidth: 0, padding: "5px 0",
+                      background: "transparent", border: "none",
+                      cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                    }}
+                  >
+                    {/* Score badge */}
+                    <div style={{
+                      width: 28, height: 28, borderRadius: 7, flexShrink: 0,
+                      background: sc != null
+                        ? (sc >= 75 ? "rgba(52,211,153,0.12)" : sc >= 55 ? "rgba(251,191,36,0.12)" : "rgba(248,113,113,0.12)")
+                        : "var(--surface3)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      {sc != null ? (
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, letterSpacing: -0.2,
+                          color: sc >= 75 ? "var(--green)" : sc >= 55 ? "var(--yellow)" : "var(--red)",
+                        }}>
+                          {sc}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 9, color: "var(--dim)" }}>—</span>
+                      )}
+                    </div>
 
-                  {/* Label */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: 12, fontWeight: 500,
-                      color: isActive ? "var(--accent)" : "var(--text)",
-                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                      letterSpacing: -0.2,
-                    }}>
-                      {r.company}
+                    {/* Label */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 12, fontWeight: 500,
+                        color: isActive ? "var(--accent)" : "var(--text)",
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                        letterSpacing: -0.2,
+                      }}>
+                        {r.company}
+                      </div>
+                      <div style={{
+                        fontSize: 11, color: "var(--dim)", letterSpacing: -0.1,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {r.role}
+                      </div>
                     </div>
-                    <div style={{
-                      fontSize: 11, color: "var(--dim)", letterSpacing: -0.1,
-                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                    }}>
-                      {r.role}
+                  </button>
+
+                  {/* Download PDF */}
+                  {r.pdf_url ? (
+                    <a
+                      href={r.pdf_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      download
+                      onClick={e => e.stopPropagation()}
+                      title="Download tailored PDF"
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                        color: "var(--dim)", textDecoration: "none",
+                        transition: "all 0.12s",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.color = "var(--accent)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--dim)"; }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                        <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M2 11h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                      </svg>
+                    </a>
+                  ) : (
+                    <div
+                      title="PDF not available (generated before Supabase Storage was wired up)"
+                      style={{
+                        width: 28, height: 28, flexShrink: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: "rgba(255,255,255,0.14)",
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                        <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M2 11h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                      </svg>
                     </div>
-                  </div>
-                </button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -167,7 +217,7 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
           padding: "10px 16px", borderTop: "1px solid var(--border)", flexShrink: 0,
           fontSize: 11, color: "var(--dim)", letterSpacing: -0.1, lineHeight: 1.5,
         }}>
-          Click a resume to use it as a base for your next tailoring.
+          Click a row to use it as a base — or tap the ↓ icon to download.
         </div>
       )}
     </aside>
