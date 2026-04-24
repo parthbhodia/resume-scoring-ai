@@ -5,6 +5,7 @@ create extension if not exists "pgcrypto";
 -- ── resumes ──────────────────────────────────────────────────────────────────
 create table if not exists resumes (
   id          uuid primary key default gen_random_uuid(),
+  user_id     uuid,
   folder      text unique not null,
   company     text not null,
   role        text not null,
