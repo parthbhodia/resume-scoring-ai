@@ -154,6 +154,18 @@
 
     .verdict-box { background: var(--surface2); border: 1px solid var(--border); border-left: 3px solid var(--blue-dim); border-radius: 0 6px 6px 0; padding: 10px 14px; font-size: 12px; color: var(--text); line-height: 1.7; margin-top: 14px; }
 
+    /* ── JD keyword highlight ────────────────────────── */
+    mark.jd-kw {
+      background: rgba(210,153,34,.28);
+      color: var(--orange);
+      border-radius: 2px;
+      padding: 0 2px;
+      font-style: inherit;
+      font-weight: 600;
+    }
+    .jd-kw-legend { font-size: 10px; color: var(--orange); margin-bottom: 8px; display: flex; align-items: center; gap: 5px; }
+    .jd-kw-legend-dot { width: 8px; height: 8px; border-radius: 2px; background: rgba(210,153,34,.35); display: inline-block; }
+
     /* ── Diff ────────────────────────────────────────── */
     .diff-stats { font-size: 11px; color: var(--muted); margin-bottom: 8px; display: flex; gap: 12px; }
     .diff-stats .adds    { color: var(--green); font-weight: 600; }
@@ -300,10 +312,50 @@
 
 <script>
   let _resumes = [];
+  let _jdKeywords = [];
+  let _latexBuffer = "";
 
   // ── Utilities ─────────────────────────────────────────────────────────────
   function escHtml(s) {
     return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  // ── JD keyword extraction & highlighting ──────────────────────────────────
+  function extractJdKeywords(jdText) {
+    const STOP = new Set([
+      "the","and","or","for","with","that","this","will","have","from","they",
+      "your","our","are","been","can","has","its","not","but","you","all","any",
+      "may","some","such","use","used","using","must","also","well","very","more",
+      "most","than","each","into","about","other","their","which","when","what",
+      "how","who","where","why","able","need","work","team","role","join","help",
+      "make","both","then","there","these","those","would","could","should","shall",
+      "being","having","doing","made","take","taken","come","came","become","became",
+      "strong","experience","including","required","preferred","position","years",
+      "skills","ability","knowledge","understanding","familiar","working","across",
+      "within","ensure","support","manage","build","design","develop","data",
+    ]);
+    const words = [];
+    // Match tech-looking tokens: acronyms, CamelCase, hyphenated tech, version numbers
+    const techRe = /\b([A-Z][A-Za-z0-9+#.]*(?:[\-\/][A-Za-z0-9+#.]+)*|[a-z]{3,}(?:\.js|\.ts|\.py)?)\b/g;
+    let m;
+    while ((m = techRe.exec(jdText)) !== null) {
+      const w = m[1];
+      if (w.length < 2 || STOP.has(w.toLowerCase())) continue;
+      words.push(w);
+    }
+    // Deduplicate case-insensitively, longest first
+    const seen = new Map();
+    words.forEach(w => { const k = w.toLowerCase(); if (!seen.has(k)) seen.set(k, w); });
+    return [...seen.values()].sort((a, b) => b.length - a.length);
+  }
+
+  function highlightKw(html) {
+    if (!_jdKeywords.length) return html;
+    _jdKeywords.forEach(kw => {
+      const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      html = html.replace(new RegExp(`\\b(${esc})\\b`, "gi"), `<mark class="jd-kw">$1</mark>`);
+    });
+    return html;
   }
   function scoreColor(n)    { return n >= 8 ? "high" : n >= 6 ? "medium" : "low"; }
   function scoreBarColor(n) { return n >= 8 ? "var(--green)" : n >= 6 ? "var(--orange)" : "var(--red)"; }
@@ -402,6 +454,10 @@
 
     if (!company || !role || !jd) { alert("Please fill in Company, Role, and Job Description."); return; }
 
+    // Extract JD keywords for highlighting
+    _jdKeywords  = extractJdKeywords(jd);
+    _latexBuffer = "";
+
     // ── UI reset ─────────────────────────────────────────────────────────────
     const btn = document.getElementById("generateBtn");
     btn.disabled = true;
@@ -462,9 +518,10 @@
         break;
 
       case "chunk": {
+        _latexBuffer += e.text;
         const preview = document.getElementById("livePreview");
         document.getElementById("previewWrap").style.display = "block";
-        preview.textContent += e.text;
+        preview.innerHTML = highlightKw(escHtml(_latexBuffer));
         preview.scrollTop = preview.scrollHeight;
         break;
       }
@@ -475,6 +532,10 @@
 
       case "ratings":
         _resultData.ratings = e.data;
+        // Update ratings tab in-place if card is already visible
+        if (document.getElementById("resultCard").style.display !== "none") {
+          renderResult();
+        }
         break;
 
       case "diff":
@@ -486,15 +547,19 @@
       case "saved":
         _resultData.folder   = e.folder;
         _resultData.tex_path = e.tex_path;
+        // Show result card immediately — PDF/ratings may still be loading
+        renderResult();
         break;
 
       case "pdf":
         _resultData.pdf_url = e.url;
+        // Update PDF button in-place without full re-render
+        updatePdfButton(e.url);
         break;
 
       case "done":
         document.getElementById("progressCard").style.display = "none";
-        renderResult();
+        renderResult();   // final sync with all data
         loadLibrary();
         break;
 
@@ -502,6 +567,17 @@
         document.getElementById("progressCard").style.display = "none";
         showError(e.msg);
         break;
+    }
+  }
+
+  // ── Update PDF button without full re-render ─────────────────────────────
+  function updatePdfButton(url) {
+    const el = document.getElementById("pdf-btn-slot");
+    if (el) {
+      el.innerHTML = `<a class="btn-pdf" href="${escHtml(url)}" target="_blank">⬇ Open PDF</a>`;
+    } else {
+      // Result card not rendered yet — renderResult will pick it up
+      renderResult();
     }
   }
 
@@ -534,13 +610,13 @@
         <div><strong>Folder</strong>&ensp;${escHtml(folder||"")}</div>
         <div><strong>PDF</strong>&ensp;${hasPdf
           ? '<span style="color:var(--green)">compiled ✓</span>'
-          : '<span style="color:var(--yellow)">not compiled</span>'}</div>
+          : '<span style="color:var(--yellow)">compiling…</span>'}</div>
         ${baseFolder ? `<div><strong>Base</strong>&ensp;${escHtml(baseFolder)}</div>` : ""}
       </div>
-      <div>
+      <div id="pdf-btn-slot">
         ${hasPdf ? `<a class="btn-pdf" href="${escHtml(pdf_url)}" target="_blank">⬇ Open PDF</a>` : ""}
-        <button class="btn-ghost" onclick="copyPath('${escHtml(tex_path||"")}')">📋 Copy .tex path</button>
       </div>
+      <button class="btn-ghost" onclick="copyPath('${escHtml(tex_path||"")}')">📋 Copy .tex path</button>
     </div>`;
 
     // ── Ratings tab ───────────────────────────────────────────────────────
@@ -615,9 +691,14 @@
     if (hasDiff) {
       const lines = diff.map(l => {
         const g = l.type==="add" ? "+" : l.type==="remove" ? "−" : l.type==="hunk" ? "⋯" : " ";
-        return `<div class="diff-line ${l.type}"><span class="diff-gutter">${g}</span>${escHtml(l.text)}</div>`;
+        const content = l.type === "add" ? highlightKw(escHtml(l.text)) : escHtml(l.text);
+        return `<div class="diff-line ${l.type}"><span class="diff-gutter">${g}</span>${content}</div>`;
       }).join("");
+      const kwNote = _jdKeywords.length
+        ? `<div class="jd-kw-legend"><span class="jd-kw-legend-dot"></span> JD keywords highlighted in added lines</div>`
+        : "";
       diffHtml += `
+        ${kwNote}
         <div class="diff-stats">
           <span class="adds">+${adds} added</span>
           <span class="removes">−${removes} removed</span>
@@ -631,10 +712,15 @@
 
     const resultCard = document.getElementById("resultCard");
     document.getElementById("resultBody").innerHTML = tabsHtml + infoHtml + ratingsHtml + diffHtml;
+    const wasVisible = resultCard.style.display === "block";
     resultCard.style.display = "block";
-    resultCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (!wasVisible) resultCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
-    switchTab(hasRatings ? "tab-ratings" : "tab-info");
+    // Default: info tab until ratings arrive; switch to ratings once we have them
+    const activeTab = document.querySelector(".tab.active")?.dataset?.tab;
+    if (!activeTab || activeTab === "tab-info") {
+      switchTab(hasRatings ? "tab-ratings" : "tab-info");
+    }
   }
 
   function showError(msg) {

@@ -141,8 +141,15 @@ def _json_grok(model: str, prompt: str, temperature: float = 0.2) -> Optional[Di
         return None
 
 
-LIBRARY_ROOT = "C:/Users/parth/OneDrive/Documents/resume"
-PDFLATEX = "C:/Users/parth/AppData/Local/Programs/MiKTeX/miktex/bin/x64/pdflatex.exe"
+LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", "C:/Users/parth/OneDrive/Documents/resume")
+
+# Prefer the system pdflatex (cross-platform); fall back to the Windows MiKTeX path for
+# backwards-compat when running on the original Windows dev machine.
+import shutil as _shutil
+PDFLATEX = (
+    _shutil.which("pdflatex")
+    or "C:/Users/parth/AppData/Local/Programs/MiKTeX/miktex/bin/x64/pdflatex.exe"
+)
 
 # LaTeX preamble — identical across all of Parth's resumes
 _LATEX_PREAMBLE = r"""%-------------------------

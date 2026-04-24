@@ -54,7 +54,7 @@ except ImportError:
     from storage import upload_pdf, upload_tex  # type: ignore
 
 # ── Config (env-var driven for Railway) ──────────────────────────────────────
-LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", "C:/Users/parth/OneDrive/Documents/resume")
+LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", str(Path(__file__).parent.parent / "resumes"))
 HTML_FILE       = Path(__file__).parent / "index.html"
 PORT            = int(os.environ.get("PORT", 8765))
 
