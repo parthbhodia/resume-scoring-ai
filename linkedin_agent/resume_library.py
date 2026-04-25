@@ -141,6 +141,29 @@ def _json_grok(model: str, prompt: str, temperature: float = 0.2) -> Optional[Di
         return None
 
 
+# Match Markdown bold: **non-empty content not containing ** or newlines**.
+# Non-greedy so adjacent groups don't merge. Excludes asterisks and newlines
+# inside the group to avoid spanning paragraphs or eating sibling markers.
+_MD_BOLD_RE = re.compile(r"\*\*([^*\n]+?)\*\*")
+
+
+def _markdown_to_latex_bold(text: str) -> Tuple[str, int]:
+    """
+    Rewrite Markdown **bold** → \\textbf{bold}.
+
+    pdflatex prints literal asterisks for **word**, which shows up in the
+    rendered PDF as `**React**` instead of bolded `React`. The system prompt
+    forbids Markdown but Grok in particular tends to default to it, so we
+    sanitize the body unconditionally before saving the .tex file.
+
+    Returns (rewritten_text, replacements_count).
+    """
+    if "**" not in text:
+        return text, 0
+    new_text, n = _MD_BOLD_RE.subn(r"\\textbf{\1}", text)
+    return new_text, n
+
+
 LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", "C:/Users/parth/OneDrive/Documents/resume")
 
 # Prefer the system pdflatex (cross-platform); fall back to the Windows MiKTeX path for
@@ -490,7 +513,8 @@ def generate_latex_resume(
         "5. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
         "   \\resumeItemListStart, \\resumeItem, \\resumeHeadingListStart, etc.\n"
         "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
-        "7. Bold the most relevant skills and technologies for this specific job\n"
+        "7. To bold the most relevant skills and technologies for this job, use the LaTeX command \\textbf{...} ONLY. "
+        "Never use Markdown bold syntax like **word** — pdflatex prints those asterisks literally instead of rendering bold text.\n"
         "8. Keep to 1 page — all experience entries + 2 most relevant projects + education + skills"
     )
 
@@ -571,6 +595,7 @@ def generate_latex_resume(
     if latex_body.startswith("```"):
         latex_body = re.sub(r"^```[a-z]*\n?", "", latex_body)
         latex_body = re.sub(r"\n?```$", "", latex_body)
+    latex_body, _ = _markdown_to_latex_bold(latex_body)
     logger.info(f"LaTeX body  |  {len(latex_body)} chars")
 
     # ── Diff ──────────────────────────────────────────────────────────────────
@@ -680,7 +705,8 @@ def _build_prompts(company, role, job_description, base_body, reference_tex, can
         "5. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
         "   \\resumeItemListStart, \\resumeItem, \\resumeHeadingListStart, etc.\n"
         "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
-        "7. Bold the most relevant skills and technologies for this specific job\n"
+        "7. To bold the most relevant skills and technologies for this job, use the LaTeX command \\textbf{...} ONLY. "
+        "Never use Markdown bold syntax like **word** — pdflatex prints those asterisks literally instead of rendering bold text.\n"
         "8. Keep to 1 page — all experience entries + 2 most relevant projects + education + skills"
     )
     base_section = ""
@@ -952,6 +978,14 @@ def stream_latex_resume(
         if latex_body.startswith("```"):
             latex_body = re.sub(r"^```[a-z]*\n?", "", latex_body)
             latex_body = re.sub(r"\n?```$", "", latex_body)
+
+        # Defensive: convert Markdown bold (**word**) → \textbf{word}.
+        # The prompt forbids this, but Grok in particular tends to default to
+        # Markdown formatting; without this rewrite pdflatex prints the literal
+        # asterisks (rule 7 violation surfaced as "**word**" in the rendered PDF).
+        latex_body, n_md_bold = _markdown_to_latex_bold(latex_body)
+        if n_md_bold:
+            logger.info(f"Markdown→LaTeX bold rewrites  |  {n_md_bold}")
 
         # Sources — from whichever provider actually ran
         sources = _extract_sources(last_candidates) or grok_sources
