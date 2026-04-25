@@ -9,6 +9,10 @@ langchain-anthropic>=0.1.0
 
 # LLM Providers (add others as needed)
 langchain-openai>=0.2.0
+# openai>=1.50 ships the Responses API (client.responses.create), which is
+# what xAI requires for the new web_search tool — Live Search on Chat
+# Completions was deprecated in Apr 2026.
+openai>=1.50.0
 langchain-google-genai>=1.0.0
 langchain-xai>=0.2.0
 

@@ -34,11 +34,12 @@ _GEMINI_FALLBACK_MODELS = (
 )
 
 # Cross-provider fallback: when the entire Gemini chain is quota-exhausted,
-# roll over to Grok via xAI's OpenAI-compatible endpoint. Requires XAI_API_KEY.
-# grok-4-fast-non-reasoning is cheap (~$0.20/$0.50 per M tok) and supports
-# Live Search (xAI's equivalent of Google Search grounding).
+# roll over to Grok via xAI's Responses API. Requires XAI_API_KEY.
+# grok-4-1-fast-non-reasoning is xAI's "best agentic tool calling" model
+# in the non-reasoning tier — needed for reliable web_search invocation.
+# Override per-deployment via env var GROK_MODEL.
 _GROK_FALLBACK_MODELS = (
-    "grok-4-fast-non-reasoning",
+    os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning"),
 )
 
 
@@ -95,31 +96,98 @@ def _get_xai_client():
 
 def _stream_grok(model: str, system_prompt: str, user_prompt: str, temperature: float = 0.2):
     """
-    Stream a Grok chat completion. Yields (text_chunk: str, sources: List[dict]).
+    Stream a Grok generation via the xAI Responses API with the web_search tool.
 
-    NOTE: xAI deprecated the inline Live Search parameter in Apr 2026 in favor
-    of a separate Agent Tools API. Grounding is therefore NOT wired here — Grok
-    generates from its trained weights only. The Gemini path still has Google
-    Search grounding; Grok is used as a quota-exhausted fallback, so the
-    degraded-grounding case only kicks in when Gemini is fully rate-limited.
+    Yields typed event dicts the caller dispatches on:
+      {"type": "text",   "delta": str}                     — incremental text
+      {"type": "query",  "query": str}                     — Grok issued a Google search
+      {"type": "source", "title": str|None, "url": str}    — Grok cited a page
+
+    Background: xAI deprecated Live Search on Chat Completions in Apr 2026 and
+    moved web search to the Responses API behind tools=[{"type":"web_search"}].
+    So we have to use client.responses.create (not chat.completions.create)
+    and parse a different streaming event format. Event names follow OpenAI's
+    Responses API spec which xAI mirrors.
     """
     client = _get_xai_client()
-    stream = client.chat.completions.create(
+    # Responses API uses `instructions` for the system message and `input` for
+    # the user message (or a list of input items for multi-turn). Single-turn
+    # is fine here.
+    stream = client.responses.create(
         model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_prompt},
-        ],
+        instructions=system_prompt,
+        input=user_prompt,
         temperature=temperature,
+        tools=[{"type": "web_search"}],
         stream=True,
     )
-    for chunk in stream:
-        try:
-            delta = chunk.choices[0].delta.content
-        except (AttributeError, IndexError):
-            delta = None
-        if delta:
-            yield delta, []
+
+    seen_query_ids: set = set()
+    seen_source_urls: set = set()
+
+    for event in stream:
+        et = getattr(event, "type", "") or ""
+
+        # Text deltas — main content
+        if et == "response.output_text.delta":
+            delta = getattr(event, "delta", None)
+            if delta:
+                yield {"type": "text", "delta": delta}
+            continue
+
+        # New output item added — could be the start of a web_search_call
+        if et in ("response.output_item.added", "response.output_item.done"):
+            item = getattr(event, "item", None)
+            if item is None:
+                continue
+            item_type = getattr(item, "type", None) or (item.get("type") if isinstance(item, dict) else None)
+            if item_type == "web_search_call":
+                # Pull the query from item.action.query (or item["action"]["query"]).
+                action = getattr(item, "action", None) or (item.get("action") if isinstance(item, dict) else None)
+                query = None
+                if action is not None:
+                    query = getattr(action, "query", None) or (action.get("query") if isinstance(action, dict) else None)
+                # Fall back to item.query if the schema changes
+                if not query:
+                    query = getattr(item, "query", None) or (item.get("query") if isinstance(item, dict) else None)
+                item_id = getattr(item, "id", None) or (item.get("id") if isinstance(item, dict) else None) or query
+                if query and item_id and item_id not in seen_query_ids:
+                    seen_query_ids.add(item_id)
+                    yield {"type": "query", "query": query}
+            continue
+
+        # Citation annotations attached to text — fire as soon as Grok cites a page
+        if et == "response.output_text.annotation.added":
+            ann = getattr(event, "annotation", None)
+            if ann is None:
+                continue
+            ann_type = getattr(ann, "type", None) or (ann.get("type") if isinstance(ann, dict) else None)
+            if ann_type in ("url_citation", "web_citation"):
+                url   = getattr(ann, "url",   None) or (ann.get("url")   if isinstance(ann, dict) else None)
+                title = getattr(ann, "title", None) or (ann.get("title") if isinstance(ann, dict) else None)
+                if url and url not in seen_source_urls:
+                    seen_source_urls.add(url)
+                    yield {"type": "source", "title": title, "url": url}
+            continue
+
+        # Final response — sweep up any citations we missed via the streaming events
+        # (some servers only emit annotations on the completed event).
+        if et == "response.completed":
+            resp = getattr(event, "response", None)
+            output = getattr(resp, "output", None) or []
+            for it in output:
+                content = getattr(it, "content", None) or (it.get("content") if isinstance(it, dict) else None) or []
+                for c in content:
+                    annotations = getattr(c, "annotations", None) or (c.get("annotations") if isinstance(c, dict) else None) or []
+                    for ann in annotations:
+                        ann_type = getattr(ann, "type", None) or (ann.get("type") if isinstance(ann, dict) else None)
+                        if ann_type not in ("url_citation", "web_citation"):
+                            continue
+                        url   = getattr(ann, "url",   None) or (ann.get("url")   if isinstance(ann, dict) else None)
+                        title = getattr(ann, "title", None) or (ann.get("title") if isinstance(ann, dict) else None)
+                        if url and url not in seen_source_urls:
+                            seen_source_urls.add(url)
+                            yield {"type": "source", "title": title, "url": url}
 
 
 def _json_grok(model: str, prompt: str, temperature: float = 0.2) -> Optional[Dict]:
@@ -978,13 +1046,29 @@ def stream_latex_resume(
             t1 = time.time()
             try:
                 if _is_grok(_m):
-                    # xAI path — Live Search grounding
-                    for delta, srcs in _stream_grok(_m, system_prompt, user_prompt, 0.2):
-                        if delta:
-                            latex_body += delta
-                            yield {"event": "chunk", "text": delta}
-                        if srcs:
-                            grok_sources = srcs
+                    # xAI Responses API path with web_search tool. _stream_grok
+                    # yields typed event dicts: text deltas, search queries, and
+                    # citation sources — fire each onto the same SSE stream the
+                    # frontend already handles for Gemini grounding.
+                    for ev in _stream_grok(_m, system_prompt, user_prompt, 0.2):
+                        et = ev.get("type")
+                        if et == "text":
+                            delta = ev.get("delta") or ""
+                            if delta:
+                                latex_body += delta
+                                yield {"event": "chunk", "text": delta}
+                        elif et == "query":
+                            q = ev.get("query") or ""
+                            if q and q not in seen_queries:
+                                seen_queries.add(q)
+                                logger.info(f"🔍 Grok web_search  |  {q}")
+                                yield {"event": "search_query", "query": q}
+                        elif et == "source":
+                            u = ev.get("url")
+                            if u and u not in seen_source_urls:
+                                seen_source_urls.add(u)
+                                grok_sources.append({"title": ev.get("title"), "url": u})
+                                yield {"event": "search_source", "title": ev.get("title"), "url": u}
                 else:
                     # Gemini path — Google Search grounding
                     stream = client.models.generate_content_stream(
