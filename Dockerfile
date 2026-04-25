@@ -2,16 +2,18 @@
 FROM python:3.11-slim
 
 # Install texlive for PDF compilation.
-#   - texlive-fonts-extra → `marvosym` (phone/email icons in the preamble)
-#   - texlive-plain-generic → `ulem.sty` (used via \usepackage[normalem]{ulem})
-# Missing either package causes pdflatex to exit 1 with no output PDF.
+#   - texlive-fonts-extra    → `marvosym` (phone/email icons in the preamble)
+#   - texlive-plain-generic  → `ulem.sty` (\usepackage[normalem]{ulem})
+#   - lmodern                → `lmodern.sty` (\usepackage{lmodern})
+# Missing any of these causes pdflatex to exit 1 with no output PDF.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         texlive-latex-base \
         texlive-fonts-recommended \
         texlive-fonts-extra \
         texlive-latex-extra \
-        texlive-plain-generic && \
+        texlive-plain-generic \
+        lmodern && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
