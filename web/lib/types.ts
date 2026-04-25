@@ -64,6 +64,8 @@ export type SSEEvent =
   | { event: "status";  msg: string }
   | { event: "chunk";   text: string }
   | { event: "sources"; urls: Source[] }
+  | { event: "search_query";  query: string }                 // Live: a Google query Gemini just issued
+  | { event: "search_source"; title: string | null; url: string }  // Live: a page Gemini just cited
   | { event: "diff";    data: DiffLine[]; adds: number; removes: number }
   | { event: "rationales"; data: ChangeRationale[] }
   | { event: "ratings"; data: RatingsData }

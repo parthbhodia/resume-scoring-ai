@@ -58,6 +58,10 @@ export default function ResumeBuilder() {
   const [activeTab,  setActiveTab]  = useState<Tab>("analysis");
   const [preview,    setPreview]    = useState("");
   const [jdKeywords, setJdKeywords] = useState<string[]>([]);
+  // Live Google Search activity from Gemini grounding — populated as the
+  // model issues queries / cites pages mid-generation. Cleared on each run.
+  const [searchQueries, setSearchQueries] = useState<string[]>([]);
+  const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
 
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(null);
   const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(null);
@@ -169,6 +173,8 @@ export default function ResumeBuilder() {
     setPreview("");
     setStatusMsg("Connecting…");
     setJdKeywords(extractJdKeywords(effJd));
+    setSearchQueries([]);
+    setSearchSources([]);
 
     const acc: GenerationResult = { ...EMPTY_RESULT };
 
@@ -208,6 +214,12 @@ export default function ResumeBuilder() {
             case "status":  setStatusMsg(ev.msg); break;
             case "chunk":   acc.latexPreview += ev.text; setPreview(p => p + ev.text); break;
             case "sources": acc.sources = ev.urls as Source[]; break;
+            case "search_query":
+              setSearchQueries(qs => qs.includes(ev.query) ? qs : [...qs, ev.query]);
+              break;
+            case "search_source":
+              setSearchSources(ss => ss.some(s => s.url === ev.url) ? ss : [...ss, { title: ev.title, url: ev.url }]);
+              break;
             case "diff":    acc.diff = ev.data as DiffLine[]; acc.adds = ev.adds; acc.removes = ev.removes; break;
             case "rationales": acc.rationales = ev.data as ChangeRationale[]; break;
             case "ratings":
@@ -522,6 +534,87 @@ export default function ResumeBuilder() {
               "Tailor my resume →"
             )}
           </button>
+
+          {/* Live Google Search activity (Gemini grounding) */}
+          {generating && (searchQueries.length > 0 || searchSources.length > 0) && (
+            <div style={{ marginBottom: 16 }} className="fade-in">
+              <div style={{
+                display: "flex", alignItems: "center", gap: 8,
+                fontSize: 11, fontWeight: 600, color: "var(--dim)",
+                letterSpacing: -0.1, marginBottom: 8, textTransform: "uppercase",
+              }}>
+                <span>Live web research</span>
+                <span style={{
+                  fontSize: 9, padding: "2px 7px", borderRadius: 999,
+                  background: "rgba(52,211,153,0.12)", color: "var(--green)",
+                  letterSpacing: 0, textTransform: "none",
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
+                    animation: "pulse-bg 1.4s ease-in-out infinite",
+                  }} />
+                  Searching Google
+                </span>
+              </div>
+              <div style={{
+                background: "var(--surface)", border: "1px solid var(--border)",
+                borderRadius: 10, padding: "12px 14px",
+                maxHeight: 220, overflow: "auto",
+                display: "flex", flexDirection: "column", gap: 10,
+              }}>
+                {/* Queries Gemini issued to Google */}
+                {searchQueries.map((q, i) => (
+                  <div key={`q-${i}`} style={{
+                    display: "flex", alignItems: "flex-start", gap: 8,
+                    fontSize: 12, color: "var(--text)", lineHeight: 1.45,
+                  }}>
+                    <span style={{ flexShrink: 0, marginTop: 1 }}>🔍</span>
+                    <span>
+                      <span style={{ color: "var(--dim)" }}>Searching:</span>{" "}
+                      <span style={{ color: "var(--text)", fontWeight: 500 }}>&ldquo;{q}&rdquo;</span>
+                    </span>
+                  </div>
+                ))}
+
+                {/* Pages Gemini cited from those queries */}
+                {searchSources.length > 0 && (
+                  <div style={{
+                    borderTop: searchQueries.length ? "1px solid var(--border)" : "none",
+                    paddingTop: searchQueries.length ? 10 : 0,
+                    display: "flex", flexDirection: "column", gap: 6,
+                  }}>
+                    <div style={{ fontSize: 10, color: "var(--dim)", letterSpacing: 0.3, textTransform: "uppercase", fontWeight: 600 }}>
+                      Citing
+                    </div>
+                    {searchSources.map((s, i) => {
+                      let domain = s.url;
+                      try { domain = new URL(s.url).hostname.replace(/^www\./, ""); } catch { /* leave as-is */ }
+                      return (
+                        <a
+                          key={`s-${i}`}
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: "flex", alignItems: "flex-start", gap: 8,
+                            fontSize: 11, color: "var(--accent)",
+                            textDecoration: "none", lineHeight: 1.45,
+                          }}
+                        >
+                          <span style={{ flexShrink: 0, marginTop: 1, color: "var(--dim)" }}>↳</span>
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <span style={{ color: "var(--text)" }}>{s.title || domain}</span>
+                            <span style={{ color: "var(--dim)" }}> — {domain}</span>
+                          </span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Live preview during generation */}
           {generating && preview && (

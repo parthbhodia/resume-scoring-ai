@@ -814,6 +814,33 @@ def _extract_sources(candidates) -> list:
     return sources
 
 
+def _extract_grounding_live(candidates) -> Tuple[List[str], List[Dict]]:
+    """
+    Pull (queries, sources) from a streaming chunk's candidates.
+
+    Gemini populates grounding_metadata incrementally as the model issues
+    Google Search calls during generation. Returns the queries Gemini sent
+    to Google (e.g. 'Bloomberg AI Assistant team requirements 2025') and the
+    pages it ended up citing.
+
+    Caller is responsible for de-duping across chunks.
+    """
+    queries: List[str] = []
+    sources: List[Dict] = []
+    for cand in (candidates or []):
+        gm = getattr(cand, "grounding_metadata", None)
+        if not gm:
+            continue
+        for q in (getattr(gm, "web_search_queries", None) or []):
+            if isinstance(q, str) and q.strip():
+                queries.append(q.strip())
+        for chunk in (getattr(gm, "grounding_chunks", None) or []):
+            web = getattr(chunk, "web", None)
+            if web and getattr(web, "uri", None):
+                sources.append({"title": getattr(web, "title", web.uri), "url": web.uri})
+    return queries, sources
+
+
 def _compute_diff(base_body: str, new_body: str) -> tuple:
     """Return (diff_lines list, adds int, removes int)."""
     old_lines = base_body.splitlines()
@@ -939,6 +966,10 @@ def stream_latex_resume(
 
         # Sources collected from whichever provider wins the fallback race.
         grok_sources: List[Dict] = []
+        # De-dup state for live grounding events so we don't re-yield the same
+        # search query / source URL across multiple stream chunks.
+        seen_queries: set = set()
+        seen_source_urls: set = set()
 
         for idx, _m in enumerate(_fallback_models):
             provider = "Grok" if _is_grok(_m) else "Gemini"
@@ -968,6 +999,19 @@ def stream_latex_resume(
                     for chunk in stream:
                         if getattr(chunk, "candidates", None):
                             last_candidates = chunk.candidates
+                            # Surface Google Search activity live as Gemini
+                            # issues queries / discovers sources mid-generation.
+                            new_q, new_s = _extract_grounding_live(chunk.candidates)
+                            for q in new_q:
+                                if q not in seen_queries:
+                                    seen_queries.add(q)
+                                    logger.info(f"🔍 Google search  |  {q}")
+                                    yield {"event": "search_query", "query": q}
+                            for s in new_s:
+                                u = s.get("url")
+                                if u and u not in seen_source_urls:
+                                    seen_source_urls.add(u)
+                                    yield {"event": "search_source", "title": s.get("title"), "url": u}
                         text = getattr(chunk, "text", None)
                         if text:
                             latex_body += text
