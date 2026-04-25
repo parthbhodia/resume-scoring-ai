@@ -2,14 +2,16 @@
 FROM python:3.11-slim
 
 # Install texlive for PDF compilation.
-# texlive-fonts-extra is required for `marvosym` (used by the resume preamble
-# for phone/email icons). Without it pdflatex exits 1 and no PDF is produced.
+#   - texlive-fonts-extra → `marvosym` (phone/email icons in the preamble)
+#   - texlive-plain-generic → `ulem.sty` (used via \usepackage[normalem]{ulem})
+# Missing either package causes pdflatex to exit 1 with no output PDF.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         texlive-latex-base \
         texlive-fonts-recommended \
         texlive-fonts-extra \
-        texlive-latex-extra && \
+        texlive-latex-extra \
+        texlive-plain-generic && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
