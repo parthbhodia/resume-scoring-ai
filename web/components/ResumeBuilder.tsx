@@ -66,6 +66,7 @@ export default function ResumeBuilder() {
   // model issues queries / cites pages mid-generation. Cleared on each run.
   const [searchQueries, setSearchQueries] = useState<string[]>([]);
   const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
+  const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
 
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(null);
   const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(null);
@@ -672,7 +673,7 @@ export default function ResumeBuilder() {
           </button>
 
           {/* Live Google Search activity (Gemini grounding) */}
-          {generating && (searchQueries.length > 0 || searchSources.length > 0) && (
+          {hasWebResearch && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
@@ -690,7 +691,7 @@ export default function ResumeBuilder() {
                     width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
                     animation: "pulse-bg 1.4s ease-in-out infinite",
                   }} />
-                  Searching Google
+                  {generating ? "Searching Google" : "Research used"}
                 </span>
               </div>
               <div style={{
