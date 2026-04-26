@@ -59,6 +59,45 @@ export interface GenerationResult {
   status: string;
 }
 
+// ── Parsed resume tree (for the bullet editor) ────────────────────────────
+//
+// We keep this *deliberately shallow* — sections → entries → bullets — because
+// that's the only structure users actually edit. Headers stay as a single
+// string; we don't try to reverse-engineer the LaTeX macro that built them
+// (different templates use different commands and parsing all of them is a
+// rabbit hole). Instead, on save we splice edited bullet text back into the
+// original .tex by line offsets the parser captured. Lossless round-trip,
+// zero re-formatting risk.
+export interface ParsedBullet {
+  id: string;       // stable client-side id (uuid-ish)
+  text: string;     // plain text — \textbf{x} / **x** rendered as **x** in the editor
+  texLine: number;  // 0-indexed line in source .tex (-1 for newly added bullets)
+}
+
+export interface ParsedEntry {
+  header: string;              // e.g. "Bloomberg | Senior SWE | 2022-Present"
+  // ── Per-entry bookkeeping the backend uses to do block-replace on save.
+  // The frontend treats these as opaque pass-through fields — never mutate
+  // them; only mutate `bullets` (add / remove / reorder freely).
+  headerLine?: number;
+  indent?: string;
+  useListMacros?: boolean;
+  bulletBlockStart?: number;
+  bulletBlockEnd?: number;
+  bullets: ParsedBullet[];
+}
+
+export interface ParsedSection {
+  name: string;                // e.g. "Experience", "Projects"
+  entries: ParsedEntry[];
+  editable: boolean;           // false for Education (locked per user request)
+}
+
+export interface ParsedResume {
+  sections: ParsedSection[];
+  rawTex: string;              // original .tex — needed so backend can splice
+}
+
 // SSE event shapes from Python backend
 export type SSEEvent =
   | { event: "status";  msg: string }

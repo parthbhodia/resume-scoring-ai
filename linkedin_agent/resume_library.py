@@ -376,6 +376,387 @@ def _extract_body(full_tex: str) -> str:
     return full_tex.strip()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Resume tree parser & save-back — powers the post-analysis bullet editor.
+#
+# We only parse what the user can EDIT: sections, entry headers, and bullets.
+# Everything else (preamble, macros, list-start/end markers) stays as-is in
+# the original .tex; on save we splice individual `\resumeItem{...}` lines
+# back into the original text by line number. Lossless round-trip, no
+# template-format guessing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SECTION_RE       = re.compile(r"\\section\*?\{([^}]*)\}")
+_QUAD_HEADING_RE  = re.compile(r"\\resumeQuadHeading\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}")
+_TRIO_HEADING_RE  = re.compile(r"\\resumeTrioHeading\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}")
+# Match `\resumeItem{...}` allowing balanced braces inside via a (deliberately
+# non-greedy) outer match; we then strip braces ourselves to avoid pulling in
+# trailing tokens like `\resumeItemListEnd` if a bullet contains a `}`.
+_RESUME_ITEM_RE   = re.compile(r"\\resumeItem\{(.*)\}\s*$")
+
+# Sections we never let the editor touch (per user request: Education stays
+# verbatim — don't risk LLM-related mutations).
+_LOCKED_SECTIONS  = {"education"}
+
+
+def _latex_to_plain(s: str) -> str:
+    """LaTeX → editor-friendly plain text. We intentionally only undo the few
+    transformations the user is likely to recognize; everything else is left
+    as-is so a power-user can still work in raw LaTeX if they want."""
+    s = re.sub(r"\\textbf\{([^}]*)\}", r"**\1**", s)
+    s = re.sub(r"\\textit\{([^}]*)\}", r"*\1*",   s)
+    s = s.replace(r"\&", "&").replace(r"\%", "%").replace(r"\$", "$").replace(r"\#", "#")
+    s = s.replace(r"\textendash", "–").replace(r"\textemdash", "—")
+    return s.strip()
+
+
+def _plain_to_latex(s: str) -> str:
+    """Inverse of `_latex_to_plain`. Conservative — escapes only the
+    characters that would otherwise blow up pdflatex."""
+    # Bold first — order matters because escape would mangle the `**` markers.
+    s, _ = _markdown_to_latex_bold(s)
+    s = re.sub(r"(?<!\*)\*([^*\n]+?)\*(?!\*)", r"\\textit{\1}", s)
+    # Escape LaTeX specials that aren't already part of a command. We skip
+    # backslash itself — assume any `\command` the user typed is intentional.
+    s = (s.replace("&", r"\&")
+           .replace("%", r"\%")
+           .replace("$", r"\$")
+           .replace("#", r"\#"))
+    # But un-escape inside our own \textbf{...} so we don't double-escape.
+    return s
+
+
+def _quad_to_header(m: "re.Match[str]") -> str:
+    a, b, c, d = m.group(1), m.group(2), m.group(3), m.group(4)
+    parts = [_latex_to_plain(p) for p in (a, b, c, d) if p.strip()]
+    return " · ".join(parts)
+
+
+def _trio_to_header(m: "re.Match[str]") -> str:
+    a, b, c = m.group(1), m.group(2), m.group(3)
+    parts = [_latex_to_plain(p) for p in (a, b, c) if p.strip()]
+    return " · ".join(parts)
+
+
+def parse_resume_tex(full_tex: str) -> Dict:
+    """
+    Parse a saved .tex resume into a structured tree the editor can manipulate.
+
+    Returns the JSON shape consumed by web/lib/types.ts → ParsedResume:
+        {
+          "rawTex":   <original .tex>,
+          "sections": [
+            {"name", "editable", "sectionStartLine", "sectionEndLine", "entries": [
+              {"header", "headerLine", "bulletBlockStart", "bulletBlockEnd",
+               "indent", "useListMacros",
+               "bullets": [{"id", "text", "texLine"}]}
+            ]}
+          ]
+        }
+
+    Per-entry bookkeeping powers the block-rewrite save path used by Phase 3
+    (add / delete / reorder). `bulletBlockStart` / `bulletBlockEnd` describe
+    the *inclusive* line range the entry "owns" for its bullets — either the
+    range bracketed by `\\resumeItemListStart` / `\\resumeItemListEnd`, or
+    just the contiguous run of `\\resumeItem{...}` lines if no markers exist
+    (Summary / Skills sections work that way). On save we drop those lines
+    and emit a fresh block built from the current bullet list.
+    """
+    # Walk the full .tex line-by-line so `texLine` indices are guaranteed to
+    # round-trip with the on-disk file. We skip everything until we cross
+    # `\begin{document}` (and stop at `\end{document}`) so preamble macros
+    # never accidentally look like content.
+    sections: List[Dict] = []
+    cur_section: Optional[Dict] = None
+    cur_entry:   Optional[Dict] = None
+    bullet_counter = 0
+    in_body = False  # flips true on the line AFTER \begin{document}
+    in_item_list = False  # tracking \resumeItemListStart / End
+
+    all_lines = full_tex.splitlines()
+    has_doc_marker = any("\\begin{document}" in ln for ln in all_lines)
+    if not has_doc_marker:
+        in_body = True  # treat the whole file as body when no marker present
+
+    def _new_entry(header: str, header_line: int, indent: str) -> Dict:
+        return {
+            "header":           header,
+            "headerLine":       header_line,
+            "indent":           indent,
+            "useListMacros":    False,   # set true when we see \resumeItemListStart
+            "bulletBlockStart": -1,       # inclusive start (line index, full-tex)
+            "bulletBlockEnd":   -1,       # inclusive end
+            "bullets":          [],
+        }
+
+    for line_in_full, line in enumerate(all_lines):
+        if not in_body:
+            if "\\begin{document}" in line:
+                in_body = True
+            continue
+        if "\\end{document}" in line:
+            break
+        stripped = line.strip()
+        leading_ws = line[: len(line) - len(line.lstrip())]
+
+        # --- Section boundary ---
+        m = _SECTION_RE.search(stripped)
+        if m:
+            name = m.group(1).strip()
+            editable = name.lower() not in _LOCKED_SECTIONS
+            cur_section = {
+                "name":             name,
+                "editable":         editable,
+                "sectionStartLine": line_in_full,
+                "entries":          [],
+            }
+            sections.append(cur_section)
+            cur_entry = None
+            in_item_list = False
+            continue
+
+        if cur_section is None:
+            continue  # skip whatever sits before the first \section
+
+        # --- List markers — track them so we know whether to wrap on save ---
+        if "\\resumeItemListStart" in stripped:
+            if cur_entry is not None:
+                cur_entry["useListMacros"]    = True
+                cur_entry["bulletBlockStart"] = line_in_full  # the marker line itself
+                in_item_list = True
+            continue
+        if "\\resumeItemListEnd" in stripped:
+            if cur_entry is not None and cur_entry["bulletBlockStart"] != -1:
+                cur_entry["bulletBlockEnd"] = line_in_full
+            in_item_list = False
+            continue
+
+        # --- Entry header (Quad / Trio) ---
+        mq = _QUAD_HEADING_RE.search(stripped)
+        if mq:
+            cur_entry = _new_entry(_quad_to_header(mq), line_in_full, leading_ws)
+            cur_section["entries"].append(cur_entry)
+            in_item_list = False
+            continue
+        mt = _TRIO_HEADING_RE.search(stripped)
+        if mt:
+            cur_entry = _new_entry(_trio_to_header(mt), line_in_full, leading_ws)
+            cur_section["entries"].append(cur_entry)
+            in_item_list = False
+            continue
+
+        # --- Bullet ---
+        mi = _RESUME_ITEM_RE.search(stripped)
+        if mi:
+            raw = mi.group(1)
+            # Strip a single trailing `}` if present (common when the inner text
+            # itself contains a brace — our regex was greedy by design).
+            if raw.endswith("}"):
+                raw = raw[:-1]
+            text = _latex_to_plain(raw)
+            if cur_entry is None:
+                # Bullet without a preceding entry header (e.g. Skills section).
+                cur_entry = _new_entry("", line_in_full, leading_ws)
+                cur_section["entries"].append(cur_entry)
+            bullet_counter += 1
+            cur_entry["bullets"].append({
+                "id":      f"b{bullet_counter}",
+                "text":    text,
+                "texLine": line_in_full,
+            })
+            # Track the contiguous-run block range for non-list-macro entries.
+            if not in_item_list:
+                if cur_entry["bulletBlockStart"] == -1:
+                    cur_entry["bulletBlockStart"] = line_in_full
+                cur_entry["bulletBlockEnd"] = line_in_full
+
+    # Section end-line = line of next section minus 1, or end-of-document.
+    for idx, sec in enumerate(sections):
+        if idx + 1 < len(sections):
+            sec["sectionEndLine"] = sections[idx + 1]["sectionStartLine"] - 1
+        else:
+            # Find \end{document} and cap there.
+            for j, ln in enumerate(all_lines):
+                if "\\end{document}" in ln:
+                    sec["sectionEndLine"] = j - 1
+                    break
+            else:
+                sec["sectionEndLine"] = len(all_lines) - 1
+
+    return {"rawTex": full_tex, "sections": sections}
+
+
+def splice_bullets_into_tex(full_tex: str, parsed: Dict) -> str:
+    """
+    Block-rewrite save path — replaces each entry's bullet block with a fresh
+    one built from the parsed tree. This (unlike a per-line splice) lets the
+    editor add, delete, and reorder bullets safely.
+
+    Strategy: collect a list of (start, end_inclusive, replacement_lines)
+    edits, sort by start descending, and apply them. Doing edits bottom-up
+    keeps line indices stable across mutations.
+
+    Locked sections are skipped wholesale — defense in depth on top of the
+    frontend lock. If a section has zero bullets after edit, we collapse the
+    block to nothing (existing list-macro markers, if any, are kept so the
+    template's empty-list rendering stays consistent).
+    """
+    lines = full_tex.splitlines()
+    edits: List[Tuple[int, int, List[str]]] = []
+
+    for section in parsed.get("sections", []):
+        if not section.get("editable", True):
+            continue
+        for entry in section.get("entries", []):
+            block_start = entry.get("bulletBlockStart", -1)
+            block_end   = entry.get("bulletBlockEnd",   -1)
+            indent      = entry.get("indent",  "")
+            uses_macros = bool(entry.get("useListMacros", False))
+            bullets     = entry.get("bullets", [])
+
+            # Build the replacement lines — formatted to match the template.
+            new_block: List[str] = []
+            if uses_macros:
+                # Inner-bullet indent = entry indent + 2 spaces (matches what the
+                # generator emits today). pdflatex doesn't care, but a human
+                # browsing the .tex will, and so will diff tools.
+                inner = indent + "  "
+                new_block.append(f"{indent}\\resumeItemListStart")
+                for b in bullets:
+                    new_block.append(f"{inner}\\resumeItem{{{_plain_to_latex(b.get('text', ''))}}}")
+                new_block.append(f"{indent}\\resumeItemListEnd")
+            else:
+                # Free-floating bullets (Summary / Skills) — emit one per line.
+                for b in bullets:
+                    new_block.append(f"{indent}\\resumeItem{{{_plain_to_latex(b.get('text', ''))}}}")
+
+            # If the parser never saw an existing block (entry had zero bullets
+            # in source AND no list markers), insert immediately after the header.
+            if block_start == -1 or block_end == -1:
+                header_line = entry.get("headerLine", -1)
+                if header_line == -1 or not bullets:
+                    continue  # nothing to insert
+                # Insert AFTER the header line — so range = (header+1, header), 0-length.
+                edits.append((header_line + 1, header_line, new_block))
+                continue
+
+            edits.append((block_start, block_end, new_block))
+
+    # Apply bottom-up so earlier indices stay valid as later ranges resize.
+    edits.sort(key=lambda e: e[0], reverse=True)
+    for start, end, replacement in edits:
+        if start < 0 or end >= len(lines) or start > end + 1:
+            continue
+        lines[start : end + 1] = replacement
+
+    # Preserve original trailing-newline style (pdflatex doesn't care, but a
+    # roundtripped file that loses its trailing \n is a noisy git diff).
+    return "\n".join(lines) + ("\n" if full_tex.endswith("\n") else "")
+
+
+def recompile_resume_from_tex(folder: str, full_tex: str) -> Dict:
+    """
+    Overwrite the .tex file at `folder` with `full_tex`, re-run pdflatex, and
+    return {"folder", "tex_path", "pdf_path", "compiled", "compile_error"}.
+    Used by POST /api/resume/{folder} after the user edits bullets.
+    """
+    folder_path = os.path.join(LIBRARY_ROOT, folder)
+    if not os.path.isdir(folder_path):
+        return {"folder": folder, "tex_path": None, "pdf_path": None,
+                "compiled": False, "compile_error": "folder not found"}
+
+    # Find the existing .tex file in the folder.
+    tex_files = [f for f in os.listdir(folder_path) if f.endswith(".tex")]
+    if not tex_files:
+        return {"folder": folder, "tex_path": None, "pdf_path": None,
+                "compiled": False, "compile_error": ".tex file not found in folder"}
+    filename = tex_files[0]
+    tex_path = os.path.join(folder_path, filename)
+
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write(full_tex)
+    logger.info(f"Re-saved .tex  |  {tex_path}  |  {len(full_tex)} chars")
+
+    result = {"folder": folder, "folder_path": folder_path, "tex_path": tex_path, "pdf_path": None}
+
+    if not os.path.exists(PDFLATEX):
+        result["compiled"]      = False
+        result["compile_error"] = "pdflatex not installed"
+        logger.warning("pdflatex not found — skipping recompile")
+        return result
+
+    logger.info("Re-compiling PDF after edit...")
+    t = time.time()
+    try:
+        proc = subprocess.run(
+            [PDFLATEX, "-interaction=nonstopmode", "-output-directory", folder_path, tex_path],
+            capture_output=True, text=True, timeout=60,
+        )
+        pdf_path = os.path.join(folder_path, filename[:-4] + ".pdf")
+        if os.path.exists(pdf_path):
+            result["pdf_path"] = pdf_path
+            result["compiled"] = True
+            logger.info(f"PDF re-compiled  |  {time.time()-t:.1f}s")
+        else:
+            tail = (proc.stdout[-800:] if proc.stdout else "") or (proc.stderr[-800:] if proc.stderr else "")
+            result["compiled"]      = False
+            result["compile_error"] = tail or f"exit={proc.returncode}"
+            logger.warning(f"Re-compile FAILED  |  exit={proc.returncode}\npdflatex tail:\n{tail}")
+    except Exception as exc:
+        result["compiled"]      = False
+        result["compile_error"] = str(exc)
+        logger.warning(f"Re-compile EXCEPTION  |  {exc}")
+    return result
+
+
+def ai_rewrite_bullet(bullet_text: str, instruction: str, jd_snippet: str = "") -> str:
+    """
+    One-shot bullet rewrite for the post-analysis editor's ✨ AI button.
+
+    Uses the same Gemini fallback chain as the main generator. Returns the
+    rewritten text or raises on hard failure (the frontend surfaces the
+    error in the popover).
+    """
+    instr = (instruction or "Make this bullet stronger and more quantified.").strip()
+    prompt = (
+        "You are improving a single resume bullet. Apply the user's instruction "
+        "while preserving every concrete fact (companies, technologies, metrics) "
+        "in the original. Do NOT invent numbers, dates, or systems. Output ONLY "
+        "the rewritten bullet text — no preamble, no quotes, no markdown headers.\n\n"
+        f"USER INSTRUCTION: {instr}\n\n"
+        f"ORIGINAL BULLET:\n{bullet_text}\n\n"
+        + (f"JOB DESCRIPTION (for tone alignment):\n{jd_snippet[:1500]}\n\n" if jd_snippet else "")
+        + "REWRITTEN BULLET:"
+    )
+
+    # Try Gemini first (fast + free), fall back to Grok if configured.
+    last_err: Optional[BaseException] = None
+    for model in _model_chain("gemini-2.5-flash"):
+        try:
+            if _is_grok(model):
+                # _stream_grok yields events; we just need the final text.
+                pieces: List[str] = []
+                for ev in _stream_grok(model, "You rewrite resume bullets.", prompt, temperature=0.3):
+                    if isinstance(ev, dict) and ev.get("type") == "text":
+                        pieces.append(ev.get("text", ""))
+                out = "".join(pieces).strip()
+                if out:
+                    return out.strip().strip('"').strip("'")
+                continue
+            # Gemini path
+            from google import genai  # type: ignore
+            client = genai.Client()
+            resp = client.models.generate_content(model=model, contents=prompt)
+            out = (getattr(resp, "text", "") or "").strip()
+            if out:
+                return out.strip().strip('"').strip("'")
+        except BaseException as exc:
+            last_err = exc
+            _backoff_if_rate_limited(exc)
+            continue
+    raise RuntimeError(f"All models failed for bullet rewrite: {last_err}")
+
+
 # ============================================================================
 # RATE — quick Gemini call to score the resume against the JD
 # ============================================================================

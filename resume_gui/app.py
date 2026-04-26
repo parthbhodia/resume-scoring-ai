@@ -44,14 +44,23 @@ from sse_starlette.sse import EventSourceResponse
 
 import uvicorn
 
-from resume_library import list_resumes, stream_latex_resume, extract_jd_from_url
+from resume_library import (
+    list_resumes,
+    stream_latex_resume,
+    extract_jd_from_url,
+    get_resume_tex,
+    parse_resume_tex,
+    splice_bullets_into_tex,
+    recompile_resume_from_tex,
+    ai_rewrite_bullet,
+)
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
 # `python resume_gui/app.py` (local dev).
 try:
-    from resume_gui.storage import upload_pdf, upload_tex
+    from resume_gui.storage import upload_pdf, upload_tex, download_tex
 except ImportError:
-    from storage import upload_pdf, upload_tex  # type: ignore
+    from storage import upload_pdf, upload_tex, download_tex  # type: ignore
 
 # ── Config (env-var driven for Railway) ──────────────────────────────────────
 LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", str(Path(__file__).parent.parent / "resumes"))
@@ -203,6 +212,113 @@ async def api_extract_jd(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+async def api_resume_parsed(request: Request):
+    """GET /api/resume/{folder} — return parsed bullet tree for the editor.
+
+    Source-of-truth resolution:
+      1. Local filesystem (Railway has the freshly-generated copy in /tmp).
+      2. Supabase Storage (covers re-deploys / cross-machine reads).
+    """
+    folder  = request.path_params["folder"]
+    user_id = (request.query_params.get("user_id") or "").strip()
+    if ".." in folder or "/" in folder:
+        return JSONResponse({"error": "invalid folder"}, status_code=400)
+
+    tex = get_resume_tex(folder)
+    if tex is None and user_id:
+        tex = download_tex(user_id, folder)
+    if tex is None:
+        return JSONResponse({"error": "resume not found"}, status_code=404)
+
+    try:
+        parsed = parse_resume_tex(tex)
+    except Exception as exc:
+        logger.exception("parse_resume_tex failed")
+        return JSONResponse({"error": f"parse failed: {exc}"}, status_code=500)
+    return JSONResponse(parsed)
+
+
+async def api_resume_save(request: Request):
+    """POST /api/resume/{folder} — accept edited tree, splice bullets into the
+    original .tex, re-run pdflatex, push refreshed PDF to Supabase Storage,
+    and return the new public URL."""
+    folder = request.path_params["folder"]
+    if ".." in folder or "/" in folder:
+        return JSONResponse({"error": "invalid folder"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+    user_id = (body.get("user_id") or "").strip() or "local"
+    parsed  = body.get("parsed") or {}
+    if not isinstance(parsed, dict) or "sections" not in parsed:
+        return JSONResponse({"error": "missing parsed.sections"}, status_code=400)
+
+    # Source .tex — same fallback chain as the GET endpoint.
+    raw_tex = parsed.get("rawTex") or get_resume_tex(folder)
+    if not raw_tex and user_id:
+        raw_tex = download_tex(user_id, folder)
+    if not raw_tex:
+        return JSONResponse({"error": "source .tex not found"}, status_code=404)
+
+    new_tex = splice_bullets_into_tex(raw_tex, parsed)
+
+    loop   = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, recompile_resume_from_tex, folder, new_tex)
+
+    if not result.get("compiled"):
+        return JSONResponse({
+            "error":          "recompile failed",
+            "compile_error":  result.get("compile_error"),
+        }, status_code=500)
+
+    # Refresh both artifacts in Supabase so the Download button picks up the
+    # new PDF and future GET /api/resume/{folder} reads see the new bullets.
+    pdf_url: Optional[str] = None
+    try:
+        if result.get("pdf_path"):
+            pdf_url = upload_pdf(user_id, folder, result["pdf_path"])
+    except Exception as exc:
+        logger.warning(f"upload_pdf (post-edit) failed: {exc}")
+    try:
+        if result.get("tex_path"):
+            upload_tex(user_id, folder, result["tex_path"])
+    except Exception as exc:
+        logger.warning(f"upload_tex (post-edit) failed: {exc}")
+
+    return JSONResponse({
+        "folder":   folder,
+        "pdf_url":  pdf_url,
+        "tex_path": result.get("tex_path"),
+    })
+
+
+async def api_ai_edit_bullet(request: Request):
+    """POST /api/ai-edit-bullet — single bullet AI rewrite for the editor."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+    bullet_text = (body.get("bullet_text") or "").strip()
+    instruction = (body.get("instruction") or "").strip()
+    jd_snippet  = (body.get("jd") or "").strip()
+    if not bullet_text:
+        return JSONResponse({"error": "bullet_text required"}, status_code=400)
+
+    loop = asyncio.get_event_loop()
+    try:
+        new_text = await loop.run_in_executor(
+            None, ai_rewrite_bullet, bullet_text, instruction, jd_snippet,
+        )
+    except Exception as exc:
+        logger.exception("ai_rewrite_bullet failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    return JSONResponse({"text": new_text})
+
+
 async def serve_pdf(request: Request):
     folder   = request.path_params["folder"]
     filename = request.path_params["filename"]
@@ -224,6 +340,9 @@ routes = [
     Route("/api/generate-stream",           api_generate_stream, methods=["POST"]),
     Route("/api/upload-resume",             api_upload_resume,   methods=["POST"]),
     Route("/api/extract-jd",                api_extract_jd,      methods=["POST"]),
+    Route("/api/resume/{folder}",           api_resume_parsed,   methods=["GET"]),
+    Route("/api/resume/{folder}",           api_resume_save,     methods=["POST"]),
+    Route("/api/ai-edit-bullet",            api_ai_edit_bullet,  methods=["POST"]),
     Route("/pdf/{folder}/{filename}",       serve_pdf),
 ]
 

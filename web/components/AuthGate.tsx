@@ -1,10 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
 import LandingPage from "./LandingPage";
 
+// Routes that intentionally bypass auth — design-system / preview pages.
+const PUBLIC_ROUTES = new Set<string>(["/editor-preview"]);
+
 export default function AuthGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  if (pathname && PUBLIC_ROUTES.has(pathname.replace(/\/$/, ""))) {
+    return <>{children}</>;
+  }
   // IMPORTANT: initial state is `null` (signed-out) so the static HTML contains
   // the full landing page — crawlable by Google. The effect below swaps in the
   // dashboard once we confirm the user is signed in on the client.

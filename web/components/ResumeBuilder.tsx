@@ -10,8 +10,10 @@ import CriteriaTable from "./CriteriaTable";
 import DiffView     from "./DiffView";
 import SourcesPanel from "./SourcesPanel";
 import ResumeSidebar from "./ResumeSidebar";
+import ResumeEditor  from "./ResumeEditor";
+import type { ParsedResume, ParsedBullet } from "@/lib/types";
 
-type Tab = "analysis" | "changes";
+type Tab = "analysis" | "changes" | "edit";
 
 function extractJdKeywords(jdText: string): string[] {
   const STOP = new Set([
@@ -73,6 +75,15 @@ export default function ResumeBuilder() {
   const [extractingJd, setExtractingJd] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
 
+  // ── Editor state — populated lazily when the user clicks the Edit tab. ──
+  // We keep `editorTree` as the freshly-fetched copy from /api/resume/{folder}
+  // so the user always edits the *current* on-disk version (not a stale tree
+  // captured at generation time, which would miss any prior edits).
+  const [editorTree,    setEditorTree]    = useState<ParsedResume | null>(null);
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorSaving,  setEditorSaving]  = useState(false);
+  const [editorError,   setEditorError]   = useState<string | null>(null);
+
   const importFromUrl = useCallback(async (): Promise<{ company?: string; role?: string; job_description?: string } | null> => {
     const url = jobUrl.trim();
     if (!url) { setExtractError("Paste a job posting URL first."); return null; }
@@ -109,6 +120,69 @@ export default function ResumeBuilder() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_ev, s) => setUser(s?.user ?? null));
     return () => subscription.unsubscribe();
   }, []);
+
+  // Lazy-load the parsed bullet tree the first time the Edit tab opens for a
+  // given folder. We re-fetch when `result.folder` changes (i.e. the user
+  // generated a new resume) to avoid showing the previous folder's bullets.
+  const loadEditor = useCallback(async (folder: string) => {
+    setEditorLoading(true); setEditorError(null);
+    try {
+      const uid = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
+      const resp = await fetch(apiUrl(`/api/resume/${encodeURIComponent(folder)}${uid}`));
+      const json = await parseJsonOrThrow<ParsedResume & { error?: string }>(resp);
+      if (!resp.ok) throw new Error(json.error ?? "Could not load resume.");
+      setEditorTree(json);
+    } catch (e: unknown) {
+      setEditorError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEditorLoading(false);
+    }
+  }, [user]);
+
+  const saveEditor = useCallback(async (next: ParsedResume) => {
+    if (!result?.folder) return;
+    setEditorSaving(true); setEditorError(null);
+    try {
+      const resp = await fetch(apiUrl(`/api/resume/${encodeURIComponent(result.folder)}`), {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user?.id ?? "local", parsed: next }),
+      });
+      const json = await parseJsonOrThrow<{ error?: string; pdf_url?: string }>(resp);
+      if (!resp.ok) throw new Error(json.error ?? "Save failed.");
+      setEditorTree(next);  // commit edits to local state — was draft until now
+      // Bubble the new PDF URL up so the Download button reflects the edit.
+      if (json.pdf_url) {
+        setResult(r => r ? { ...r, pdfUrl: json.pdf_url ?? r.pdfUrl } : r);
+      }
+    } catch (e: unknown) {
+      setEditorError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEditorSaving(false);
+    }
+  }, [result, user]);
+
+  const aiEditBullet = useCallback(async (bullet: ParsedBullet, instruction: string): Promise<string> => {
+    const resp = await fetch(apiUrl("/api/ai-edit-bullet"), {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bullet_text: bullet.text,
+        instruction,
+        jd: jd.slice(0, 1500),
+      }),
+    });
+    const json = await parseJsonOrThrow<{ error?: string; text?: string }>(resp);
+    if (!resp.ok || !json.text) throw new Error(json.error ?? "AI rewrite failed");
+    return json.text;
+  }, [jd]);
+
+  // Reset the cached editor tree whenever we switch to a different generation
+  // — otherwise the Edit tab would show stale bullets from the previous run.
+  useEffect(() => {
+    setEditorTree(null);
+    setEditorError(null);
+  }, [result?.folder]);
 
   const handlePdfUpload = useCallback(async (file: File) => {
     if (!file.type.includes("pdf")) { setUploadError("Please upload a PDF file."); return; }
@@ -765,15 +839,22 @@ export default function ResumeBuilder() {
                 display: "flex", gap: 2, marginBottom: 18,
                 background: "var(--surface2)", borderRadius: 9, padding: 3,
               }}>
-                {(["analysis", "changes"] as Tab[]).map(t => {
+                {(["analysis", "changes", "edit"] as Tab[]).map(t => {
                   const labels: Record<Tab, string> = {
                     analysis: "Analysis",
                     changes:  result.diff.length ? `Changes  +${result.adds} −${result.removes}` : "Changes",
+                    edit:     "Edit bullets",
                   };
                   return (
                     <button
                       key={t}
-                      onClick={() => setActiveTab(t)}
+                      onClick={() => {
+                        setActiveTab(t);
+                        // Lazy-load on first open of the Edit tab.
+                        if (t === "edit" && result.folder && !editorTree && !editorLoading) {
+                          loadEditor(result.folder);
+                        }
+                      }}
                       style={{
                         flex: 1, padding: "7px 14px", fontSize: 12,
                         fontWeight: activeTab === t ? 600 : 400,
@@ -796,6 +877,41 @@ export default function ResumeBuilder() {
               )}
               {activeTab === "changes" && (
                 <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={baseFolder} jdKeywords={jdKeywords} />
+              )}
+              {activeTab === "edit" && (
+                <>
+                  {editorLoading && (
+                    <div style={{ padding: 28, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
+                      Loading bullets…
+                    </div>
+                  )}
+                  {editorError && !editorLoading && (
+                    <div style={{ padding: 16, color: "var(--red)", fontSize: 12 }}>
+                      Couldn&apos;t load editor: {editorError}
+                      {result.folder && (
+                        <button
+                          onClick={() => loadEditor(result.folder!)}
+                          style={{
+                            marginLeft: 12, fontSize: 11, padding: "4px 10px",
+                            background: "var(--surface2)", border: "1px solid var(--border)",
+                            borderRadius: 6, color: "var(--text)", cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >Retry</button>
+                      )}
+                    </div>
+                  )}
+                  {editorTree && !editorLoading && (
+                    <ResumeEditor
+                      initial={editorTree}
+                      folder={result.folder}
+                      saving={editorSaving}
+                      saveError={editorError}
+                      onSave={saveEditor}
+                      onAIEdit={aiEditBullet}
+                    />
+                  )}
+                </>
               )}
 
               {/* Start over nudge */}
