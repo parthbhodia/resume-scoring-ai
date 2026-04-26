@@ -47,6 +47,8 @@ export interface ResumeRecord {
 
 export interface GenerationResult {
   folder: string | null;
+  baseFolder: string | null;
+  baseLoaded: boolean | null;
   texPath: string | null;
   pdfUrl: string | null;
   ratings: RatingsData | null;
@@ -105,10 +107,12 @@ export type SSEEvent =
   | { event: "sources"; urls: Source[] }
   | { event: "search_query";  query: string }                 // Live: a Google query Gemini just issued
   | { event: "search_source"; title: string | null; url: string }  // Live: a page Gemini just cited
+  | { event: "base";    folder: string; loaded: boolean; chars: number }
   | { event: "diff";    data: DiffLine[]; adds: number; removes: number }
   | { event: "rationales"; data: ChangeRationale[] }
   | { event: "ratings"; data: RatingsData }
   | { event: "saved";   folder: string; tex_path: string }
   | { event: "pdf";     url: string }
+  | { event: "storage"; artifact: "pdf" | "tex"; stored: boolean; url?: string; reason?: string }
   | { event: "done" }
   | { event: "error";   msg: string };

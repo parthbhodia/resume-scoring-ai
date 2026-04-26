@@ -8,6 +8,7 @@ interface Props {
   removes: number;
   rationales?: ChangeRationale[];
   baseFolder: string | null;
+  baseLoaded?: boolean | null;
   jdKeywords?: string[];
 }
 
@@ -110,7 +111,7 @@ function diffToChanges(diff: DiffLine[]): Change[] {
   return out;
 }
 
-export default function DiffView({ diff, adds, removes, rationales, baseFolder, jdKeywords = [] }: Props) {
+export default function DiffView({ diff, adds, removes, rationales, baseFolder, baseLoaded = null, jdKeywords = [] }: Props) {
   const changes: Change[] = useMemo(() => {
     if (rationales && rationales.length) {
       return rationales.map(r => ({
@@ -124,6 +125,26 @@ export default function DiffView({ diff, adds, removes, rationales, baseFolder, 
   }, [diff, rationales]);
 
   if (!diff.length && (!rationales || rationales.length === 0)) {
+    if (baseFolder && baseLoaded === false) {
+      return (
+        <div style={{ padding: "32px 0", textAlign: "center", color: "var(--dim)", fontSize: 12, lineHeight: 1.6 }}>
+          Couldn&apos;t load the previous resume source for comparison.<br />
+          <span style={{ fontSize: 11 }}>
+            Selected base: <strong style={{ color: "var(--muted)" }}>{baseFolder}</strong>. Make sure its .tex file exists in Supabase Storage or on the backend.
+          </span>
+        </div>
+      );
+    }
+
+    if (baseFolder) {
+      return (
+        <div style={{ padding: "32px 0", textAlign: "center", color: "var(--dim)", fontSize: 12, lineHeight: 1.6 }}>
+          Compared against <strong style={{ color: "var(--muted)" }}>{baseFolder}</strong>, but no line changes were reported.<br />
+          <span style={{ fontSize: 11 }}>The generated content may be effectively unchanged, or only formatting changed.</span>
+        </div>
+      );
+    }
+
     return (
       <div style={{ padding: "32px 0", textAlign: "center", color: "var(--dim)", fontSize: 12, lineHeight: 1.6 }}>
         No previous resume to compare against.<br />

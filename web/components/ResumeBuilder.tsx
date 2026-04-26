@@ -43,7 +43,7 @@ function extractJdKeywords(jdText: string): string[] {
 }
 
 const EMPTY_RESULT: GenerationResult = {
-  folder: null, texPath: null, pdfUrl: null,
+  folder: null, baseFolder: null, baseLoaded: null, texPath: null, pdfUrl: null,
   ratings: null, diff: [], adds: 0, removes: 0, rationales: [],
   sources: [], latexPreview: "", status: "",
 };
@@ -303,7 +303,7 @@ export default function ResumeBuilder() {
     setSearchQueries([]);
     setSearchSources([]);
 
-    const acc: GenerationResult = { ...EMPTY_RESULT };
+    const acc: GenerationResult = { ...EMPTY_RESULT, baseFolder, baseLoaded: baseFolder ? null : false };
 
     try {
       const resp = await fetch(apiUrl("/api/generate-stream"), {
@@ -347,6 +347,10 @@ export default function ResumeBuilder() {
             case "search_source":
               setSearchSources(ss => ss.some(s => s.url === ev.url) ? ss : [...ss, { title: ev.title, url: ev.url }]);
               break;
+            case "base":
+              acc.baseFolder = ev.folder;
+              acc.baseLoaded = ev.loaded;
+              break;
             case "diff":    acc.diff = ev.data as DiffLine[]; acc.adds = ev.adds; acc.removes = ev.removes; break;
             case "rationales": acc.rationales = ev.data as ChangeRationale[]; break;
             case "ratings":
@@ -360,6 +364,11 @@ export default function ResumeBuilder() {
             case "pdf":
               acc.pdfUrl = /^https?:\/\//.test(ev.url) ? ev.url : apiUrl(ev.url);
               setResult({ ...acc }); // Update PDF button in-place
+              break;
+            case "storage":
+              if (!ev.stored) {
+                console.warn(`Supabase Storage did not store ${ev.artifact}: ${ev.reason ?? "unknown reason"}`);
+              }
               break;
             case "done":
               if (acc.folder) {
@@ -975,7 +984,7 @@ export default function ResumeBuilder() {
                 </>
               )}
               {activeTab === "changes" && (
-                <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={baseFolder} jdKeywords={jdKeywords} />
+                <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={result.baseFolder} baseLoaded={result.baseLoaded} jdKeywords={jdKeywords} />
               )}
               {activeTab === "edit" && (
                 <>

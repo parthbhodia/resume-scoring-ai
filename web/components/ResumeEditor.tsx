@@ -1033,8 +1033,24 @@ function renderInline(text: string): React.ReactNode[] {
 }
 
 function PreviewPane({ resume }: { resume: ParsedResume }) {
+  const header = extractPreviewHeader(resume.rawTex);
   return (
     <div>
+      <div style={{
+        textAlign: "center",
+        marginBottom: 12,
+        paddingBottom: 8,
+        borderBottom: "0.5px solid #d7d2c6",
+      }}>
+        <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 0.2, marginBottom: 3 }}>
+          {header.name}
+        </div>
+        <div style={{ fontSize: 9.5, lineHeight: 1.45, color: "#333" }}>
+          {header.lines.map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
+        </div>
+      </div>
       {resume.sections.map((s, si) => (
         <div key={si} style={{ marginBottom: 14 }}>
           <div style={{
@@ -1066,4 +1082,41 @@ function PreviewPane({ resume }: { resume: ParsedResume }) {
       ))}
     </div>
   );
+}
+
+function extractPreviewHeader(rawTex: string): { name: string; lines: string[] } {
+  // Keep the user-info section visible in the HTML preview. Prefer details from
+  // the generated .tex if present, then fall back to the canonical profile info.
+  const fallback = {
+    name: "Parth Bhodia",
+    lines: [
+      "Jersey City, NJ (NYC metro)",
+      "parthbhodia08@gmail.com | +1 (443) 929-4371",
+      "parthbhodia.com | linkedin.com/in/parthbhodia",
+    ],
+  };
+
+  if (!rawTex) return fallback;
+  const beforeFirstSection = rawTex.split(/\\section\s*\{/)[0] ?? rawTex;
+  const cleaned = beforeFirstSection
+    .replace(/%.*$/gm, "")
+    .replace(/\\begin\{document\}/g, "")
+    .replace(/\\end\{document\}/g, "")
+    .replace(/\\(?:textbf|textit|emph|uline|underline|large|Large|small)\s*\{([^{}]*)\}/g, "$1")
+    .replace(/\\href\s*\{[^{}]*\}\s*\{([^{}]*)\}/g, "$1")
+    .replace(/\\(?:center|begin\{center\}|end\{center\}|noindent|centering|hfill)/g, "")
+    .replace(/\\\\/g, "\n")
+    .replace(/[{}]/g, "")
+    .split(/\n+/)
+    .map(s => s.replace(/\\[a-zA-Z]+\*?/g, "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter(s => !/^\\?documentclass|^\\?usepackage|^\\?input|^\\?pdfgentounicode|^\\?pagestyle|^\\?fancy|^\\?renewcommand|^\\?setlength|^\\?addtolength|^\\?titleformat|^\\?titlespacing|^\\?newcommand/i.test(s));
+
+  const name = cleaned.find(s => /parth\s+bhodia/i.test(s)) ?? fallback.name;
+  const lines = cleaned
+    .filter(s => s !== name)
+    .filter(s => /@|\+?\d|linkedin|github|jersey|city|nj|http|www|\.com/i.test(s))
+    .slice(0, 3);
+
+  return { name, lines: lines.length ? lines : fallback.lines };
 }

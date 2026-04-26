@@ -60,6 +60,22 @@ def _get_client():
         return None
 
 
+def storage_status() -> dict:
+    """Return whether Supabase Storage is configured for durable uploads."""
+    url_set = bool(os.environ.get("SUPABASE_URL"))
+    key_set = bool(os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))
+    if not url_set or not key_set:
+        return {
+            "configured": False,
+            "reason": "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set",
+        }
+    client = _get_client()
+    return {
+        "configured": client is not None,
+        "reason": None if client is not None else "Supabase Storage client failed to initialize",
+    }
+
+
 def _safe_path(user_id: str, folder: str, ext: str) -> str:
     # Prevent path traversal — folder names are timestamped slugs but be defensive.
     safe_user   = "".join(c for c in user_id if c.isalnum() or c in "-_")
@@ -126,12 +142,10 @@ def upload_pdf(user_id: str, folder: str, pdf_path: str) -> Optional[str]:
     super_path = _safe_path(user_id, folder, "pdf")
     url = _upload(PDF_BUCKET, super_path, data, "application/pdf")
     
-    # Fallback to local if Supabase fails
+    # Fallback to local if Supabase fails, but do not return file:// to the browser.
+    # The API can serve local files through /pdf/... while the container lives.
     if url is None:
-        local_path = _write_local(user_id, folder, "pdf", data)
-        if local_path:
-            # Return local file:// URL for local access
-            return f"file://{local_path}"
+        _write_local(user_id, folder, "pdf", data)
         return None
     
     if url:
@@ -153,11 +167,9 @@ def upload_tex(user_id: str, folder: str, tex_path: str) -> Optional[str]:
     super_path = _safe_path(user_id, folder, "tex")
     url = _upload(TEX_BUCKET, super_path, data, "application/x-tex")
     
-    # Fallback to local
+    # Fallback to local if Supabase fails, but do not return file:// to clients.
     if url is None:
-        local_path = _write_local(user_id, folder, "tex", data)
-        if local_path:
-            return f"file://{local_path}"
+        _write_local(user_id, folder, "tex", data)
         return None
     
     if url:
@@ -176,11 +188,9 @@ def upload_json(user_id: str, folder: str, json_data: str) -> Optional[str]:
     super_path = _safe_path(user_id, folder, "json")
     url = _upload(JSON_BUCKET, super_path, data, "application/json")
     
-    # Fallback to local
+    # Fallback to local if Supabase fails, but do not return file:// to clients.
     if url is None:
-        local_path = _write_local(user_id, folder, "json", data)
-        if local_path:
-            return f"file://{local_path}"
+        _write_local(user_id, folder, "json", data)
         return None
     
     return url

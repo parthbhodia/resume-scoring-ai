@@ -61,9 +61,9 @@ from resume_library import (
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
 # `python resume_gui/app.py` (local dev).
 try:
-    from resume_gui.storage import upload_pdf, upload_tex, download_tex, download_pdf, save_version, list_versions, load_version, download_json
+    from resume_gui.storage import upload_pdf, upload_tex, download_tex, download_pdf, save_version, list_versions, load_version, download_json, storage_status
 except ImportError:
-    from storage import upload_pdf, upload_tex, download_tex, download_pdf, save_version, list_versions, load_version, download_json  # type: ignore
+    from storage import upload_pdf, upload_tex, download_tex, download_pdf, save_version, list_versions, load_version, download_json, storage_status  # type: ignore
 
 # ── Config (env-var driven for Railway) ──────────────────────────────────────
 LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", str(Path(__file__).parent.parent / "resumes"))
@@ -143,9 +143,29 @@ async def api_generate_stream(request: Request):
                 # later, we still want the source preserved for diff/use-as-base.
                 if user_id and saved_folder and saved_tex_path:
                     try:
-                        upload_tex(user_id, saved_folder, saved_tex_path)
+                        tex_url = upload_tex(user_id, saved_folder, saved_tex_path)
+                        if tex_url:
+                            asyncio.run_coroutine_threadsafe(queue.put({
+                                "event": "storage",
+                                "artifact": "tex",
+                                "stored": True,
+                                "url": tex_url,
+                            }), loop).result()
+                        else:
+                            asyncio.run_coroutine_threadsafe(queue.put({
+                                "event": "storage",
+                                "artifact": "tex",
+                                "stored": False,
+                                "reason": storage_status().get("reason") or "Supabase upload returned no public URL",
+                            }), loop).result()
                     except Exception as exc:
                         logger.warning(f"upload_tex failed: {exc}")
+                        asyncio.run_coroutine_threadsafe(queue.put({
+                            "event": "storage",
+                            "artifact": "tex",
+                            "stored": False,
+                            "reason": str(exc),
+                        }), loop).result()
 
             elif ev_name == "pdf" and user_id and saved_folder:
                 # The library emits a relative URL like "/pdf/<folder>/<file>.pdf".
@@ -157,10 +177,29 @@ async def api_generate_stream(request: Request):
                     pdf_path = os.path.join(LIBRARY_ROOT, saved_folder, filename)
                     try:
                         public = upload_pdf(user_id, saved_folder, pdf_path)
-                        if public:
+                        if public and public.startswith(("http://", "https://")):
                             event = {**event, "url": public}
+                            asyncio.run_coroutine_threadsafe(queue.put({
+                                "event": "storage",
+                                "artifact": "pdf",
+                                "stored": True,
+                                "url": public,
+                            }), loop).result()
+                        else:
+                            asyncio.run_coroutine_threadsafe(queue.put({
+                                "event": "storage",
+                                "artifact": "pdf",
+                                "stored": False,
+                                "reason": storage_status().get("reason") or "Supabase upload returned no public URL",
+                            }), loop).result()
                     except Exception as exc:
                         logger.warning(f"upload_pdf failed: {exc}")
+                        asyncio.run_coroutine_threadsafe(queue.put({
+                            "event": "storage",
+                            "artifact": "pdf",
+                            "stored": False,
+                            "reason": str(exc),
+                        }), loop).result()
 
             asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
         asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
@@ -425,6 +464,31 @@ async def api_share_create(request: Request):
     if table is None:
         return JSONResponse({"error": "share storage not configured"}, status_code=503)
 
+    # Ensure the resume exists and belongs to the caller before minting a public link.
+    # Also lets us fall back to the stored PDF URL if the client did not send one.
+    try:
+        try:
+            from resume_gui.storage import _get_client  # type: ignore
+        except ImportError:
+            from storage import _get_client  # type: ignore
+        client = _get_client()
+        if client is None:
+            return JSONResponse({"error": "share storage not configured"}, status_code=503)
+        resume_res = (
+            client.table("resumes")
+                  .select("id, pdf_url")
+                  .eq("user_id", user_id)
+                  .eq("folder", folder)
+                  .limit(1)
+                  .execute()
+        )
+        if not resume_res.data:
+            return JSONResponse({"error": "resume not saved yet; generate or save it before sharing"}, status_code=404)
+        pdf_url = pdf_url or (resume_res.data[0].get("pdf_url") or "")
+    except Exception as exc:
+        logger.exception("share resume ownership lookup failed")
+        return JSONResponse({"error": f"share lookup failed: {exc}"}, status_code=500)
+
     # Reuse existing shortid if one already exists for this user+folder.
     try:
         existing = (
@@ -452,9 +516,14 @@ async def api_share_create(request: Request):
             }).execute()
             return JSONResponse({"shortid": shortid, "pdf_url": pdf_url, "reused": False})
         except Exception as exc:
-            logger.warning(f"share insert failed (retrying): {exc}")
-            continue
-    return JSONResponse({"error": "could not mint shortid"}, status_code=500)
+            msg = str(exc)
+            logger.warning(f"share insert failed: {msg}")
+            # Only retry actual shortid collisions; other DB errors need to be
+            # surfaced so the UI/operator sees the real Supabase problem.
+            if "duplicate key" in msg.lower() or "unique" in msg.lower():
+                continue
+            return JSONResponse({"error": f"share insert failed: {msg}"}, status_code=500)
+    return JSONResponse({"error": "could not mint unique shortid after retries"}, status_code=500)
 
 
 async def api_share_resolve(request: Request):
