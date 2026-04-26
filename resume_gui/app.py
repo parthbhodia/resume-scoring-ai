@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -53,14 +54,16 @@ from resume_library import (
     splice_bullets_into_tex,
     recompile_resume_from_tex,
     ai_rewrite_bullet,
+    ats_check,
+    doctor_check_resume,
 )
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
 # `python resume_gui/app.py` (local dev).
 try:
-    from resume_gui.storage import upload_pdf, upload_tex, download_tex
+    from resume_gui.storage import upload_pdf, upload_tex, download_tex, download_pdf, save_version, list_versions, load_version, download_json
 except ImportError:
-    from storage import upload_pdf, upload_tex, download_tex  # type: ignore
+    from storage import upload_pdf, upload_tex, download_tex, download_pdf, save_version, list_versions, load_version, download_json  # type: ignore
 
 # ── Config (env-var driven for Railway) ──────────────────────────────────────
 LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", str(Path(__file__).parent.parent / "resumes"))
@@ -319,6 +322,269 @@ async def api_ai_edit_bullet(request: Request):
     return JSONResponse({"text": new_text})
 
 
+async def api_ats_check(request: Request):
+    """POST /api/ats-check/{folder} — run ATS readiness analysis on the
+    compiled PDF. Body: {"jd": "...", "user_id": "..."}.
+
+    Heavy lifting (pdfplumber text extraction + layout analysis) runs in the
+    default executor so the event loop stays responsive.
+    """
+    folder = request.path_params["folder"]
+    if ".." in folder or "/" in folder:
+        return JSONResponse({"error": "invalid folder"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    jd      = (body.get("jd") or "").strip()
+    user_id = (body.get("user_id") or "").strip() or "local"
+
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(None, ats_check, folder, jd, user_id, None)
+    except FileNotFoundError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    except Exception as exc:
+        logger.exception("ats_check failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    return JSONResponse(result)
+
+
+async def api_doctor_check(request: Request):
+    """POST /api/doctor-check — analyze a parsed resume tree for writing-quality
+    issues (passive voice, weak verbs, missing metrics, ...). Pure regex-based,
+    runs synchronously, no LLM cost.
+
+    Body: {"parsed": ParsedResume}
+    Returns: {"issues": {bullet_id: [issue, ...]}, "total": int}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    parsed = body.get("parsed")
+    if not isinstance(parsed, dict):
+        return JSONResponse({"error": "parsed required"}, status_code=400)
+
+    try:
+        issues = doctor_check_resume(parsed)
+    except Exception as exc:
+        logger.exception("doctor_check_resume failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    total = sum(len(v) for v in issues.values())
+    return JSONResponse({"issues": issues, "total": total})
+
+
+# ── Share links (Phase 8b) ───────────────────────────────────────────────────
+import secrets
+import string
+_SHORTID_ALPHABET = string.ascii_lowercase + string.digits
+
+
+def _gen_shortid(n: int = 8) -> str:
+    return "".join(secrets.choice(_SHORTID_ALPHABET) for _ in range(n))
+
+
+def _share_table():
+    """Return the supabase share_links table or None if storage isn't configured."""
+    try:
+        try:
+            from resume_gui.storage import _get_client  # type: ignore
+        except ImportError:
+            from storage import _get_client  # type: ignore
+        client = _get_client()
+        if client is None:
+            return None
+        return client.table("share_links")
+    except Exception as exc:
+        logger.warning(f"share_table unavailable: {exc}")
+        return None
+
+
+async def api_share_create(request: Request):
+    """POST /api/share/{folder} — mint a shortid for `folder`. Idempotent if
+    the same user already created one — returns the existing one.
+
+    Body: {"user_id": "...", "pdf_url": "..."}
+    """
+    folder = request.path_params["folder"]
+    if ".." in folder or "/" in folder:
+        return JSONResponse({"error": "invalid folder"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    user_id = (body.get("user_id") or "").strip()
+    pdf_url = (body.get("pdf_url") or "").strip()
+    if not user_id:
+        return JSONResponse({"error": "user_id required"}, status_code=400)
+
+    table = _share_table()
+    if table is None:
+        return JSONResponse({"error": "share storage not configured"}, status_code=503)
+
+    # Reuse existing shortid if one already exists for this user+folder.
+    try:
+        existing = (
+            table.select("shortid, pdf_url, views, revoked")
+                 .eq("user_id", user_id).eq("folder", folder)
+                 .eq("revoked", False)
+                 .limit(1).execute()
+        )
+        if existing.data:
+            row = existing.data[0]
+            return JSONResponse({
+                "shortid": row["shortid"], "pdf_url": row.get("pdf_url"),
+                "views":   row.get("views", 0), "reused": True,
+            })
+    except Exception as exc:
+        logger.warning(f"share lookup failed: {exc}")
+
+    # Mint a new one — retry on the (vanishingly unlikely) collision.
+    for _ in range(5):
+        shortid = _gen_shortid()
+        try:
+            table.insert({
+                "shortid": shortid, "user_id": user_id,
+                "folder":  folder,  "pdf_url": pdf_url or None,
+            }).execute()
+            return JSONResponse({"shortid": shortid, "pdf_url": pdf_url, "reused": False})
+        except Exception as exc:
+            logger.warning(f"share insert failed (retrying): {exc}")
+            continue
+    return JSONResponse({"error": "could not mint shortid"}, status_code=500)
+
+
+async def api_share_resolve(request: Request):
+    """GET /api/share/{shortid} — resolve a shortid to its folder + pdf_url.
+    Increments the view counter as a side-effect.
+
+    Public endpoint — used by the recipient page (no auth).
+    """
+    shortid = request.path_params["shortid"]
+    if not re.match(r"^[a-z0-9]{6,16}$", shortid or ""):
+        return JSONResponse({"error": "invalid shortid"}, status_code=400)
+
+    table = _share_table()
+    if table is None:
+        return JSONResponse({"error": "share storage not configured"}, status_code=503)
+
+    try:
+        rows = table.select("shortid, folder, pdf_url, views, revoked, created_at") \
+                    .eq("shortid", shortid).limit(1).execute()
+    except Exception as exc:
+        logger.exception("share resolve query failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    if not rows.data:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    row = rows.data[0]
+    if row.get("revoked"):
+        return JSONResponse({"error": "link revoked"}, status_code=410)
+
+    # Best-effort view counter — never fail the response if this errors.
+    try:
+        table.update({"views": (row.get("views") or 0) + 1}).eq("shortid", shortid).execute()
+    except Exception as exc:
+        logger.warning(f"share view-counter update failed: {exc}")
+
+    return JSONResponse({
+        "shortid":    row["shortid"],
+        "folder":     row["folder"],
+        "pdf_url":    row.get("pdf_url"),
+        "views":      (row.get("views") or 0) + 1,
+        "created_at": row.get("created_at"),
+    })
+
+
+async def api_share_revoke(request: Request):
+    """DELETE /api/share/{shortid} — owner-only revoke. Body: {"user_id": "..."}.
+    We require user_id match because this is what the frontend has after login.
+    Service-role on the backend would let us bypass RLS, but we still scope by
+    user_id to prevent cross-user revocation by a logged-in attacker."""
+    shortid = request.path_params["shortid"]
+    if not re.match(r"^[a-z0-9]{6,16}$", shortid or ""):
+        return JSONResponse({"error": "invalid shortid"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    user_id = (body.get("user_id") or "").strip()
+    if not user_id:
+        return JSONResponse({"error": "user_id required"}, status_code=400)
+
+    table = _share_table()
+    if table is None:
+        return JSONResponse({"error": "share storage not configured"}, status_code=503)
+    try:
+        table.update({"revoked": True}).eq("shortid", shortid).eq("user_id", user_id).execute()
+    except Exception as exc:
+        logger.exception("share revoke failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    return JSONResponse({"ok": True})
+
+
+# ── Version History ───────────────────────────────────────────────────
+
+async def api_version_save(request: Request):
+    """POST /api/version/{folder} — save current editor state as a version.
+    Body: {"user_id": "...", "parsed": "..."}"""
+    folder = request.path_params["folder"]
+    if ".." in folder or "/" in folder:
+        return JSONResponse({"error": "invalid folder"}, status_code=400)
+    
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    user_id = (body.get("user_id") or "").strip()
+    parsed = body.get("parsed")
+    
+    if not user_id or not parsed:
+        return JSONResponse({"error": "user_id and parsed required"}, status_code=400)
+    
+    result = save_version(user_id, folder, json.dumps(parsed))
+    if result is None:
+        return JSONResponse({"error": "failed to save version"}, status_code=500)
+    
+    return JSONResponse(result)
+
+
+async def api_version_list(request: Request):
+    """GET /api/version/{folder}?user_id=xxx — list all versions."""
+    folder = request.path_params["folder"]
+    user_id = request.query_params.get("user_id", "").strip()
+    
+    if not user_id:
+        return JSONResponse({"error": "user_id required"}, status_code=400)
+    
+    versions = list_versions(user_id, folder)
+    if versions is None:
+        return JSONResponse({"error": "failed to list versions"}, status_code=500)
+    
+    return JSONResponse({"versions": versions})
+
+
+async def api_version_load(request: Request):
+    """GET /api/version/{folder}/{version}?user_id=xxx — load a specific version."""
+    folder = request.path_params["folder"]
+    try:
+        version = int(request.path_params.get("version", 0))
+    except ValueError:
+        return JSONResponse({"error": "invalid version"}, status_code=400)
+    user_id = request.query_params.get("user_id", "").strip()
+    
+    if not user_id or version < 1:
+        return JSONResponse({"error": "user_id and version required"}, status_code=400)
+    
+    parsed = load_version(user_id, folder, version)
+    if parsed is None:
+        return JSONResponse({"error": "version not found"}, status_code=404)
+    
+    return JSONResponse({"parsed": json.loads(parsed)})
+
+
 async def serve_pdf(request: Request):
     folder   = request.path_params["folder"]
     filename = request.path_params["filename"]
@@ -339,11 +605,19 @@ routes = [
     Route("/api/resumes",                   api_resumes),
     Route("/api/generate-stream",           api_generate_stream, methods=["POST"]),
     Route("/api/upload-resume",             api_upload_resume,   methods=["POST"]),
-    Route("/api/extract-jd",                api_extract_jd,      methods=["POST"]),
-    Route("/api/resume/{folder}",           api_resume_parsed,   methods=["GET"]),
-    Route("/api/resume/{folder}",           api_resume_save,     methods=["POST"]),
-    Route("/api/ai-edit-bullet",            api_ai_edit_bullet,  methods=["POST"]),
-    Route("/pdf/{folder}/{filename}",       serve_pdf),
+    Route("/api/extract-jd",              api_extract_jd,     methods=["POST"]),
+    Route("/api/resume/{folder}",          api_resume_parsed,  methods=["GET"]),
+    Route("/api/resume/{folder}",          api_resume_save,    methods=["POST"]),
+    Route("/api/ai-edit-bullet",           api_ai_edit_bullet,methods=["POST"]),
+    Route("/api/ats-check/{folder}",     api_ats_check,     methods=["POST"]),
+    Route("/api/doctor-check",             api_doctor_check,   methods=["POST"]),
+    Route("/api/share/{folder}",           api_share_create,  methods=["POST"]),
+    Route("/api/share/{shortid}",         api_share_resolve, methods=["GET"]),
+    Route("/api/share/{shortid}",         api_share_revoke, methods=["DELETE"]),
+    Route("/api/version/{folder}",        api_version_save, methods=["POST"]),
+    Route("/api/version/{folder}",        api_version_list, methods=["GET"]),
+    Route("/api/version/{folder}/{version}", api_version_load, methods=["GET"]),
+    Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
 
 middleware = [
@@ -352,7 +626,7 @@ middleware = [
         allow_origins=ALLOWED_ORIGINS,
         # Allow any GitHub Pages domain + any resunova.io subdomain
         allow_origin_regex=r"https://(.*\.github\.io|(.*\.)?resunova\.io)",
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
         allow_headers=["Content-Type"],
         allow_credentials=False,
     ),

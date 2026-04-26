@@ -7,11 +7,15 @@ import LandingPage from "./LandingPage";
 
 // Routes that intentionally bypass auth — design-system / preview pages.
 const PUBLIC_ROUTES = new Set<string>(["/editor-preview"]);
+// Path prefixes that bypass auth — recipient share pages live at /r/<shortid>.
+const PUBLIC_PREFIXES = ["/r/"];
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (pathname && PUBLIC_ROUTES.has(pathname.replace(/\/$/, ""))) {
-    return <>{children}</>;
+  if (pathname) {
+    const trimmed = pathname.replace(/\/$/, "");
+    if (PUBLIC_ROUTES.has(trimmed)) return <>{children}</>;
+    if (PUBLIC_PREFIXES.some(p => pathname.startsWith(p))) return <>{children}</>;
   }
   // IMPORTANT: initial state is `null` (signed-out) so the static HTML contains
   // the full landing page — crawlable by Google. The effect below swaps in the

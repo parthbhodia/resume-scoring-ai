@@ -758,6 +758,448 @@ def ai_rewrite_bullet(bullet_text: str, instruction: str, jd_snippet: str = "") 
 
 
 # ============================================================================
+# ATS CHECK — structural + keyword-coverage scoring against a JD
+# ============================================================================
+#
+# This is *not* a JD-fit score (we already have that via `_rate_resume`).
+# It's a "will an ATS actually parse this PDF?" check — text-extractable,
+# single-column, sections present, contact info detected, page count — plus
+# a keyword coverage table built from the JD.
+#
+# Runs locally on the compiled PDF; no LLM needed. Fast (~200ms).
+
+_STOPWORDS = {
+    "a","an","and","the","or","but","if","of","to","in","on","for","with","by",
+    "as","is","are","was","were","be","been","being","this","that","these",
+    "those","it","its","at","from","not","you","your","we","our","us","i",
+    "they","them","their","he","she","his","her","will","would","can","could",
+    "should","may","might","must","do","does","did","done","have","has","had",
+    "having","about","into","over","under","up","down","out","than","then",
+    "so","because","while","when","where","how","what","which","who","whom",
+    "all","any","each","every","other","some","such","no","nor","only","own",
+    "same","also","just","more","most","very","there","here","both","few","many",
+    "much","new","please","via","etc","including","include","includes","using",
+    "use","used","uses","make","makes","made","work","works","worked","working",
+    "team","teams","role","roles","skills","skill","ability","experience",
+    "experiences","year","years","job","jobs","position","candidate","required",
+    "preferred","plus","strong","excellent","good","great","across","within",
+}
+
+# Common section labels — case-insensitive substring check on extracted text.
+_ATS_REQUIRED_SECTIONS = ["experience", "education", "skills"]
+_ATS_OPTIONAL_SECTIONS = ["projects", "summary", "objective"]
+
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_PHONE_RE = re.compile(r"(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}")
+_URL_RE   = re.compile(r"(?:https?://|www\.|linkedin\.com|github\.com)[\w./?=&%+#:-]+", re.I)
+
+
+def _extract_jd_keywords(jd: str, max_keywords: int = 25) -> List[Dict]:
+    """Pull weighted keywords from a JD. Frequency-based, with multi-word phrase
+    promotion so "machine learning" beats "machine" + "learning" separately.
+
+    Returns: [{"keyword": "...", "weight": 1-3}, ...] sorted by weight desc.
+    """
+    text = (jd or "").lower()
+    if not text.strip():
+        return []
+
+    # 1. Single tokens (alpha-words 3+ chars, no stopwords)
+    tokens = re.findall(r"[a-z][a-z+#./-]{2,}", text)
+    tokens = [t.strip(".-/+#") for t in tokens]
+    tokens = [t for t in tokens if t and t not in _STOPWORDS and len(t) >= 3]
+
+    freq: Dict[str, int] = {}
+    for t in tokens:
+        freq[t] = freq.get(t, 0) + 1
+
+    # 2. Bigrams — only when both halves aren't stopwords
+    raw_words = re.findall(r"[a-z][a-z+#./-]{1,}", text)
+    bigram_freq: Dict[str, int] = {}
+    for a, b in zip(raw_words, raw_words[1:]):
+        if a in _STOPWORDS or b in _STOPWORDS:
+            continue
+        if len(a) < 3 or len(b) < 3:
+            continue
+        bg = f"{a} {b}"
+        bigram_freq[bg] = bigram_freq.get(bg, 0) + 1
+
+    # Bigrams that appear 2+ times and beat their parts get promoted
+    for bg, count in list(bigram_freq.items()):
+        if count >= 2:
+            freq[bg] = max(freq.get(bg, 0), count + 1)
+
+    # Sort: most-frequent first, drop very-rare singletons
+    items = sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))
+    items = [(k, c) for k, c in items if c >= 2 or " " in k][:max_keywords]
+
+    out: List[Dict] = []
+    for k, c in items:
+        if c >= 4:
+            w = 3
+        elif c >= 2:
+            w = 2
+        else:
+            w = 1
+        out.append({"keyword": k, "weight": w, "jd_count": c})
+    return out
+
+
+def _check_keyword_in_resume(keyword: str, resume_text: str) -> Dict:
+    """Find a JD keyword in resume text. Multi-word keywords match either as a
+    contiguous phrase (status=found) or with all parts present separately
+    (status=partial). Single words are found/missing only.
+
+    Counts matches case-insensitively with word-boundary regex so "react"
+    doesn't match "reaction".
+    """
+    rt = (resume_text or "").lower()
+    if not rt:
+        return {"keyword": keyword, "status": "missing", "count": 0}
+
+    # Word-boundary match for the full phrase
+    pat = re.compile(r"\b" + re.escape(keyword) + r"\b", re.I)
+    count = len(pat.findall(rt))
+    if count > 0:
+        return {"keyword": keyword, "status": "found", "count": count}
+
+    # For multi-word phrases, also check if all words appear separately
+    if " " in keyword:
+        parts = keyword.split()
+        all_present = all(re.search(r"\b" + re.escape(p) + r"\b", rt) for p in parts)
+        if all_present:
+            return {"keyword": keyword, "status": "partial", "count": 0}
+
+    return {"keyword": keyword, "status": "missing", "count": 0}
+
+
+def _detect_layout_issues(pdf) -> Dict:
+    """Heuristics for ATS-unfriendly layouts. Multi-column resumes (common in
+    designer templates) often confuse parsers — the text comes out interleaved
+    line-by-line instead of column-by-column.
+
+    We look at the x-coordinate distribution of words on the first page: if
+    there are two clear clusters with a gap, it's likely multi-column.
+    """
+    out = {"single_column": True, "x0_clusters": 1, "detail": ""}
+    try:
+        if not pdf.pages:
+            out["detail"] = "no pages"
+            return out
+        page = pdf.pages[0]
+        words = page.extract_words() or []
+        if len(words) < 20:
+            out["detail"] = "too few words to analyze layout"
+            return out
+        x0s = sorted(w["x0"] for w in words)
+        # Bin x0 to nearest 10pt; the most common bin is the left margin.
+        from collections import Counter
+        bins = Counter(int(x) // 10 * 10 for x in x0s)
+        # If two bins each contain >25% of words, with a gap of 100+ pts, multi-col.
+        sorted_bins = bins.most_common(3)
+        total = sum(bins.values())
+        big_bins = [(b, c) for b, c in sorted_bins if c / total > 0.20]
+        if len(big_bins) >= 2:
+            xs = sorted(b for b, _ in big_bins)
+            if xs[-1] - xs[0] > 100:
+                out["single_column"] = False
+                out["x0_clusters"] = len(big_bins)
+                out["detail"] = f"two text columns detected at x≈{xs[0]} and x≈{xs[-1]}"
+        if out["single_column"]:
+            out["detail"] = f"primary column at x≈{sorted_bins[0][0]}"
+    except Exception as exc:
+        out["detail"] = f"layout check failed: {exc}"
+    return out
+
+
+def ats_check(folder: str, jd: str = "", user_id: str = "", pdf_bytes: Optional[bytes] = None) -> Dict:
+    """Run an ATS-readiness check against the compiled PDF for `folder`.
+
+    Resolution order for the PDF:
+      1. `pdf_bytes` arg (if caller already has it)
+      2. local LIBRARY_ROOT/<folder>/*.pdf
+      3. Supabase resume-pdfs bucket via download_pdf
+
+    Returns:
+      {
+        "score": 0-100,
+        "checks": [{"id", "name", "pass", "detail"}],
+        "keywords": [{"keyword", "weight", "status", "count", "jd_count"}],
+        "stats": {"page_count", "word_count", "char_count"}
+      }
+    """
+    import io as _io
+
+    # 1. Locate PDF bytes
+    data: Optional[bytes] = pdf_bytes
+    if data is None:
+        folder_path = os.path.join(LIBRARY_ROOT, folder)
+        if os.path.isdir(folder_path):
+            for fn in os.listdir(folder_path):
+                if fn.endswith(".pdf"):
+                    try:
+                        with open(os.path.join(folder_path, fn), "rb") as f:
+                            data = f.read()
+                        break
+                    except Exception as exc:
+                        logger.warning(f"ats_check: read {fn} failed: {exc}")
+    if data is None and user_id:
+        # Lazy import — avoids a circular dep when resume_gui imports this module
+        try:
+            try:
+                from resume_gui.storage import download_pdf  # type: ignore
+            except ImportError:
+                from storage import download_pdf  # type: ignore
+            data = download_pdf(user_id, folder)
+        except Exception as exc:
+            logger.warning(f"ats_check: storage download failed: {exc}")
+
+    if data is None:
+        raise FileNotFoundError(f"PDF for folder '{folder}' not found locally or in storage")
+
+    # 2. Extract text + run pdfplumber checks
+    try:
+        import pdfplumber  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(f"pdfplumber required for ATS check: {exc}")
+
+    pages_text: List[str] = []
+    layout: Dict = {"single_column": True, "detail": "(not analyzed)"}
+    page_count = 0
+    with pdfplumber.open(_io.BytesIO(data)) as pdf:
+        page_count = len(pdf.pages)
+        for p in pdf.pages:
+            pages_text.append(p.extract_text() or "")
+        layout = _detect_layout_issues(pdf)
+
+    full_text = "\n".join(pages_text)
+    word_count = len(re.findall(r"\b\w+\b", full_text))
+    char_count = len(full_text)
+
+    # 3. Structural checks
+    checks: List[Dict] = []
+
+    text_extractable = char_count > 200
+    checks.append({
+        "id":     "text_extractable",
+        "name":   "Text is selectable / extractable",
+        "pass":   text_extractable,
+        "detail": f"extracted {char_count:,} chars across {page_count} page(s)"
+                  if text_extractable else
+                  f"only {char_count} chars extracted — PDF may be image-based",
+    })
+
+    checks.append({
+        "id":     "single_column",
+        "name":   "Single-column, ATS-friendly layout",
+        "pass":   layout["single_column"],
+        "detail": layout.get("detail", ""),
+    })
+
+    page_ok = 1 <= page_count <= 2
+    checks.append({
+        "id":     "page_count",
+        "name":   "Page count between 1 and 2",
+        "pass":   page_ok,
+        "detail": f"{page_count} page(s)",
+    })
+
+    lower_text = full_text.lower()
+    sections_found  = [s for s in _ATS_REQUIRED_SECTIONS if s in lower_text]
+    sections_missing = [s for s in _ATS_REQUIRED_SECTIONS if s not in lower_text]
+    checks.append({
+        "id":     "required_sections",
+        "name":   "Standard sections present (Experience, Education, Skills)",
+        "pass":   not sections_missing,
+        "detail": (f"found: {', '.join(sections_found).title()}" if sections_found else "none found")
+                  + (f"  |  missing: {', '.join(sections_missing).title()}" if sections_missing else ""),
+    })
+
+    has_email = bool(_EMAIL_RE.search(full_text))
+    has_phone = bool(_PHONE_RE.search(full_text))
+    has_url   = bool(_URL_RE.search(full_text))
+    contact_score = sum([has_email, has_phone, has_url])
+    checks.append({
+        "id":     "contact_info",
+        "name":   "Contact info detectable (email + phone/URL)",
+        "pass":   has_email and (has_phone or has_url),
+        "detail": f"email={'✓' if has_email else '✗'}  phone={'✓' if has_phone else '✗'}  url={'✓' if has_url else '✗'}",
+    })
+
+    # 4. Word-count sanity (too short / too long is a flag)
+    wc_ok = 250 <= word_count <= 1200
+    checks.append({
+        "id":     "word_count",
+        "name":   "Word count in healthy range (250–1,200)",
+        "pass":   wc_ok,
+        "detail": f"{word_count:,} words "
+                  + ("(too short — add detail)" if word_count < 250 else
+                     "(too long — trim)" if word_count > 1200 else "(ideal)"),
+    })
+
+    # 5. Keyword coverage
+    kw_list = _extract_jd_keywords(jd)
+    kw_results: List[Dict] = []
+    for kw in kw_list:
+        r = _check_keyword_in_resume(kw["keyword"], full_text)
+        r["weight"]    = kw["weight"]
+        r["jd_count"]  = kw["jd_count"]
+        kw_results.append(r)
+
+    # 6. Compute score
+    # Structural: 60% of total. Each check is weighted equally; failed checks
+    # subtract proportionally. Keywords: 40% — weighted average of found-ness,
+    # where partial counts as 0.5.
+    total_struct  = len(checks)
+    passed_struct = sum(1 for c in checks if c["pass"])
+    struct_pct    = (passed_struct / total_struct) if total_struct else 1.0
+
+    if kw_results:
+        total_w = sum(k["weight"] for k in kw_results)
+        got_w   = sum(
+            k["weight"] * (1.0 if k["status"] == "found"
+                           else 0.5 if k["status"] == "partial" else 0.0)
+            for k in kw_results
+        )
+        kw_pct = got_w / total_w if total_w else 1.0
+    else:
+        kw_pct = 1.0  # No JD = don't penalize keyword section
+
+    # When no JD provided, structural score is the whole story.
+    if not kw_results:
+        score = round(struct_pct * 100)
+    else:
+        score = round((0.6 * struct_pct + 0.4 * kw_pct) * 100)
+
+    return {
+        "score":    score,
+        "checks":   checks,
+        "keywords": kw_results,
+        "stats": {
+            "page_count": page_count,
+            "word_count": word_count,
+            "char_count": char_count,
+        },
+    }
+
+
+# ============================================================================
+# RESUME DOCTOR — bullet-level writing-quality analyzer (pure regex)
+# ============================================================================
+#
+# Runs against the parsed bullets — NOT the PDF. Surfaces issues inline in the
+# editor as chips so the user can fix them without leaving the UI. Zero LLM
+# cost, zero latency. Pure rule-based linting for the most common resume sins.
+
+_WEAK_VERBS = {
+    "worked", "helped", "assisted", "responsible", "involved", "participated",
+    "contributed", "supported", "handled", "did", "made", "got", "had",
+    "tried", "attempted", "managed to", "able to",
+}
+_BUZZWORDS = {
+    "synergy", "synergies", "results-driven", "passionate", "self-starter",
+    "go-getter", "rockstar", "ninja", "guru", "thought leader", "team player",
+    "detail-oriented", "out of the box", "hit the ground running",
+    "best of breed", "world-class", "best-in-class", "next-generation",
+    "cutting-edge", "value-add", "value-added", "leverage", "leveraged",
+    "utilize", "utilized",
+}
+_PASSIVE_AUX = {"was", "were", "been", "being", "is", "are", "am"}
+# Past participles ending in -ed/-en that often signal passive when after _AUX.
+_PAST_PARTICIPLE_RE = re.compile(r"\b\w+(ed|en)\b", re.I)
+_NUMBER_RE = re.compile(r"\b\d+([.,]\d+)?[%KkMmBb]?\+?\b|\$\d|\b\d+x\b", re.I)
+
+
+def doctor_check_bullet(text: str) -> List[Dict]:
+    """Lint a single bullet. Returns a list of issue dicts:
+        {"id": str, "severity": "warn"|"info", "msg": str}
+    Empty list = clean bullet. Cheap enough to run on every keystroke if needed.
+    """
+    issues: List[Dict] = []
+    if not text or not text.strip():
+        return issues
+    lower = text.lower()
+    words = re.findall(r"[A-Za-z']+", text)
+    if not words:
+        return issues
+    first = words[0].lower()
+
+    # 1. Weak opening verb
+    if first in _WEAK_VERBS or any(lower.startswith(p + " ") for p in _WEAK_VERBS):
+        issues.append({
+            "id":       "weak_verb",
+            "severity": "warn",
+            "msg":      f'Weak opener "{first}" — try a stronger action verb (Architected, Drove, Shipped, etc.)',
+        })
+
+    # 2. Passive voice (was/were + past participle)
+    for i, w in enumerate(words[:-1]):
+        if w.lower() in _PASSIVE_AUX and _PAST_PARTICIPLE_RE.match(words[i + 1] or ""):
+            issues.append({
+                "id":       "passive_voice",
+                "severity": "warn",
+                "msg":      f'Passive voice ("{w} {words[i+1]}") — flip to active for stronger impact',
+            })
+            break
+
+    # 3. Buzzword overload
+    hits = [b for b in _BUZZWORDS if b in lower]
+    if hits:
+        issues.append({
+            "id":       "buzzwords",
+            "severity": "info",
+            "msg":      f"Buzzword{'s' if len(hits)>1 else ''}: {', '.join(hits[:3])} — replace with concrete outcomes",
+        })
+
+    # 4. Missing metric (no number, %, $ or x-multiplier)
+    if not _NUMBER_RE.search(text) and len(words) > 6:
+        issues.append({
+            "id":       "no_metric",
+            "severity": "info",
+            "msg":      "No metric — add a number, %, $, or x-multiplier to quantify impact",
+        })
+
+    # 5. First-person pronouns (resumes typically drop them)
+    if re.search(r"\b(I|me|my|we|our)\b", text):
+        issues.append({
+            "id":       "first_person",
+            "severity": "info",
+            "msg":      "First-person pronoun — resumes usually drop I/me/we/our",
+        })
+
+    # 6. Bullet too long (over ~30 words = wall of text)
+    if len(words) > 32:
+        issues.append({
+            "id":       "too_long",
+            "severity": "warn",
+            "msg":      f"Long bullet ({len(words)} words) — aim for under 25 for scanability",
+        })
+
+    return issues
+
+
+def doctor_check_resume(parsed: Dict) -> Dict:
+    """Run doctor_check_bullet across every bullet in a parsed tree.
+
+    Returns {bullet_id: [issues...]} keyed by `id` so the frontend can show
+    chips next to each row without index gymnastics.
+    """
+    out: Dict[str, List[Dict]] = {}
+    for sec in parsed.get("sections") or []:
+        if not sec.get("editable"):
+            continue
+        for entry in sec.get("entries") or []:
+            for b in entry.get("bullets") or []:
+                bid = b.get("id")
+                if not bid:
+                    continue
+                issues = doctor_check_bullet(b.get("text") or "")
+                if issues:
+                    out[bid] = issues
+    return out
+
+
+# ============================================================================
 # RATE — quick Gemini call to score the resume against the JD
 # ============================================================================
 

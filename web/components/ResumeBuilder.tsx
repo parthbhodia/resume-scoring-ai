@@ -11,9 +11,11 @@ import DiffView     from "./DiffView";
 import SourcesPanel from "./SourcesPanel";
 import ResumeSidebar from "./ResumeSidebar";
 import ResumeEditor  from "./ResumeEditor";
+import AtsPanel, { type AtsResult } from "./AtsPanel";
+import ShareButton   from "./ShareButton";
 import type { ParsedResume, ParsedBullet } from "@/lib/types";
 
-type Tab = "analysis" | "changes" | "edit";
+type Tab = "analysis" | "ats" | "changes" | "edit";
 
 function extractJdKeywords(jdText: string): string[] {
   const STOP = new Set([
@@ -84,6 +86,14 @@ export default function ResumeBuilder() {
   const [editorSaving,  setEditorSaving]  = useState(false);
   const [editorError,   setEditorError]   = useState<string | null>(null);
 
+  // ── ATS state — populated lazily when the user clicks the ATS tab. ──
+  const [atsResult,    setAtsResult]    = useState<AtsResult | null>(null);
+  const [atsLoading,   setAtsLoading]   = useState(false);
+  const [atsError,     setAtsError]     = useState<string | null>(null);
+  // Map of bullet_id → list of writing-quality issues (passive voice, weak
+  // verbs, missing metrics, …). Lazily populated alongside the editor tree.
+  const [doctorIssues, setDoctorIssues] = useState<Record<string, { id: string; severity: "warn" | "info"; msg: string }[]>>({});
+
   const importFromUrl = useCallback(async (): Promise<{ company?: string; role?: string; job_description?: string } | null> => {
     const url = jobUrl.trim();
     if (!url) { setExtractError("Paste a job posting URL first."); return null; }
@@ -124,6 +134,21 @@ export default function ResumeBuilder() {
   // Lazy-load the parsed bullet tree the first time the Edit tab opens for a
   // given folder. We re-fetch when `result.folder` changes (i.e. the user
   // generated a new resume) to avoid showing the previous folder's bullets.
+  const runDoctor = useCallback(async (parsed: ParsedResume) => {
+    try {
+      const resp = await fetch(apiUrl("/api/doctor-check"), {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ parsed }),
+      });
+      const json = await parseJsonOrThrow<{ error?: string; issues?: Record<string, { id: string; severity: "warn" | "info"; msg: string }[]> }>(resp);
+      if (!resp.ok) return;  // Doctor is best-effort — never block the editor on failure
+      setDoctorIssues(json.issues ?? {});
+    } catch {
+      // swallow — doctor is a non-critical enhancement
+    }
+  }, []);
+
   const loadEditor = useCallback(async (folder: string) => {
     setEditorLoading(true); setEditorError(null);
     try {
@@ -132,12 +157,32 @@ export default function ResumeBuilder() {
       const json = await parseJsonOrThrow<ParsedResume & { error?: string }>(resp);
       if (!resp.ok) throw new Error(json.error ?? "Could not load resume.");
       setEditorTree(json);
+      // Kick off doctor analysis in parallel — non-blocking.
+      runDoctor(json);
     } catch (e: unknown) {
       setEditorError(e instanceof Error ? e.message : String(e));
     } finally {
       setEditorLoading(false);
     }
-  }, [user]);
+  }, [user, runDoctor]);
+
+  const runAtsCheck = useCallback(async (folder: string) => {
+    setAtsLoading(true); setAtsError(null);
+    try {
+      const resp = await fetch(apiUrl(`/api/ats-check/${encodeURIComponent(folder)}`), {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ jd: jd.slice(0, 8000), user_id: user?.id ?? "local" }),
+      });
+      const json = await parseJsonOrThrow<AtsResult & { error?: string }>(resp);
+      if (!resp.ok) throw new Error(json.error ?? "ATS check failed.");
+      setAtsResult(json);
+    } catch (e: unknown) {
+      setAtsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAtsLoading(false);
+    }
+  }, [jd, user]);
 
   const saveEditor = useCallback(async (next: ParsedResume) => {
     if (!result?.folder) return;
@@ -155,12 +200,17 @@ export default function ResumeBuilder() {
       if (json.pdf_url) {
         setResult(r => r ? { ...r, pdfUrl: json.pdf_url ?? r.pdfUrl } : r);
       }
+      // Re-run doctor on the saved tree — the user may have fixed (or
+      // introduced) issues since the last run.
+      runDoctor(next);
+      // ATS results are now stale — clear so the ATS tab re-checks on next open.
+      setAtsResult(null);
     } catch (e: unknown) {
       setEditorError(e instanceof Error ? e.message : String(e));
     } finally {
       setEditorSaving(false);
     }
-  }, [result, user]);
+  }, [result, user, runDoctor]);
 
   const aiEditBullet = useCallback(async (bullet: ParsedBullet, instruction: string): Promise<string> => {
     const resp = await fetch(apiUrl("/api/ai-edit-bullet"), {
@@ -182,6 +232,9 @@ export default function ResumeBuilder() {
   useEffect(() => {
     setEditorTree(null);
     setEditorError(null);
+    setAtsResult(null);
+    setAtsError(null);
+    setDoctorIssues({});
   }, [result?.folder]);
 
   const handlePdfUpload = useCallback(async (file: File) => {
@@ -760,27 +813,36 @@ export default function ResumeBuilder() {
                     )}
                   </div>
 
-                  {/* PDF download */}
+                  {/* PDF download + share */}
                   {result.pdfUrl && (
-                    <a
-                      href={result.pdfUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        display: "flex", alignItems: "center", gap: 7,
-                        padding: "9px 16px", flexShrink: 0,
-                        background: "var(--accent)", borderRadius: 9,
-                        color: "#fff", textDecoration: "none",
-                        fontSize: 13, fontWeight: 500, letterSpacing: -0.3,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                        <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M2 11h9" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
-                      </svg>
-                      Download PDF
-                    </a>
+                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                      {result.folder && (
+                        <ShareButton
+                          folder={result.folder}
+                          pdfUrl={result.pdfUrl}
+                          userId={user?.id ?? null}
+                        />
+                      )}
+                      <a
+                        href={result.pdfUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: "flex", alignItems: "center", gap: 7,
+                          padding: "9px 16px",
+                          background: "var(--accent)", borderRadius: 9,
+                          color: "#fff", textDecoration: "none",
+                          fontSize: 13, fontWeight: 500, letterSpacing: -0.3,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                          <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M2 11h9" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
+                        </svg>
+                        Download PDF
+                      </a>
+                    </div>
                   )}
                 </div>
               </div>
@@ -839,9 +901,10 @@ export default function ResumeBuilder() {
                 display: "flex", gap: 2, marginBottom: 18,
                 background: "var(--surface2)", borderRadius: 9, padding: 3,
               }}>
-                {(["analysis", "changes", "edit"] as Tab[]).map(t => {
+                {(["analysis", "ats", "changes", "edit"] as Tab[]).map(t => {
                   const labels: Record<Tab, string> = {
                     analysis: "Analysis",
+                    ats:      atsResult ? `ATS  ${atsResult.score}` : "ATS check",
                     changes:  result.diff.length ? `Changes  +${result.adds} −${result.removes}` : "Changes",
                     edit:     "Edit bullets",
                   };
@@ -853,6 +916,10 @@ export default function ResumeBuilder() {
                         // Lazy-load on first open of the Edit tab.
                         if (t === "edit" && result.folder && !editorTree && !editorLoading) {
                           loadEditor(result.folder);
+                        }
+                        // Lazy-run on first open of the ATS tab.
+                        if (t === "ats" && result.folder && !atsResult && !atsLoading) {
+                          runAtsCheck(result.folder);
                         }
                       }}
                       style={{
@@ -874,6 +941,38 @@ export default function ResumeBuilder() {
 
               {activeTab === "analysis" && ratings && (
                 <CriteriaTable criteria={ratings.criteria} />
+              )}
+              {activeTab === "ats" && (
+                <>
+                  {atsLoading && (
+                    <div style={{ padding: 28, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
+                      Running ATS check…
+                    </div>
+                  )}
+                  {atsError && !atsLoading && (
+                    <div style={{ padding: 16, color: "var(--red)", fontSize: 12 }}>
+                      Couldn&apos;t run ATS check: {atsError}
+                      {result.folder && (
+                        <button
+                          onClick={() => runAtsCheck(result.folder!)}
+                          style={{
+                            marginLeft: 12, fontSize: 11, padding: "4px 10px",
+                            background: "var(--surface2)", border: "1px solid var(--border)",
+                            borderRadius: 6, color: "var(--text)", cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >Retry</button>
+                      )}
+                    </div>
+                  )}
+                  {atsResult && !atsLoading && (
+                    <AtsPanel
+                      result={atsResult}
+                      rechecking={atsLoading}
+                      onRecheck={() => result.folder && runAtsCheck(result.folder)}
+                    />
+                  )}
+                </>
               )}
               {activeTab === "changes" && (
                 <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={baseFolder} jdKeywords={jdKeywords} />
@@ -909,6 +1008,8 @@ export default function ResumeBuilder() {
                       saveError={editorError}
                       onSave={saveEditor}
                       onAIEdit={aiEditBullet}
+                      doctorIssues={doctorIssues}
+                      pdfUrl={result.pdfUrl}
                     />
                   )}
                 </>

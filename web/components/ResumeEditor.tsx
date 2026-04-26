@@ -18,6 +18,12 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { ParsedResume, ParsedBullet, ParsedSection, ParsedEntry } from "@/lib/types";
 
+export interface DoctorIssue {
+  id:       string;
+  severity: "warn" | "info";
+  msg:      string;
+}
+
 interface Props {
   initial: ParsedResume;
   saving?: boolean;
@@ -28,6 +34,12 @@ interface Props {
   onSave: (next: ParsedResume) => void | Promise<void>;
   /** Optional: per-bullet AI rewrite. Returns the new text. */
   onAIEdit?: (bullet: ParsedBullet, instruction: string) => Promise<string>;
+  /** Optional: writing-quality issues keyed by bullet id. Surfaced inline as
+   *  chips under each textarea. Pure decoration — empty/missing is safe. */
+  doctorIssues?: Record<string, DoctorIssue[]>;
+  /** Optional: URL of the most recently compiled PDF. Enables the "PDF" toggle
+   *  in the preview pane (vs the live HTML mock). */
+  pdfUrl?: string | null;
 }
 
 // Cap the per-folder localStorage version log. 5 is plenty for "oh no, undo".
@@ -37,7 +49,7 @@ const _newId = () => `b-${Date.now().toString(36)}-${Math.random().toString(36).
 
 interface HistoryEntry { savedAt: number; tree: ParsedResume; }
 
-export default function ResumeEditor({ initial, saving, saveError, folder, onSave, onAIEdit }: Props) {
+export default function ResumeEditor({ initial, saving, saveError, folder, onSave, onAIEdit, doctorIssues, pdfUrl }: Props) {
   // We work on a draft copy so cancel/reset is one setState away.
   const [draft, setDraft] = useState<ParsedResume>(initial);
   // Drag-and-drop state — which bullet is being dragged, and which slot is hovered.
@@ -248,6 +260,7 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
             onBulletReorder={(ei, from, to) => reorderBullets(si, ei, from, to)}
             onSectionRewrite={onAIEdit ? (instruction) => rewriteSection(si, instruction) : undefined}
             onAIEdit={onAIEdit}
+            doctorIssues={doctorIssues}
             dragRef={dragRef}
             dropHover={dropHover}
             setDropHover={setDropHover}
@@ -296,15 +309,11 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
       </div>
 
       {/* ── PREVIEW PANE ──────────────────────────────────────── */}
-      <div style={{
-        background: "#fafaf7", color: "#111",
-        border: "1px solid var(--border)", borderRadius: 12,
-        padding: "32px 36px", overflow: "auto", maxHeight: "78vh",
-        fontFamily: "'Latin Modern Roman', 'Computer Modern', Georgia, serif",
-        fontSize: 11, lineHeight: 1.35,
-      }}>
-        <PreviewPane resume={draft} />
-      </div>
+      <PreviewSurface
+        resume={draft}
+        pdfUrl={pdfUrl ?? null}
+        dirty={dirty}
+      />
     </div>
   );
 }
@@ -316,7 +325,7 @@ type DragHandle = React.MutableRefObject<{ sIdx: number; eIdx: number; bIdx: num
 function SectionBlock({
   section, sIdx,
   onBulletChange, onBulletAdd, onBulletDelete, onBulletReorder,
-  onSectionRewrite, onAIEdit,
+  onSectionRewrite, onAIEdit, doctorIssues,
   dragRef, dropHover, setDropHover,
 }: {
   section: ParsedSection;
@@ -327,6 +336,7 @@ function SectionBlock({
   onBulletReorder:(entryIdx: number, fromIdx: number, toIdx: number) => void;
   onSectionRewrite?: (instruction: string) => Promise<void>;
   onAIEdit?: Props["onAIEdit"];
+  doctorIssues?: Record<string, DoctorIssue[]>;
   dragRef:    DragHandle;
   dropHover:  string | null;
   setDropHover: (v: string | null) => void;
@@ -396,6 +406,7 @@ function SectionBlock({
           onBulletDelete={(bi) => onBulletDelete(ei, bi)}
           onBulletReorder={(from, to) => onBulletReorder(ei, from, to)}
           onAIEdit={onAIEdit}
+          doctorIssues={doctorIssues}
           dragRef={dragRef}
           dropHover={dropHover}
           setDropHover={setDropHover}
@@ -470,7 +481,7 @@ function SectionRewritePopover({ onRun, onCancel }: { onRun: (instr: string) => 
 
 function EntryBlock({
   entry, sIdx, eIdx, editable,
-  onBulletChange, onBulletAdd, onBulletDelete, onBulletReorder, onAIEdit,
+  onBulletChange, onBulletAdd, onBulletDelete, onBulletReorder, onAIEdit, doctorIssues,
   dragRef, dropHover, setDropHover,
 }: {
   entry: ParsedEntry;
@@ -482,6 +493,7 @@ function EntryBlock({
   onBulletDelete: (bulletIdx: number) => void;
   onBulletReorder: (fromIdx: number, toIdx: number) => void;
   onAIEdit?: Props["onAIEdit"];
+  doctorIssues?: Record<string, DoctorIssue[]>;
   dragRef:    DragHandle;
   dropHover:  string | null;
   setDropHover: (v: string | null) => void;
@@ -534,6 +546,7 @@ function EntryBlock({
               onDragStart={() => { dragRef.current = { sIdx, eIdx, bIdx: bi }; }}
               onDragEnd={() => { dragRef.current = null; setDropHover(null); }}
               onAIEdit={onAIEdit}
+              issues={doctorIssues?.[b.id]}
             />
           </div>
         );
@@ -570,7 +583,7 @@ const QUICK_ACTIONS: { label: string; instr: string }[] = [
 ];
 
 function BulletRow({
-  bullet, editable, onChange, onDelete, onDragStart, onDragEnd, onAIEdit,
+  bullet, editable, onChange, onDelete, onDragStart, onDragEnd, onAIEdit, issues,
 }: {
   bullet: ParsedBullet;
   editable: boolean;
@@ -579,6 +592,7 @@ function BulletRow({
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onAIEdit?: Props["onAIEdit"];
+  issues?: DoctorIssue[];
 }) {
   const [aiOpen,  setAiOpen]  = useState(false);
   const [aiInstr, setAiInstr] = useState("");
@@ -682,6 +696,31 @@ function BulletRow({
           >×</button>
         )}
       </div>
+
+      {issues && issues.length > 0 && (
+        <div style={{
+          marginTop: 4, marginLeft: 16,
+          display: "flex", flexWrap: "wrap", gap: 4,
+        }}>
+          {issues.map(iss => (
+            <span
+              key={iss.id}
+              title={iss.msg}
+              style={{
+                fontSize: 10, padding: "2px 7px", borderRadius: 999,
+                background: iss.severity === "warn"
+                  ? "rgba(255, 95, 95, 0.13)" : "rgba(255, 204, 0, 0.13)",
+                color: iss.severity === "warn" ? "var(--red)" : "var(--yellow, #ffc857)",
+                border: `1px solid ${iss.severity === "warn" ? "var(--red)" : "var(--yellow, #ffc857)"}33`,
+                letterSpacing: -0.1, lineHeight: 1.4,
+                cursor: "help",
+              }}
+            >
+              {iss.severity === "warn" ? "⚠" : "ⓘ"} {iss.msg.split("—")[0].trim()}
+            </span>
+          ))}
+        </div>
+      )}
 
       {aiOpen && (
         <div style={{
@@ -889,6 +928,96 @@ function diffWords(before: string, after: string): DiffTok[] {
 }
 
 /* ── Preview pane ─────────────────────────────────────────── */
+
+/**
+ * PreviewSurface — wraps the HTML mock + (optionally) the real compiled PDF
+ * so the user can flip between them with a small toggle.
+ *
+ * Default behavior:
+ *  - PDF available + no unsaved edits → show PDF (it's the source of truth)
+ *  - PDF available + unsaved edits → show HTML (PDF is now stale; HTML reflects
+ *    the *current* draft)
+ *  - No PDF yet → HTML only, no toggle
+ *
+ * The toggle lets the user override either way (e.g. peek at the PDF mid-edit
+ * to remember the layout, or check the HTML preview after save).
+ */
+function PreviewSurface({ resume, pdfUrl, dirty }: {
+  resume: ParsedResume;
+  pdfUrl: string | null;
+  dirty: boolean;
+}) {
+  // Default: prefer PDF when clean, HTML when dirty.
+  const [mode, setMode] = useState<"html" | "pdf">(pdfUrl && !dirty ? "pdf" : "html");
+  // When the user starts editing, auto-flip back to HTML so they see live
+  // updates. We track the "user manually overrode" state to avoid yanking
+  // them out of PDF mode if they explicitly chose it.
+  const [userOverride, setUserOverride] = useState(false);
+  useEffect(() => {
+    if (userOverride) return;
+    if (dirty && mode === "pdf") setMode("html");
+    if (!dirty && pdfUrl && mode === "html") setMode("pdf");
+  }, [dirty, pdfUrl, mode, userOverride]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {pdfUrl && (
+        <div style={{
+          display: "flex", gap: 4, padding: 3,
+          background: "var(--surface2)", borderRadius: 7,
+          alignSelf: "flex-end",
+        }}>
+          {(["html", "pdf"] as const).map(m => (
+            <button
+              key={m}
+              onClick={() => { setMode(m); setUserOverride(true); }}
+              style={{
+                fontSize: 10.5, padding: "4px 10px",
+                background: mode === m ? "var(--surface)" : "transparent",
+                color: mode === m ? "var(--text)" : "var(--dim)",
+                border: "none", borderRadius: 5,
+                fontWeight: mode === m ? 600 : 400,
+                cursor: "pointer", fontFamily: "inherit",
+                letterSpacing: -0.1,
+              }}
+              title={m === "pdf" && dirty ? "PDF reflects last save — unsaved edits not shown" : ""}
+            >
+              {m === "pdf" ? "PDF" : "Live preview"}
+              {m === "pdf" && dirty && <span style={{ marginLeft: 4, color: "var(--orange)" }}>•</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {mode === "pdf" && pdfUrl ? (
+        <div style={{
+          border: "1px solid var(--border)", borderRadius: 12,
+          overflow: "hidden", background: "#1c1c1e",
+          maxHeight: "78vh",
+        }}>
+          <iframe
+            src={pdfUrl + "#toolbar=0&navpanes=0"}
+            title="Compiled PDF preview"
+            style={{
+              width: "100%", height: "78vh", border: "none",
+              display: "block", background: "#fafaf7",
+            }}
+          />
+        </div>
+      ) : (
+        <div style={{
+          background: "#fafaf7", color: "#111",
+          border: "1px solid var(--border)", borderRadius: 12,
+          padding: "32px 36px", overflow: "auto", maxHeight: "78vh",
+          fontFamily: "'Latin Modern Roman', 'Computer Modern', Georgia, serif",
+          fontSize: 11, lineHeight: 1.35,
+        }}>
+          <PreviewPane resume={resume} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Render plain text with **bold** and \textbf{...} both honored. */
 function renderInline(text: string): React.ReactNode[] {

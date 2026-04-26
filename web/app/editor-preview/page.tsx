@@ -142,6 +142,18 @@ export default function EditorPreviewPage() {
         saving={saving}
         onSave={onSave}
         onAIEdit={onAIEdit}
+        // Sample Doctor issues — exercises the chip rendering in the harness.
+        doctorIssues={{
+          "exp-3": [
+            { id: "weak_verb",  severity: "warn", msg: 'Weak opener "Led" — try a stronger action verb' },
+            { id: "no_metric",  severity: "info", msg: "No metric — add numbers or %" },
+          ],
+          "edu-1": [
+            { id: "first_person", severity: "info", msg: "First-person pronoun — drop I/me/we/our" },
+          ],
+        }}
+        // Stub PDF URL so the PDF/Live preview toggle is exercised.
+        pdfUrl={null}
       />
     </div>
   );
