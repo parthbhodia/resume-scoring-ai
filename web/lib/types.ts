@@ -92,12 +92,33 @@ export interface ParsedEntry {
 export interface ParsedSection {
   name: string;                // e.g. "Experience", "Projects"
   entries: ParsedEntry[];
-  editable: boolean;           // false for Education (locked per user request)
+  editable: boolean;           // backend-driven; presently no sections are locked
+}
+
+// Contact header — name, location, links, email, phone. Lives in the LaTeX
+// preamble between marker comments so the parser can find / rewrite it
+// losslessly. May be `null` for very old resumes that predate the markers
+// AND don't have any tabular header at all.
+export interface ParsedContact {
+  blockStart:   number;
+  blockEnd:     number;
+  marked:       boolean;
+  name:         string;
+  location:     string;
+  website:      string;
+  websiteUrl:   string;
+  linkedin:     string;
+  linkedinUrl:  string;
+  github:       string;
+  githubUrl:    string;
+  email:        string;
+  phone:        string;
 }
 
 export interface ParsedResume {
   sections: ParsedSection[];
   rawTex: string;              // original .tex — needed so backend can splice
+  contact?: ParsedContact | null;
 }
 
 // SSE event shapes from Python backend

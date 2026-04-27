@@ -97,6 +97,23 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
     return { editableSections, bullets };
   }, [draft.sections]);
 
+  const updateContact = useCallback((field: keyof NonNullable<ParsedResume["contact"]>, value: string) => {
+    setDraft(d => {
+      // No contact block in this resume yet — synthesize a fresh one (the
+      // splicer will skip writing it because blockStart/End are -1, but the
+      // user can still see + tweak the form for next time we add insert support).
+      const base = d.contact ?? {
+        blockStart: -1, blockEnd: -1, marked: false,
+        name: "", location: "",
+        website: "", websiteUrl: "",
+        linkedin: "", linkedinUrl: "",
+        github: "GitHub", githubUrl: "",
+        email: "", phone: "",
+      };
+      return { ...d, contact: { ...base, [field]: value } as ParsedResume["contact"] };
+    });
+  }, []);
+
   const updateBullet = useCallback((sectionIdx: number, entryIdx: number, bulletIdx: number, text: string) => {
     setDraft(d => {
       const sections = d.sections.map((s, si) => {
@@ -298,6 +315,11 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
             </div>
           )}
 
+          <ContactCard
+            contact={draft.contact ?? null}
+            onChange={updateContact}
+          />
+
           {draft.sections.map((section, si) => (
             <SectionBlock
               key={si}
@@ -373,6 +395,122 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
 /* ── Editor sub-components ────────────────────────────────── */
 
 type DragHandle = React.MutableRefObject<{ sIdx: number; eIdx: number; bIdx: number } | null>;
+
+/**
+ * ContactCard — collapsible header editor for name / location / contact links.
+ *
+ * Lives at the very top of the editor (above all sections). Renders even when
+ * `contact` is null so the user can populate fields on a fresh resume; on save,
+ * the splicer skips writing the block if it never had line indices to begin
+ * with — which means brand-new contacts on legacy resumes won't accidentally
+ * insert garbage into the .tex.
+ */
+type ContactField = keyof NonNullable<ParsedResume["contact"]>;
+
+function ContactCard({ contact, onChange }: {
+  contact: ParsedResume["contact"] | null | undefined;
+  onChange: (field: ContactField, value: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const c = contact ?? null;
+  const writable = !!c && (c.blockStart >= 0 && c.blockEnd >= 0);
+
+  return (
+    <div style={{
+      marginBottom: 18,
+      background: "var(--surface)", border: "1px solid var(--border)",
+      borderRadius: 12, overflow: "hidden",
+    }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 10,
+          padding: "12px 14px", background: "transparent", border: "none",
+          cursor: "pointer", color: "var(--text)", fontFamily: "inherit",
+          textAlign: "left",
+        }}
+      >
+        <span style={{
+          fontSize: 11, color: "var(--dim)", letterSpacing: 0.6,
+          textTransform: "uppercase", fontWeight: 700,
+        }}>
+          Contact header
+        </span>
+        <span style={{ fontSize: 12, color: "var(--text)", letterSpacing: -0.2, fontWeight: 600 }}>
+          {c?.name || "(name not set)"}
+        </span>
+        {!writable && (
+          <span style={{
+            fontSize: 9, fontWeight: 600, padding: "2px 6px",
+            background: "var(--surface2)", color: "var(--dim)",
+            borderRadius: 4, letterSpacing: 0.3,
+          }} title="No marker block found in this resume's .tex — re-generate to gain edit support">
+            READ-ONLY
+          </span>
+        )}
+        <span style={{ marginLeft: "auto", color: "var(--dim)", fontSize: 11 }}>
+          {open ? "Hide" : "Edit"}
+        </span>
+      </button>
+
+      {open && (
+        <div style={{
+          padding: "4px 14px 14px",
+          display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8,
+        }}>
+          <ContactField label="Name"           value={c?.name      ?? ""} onChange={v => onChange("name", v)}      readOnly={!writable} />
+          <ContactField label="Location"       value={c?.location  ?? ""} onChange={v => onChange("location", v)}  readOnly={!writable} />
+          <ContactField label="Email"          value={c?.email     ?? ""} onChange={v => onChange("email", v)}     readOnly={!writable} type="email" />
+          <ContactField label="Phone"          value={c?.phone     ?? ""} onChange={v => onChange("phone", v)}     readOnly={!writable} />
+          <ContactField label="Website (text)" value={c?.website   ?? ""} onChange={v => onChange("website", v)}   readOnly={!writable} />
+          <ContactField label="Website URL"    value={c?.websiteUrl?? ""} onChange={v => onChange("websiteUrl", v)} readOnly={!writable} type="url" />
+          <ContactField label="LinkedIn (text)" value={c?.linkedin   ?? ""} onChange={v => onChange("linkedin", v)} readOnly={!writable} />
+          <ContactField label="LinkedIn URL"    value={c?.linkedinUrl?? ""} onChange={v => onChange("linkedinUrl", v)} readOnly={!writable} type="url" />
+          <ContactField label="GitHub (text)"  value={c?.github     ?? ""} onChange={v => onChange("github", v)}   readOnly={!writable} />
+          <ContactField label="GitHub URL"     value={c?.githubUrl  ?? ""} onChange={v => onChange("githubUrl", v)} readOnly={!writable} type="url" />
+          {!writable && (
+            <div style={{
+              gridColumn: "1 / -1",
+              fontSize: 10.5, color: "var(--dim)", letterSpacing: -0.1, marginTop: 6,
+            }}>
+              This resume was generated before the editable-contact pipeline. Re-generate (or
+              save once) to embed the marker comments — after that, edits here will round-trip
+              into the .tex.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContactField({ label, value, onChange, readOnly, type = "text" }: {
+  label: string; value: string; onChange: (v: string) => void;
+  readOnly?: boolean; type?: string;
+}) {
+  return (
+    <label style={{ display: "block" }}>
+      <div style={{
+        fontSize: 9.5, color: "var(--dim)", letterSpacing: 0.4,
+        textTransform: "uppercase", fontWeight: 600, marginBottom: 3,
+      }}>{label}</div>
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        disabled={readOnly}
+        style={{
+          width: "100%", fontSize: 12, padding: "6px 9px",
+          background: readOnly ? "var(--surface)" : "var(--surface2)",
+          color: readOnly ? "var(--dim)" : "var(--text)",
+          border: "1px solid var(--border)", borderRadius: 6,
+          fontFamily: "inherit", letterSpacing: -0.1,
+          cursor: readOnly ? "not-allowed" : "text",
+        }}
+      />
+    </label>
+  );
+}
 
 const toolbarButtonStyle: CSSProperties = {
   fontSize: 10,
@@ -1183,7 +1321,25 @@ function renderInline(text: string): React.ReactNode[] {
 }
 
 function PreviewPane({ resume }: { resume: ParsedResume }) {
-  const header = extractPreviewHeader(resume.rawTex);
+  // Prefer the structured contact field (reflects unsaved edits live).
+  // Fall back to scraping rawTex for legacy resumes.
+  const header = useMemo(() => {
+    const c = resume.contact;
+    if (c && (c.name || c.email)) {
+      const linkParts = [c.email, c.phone].filter(Boolean).join(" | ");
+      const profileParts = [c.website, c.linkedin, c.github].filter(p => p && p.toLowerCase() !== "github" || c.githubUrl).join(" | ");
+      return {
+        name: c.name || "(name not set)",
+        lines: [
+          c.location,
+          linkParts,
+          profileParts,
+        ].filter(Boolean),
+      };
+    }
+    return extractPreviewHeader(resume.rawTex);
+  }, [resume.contact, resume.rawTex]);
+
   return (
     <div>
       <div style={{

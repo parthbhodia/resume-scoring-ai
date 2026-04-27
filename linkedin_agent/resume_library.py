@@ -323,11 +323,58 @@ _LATEX_PREAMBLE = r"""%-------------------------
 \newcommand{\resumeHeadingListEnd}{\end{itemize}}
 
 \begin{document}
+
+% RESUME-CONTACT-BLOCK-START — parsed and edited by the structured editor.
+% Edits via the editor splice this entire block; manual tweaks here are fine,
+% just keep the start/end markers so the parser can find it.
+\begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}
+  \textbf{\Huge {contact_name} \vspace{2pt}} &
+  Location: {contact_location} \\
+
+  \href{{contact_website_url}}{\uline{{contact_website}}} $|$
+  \href{{contact_linkedin_url}}{\uline{{contact_linkedin}}} $|$
+  \href{{contact_github_url}}{\uline{GitHub}}
+  &
+  Email: \href{mailto:{contact_email}}{\uline{{contact_email}}} $|$
+  Mobile: {contact_phone} \\
+\end{tabular*}
+% RESUME-CONTACT-BLOCK-END
 """
 
 _LATEX_FOOTER = r"""
 \end{document}
 """
+
+# Default contact info — lives in the LaTeX header. Overridable via env vars
+# so a self-host deployment doesn't need a code edit. Single-user app today,
+# but the editor can override these per-folder via the structured `contact`
+# field on `ParsedResume`.
+DEFAULT_CONTACT: Dict[str, str] = {
+    "name":          os.environ.get("CONTACT_NAME",          "Parth Bhodia"),
+    "location":      os.environ.get("CONTACT_LOCATION",      "Jersey City, NJ (NYC metro)"),
+    "website":       os.environ.get("CONTACT_WEBSITE",       "parthbhodia.com"),
+    "website_url":   os.environ.get("CONTACT_WEBSITE_URL",   "https://parthbhodia.github.io"),
+    "linkedin":      os.environ.get("CONTACT_LINKEDIN",      "LinkedIn/in/parthbhodia"),
+    "linkedin_url":  os.environ.get("CONTACT_LINKEDIN_URL",  "https://linkedin.com/in/parthbhodia"),
+    "github":        os.environ.get("CONTACT_GITHUB",        "GitHub"),
+    "github_url":    os.environ.get("CONTACT_GITHUB_URL",    "https://github.com/parthbhodia"),
+    "email":         os.environ.get("CONTACT_EMAIL",         "parthbhodia08@gmail.com"),
+    "phone":         os.environ.get("CONTACT_PHONE",         "+1 4439294371"),
+}
+
+
+def _apply_preamble_subs(preamble: str, role: str, company: str, contact: Optional[Dict[str, str]] = None) -> str:
+    """Fill the {role}/{company}/{contact_*} placeholders in the LaTeX preamble.
+
+    Centralized so `_save_and_compile` and any future caller stay in sync.
+    Unknown contact fields fall back to DEFAULT_CONTACT so a partial override
+    (just changing the email, say) still works.
+    """
+    out = preamble.replace("{role}", role).replace("{company}", company)
+    merged = {**DEFAULT_CONTACT, **(contact or {})}
+    for key, val in merged.items():
+        out = out.replace("{contact_" + key + "}", val)
+    return out
 
 
 # ============================================================================
@@ -414,9 +461,10 @@ _TRIO_HEADING_RE  = re.compile(r"\\resumeTrioHeading\{([^}]*)\}\{([^}]*)\}\{([^}
 # trailing tokens like `\resumeItemListEnd` if a bullet contains a `}`.
 _RESUME_ITEM_RE   = re.compile(r"\\resumeItem\{(.*)\}\s*$")
 
-# Sections we never let the editor touch (per user request: Education stays
-# verbatim — don't risk LLM-related mutations).
-_LOCKED_SECTIONS  = {"education"}
+# Sections we never let the editor touch. (Was {"education"} originally per
+# user request — they later asked to allow editing Education too.) Kept as a
+# named constant in case we ever want to lock a section again.
+_LOCKED_SECTIONS: set = set()
 
 
 def _latex_to_plain(s: str) -> str:
@@ -456,6 +504,156 @@ def _trio_to_header(m: "re.Match[str]") -> str:
     a, b, c = m.group(1), m.group(2), m.group(3)
     parts = [_latex_to_plain(p) for p in (a, b, c) if p.strip()]
     return " · ".join(parts)
+
+
+_CONTACT_START = "% RESUME-CONTACT-BLOCK-START"
+_CONTACT_END   = "% RESUME-CONTACT-BLOCK-END"
+
+
+def _parse_contact_block(full_tex: str) -> Optional[Dict]:
+    """Detect and parse the contact header.
+
+    We look for a marker-bracketed block (`% RESUME-CONTACT-BLOCK-START`/`-END`)
+    first — that's what new generations emit. Older resumes don't have the
+    markers; for those, we fall back to scanning the first `\\begin{tabular*}`
+    block after `\\begin{document}` and pulling whatever fields we can.
+
+    Returns:
+        {
+          "blockStart": int,   # 0-based line index, inclusive
+          "blockEnd":   int,   # inclusive
+          "name":       str,
+          "location":   str,
+          "website":      str, "websiteUrl":  str,
+          "linkedin":     str, "linkedinUrl": str,
+          "github":       str, "githubUrl":   str,
+          "email":      str,
+          "phone":      str,
+          "marked":     bool,  # True if found via markers, False if heuristic
+        }
+        or None if no contact block found at all.
+    """
+    lines = full_tex.splitlines()
+    block_start = block_end = -1
+    marked = False
+
+    # Strategy 1: marker block (preferred)
+    for i, ln in enumerate(lines):
+        if _CONTACT_START in ln and block_start == -1:
+            block_start = i
+        elif _CONTACT_END in ln and block_start != -1:
+            block_end = i
+            marked = True
+            break
+
+    # Strategy 2: heuristic — first tabular* block after \begin{document}
+    if block_start == -1 or block_end == -1:
+        in_doc = False
+        for i, ln in enumerate(lines):
+            if not in_doc:
+                if "\\begin{document}" in ln:
+                    in_doc = True
+                continue
+            if "\\section" in ln:
+                break  # gave up — went past where contact should be
+            if "\\begin{tabular*}" in ln and block_start == -1:
+                block_start = i
+                continue
+            if block_start != -1 and "\\end{tabular*}" in ln:
+                block_end = i
+                break
+        if block_start == -1 or block_end == -1:
+            return None
+
+    block_text = "\n".join(lines[block_start : block_end + 1])
+
+    def _grab(pattern: str, default: str = "") -> str:
+        m = re.search(pattern, block_text, re.S)
+        return m.group(1).strip() if m else default
+
+    # Name: `\textbf{\Huge NAME \vspace{2pt}}` — NAME may have spaces.
+    name = _grab(r"\\textbf\{\\Huge\s+([^}\\]+?)\s*\\vspace")
+    if not name:
+        name = _grab(r"\\Huge\s+([^}\\]+)")
+
+    location = _grab(r"Location:\s*([^\\]+?)\s*\\\\")
+
+    # Three \href{URL}{\uline{TEXT}} pairs in order: website, linkedin, github.
+    href_iter = list(re.finditer(r"\\href\{([^{}]*)\}\{\\uline\{([^{}]*)\}\}", block_text))
+
+    def _hp(idx: int) -> Tuple[str, str]:
+        if idx < len(href_iter):
+            m = href_iter[idx]
+            return m.group(1).strip(), m.group(2).strip()
+        return "", ""
+
+    website_url,  website  = _hp(0)
+    linkedin_url, linkedin = _hp(1)
+    github_url,   github   = _hp(2)
+
+    # Email: prefer the mailto: link, fall back to the visible text.
+    email = _grab(r"mailto:([^\s}]+)")
+    if not email:
+        email = _grab(r"Email:\s*\\href\{[^}]*\}\{\\uline\{([^}]+)\}\}")
+
+    phone = _grab(r"Mobile:\s*([^\\]+?)\s*\\\\")
+
+    return {
+        "blockStart":   block_start,
+        "blockEnd":     block_end,
+        "name":         name,
+        "location":     location,
+        "website":      website,
+        "websiteUrl":   website_url,
+        "linkedin":     linkedin,
+        "linkedinUrl":  linkedin_url,
+        "github":       github,
+        "githubUrl":    github_url,
+        "email":        email,
+        "phone":        phone,
+        "marked":       marked,
+    }
+
+
+def _render_contact_block(contact: Dict) -> List[str]:
+    """Render a parsed contact dict back into LaTeX lines (with start/end markers).
+
+    Output mirrors the template baked into _LATEX_PREAMBLE so the on-disk file
+    stays human-readable and the parser can re-read it on the next round-trip.
+    Empty fields render as empty strings — pdflatex handles this gracefully.
+    """
+    def esc(s: str) -> str:
+        # Escape LaTeX-special chars in user-supplied text. URLs are passed
+        # through as-is (they live inside \href{...} which doesn't apply most
+        # special-char rules to the URL arg).
+        return (s or "").replace("&", r"\&").replace("%", r"\%").replace("#", r"\#")
+
+    name      = esc(contact.get("name", ""))
+    location  = esc(contact.get("location", ""))
+    website     = esc(contact.get("website", ""))
+    website_url = (contact.get("websiteUrl") or "").strip()
+    linkedin     = esc(contact.get("linkedin", ""))
+    linkedin_url = (contact.get("linkedinUrl") or "").strip()
+    github       = esc(contact.get("github", "GitHub"))
+    github_url   = (contact.get("githubUrl") or "").strip()
+    email     = (contact.get("email") or "").strip()
+    phone     = esc(contact.get("phone", ""))
+
+    return [
+        _CONTACT_START,
+        r"\begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}",
+        f"  \\textbf{{\\Huge {name} \\vspace{{2pt}}}} &",
+        f"  Location: {location} \\\\",
+        "",
+        f"  \\href{{{website_url}}}{{\\uline{{{website}}}}} $|$",
+        f"  \\href{{{linkedin_url}}}{{\\uline{{{linkedin}}}}} $|$",
+        f"  \\href{{{github_url}}}{{\\uline{{{github}}}}}",
+        "  &",
+        f"  Email: \\href{{mailto:{email}}}{{\\uline{{{email}}}}} $|$",
+        f"  Mobile: {phone} \\\\",
+        r"\end{tabular*}",
+        _CONTACT_END,
+    ]
 
 
 def parse_resume_tex(full_tex: str) -> Dict:
@@ -603,7 +801,8 @@ def parse_resume_tex(full_tex: str) -> Dict:
             else:
                 sec["sectionEndLine"] = len(all_lines) - 1
 
-    return {"rawTex": full_tex, "sections": sections}
+    contact = _parse_contact_block(full_tex)
+    return {"rawTex": full_tex, "sections": sections, "contact": contact}
 
 
 def splice_bullets_into_tex(full_tex: str, parsed: Dict) -> str:
@@ -623,6 +822,16 @@ def splice_bullets_into_tex(full_tex: str, parsed: Dict) -> str:
     """
     lines = full_tex.splitlines()
     edits: List[Tuple[int, int, List[str]]] = []
+
+    # Contact block — only re-render when the editor actually shipped one AND
+    # the parser recorded its line range. This way an unchanged or missing
+    # contact field never disturbs the source on save.
+    contact = parsed.get("contact")
+    if isinstance(contact, dict):
+        c_start = contact.get("blockStart", -1)
+        c_end   = contact.get("blockEnd",   -1)
+        if isinstance(c_start, int) and isinstance(c_end, int) and 0 <= c_start <= c_end < len(lines):
+            edits.append((c_start, c_end, _render_contact_block(contact)))
 
     for section in parsed.get("sections", []):
         if not section.get("editable", True):
@@ -1547,7 +1756,7 @@ def generate_latex_resume(
     logger.info(f"Ratings  |  {time.time() - t2:.1f}s  |  {ratings}")
 
     # ── Assemble + save ───────────────────────────────────────────────────────
-    preamble = _LATEX_PREAMBLE.replace("{role}", role).replace("{company}", company)
+    preamble = _apply_preamble_subs(_LATEX_PREAMBLE, role, company)
     full_tex = preamble + "\n" + latex_body + _LATEX_FOOTER
 
     folder_name = _make_folder_name(company, role)
@@ -1772,7 +1981,7 @@ def _compute_diff(base_body: str, new_body: str) -> tuple:
 
 def _save_and_compile(company, role, latex_body, compile_pdf=True):
     """Assemble full .tex, save to library, optionally compile PDF. Returns result dict."""
-    preamble = _LATEX_PREAMBLE.replace("{role}", role).replace("{company}", company)
+    preamble = _apply_preamble_subs(_LATEX_PREAMBLE, role, company)
     full_tex  = preamble + "\n" + latex_body + _LATEX_FOOTER
 
     folder_name = _make_folder_name(company, role)
