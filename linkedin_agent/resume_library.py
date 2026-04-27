@@ -1448,9 +1448,10 @@ def _find_company_reference(company: str) -> Optional[str]:
 
 def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Optional[Dict]:
     prompt = (
-        "You are helping the candidate honestly self-assess their fit for a job. Write the assessment in the candidate's "
-        "FIRST-PERSON voice (use 'I', 'my', 'I have', 'I built'). Never refer to 'this candidate' or 'the candidate' — "
-        "speak AS the candidate, not ABOUT them. Be specific, direct, and reference actual companies, projects, and metrics from the resume.\n\n"
+        "You are a coach giving the candidate an honest, direct read on their fit for a job. Write the assessment in "
+        "SECOND-PERSON voice — address the candidate directly with 'you', 'your', 'you have', 'you built'. Never refer to "
+        "'this candidate' or 'the candidate', and never use first-person 'I'/'my'. Speak TO the candidate, not about them. "
+        "Be specific, direct, and reference actual companies, projects, and metrics from the resume.\n\n"
         "ABSOLUTE NO-HALLUCINATION RULE — violating this makes your output useless:\n"
         "• You may ONLY cite employers, companies, institutions, metrics, numbers, technologies, and projects that appear VERBATIM in the RESUME BODY below.\n"
         "• Do NOT invent, infer, or borrow facts from your training data, from the job description, or from typical candidates for this role.\n"
@@ -1465,22 +1466,22 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         '      "name": "<specific skill or requirement from JD>",\n'
         '      "weight": "<High|Medium|Low based on how critical it is in the JD>",\n'
         '      "score": <1-10>,\n'
-        '      "notes": "<honest note in FIRST PERSON, e.g. \'I built X at Y\' — quoting actual experience from the resume>"\n'
+        '      "notes": "<honest note in SECOND PERSON, e.g. \'You built X at Y\' — quoting actual experience from the resume>"\n'
         '    }\n'
         "  ],\n"
-        '  "whats_working": ["<first-person strength: \'I have...\', \'I built...\', \'My experience with...\'>"],\n'
-        '  "gaps": ["<first-person gap + how I can address it: \'I lack X, but I can discuss Y to bridge this\'>"],\n'
-        '  "verdict": "<2-3 sentence honest bottom line in first person: \'I have a strong foundation in X. While I lack Y, my experience with Z should make this a worthwhile pursuit.\'>"\n'
+        '  "whats_working": ["<second-person strength: \'You have...\', \'You built...\', \'Your experience with...\'>"],\n'
+        '  "gaps": ["<second-person gap + how to address it: \'You lack X, but you can discuss Y to bridge this\'>"],\n'
+        '  "verdict": "<2-3 sentence honest bottom line in second person: \'You have a strong foundation in X. While you lack Y, your experience with Z should make this a worthwhile pursuit.\'>"\n'
         "}\n\n"
         "Rules:\n"
         "- 6-10 criteria covering the most important JD requirements (mix of required and nice-to-have)\n"
         "- Notes must name actual companies, projects, or metrics from the RESUME BODY — never generic, never invented\n"
-        "- gaps must include a concrete first-person plan (e.g. 'I haven't used LangGraph, but my dual-LLM pipeline at VibeIMG shows I can quickly pick up agentic frameworks')\n"
+        "- gaps must include a concrete second-person plan (e.g. 'You haven't used LangGraph, but your dual-LLM pipeline at VibeIMG shows you can quickly pick up agentic frameworks')\n"
         "- match_score must be honest — do not inflate it\n"
         "- whats_working: 3-5 bullets, gaps: 2-4 bullets\n"
-        "- EVERY string in whats_working, gaps, and verdict must use first-person 'I'/'my' — no third-person 'this candidate' or 'the candidate' anywhere\n\n"
+        "- EVERY string in whats_working, gaps, and verdict must use second-person 'you'/'your' — no first-person 'I'/'my', no third-person 'this candidate' or 'the candidate' anywhere\n\n"
         f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
-        f"RESUME BODY (LaTeX — ignore formatting commands, read only the content. This is the ONLY source of truth about my experience):\n{latex_body[:6000]}"
+        f"RESUME BODY (LaTeX — ignore formatting commands, read only the content. This is the ONLY source of truth about the candidate's experience):\n{latex_body[:6000]}"
     )
     fallback_models = _model_chain(model)
     for i, m in enumerate(fallback_models):
