@@ -366,6 +366,26 @@ def get_resume_tex(folder: str) -> Optional[str]:
     return None
 
 
+def _get_resume_tex_for_user(folder: str, user_id: Optional[str] = None) -> Optional[str]:
+    """Read a resume source locally first, then from Supabase Storage for a user."""
+    tex = get_resume_tex(folder)
+    if tex or not user_id or user_id == "local":
+        return tex
+
+    try:
+        try:
+            from resume_gui.storage import download_tex  # type: ignore
+        except ImportError:
+            from storage import download_tex  # type: ignore
+        tex = download_tex(user_id, folder)
+        if tex:
+            logger.info(f"Loaded .tex from Supabase Storage  |  {folder}  |  user={user_id}")
+        return tex
+    except Exception as exc:
+        logger.warning(f"Supabase .tex load failed  |  folder={folder}  |  user={user_id}  |  {exc}")
+        return None
+
+
 def _extract_body(full_tex: str) -> str:
     """Pull just the content between \\begin{document} and \\end{document}."""
     if "\\begin{document}" in full_tex:
@@ -1817,6 +1837,7 @@ def stream_latex_resume(
     model: str = "gemini-2.5-flash",
     base_folder: Optional[str] = None,
     candidate_profile: Optional[str] = None,
+    user_id: Optional[str] = None,
 ):
     """
     Generator that yields SSE-style event dicts while generating the resume.
@@ -1843,9 +1864,10 @@ def stream_latex_resume(
 
         base_body = ""
         if base_folder:
-            base_tex  = get_resume_tex(base_folder) or ""
+            base_tex  = _get_resume_tex_for_user(base_folder, user_id) or ""
             base_body = _extract_body(base_tex)
             logger.info(f"Base resume  |  {base_folder}  ({len(base_body)} chars)")
+            yield {"event": "base", "folder": base_folder, "loaded": bool(base_body), "chars": len(base_body)}
 
         client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
         system_prompt, user_prompt = _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=candidate_profile)

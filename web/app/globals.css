@@ -101,6 +101,7 @@ select option { background: var(--surface); }
   .rb-grid-2    { grid-template-columns: 1fr !important; }
   .rb-score-row { flex-direction: column !important; align-items: center !important; text-align: center; gap: 16px !important; }
   .rb-score-card{ padding: 22px 18px 20px !important; }
+  .resume-editor-workspace { grid-template-columns: 1fr !important; }
 }
 
 @media (max-width: 480px) {

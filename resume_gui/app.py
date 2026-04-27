@@ -132,7 +132,7 @@ async def api_generate_stream(request: Request):
 
         for event in stream_latex_resume(
             company, role, jd,
-            model=model, base_folder=base_folder, candidate_profile=candidate_profile,
+            model=model, base_folder=base_folder, candidate_profile=candidate_profile, user_id=user_id,
         ):
             ev_name = event.get("event")
 

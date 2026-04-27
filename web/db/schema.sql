@@ -108,13 +108,16 @@ create table if not exists share_links (
   pdf_url     text,                              -- snapshot at share time
   created_at  timestamptz default now(),
   views       int default 0,
-  revoked     bool default false,
-  foreign key (folder) references resumes(folder) on delete cascade
+  revoked     bool default false
 );
 
 -- Earlier drafts tried to reference resumes(user_id), but one user can own many
 -- resumes, so that column cannot be a foreign key target by itself.
 alter table share_links drop constraint if exists share_links_user_id_fkey;
+
+-- folder is only unique per-user on resumes, not globally unique, so it cannot
+-- be a standalone FK target. The backend checks ownership before minting links.
+alter table share_links drop constraint if exists share_links_folder_fkey;
 
 create index if not exists share_links_folder_idx on share_links (folder);
 create index if not exists share_links_user_idx on share_links (user_id);

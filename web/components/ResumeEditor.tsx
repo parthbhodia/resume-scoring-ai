@@ -15,7 +15,7 @@
  *     points to a callback the parent provides.
  */
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, type CSSProperties } from "react";
 import type { ParsedResume, ParsedBullet, ParsedSection, ParsedEntry } from "@/lib/types";
 
 export interface DoctorIssue {
@@ -62,17 +62,40 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
 
   // Load history on mount / when folder changes.
   useEffect(() => {
-    if (!folder) { setHistory([]); return; }
-    try {
-      const raw = window.localStorage.getItem(HISTORY_KEY(folder));
-      setHistory(raw ? JSON.parse(raw) : []);
-    } catch { setHistory([]); }
+    queueMicrotask(() => {
+      if (!folder) { setHistory([]); return; }
+      try {
+        const raw = window.localStorage.getItem(HISTORY_KEY(folder));
+        setHistory(raw ? JSON.parse(raw) : []);
+      } catch { setHistory([]); }
+    });
   }, [folder]);
 
   // Re-sync draft when initial changes (e.g. parent loaded a new folder).
-  useEffect(() => { setDraft(initial); }, [initial]);
+  useEffect(() => { queueMicrotask(() => setDraft(initial)); }, [initial]);
+
+  const initialOpenSections = useCallback((resume: ParsedResume) => {
+    const firstEditableWithContent = resume.sections.findIndex(s => s.editable && s.entries.some(e => e.bullets.length > 0));
+    return Object.fromEntries(
+      resume.sections.map((section, index) => [
+        section.name,
+        firstEditableWithContent === -1 ? index === 0 : index === firstEditableWithContent,
+      ]),
+    );
+  }, []);
+
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => initialOpenSections(initial));
+  const defaultOpenSections = useMemo(() => initialOpenSections(draft), [draft, initialOpenSections]);
 
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(initial), [draft, initial]);
+
+  const editorStats = useMemo(() => {
+    const editableSections = draft.sections.filter(s => s.editable).length;
+    const bullets = draft.sections.reduce((acc, section) => (
+      acc + section.entries.reduce((entryAcc, entry) => entryAcc + entry.bullets.length, 0)
+    ), 0);
+    return { editableSections, bullets };
+  }, [draft.sections]);
 
   const updateBullet = useCallback((sectionIdx: number, entryIdx: number, bulletIdx: number, text: string) => {
     setDraft(d => {
@@ -177,134 +200,163 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
   }, []);
 
   return (
-    <div style={{
+    <div
+      className="resume-editor-workspace"
+      style={{
       display: "grid",
-      gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
-      gap: 16,
+      gridTemplateColumns: "minmax(560px, 1.18fr) minmax(420px, 0.82fr)",
+      gap: 18,
       // Tall enough to feel like a real workspace, short enough to not eat the page.
       minHeight: 600,
+      alignItems: "start",
     }}>
       {/* ── EDITOR PANE ───────────────────────────────────────── */}
       <div style={{
         background: "var(--surface)", border: "1px solid var(--border)",
-        borderRadius: 12, padding: 16, overflow: "auto", maxHeight: "78vh",
+        borderRadius: 16, padding: 0, overflow: "hidden", maxHeight: "82vh",
+        boxShadow: "0 18px 60px rgba(0,0,0,0.24)",
       }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.5, textTransform: "uppercase" }}>
-            Editor
-          </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {history.length > 0 && (
+        <div style={{
+          position: "sticky", top: 0, zIndex: 5,
+          padding: "14px 16px 12px",
+          background: "linear-gradient(to bottom, var(--surface) 82%, rgba(28,28,30,0.86))",
+          borderBottom: "1px solid var(--border)",
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 750, color: "var(--text)", letterSpacing: -0.2 }}>
+                Resume editor
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
+                <HelpChip label={`${editorStats.editableSections} editable sections`} />
+                <HelpChip label={`${editorStats.bullets} bullets`} />
+                <HelpChip label="**bold** supported" />
+                <HelpChip label="Education locked" />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
               <button
-                onClick={() => setHistoryOpen(o => !o)}
-                title={`${history.length} prior version${history.length === 1 ? "" : "s"} saved locally`}
-                style={{
-                  fontSize: 10, padding: "4px 8px",
-                  background: historyOpen ? "var(--accent-bg)" : "var(--surface2)",
-                  color: historyOpen ? "var(--accent)" : "var(--muted)",
-                  border: "1px solid var(--border)", borderRadius: 6,
-                  cursor: "pointer", fontFamily: "inherit",
-                  letterSpacing: 0.3, textTransform: "uppercase", fontWeight: 600,
-                }}
+                onClick={() => setOpenSections(Object.fromEntries(draft.sections.map(s => [s.name, true])))}
+                style={toolbarButtonStyle}
               >
-                ↺ History ({history.length})
+                Expand all
               </button>
-            )}
-            <div style={{ fontSize: 10, color: "var(--dim)", letterSpacing: -0.1 }}>
-              <code style={{ color: "var(--text)" }}>**bold**</code> • drag to reorder • Education is locked
+              <button
+                onClick={() => setOpenSections(Object.fromEntries(draft.sections.map(s => [s.name, false])))}
+                style={toolbarButtonStyle}
+              >
+                Collapse all
+              </button>
+              {history.length > 0 && (
+                <button
+                  onClick={() => setHistoryOpen(o => !o)}
+                  title={`${history.length} prior version${history.length === 1 ? "" : "s"} saved locally`}
+                  style={{
+                    ...toolbarButtonStyle,
+                    background: historyOpen ? "var(--accent-bg)" : "var(--surface2)",
+                    color: historyOpen ? "var(--accent)" : "var(--muted)",
+                  }}
+                >
+                  History ({history.length})
+                </button>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Version history popover — slides in below the toolbar */}
-        {historyOpen && history.length > 0 && (
-          <div style={{
-            background: "var(--surface2)", border: "1px solid var(--border)",
-            borderRadius: 8, padding: 8, marginBottom: 10,
-            display: "flex", flexDirection: "column", gap: 4,
-          }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.5, textTransform: "uppercase", padding: "4px 6px" }}>
-              Recent saves (this device only)
+        <div style={{ overflow: "auto", maxHeight: "calc(82vh - 74px)", padding: 16 }}>
+          {/* Version history popover — slides in below the toolbar */}
+          {historyOpen && history.length > 0 && (
+            <div style={{
+              background: "var(--surface2)", border: "1px solid var(--border)",
+              borderRadius: 12, padding: 8, marginBottom: 12,
+              display: "flex", flexDirection: "column", gap: 4,
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.5, textTransform: "uppercase", padding: "4px 6px" }}>
+                Recent saves (this device only)
+              </div>
+              {history.map((h, i) => {
+                const ago = relativeTime(h.savedAt);
+                const bulletCount = h.tree.sections.reduce((acc, s) => acc + s.entries.reduce((a, e) => a + e.bullets.length, 0), 0);
+                return (
+                  <button
+                    key={i}
+                    onClick={() => restoreVersion(h.tree)}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "7px 10px", fontSize: 11,
+                      background: "var(--surface)", border: "1px solid var(--border)",
+                      borderRadius: 8, color: "var(--text)", cursor: "pointer",
+                      fontFamily: "inherit", textAlign: "left",
+                    }}
+                  >
+                    <span>{i === 0 ? "Latest" : `Version ${history.length - i}`} · {ago}</span>
+                    <span style={{ color: "var(--dim)", fontSize: 10 }}>{bulletCount} bullets · restore</span>
+                  </button>
+                );
+              })}
             </div>
-            {history.map((h, i) => {
-              const ago = relativeTime(h.savedAt);
-              const bulletCount = h.tree.sections.reduce((acc, s) => acc + s.entries.reduce((a, e) => a + e.bullets.length, 0), 0);
-              return (
-                <button
-                  key={i}
-                  onClick={() => restoreVersion(h.tree)}
-                  style={{
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "6px 10px", fontSize: 11,
-                    background: "var(--surface)", border: "1px solid var(--border)",
-                    borderRadius: 6, color: "var(--text)", cursor: "pointer",
-                    fontFamily: "inherit", textAlign: "left",
-                  }}
-                >
-                  <span>{i === 0 ? "Latest" : `Version ${history.length - i}`} · {ago}</span>
-                  <span style={{ color: "var(--dim)", fontSize: 10 }}>{bulletCount} bullets · restore</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+          )}
 
-        {draft.sections.map((section, si) => (
-          <SectionBlock
-            key={si}
-            section={section}
-            sIdx={si}
-            onBulletChange={(ei, bi, text) => updateBullet(si, ei, bi, text)}
-            onBulletAdd={(ei) => addBullet(si, ei)}
-            onBulletDelete={(ei, bi) => deleteBullet(si, ei, bi)}
-            onBulletReorder={(ei, from, to) => reorderBullets(si, ei, from, to)}
-            onSectionRewrite={onAIEdit ? (instruction) => rewriteSection(si, instruction) : undefined}
-            onAIEdit={onAIEdit}
-            doctorIssues={doctorIssues}
-            dragRef={dragRef}
-            dropHover={dropHover}
-            setDropHover={setDropHover}
-          />
-        ))}
+          {draft.sections.map((section, si) => (
+            <SectionBlock
+              key={si}
+              section={section}
+              sIdx={si}
+              open={openSections[section.name] ?? defaultOpenSections[section.name] ?? false}
+              onToggle={() => setOpenSections(prev => ({ ...prev, [section.name]: !(prev[section.name] ?? false) }))}
+              onBulletChange={(ei, bi, text) => updateBullet(si, ei, bi, text)}
+              onBulletAdd={(ei) => addBullet(si, ei)}
+              onBulletDelete={(ei, bi) => deleteBullet(si, ei, bi)}
+              onBulletReorder={(ei, from, to) => reorderBullets(si, ei, from, to)}
+              onSectionRewrite={onAIEdit ? (instruction) => rewriteSection(si, instruction) : undefined}
+              onAIEdit={onAIEdit}
+              doctorIssues={doctorIssues}
+              dragRef={dragRef}
+              dropHover={dropHover}
+              setDropHover={setDropHover}
+            />
+          ))}
 
-        {/* Save bar — sticky at the bottom of the editor pane */}
-        <div style={{
-          position: "sticky", bottom: -16, marginTop: 16, paddingTop: 12,
-          paddingBottom: 4,
-          background: "linear-gradient(to top, var(--surface) 60%, rgba(28,28,30,0))",
-          display: "flex", alignItems: "center", gap: 10,
-        }}>
-          <button
-            disabled={!dirty || saving}
-            onClick={() => wrappedSave(draft)}
-            style={{
-              fontSize: 13, padding: "8px 18px",
-              background: dirty ? "var(--accent)" : "var(--surface2)",
-              color: dirty ? "#fff" : "var(--dim)",
-              border: "none", borderRadius: 8,
-              cursor: dirty && !saving ? "pointer" : "not-allowed",
-              fontWeight: 600, letterSpacing: -0.2, fontFamily: "inherit",
-              transition: "all 0.15s",
-            }}
-          >
-            {saving ? "Re-compiling…" : dirty ? "Save & re-compile PDF" : "No changes"}
-          </button>
-          {dirty && !saving && (
+          {/* Save bar — sticky at the bottom of the editor pane */}
+          <div style={{
+            position: "sticky", bottom: -16, marginTop: 16, paddingTop: 12,
+            paddingBottom: 4,
+            background: "linear-gradient(to top, var(--surface) 64%, rgba(28,28,30,0))",
+            display: "flex", alignItems: "center", gap: 10,
+          }}>
             <button
-              onClick={() => setDraft(initial)}
+              disabled={!dirty || saving}
+              onClick={() => wrappedSave(draft)}
               style={{
-                fontSize: 12, padding: "7px 12px",
-                background: "transparent", color: "var(--dim)",
-                border: "1px solid var(--border)", borderRadius: 7,
-                cursor: "pointer", fontFamily: "inherit",
+                fontSize: 13, padding: "10px 18px",
+                background: dirty ? "var(--accent)" : "var(--surface2)",
+                color: dirty ? "#fff" : "var(--dim)",
+                border: "none", borderRadius: 10,
+                cursor: dirty && !saving ? "pointer" : "not-allowed",
+                fontWeight: 700, letterSpacing: -0.2, fontFamily: "inherit",
+                transition: "all 0.15s",
               }}
             >
-              Discard
+              {saving ? "Re-compiling…" : dirty ? "Save & re-compile PDF" : "No changes"}
             </button>
-          )}
-          {saveError && (
-            <span style={{ fontSize: 12, color: "var(--red)" }}>{saveError}</span>
-          )}
+            {dirty && !saving && (
+              <button
+                onClick={() => setDraft(initial)}
+                style={{
+                  fontSize: 12, padding: "9px 12px",
+                  background: "transparent", color: "var(--dim)",
+                  border: "1px solid var(--border)", borderRadius: 9,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                Discard
+              </button>
+            )}
+            {saveError && (
+              <span style={{ fontSize: 12, color: "var(--red)" }}>{saveError}</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -322,14 +374,47 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
 
 type DragHandle = React.MutableRefObject<{ sIdx: number; eIdx: number; bIdx: number } | null>;
 
+const toolbarButtonStyle: CSSProperties = {
+  fontSize: 10,
+  padding: "6px 9px",
+  background: "var(--surface2)",
+  color: "var(--muted)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  letterSpacing: 0.2,
+  textTransform: "uppercase",
+  fontWeight: 700,
+};
+
+function HelpChip({ label }: { label: string }) {
+  return (
+    <span style={{
+      fontSize: 10,
+      padding: "3px 7px",
+      borderRadius: 999,
+      background: "var(--surface2)",
+      color: "var(--dim)",
+      border: "1px solid var(--border)",
+      lineHeight: 1.4,
+    }}>
+      {label}
+    </span>
+  );
+}
+
 function SectionBlock({
   section, sIdx,
+  open, onToggle,
   onBulletChange, onBulletAdd, onBulletDelete, onBulletReorder,
   onSectionRewrite, onAIEdit, doctorIssues,
   dragRef, dropHover, setDropHover,
 }: {
   section: ParsedSection;
   sIdx: number;
+  open: boolean;
+  onToggle: () => void;
   onBulletChange: (entryIdx: number, bulletIdx: number, text: string) => void;
   onBulletAdd:    (entryIdx: number) => void;
   onBulletDelete: (entryIdx: number, bulletIdx: number) => void;
@@ -351,67 +436,130 @@ function SectionBlock({
     finally { setSectionAIBusy(false); setSectionAIOpen(false); }
   };
 
+  const bulletCount = section.entries.reduce((acc, entry) => acc + entry.bullets.length, 0);
+
   return (
-    <div style={{ marginBottom: 22 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 700, color: section.editable ? "var(--accent)" : "var(--dim)",
-        letterSpacing: 0.6, textTransform: "uppercase",
-        paddingBottom: 6, marginBottom: 10,
-        borderBottom: "1px solid var(--border)",
-        display: "flex", alignItems: "center", gap: 8,
-      }}>
-        {section.name}
-        {!section.editable && (
+    <div style={{
+      marginBottom: 10,
+      border: "1px solid var(--border)",
+      borderRadius: 13,
+      overflow: "hidden",
+      background: open ? "rgba(255,255,255,0.018)" : "transparent",
+    }}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onToggle}
+        onKeyDown={ev => {
+          if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            onToggle();
+          }
+        }}
+        aria-expanded={open}
+        style={{
+          width: "100%",
+          border: "none",
+          background: open ? "var(--surface2)" : "transparent",
+          color: "var(--text)",
+          display: "grid",
+          gridTemplateColumns: "20px minmax(0, 1fr) auto",
+          alignItems: "center",
+          gap: 10,
+          padding: "11px 12px",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          textAlign: "left",
+        }}
+      >
+        <span style={{
+          color: section.editable ? "var(--accent)" : "var(--dim)",
+          transform: open ? "rotate(90deg)" : "rotate(0deg)",
+          transition: "transform 0.16s ease-out",
+          fontSize: 13,
+        }}>›</span>
+        <span style={{ minWidth: 0 }}>
           <span style={{
-            fontSize: 9, fontWeight: 600, padding: "2px 6px",
-            background: "var(--surface2)", color: "var(--dim)",
-            borderRadius: 4, letterSpacing: 0.3,
-          }}>LOCKED</span>
-        )}
-        {section.editable && onSectionRewrite && (
-          <button
-            onClick={() => setSectionAIOpen(o => !o)}
-            disabled={sectionAIBusy}
-            title={`Rewrite every bullet in ${section.name} with one instruction`}
-            style={{
-              fontSize: 9, padding: "3px 8px", marginLeft: "auto",
-              background: sectionAIOpen ? "var(--accent-bg)" : "var(--surface2)",
-              color: sectionAIOpen ? "var(--accent)" : "var(--muted)",
-              border: "1px solid var(--border)", borderRadius: 4,
-              cursor: sectionAIBusy ? "wait" : "pointer", fontFamily: "inherit",
-              letterSpacing: 0.3, fontWeight: 600, textTransform: "uppercase",
-            }}
-          >
-            {sectionAIBusy ? "Rewriting…" : "✨ Rewrite all"}
-          </button>
-        )}
+            display: "block",
+            fontSize: 12,
+            fontWeight: 750,
+            color: section.editable ? "var(--text)" : "var(--dim)",
+            letterSpacing: 0.2,
+            textTransform: "uppercase",
+          }}>
+            {section.name}
+          </span>
+          <span style={{ display: "block", marginTop: 2, fontSize: 10.5, color: "var(--dim)" }}>
+            {bulletCount} bullet{bulletCount === 1 ? "" : "s"}
+            {!section.editable ? " • locked" : ""}
+          </span>
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          {!section.editable && (
+            <span style={{
+              fontSize: 9, fontWeight: 700, padding: "3px 7px",
+              background: "var(--surface)", color: "var(--dim)",
+              borderRadius: 999, letterSpacing: 0.3,
+              border: "1px solid var(--border)",
+            }}>LOCKED</span>
+          )}
+          {section.editable && onSectionRewrite && (
+            <span
+              onClick={ev => { ev.stopPropagation(); setSectionAIOpen(o => !o); }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={ev => {
+                if (ev.key === "Enter" || ev.key === " ") {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  setSectionAIOpen(o => !o);
+                }
+              }}
+              title={`Rewrite every bullet in ${section.name} with one instruction`}
+              style={{
+                fontSize: 9, padding: "4px 8px",
+                background: sectionAIOpen ? "var(--accent-bg)" : "var(--surface)",
+                color: sectionAIOpen ? "var(--accent)" : "var(--muted)",
+                border: "1px solid var(--border)", borderRadius: 999,
+                cursor: sectionAIBusy ? "wait" : "pointer", fontFamily: "inherit",
+                letterSpacing: 0.3, fontWeight: 700, textTransform: "uppercase",
+              }}
+            >
+              {sectionAIBusy ? "Rewriting" : "Rewrite"}
+            </span>
+          )}
+        </span>
       </div>
 
-      {sectionAIOpen && !sectionAIBusy && (
-        <SectionRewritePopover
-          onRun={runSectionAI}
-          onCancel={() => setSectionAIOpen(false)}
-        />
-      )}
+      {open && (
+        <div style={{ padding: "12px 12px 14px" }}>
+          {sectionAIOpen && !sectionAIBusy && (
+            <SectionRewritePopover
+              onRun={runSectionAI}
+              onCancel={() => setSectionAIOpen(false)}
+            />
+          )}
 
-      {section.entries.map((entry, ei) => (
-        <EntryBlock
-          key={ei}
-          entry={entry}
-          sIdx={sIdx}
-          eIdx={ei}
-          editable={section.editable}
-          onBulletChange={(bi, text) => onBulletChange(ei, bi, text)}
-          onBulletAdd={() => onBulletAdd(ei)}
-          onBulletDelete={(bi) => onBulletDelete(ei, bi)}
-          onBulletReorder={(from, to) => onBulletReorder(ei, from, to)}
-          onAIEdit={onAIEdit}
-          doctorIssues={doctorIssues}
-          dragRef={dragRef}
-          dropHover={dropHover}
-          setDropHover={setDropHover}
-        />
-      ))}
+          {section.entries.map((entry, ei) => (
+            <EntryBlock
+              key={ei}
+              entry={entry}
+              sIdx={sIdx}
+              eIdx={ei}
+              editable={section.editable}
+              onBulletChange={(bi, text) => onBulletChange(ei, bi, text)}
+              onBulletAdd={() => onBulletAdd(ei)}
+              onBulletDelete={(bi) => onBulletDelete(ei, bi)}
+              onBulletReorder={(from, to) => onBulletReorder(ei, from, to)}
+              onAIEdit={onAIEdit}
+              doctorIssues={doctorIssues}
+              dragRef={dragRef}
+              dropHover={dropHover}
+              setDropHover={setDropHover}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -955,8 +1103,10 @@ function PreviewSurface({ resume, pdfUrl, dirty }: {
   const [userOverride, setUserOverride] = useState(false);
   useEffect(() => {
     if (userOverride) return;
-    if (dirty && mode === "pdf") setMode("html");
-    if (!dirty && pdfUrl && mode === "html") setMode("pdf");
+    queueMicrotask(() => {
+      if (dirty && mode === "pdf") setMode("html");
+      if (!dirty && pdfUrl && mode === "html") setMode("pdf");
+    });
   }, [dirty, pdfUrl, mode, userOverride]);
 
   return (
@@ -1097,20 +1247,24 @@ function extractPreviewHeader(rawTex: string): { name: string; lines: string[] }
   };
 
   if (!rawTex) return fallback;
-  const beforeFirstSection = rawTex.split(/\\section\s*\{/)[0] ?? rawTex;
+  const bodyStart = rawTex.includes("\\begin{document}")
+    ? rawTex.split("\\begin{document}", 2)[1]
+    : rawTex;
+  const beforeFirstSection = bodyStart.split(/\\section\s*\{/)[0] ?? bodyStart;
   const cleaned = beforeFirstSection
     .replace(/%.*$/gm, "")
-    .replace(/\\begin\{document\}/g, "")
-    .replace(/\\end\{document\}/g, "")
+    .replace(/\\(?:vspace|hspace)\*?\s*\{[^{}]*\}/g, "")
+    .replace(/\\(?:rule|addtolength|setlength|titleformat|titlespacing)\*?\s*(\[[^\]]*\])?(\{[^{}]*\})+/g, "")
     .replace(/\\(?:textbf|textit|emph|uline|underline|large|Large|small)\s*\{([^{}]*)\}/g, "$1")
     .replace(/\\href\s*\{[^{}]*\}\s*\{([^{}]*)\}/g, "$1")
-    .replace(/\\(?:center|begin\{center\}|end\{center\}|noindent|centering|hfill)/g, "")
+    .replace(/\\(?:begin|end)\{center\}/g, "")
+    .replace(/\\(?:center|noindent|centering|hfill|par|quad|qquad)/g, "")
     .replace(/\\\\/g, "\n")
     .replace(/[{}]/g, "")
     .split(/\n+/)
     .map(s => s.replace(/\\[a-zA-Z]+\*?/g, "").replace(/\s+/g, " ").trim())
     .filter(Boolean)
-    .filter(s => !/^\\?documentclass|^\\?usepackage|^\\?input|^\\?pdfgentounicode|^\\?pagestyle|^\\?fancy|^\\?renewcommand|^\\?setlength|^\\?addtolength|^\\?titleformat|^\\?titlespacing|^\\?newcommand/i.test(s));
+    .filter(s => !/(documentclass|usepackage|article|a4paper|11pt|textwidth|textheight|footskip|oddsidemargin|evensidemargin|topmargin|pdfgentounicode|glyphtounicode|pagestyle|fancy|renewcommand|newcommand|0in|=1)/i.test(s));
 
   const name = cleaned.find(s => /parth\s+bhodia/i.test(s)) ?? fallback.name;
   const lines = cleaned
