@@ -654,6 +654,174 @@ async def api_version_load(request: Request):
     return JSONResponse({"parsed": json.loads(parsed)})
 
 
+async def api_storage_status(request: Request):
+    """GET /api/storage-status?user_id=<uuid> — diagnose missing .tex files.
+
+    Compares the `resumes` table for user_id against what's in the resume-tex
+    Storage bucket AND the local LIBRARY_ROOT (which only ever has data in
+    local dev — Railway's filesystem is empty after each deploy).
+
+    Returns: { rows: [{folder, company, role, has_storage_tex, has_local_tex, status}], summary }
+    """
+    user_id = (request.query_params.get("user_id") or "").strip()
+    if not user_id:
+        return JSONResponse({"error": "user_id required"}, status_code=400)
+
+    try:
+        try:
+            from resume_gui.storage import _get_client  # type: ignore
+        except ImportError:
+            from storage import _get_client  # type: ignore
+        client = _get_client()
+        if client is None:
+            return JSONResponse({"error": "storage not configured"}, status_code=503)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    loop = asyncio.get_event_loop()
+
+    def _scan():
+        db_rows = client.table("resumes").select("folder, company, role, created_at") \
+                        .eq("user_id", user_id).order("created_at", desc=True).execute().data or []
+        try:
+            objs = client.storage.from_("resume-tex").list(user_id) or []
+        except Exception:
+            objs = []
+        in_storage = {o["name"][:-4] for o in objs if o.get("name", "").endswith(".tex")}
+
+        local_with_tex: set = set()
+        if os.path.isdir(LIBRARY_ROOT):
+            for entry in os.listdir(LIBRARY_ROOT):
+                p = os.path.join(LIBRARY_ROOT, entry)
+                if os.path.isdir(p) and any(f.endswith(".tex") for f in os.listdir(p)):
+                    local_with_tex.add(entry)
+
+        rows = []
+        in_storage_count = recoverable = lost = 0
+        for r in db_rows:
+            folder   = r["folder"]
+            has_stor = folder in in_storage
+            has_loc  = folder in local_with_tex
+            if has_stor:
+                status = "in_storage"; in_storage_count += 1
+            elif has_loc:
+                status = "recoverable"; recoverable += 1
+            else:
+                status = "lost"; lost += 1
+            rows.append({
+                "folder":   folder,
+                "company":  r.get("company"),
+                "role":     r.get("role"),
+                "has_storage_tex": has_stor,
+                "has_local_tex":   has_loc,
+                "status":   status,
+            })
+        return {
+            "rows": rows,
+            "summary": {
+                "total":       len(db_rows),
+                "in_storage":  in_storage_count,
+                "recoverable": recoverable,
+                "lost":        lost,
+            },
+        }
+
+    try:
+        result = await loop.run_in_executor(None, _scan)
+    except Exception as exc:
+        logger.exception("storage_status failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    return JSONResponse(result)
+
+
+async def api_backfill_tex(request: Request):
+    """POST /api/backfill-tex — upload any local-only .tex/.pdf into Storage.
+
+    Body: {"user_id": "<uuid>", "folders": ["folder1", ...]}.
+    `folders` is optional — if omitted, attempts every recoverable folder
+    found by api_storage_status. Each folder must exist in the local
+    LIBRARY_ROOT, otherwise it's skipped.
+
+    Designed for one-shot recovery from a logged-in browser session — no admin
+    auth gate (single-user app today). Locks down: only the row's own user_id
+    can re-upload, since the path is partitioned by user_id.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    user_id = (body.get("user_id") or "").strip()
+    folders = body.get("folders") or None
+    if not user_id:
+        return JSONResponse({"error": "user_id required"}, status_code=400)
+    if folders is not None and (not isinstance(folders, list) or not all(isinstance(f, str) for f in folders)):
+        return JSONResponse({"error": "folders must be list[str]"}, status_code=400)
+
+    loop = asyncio.get_event_loop()
+
+    def _run():
+        # Resolve the candidate list — either explicit `folders` or auto-detect.
+        if folders is None:
+            try:
+                try:
+                    from resume_gui.storage import _get_client  # type: ignore
+                except ImportError:
+                    from storage import _get_client  # type: ignore
+                client = _get_client()
+                rows = client.table("resumes").select("folder").eq("user_id", user_id).execute().data or []
+                candidates = [r["folder"] for r in rows]
+                objs = client.storage.from_("resume-tex").list(user_id) or []
+                in_storage = {o["name"][:-4] for o in objs if o.get("name", "").endswith(".tex")}
+                target = [f for f in candidates if f not in in_storage]
+            except Exception as exc:
+                return {"error": f"could not list candidates: {exc}"}
+        else:
+            target = list(folders)
+
+        report = {"fixed": [], "skipped": [], "errors": []}
+        for folder in target:
+            if ".." in folder or "/" in folder:
+                report["errors"].append({"folder": folder, "msg": "invalid folder name"})
+                continue
+            local = os.path.join(LIBRARY_ROOT, folder)
+            if not os.path.isdir(local):
+                report["skipped"].append({"folder": folder, "reason": "not in local LIBRARY_ROOT"})
+                continue
+            tex_files = [f for f in os.listdir(local) if f.endswith(".tex")]
+            if not tex_files:
+                report["skipped"].append({"folder": folder, "reason": "no .tex inside local folder"})
+                continue
+            try:
+                tex_url = upload_tex(user_id, folder, os.path.join(local, tex_files[0]))
+            except Exception as exc:
+                report["errors"].append({"folder": folder, "msg": f"upload_tex: {exc}"})
+                continue
+            pdf_url = None
+            pdf_files = [f for f in os.listdir(local) if f.endswith(".pdf")]
+            if pdf_files:
+                try:
+                    pdf_url = upload_pdf(user_id, folder, os.path.join(local, pdf_files[0]))
+                except Exception as exc:
+                    # Non-fatal — tex is the important one for the editor.
+                    logger.warning(f"backfill upload_pdf failed for {folder}: {exc}")
+            report["fixed"].append({"folder": folder, "tex_url": tex_url, "pdf_url": pdf_url})
+        report["summary"] = {
+            "fixed":   len(report["fixed"]),
+            "skipped": len(report["skipped"]),
+            "errors":  len(report["errors"]),
+        }
+        return report
+
+    try:
+        result = await loop.run_in_executor(None, _run)
+    except Exception as exc:
+        logger.exception("backfill_tex failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    if isinstance(result, dict) and result.get("error"):
+        return JSONResponse(result, status_code=500)
+    return JSONResponse(result)
+
+
 async def serve_pdf(request: Request):
     folder   = request.path_params["folder"]
     filename = request.path_params["filename"]
@@ -686,6 +854,8 @@ routes = [
     Route("/api/version/{folder}",        api_version_save, methods=["POST"]),
     Route("/api/version/{folder}",        api_version_list, methods=["GET"]),
     Route("/api/version/{folder}/{version}", api_version_load, methods=["GET"]),
+    Route("/api/storage-status",            api_storage_status,methods=["GET"]),
+    Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
     Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
 
