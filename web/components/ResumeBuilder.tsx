@@ -66,6 +66,10 @@ export default function ResumeBuilder() {
   // model issues queries / cites pages mid-generation. Cleared on each run.
   const [searchQueries, setSearchQueries] = useState<string[]>([]);
   const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
+  // Per-artifact upload state from the backend's `storage` SSE events. Lets
+  // us surface "Source not backed up — base-comparison won't work for this
+  // resume" in the UI instead of swallowing it as a console.warn.
+  const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
 
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(null);
@@ -303,6 +307,7 @@ export default function ResumeBuilder() {
     setJdKeywords(extractJdKeywords(effJd));
     setSearchQueries([]);
     setSearchSources([]);
+    setStorageFailures([]);
 
     const acc: GenerationResult = { ...EMPTY_RESULT, baseFolder, baseLoaded: baseFolder ? null : false };
 
@@ -369,6 +374,7 @@ export default function ResumeBuilder() {
             case "storage":
               if (!ev.stored) {
                 console.warn(`Supabase Storage did not store ${ev.artifact}: ${ev.reason ?? "unknown reason"}`);
+                setStorageFailures(fs => [...fs, { artifact: ev.artifact, reason: ev.reason ?? "unknown reason" }]);
               }
               break;
             case "done":
@@ -903,6 +909,32 @@ export default function ResumeBuilder() {
               {result.sources.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
                   <SourcesPanel sources={result.sources} />
+                </div>
+              )}
+
+              {/* Storage failure banner — surfaces silent upload errors so the
+                  user knows this resume can't be used as a base for diff/edit
+                  later. */}
+              {storageFailures.length > 0 && (
+                <div style={{
+                  marginBottom: 16, padding: "10px 14px",
+                  background: "rgba(251,191,36,0.08)",
+                  border: "1px solid rgba(251,191,36,0.35)",
+                  borderRadius: 9, fontSize: 12, color: "var(--text)",
+                  letterSpacing: -0.1, lineHeight: 1.5,
+                }}>
+                  <div style={{ fontWeight: 600, color: "var(--orange)", marginBottom: 4, fontSize: 11, letterSpacing: 0.3, textTransform: "uppercase" }}>
+                    ⚠ Cloud backup incomplete
+                  </div>
+                  {storageFailures.map((f, i) => (
+                    <div key={i} style={{ color: "var(--muted)" }}>
+                      <strong style={{ color: "var(--text)" }}>{f.artifact === "tex" ? ".tex source" : "PDF"}</strong> didn&apos;t upload to Supabase: <span style={{ color: "var(--dim)" }}>{f.reason}</span>
+                    </div>
+                  ))}
+                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--dim)" }}>
+                    The resume is saved locally and you can still edit it now, but it may
+                    not be selectable as a base for future runs. Re-generating usually fixes this.
+                  </div>
                 </div>
               )}
 
