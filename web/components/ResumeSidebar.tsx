@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { ResumeRecord } from "@/lib/types";
 import { fetchResumes } from "@/lib/supabase";
 import { scoreColor } from "@/lib/utils";
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
+  const router = useRouter();
   const [resumes, setResumes] = useState<ResumeRecord[]>([]);
   const [filter,  setFilter]  = useState("");
   const [loading, setLoading] = useState(true);
@@ -166,6 +168,25 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
                     </div>
                   </button>
 
+                  {/* Open the full resume view */}
+                  <button
+                    onClick={e => { e.stopPropagation(); router.push(`/?view=library&resume=${encodeURIComponent(r.folder)}`); }}
+                    title="Open full editor + ATS view"
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                      color: "var(--dim)", background: "transparent", border: "none",
+                      cursor: "pointer", transition: "all 0.12s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.color = "var(--accent)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--dim)"; }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                      <path d="M5 2H3a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                      <path d="M11 2H7M11 2v4M11 2L6 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+
                   {/* Download PDF */}
                   {r.pdf_url ? (
                     <a
@@ -217,7 +238,7 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
           padding: "10px 16px", borderTop: "1px solid var(--border)", flexShrink: 0,
           fontSize: 11, color: "var(--dim)", letterSpacing: -0.1, lineHeight: 1.5,
         }}>
-          Click a row to use it as a base — or tap the ↓ icon to download.
+          Click row → use as base. ↗ open full view. ↓ download PDF.
         </div>
       )}
     </aside>

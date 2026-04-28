@@ -48,12 +48,13 @@ const EMPTY_RESULT: GenerationResult = {
   sources: [], latexPreview: "", status: "",
 };
 
-export default function ResumeBuilder() {
+export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder?: string | null } = {}) {
   const [company,    setCompany]    = useState("");
   const [role,       setRole]       = useState("");
   const [jd,         setJd]         = useState("");
   const model = "gemini-2.5-flash";
-  const [baseFolder, setBaseFolder] = useState<string | null>(null);
+  // Pre-load a base when arriving via /?base=<folder> from the library view.
+  const [baseFolder, setBaseFolder] = useState<string | null>(initialBaseFolder ?? null);
 
   const [generating, setGenerating] = useState(false);
   const [statusMsg,  setStatusMsg]  = useState("");
