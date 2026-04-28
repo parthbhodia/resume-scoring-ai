@@ -3,7 +3,7 @@
 /**
  * AppShell — sidebar + content layout for the signed-in app.
  *
- * Structure (mirrors Jobright at a high level):
+ * Structure:
  *   ┌──────────┬────────────────────────────────────────────┐
  *   │  Logo    │                                            │
  *   ├──────────┤                                            │

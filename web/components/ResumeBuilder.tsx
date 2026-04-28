@@ -698,7 +698,7 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                     width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
                     animation: "pulse-bg 1.4s ease-in-out infinite",
                   }} />
-                  {generating ? "Searching Google" : "Research used"}
+                  {generating ? "Researching the web" : "Research used"}
                 </span>
               </div>
               <div style={{

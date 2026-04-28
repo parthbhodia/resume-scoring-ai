@@ -41,7 +41,7 @@ function RouterView() {
     if (resume) return <ResumeView folder={resume} />;
     return <ResumeLibrary />;
   }
-  if (view === "profile") return <PlaceholderPanel title="Profile" subtitle="Coming next — full Jobright-style profile with Personal, Education, Work Experience, Skills, EEO, and Resumes tabs." />;
+  if (view === "profile") return <PlaceholderPanel title="Profile" subtitle="Coming next — your Personal, Education, Work Experience, Skills, EEO, and Resume defaults all in one place." />;
   if (view === "jobs")    return <PlaceholderPanel title="Jobs" subtitle="Coming soon — autoapply will live here once your profile is set up." />;
   // Default: builder. Pass the optional `base` param so the user can land
   // straight into the builder with a base resume already selected.

@@ -4,7 +4,7 @@
  * ResumeLibrary — full-page grid view of every saved resume.
  *
  * Phase B of the app-shell rebuild — replaces the sidebar's "click to use as
- * base" flow with a Jobright-style detail view. From here:
+ * base" flow with a proper detail view. From here:
  *   - Click a card → opens the resume in ResumeView (?view=library&resume=<folder>)
  *   - Right-side actions: Use as base · Download · Share (for items with PDF)
  *
