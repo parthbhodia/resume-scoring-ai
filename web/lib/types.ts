@@ -103,6 +103,10 @@ export interface ParsedContact {
   blockStart:   number;
   blockEnd:     number;
   marked:       boolean;
+  /** True when the parser couldn't find a real marker block and is handing
+   *  back a default-filled synthetic; the splicer inserts a fresh block on
+   *  save so subsequent edits become a normal in-place rewrite. */
+  synthetic?:   boolean;
   name:         string;
   location:     string;
   website:      string;

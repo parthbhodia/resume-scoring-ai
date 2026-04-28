@@ -99,11 +99,11 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
 
   const updateContact = useCallback((field: keyof NonNullable<ParsedResume["contact"]>, value: string) => {
     setDraft(d => {
-      // No contact block in this resume yet — synthesize a fresh one (the
-      // splicer will skip writing it because blockStart/End are -1, but the
-      // user can still see + tweak the form for next time we add insert support).
+      // No contact block in this resume yet — synthesize a fresh one. The
+      // splicer recognises `synthetic: true` and inserts a marker-bracketed
+      // block right after `\begin{document}` on save.
       const base = d.contact ?? {
-        blockStart: -1, blockEnd: -1, marked: false,
+        blockStart: -1, blockEnd: -1, marked: false, synthetic: true,
         name: "", location: "",
         website: "", websiteUrl: "",
         linkedin: "", linkedinUrl: "",
@@ -413,7 +413,13 @@ function ContactCard({ contact, onChange }: {
 }) {
   const [open, setOpen] = useState(true);
   const c = contact ?? null;
-  const writable = !!c && (c.blockStart >= 0 && c.blockEnd >= 0);
+  // Writable when:
+  //   1. The parser found a real marker block (blockStart >= 0), OR
+  //   2. The parser handed us a synthetic block — on save the splicer
+  //      inserts a fresh marker block right after \begin{document}.
+  // Only locked when there's no contact dict at all, which today shouldn't
+  // happen because the parser always returns at least the synthetic fallback.
+  const writable = !!c && (c.blockStart >= 0 || c.synthetic === true);
 
   return (
     <div style={{

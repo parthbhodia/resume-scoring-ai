@@ -801,7 +801,88 @@ def parse_resume_tex(full_tex: str) -> Dict:
             else:
                 sec["sectionEndLine"] = len(all_lines) - 1
 
+    # Free-text paragraph capture (Summary / Objective sections).
+    # The LLM sometimes emits Summary as a `\section{Summary}\n<prose>` block
+    # with no `\resumeItem{}` wrapper. Without this pass, the editor shows
+    # "0 bullets" and the user can't edit the summary at all.
+    #
+    # Strategy: for any section that has zero entries, scan the lines between
+    # its sectionStartLine and sectionEndLine for prose lines (no `\command`
+    # at start, non-empty after strip). Group contiguous prose into a single
+    # synthetic entry/bullet with block range covering all those lines.
+    for sec in sections:
+        if sec.get("entries"):
+            continue
+        start = sec.get("sectionStartLine", -1) + 1
+        end   = sec.get("sectionEndLine",   -1)
+        if start < 0 or end < start:
+            continue
+        # Find contiguous prose lines, skipping leading blanks / structural macros.
+        prose_lines: List[Tuple[int, str]] = []
+        for j in range(start, min(end + 1, len(all_lines))):
+            ln = all_lines[j]
+            s  = ln.strip()
+            if not s:
+                if prose_lines:
+                    break  # blank line after prose ends the paragraph
+                continue
+            # Skip pure structural macro lines (no surrounding text).
+            if s.startswith("\\") and ("{" not in s or s.endswith("}")) and re.match(r"^\\[a-zA-Z]+\*?(\{[^}]*\})?\s*$", s):
+                if prose_lines:
+                    break
+                continue
+            prose_lines.append((j, ln))
+        if not prose_lines:
+            continue
+        first_idx = prose_lines[0][0]
+        last_idx  = prose_lines[-1][0]
+        # `\small{...}` wrapper is common — strip the wrapping macro for editing.
+        joined = " ".join(l for _, l in prose_lines).strip()
+        joined = re.sub(r"^\\small\s*\{", "", joined)
+        if joined.endswith("}"):
+            joined = joined[:-1]
+        bullet_counter += 1
+        leading_ws = all_lines[first_idx][: len(all_lines[first_idx]) - len(all_lines[first_idx].lstrip())]
+        synthetic_entry: Dict = {
+            "header":           "",
+            "headerLine":       -1,
+            "indent":           leading_ws,
+            "useListMacros":    False,
+            "bulletBlockStart": first_idx,
+            "bulletBlockEnd":   last_idx,
+            "bullets":          [{
+                "id":      f"b{bullet_counter}",
+                "text":    _latex_to_plain(joined),
+                "texLine": first_idx,
+                # Marker so the splicer knows to emit this as a paragraph
+                # (no `\resumeItem{}` wrapper) on save — see splice_bullets_into_tex.
+                "isProse": True,
+            }],
+        }
+        sec["entries"].append(synthetic_entry)
+
     contact = _parse_contact_block(full_tex)
+    # If no contact block exists at all, hand the editor a synthetic one
+    # pre-filled with the deployment's defaults so the user sees editable
+    # fields instead of "(name not set) READ-ONLY". On save, the splicer
+    # inserts a fresh marker block right after `\begin{document}`.
+    if contact is None:
+        contact = {
+            "blockStart":   -1,
+            "blockEnd":     -1,
+            "marked":       False,
+            "name":         DEFAULT_CONTACT.get("name", ""),
+            "location":     DEFAULT_CONTACT.get("location", ""),
+            "website":      DEFAULT_CONTACT.get("website", ""),
+            "websiteUrl":   DEFAULT_CONTACT.get("website_url", ""),
+            "linkedin":     DEFAULT_CONTACT.get("linkedin", ""),
+            "linkedinUrl":  DEFAULT_CONTACT.get("linkedin_url", ""),
+            "github":       DEFAULT_CONTACT.get("github", "GitHub"),
+            "githubUrl":    DEFAULT_CONTACT.get("github_url", ""),
+            "email":        DEFAULT_CONTACT.get("email", ""),
+            "phone":        DEFAULT_CONTACT.get("phone", ""),
+            "synthetic":    True,   # signals to splicer: insert, don't replace
+        }
     return {"rawTex": full_tex, "sections": sections, "contact": contact}
 
 
@@ -823,15 +904,28 @@ def splice_bullets_into_tex(full_tex: str, parsed: Dict) -> str:
     lines = full_tex.splitlines()
     edits: List[Tuple[int, int, List[str]]] = []
 
-    # Contact block — only re-render when the editor actually shipped one AND
-    # the parser recorded its line range. This way an unchanged or missing
-    # contact field never disturbs the source on save.
+    # Contact block — three cases:
+    #   1. Real block (blockStart >= 0): replace it in place.
+    #   2. Synthetic block (synthetic=True, blockStart=-1): insert a fresh
+    #      marker-bracketed block right after `\begin{document}` so future
+    #      reads see a real block.
+    #   3. Missing entirely (no contact dict): leave source alone.
     contact = parsed.get("contact")
     if isinstance(contact, dict):
         c_start = contact.get("blockStart", -1)
         c_end   = contact.get("blockEnd",   -1)
         if isinstance(c_start, int) and isinstance(c_end, int) and 0 <= c_start <= c_end < len(lines):
             edits.append((c_start, c_end, _render_contact_block(contact)))
+        elif contact.get("synthetic") and any(contact.get(k) for k in ("name", "email", "phone", "location")):
+            # Find `\begin{document}` and insert immediately after it (with a
+            # blank line above for breathing room).
+            for j, ln in enumerate(lines):
+                if "\\begin{document}" in ln:
+                    block = [""] + _render_contact_block(contact)
+                    # Insert: range (j+1, j) is a 0-length window — splicing
+                    # `lines[j+1:j+1]` inserts without removing anything.
+                    edits.append((j + 1, j, block))
+                    break
 
     for section in parsed.get("sections", []):
         if not section.get("editable", True):
@@ -845,7 +939,13 @@ def splice_bullets_into_tex(full_tex: str, parsed: Dict) -> str:
 
             # Build the replacement lines — formatted to match the template.
             new_block: List[str] = []
-            if uses_macros:
+            # Single-bullet prose entries (synthesized from `\section{Summary}`
+            # paragraphs by the parser) round-trip as a `\small{...}` paragraph
+            # — NOT a `\resumeItem`. That preserves the original visual style.
+            if (len(bullets) == 1 and bullets[0].get("isProse")):
+                text = _plain_to_latex(bullets[0].get("text", ""))
+                new_block.append(f"{indent}\\small{{{text}}}")
+            elif uses_macros:
                 # Inner-bullet indent = entry indent + 2 spaces (matches what the
                 # generator emits today). pdflatex doesn't care, but a human
                 # browsing the .tex will, and so will diff tools.
