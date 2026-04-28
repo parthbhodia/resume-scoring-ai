@@ -3,14 +3,19 @@
 /**
  * Public share recipient page — no auth required.
  *
- * Visitors land here from a /r/<shortid> URL, we hit GET /api/share/<shortid>
+ * Visitors land here from a /r/?id=<shortid> URL, we hit GET /api/share/<shortid>
  * to resolve to the underlying PDF, and embed it in an iframe along with a
  * minimal Resunova header (so recipients know what they're looking at and
  * can find their way back to the marketing page).
+ *
+ * Why query-param instead of /r/[shortid]: GitHub Pages serves the static
+ * `output: "export"` build, which requires every dynamic route to enumerate
+ * its params at build time via generateStaticParams(). Share shortids are
+ * minted at runtime, so the dynamic route was unbuildable.
  */
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
 
 interface ResolveResp {
@@ -23,8 +28,23 @@ interface ResolveResp {
 }
 
 export default function SharePage() {
-  const params = useParams<{ shortid: string }>();
-  const shortid = params?.shortid ?? "";
+  // Wrap in Suspense — useSearchParams() requires it under output:export.
+  return (
+    <Suspense fallback={
+      <div style={{
+        minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+        background: "var(--bg, #0a0a0a)", color: "var(--dim, #888)",
+        fontSize: 13, letterSpacing: -0.2,
+      }}>Loading shared resume…</div>
+    }>
+      <SharePageInner />
+    </Suspense>
+  );
+}
+
+function SharePageInner() {
+  const params  = useSearchParams();
+  const shortid = (params?.get("id") ?? "").trim();
 
   const [data,    setData]    = useState<ResolveResp | null>(null);
   const [error,   setError]   = useState<string | null>(null);

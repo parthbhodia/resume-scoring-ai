@@ -5,7 +5,7 @@
  * popover with Copy + Open + Revoke actions.
  *
  * The actual PDF is hosted on Supabase Storage (see resume_gui/storage.py);
- * the shortid only proxies through resunova.io/r/<id> so the user has a
+ * the shortid only proxies through resunova.io/r/?id=<id> so the user has a
  * pretty link to share AND a kill-switch (revoke) without having to delete
  * the underlying PDF.
  */
@@ -65,8 +65,9 @@ export default function ShareButton({ folder, pdfUrl, userId }: {
     }
   };
 
+  // Static-export forces a query-param route — see web/app/r/page.tsx for why.
   const shareUrl = shortid
-    ? (typeof window !== "undefined" ? `${window.location.origin}/r/${shortid}` : `/r/${shortid}`)
+    ? (typeof window !== "undefined" ? `${window.location.origin}/r/?id=${shortid}` : `/r/?id=${shortid}`)
     : "";
 
   const onCopy = async () => {
