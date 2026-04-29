@@ -498,9 +498,20 @@ type DragHandle = React.MutableRefObject<{ sIdx: number; eIdx: number; bIdx: num
  * with — which means brand-new contacts on legacy resumes won't accidentally
  * insert garbage into the .tex.
  */
-type ContactField = Exclude<{
-  [K in keyof NonNullable<ParsedResume["contact"]>]: NonNullable<ParsedResume["contact"]>[K] extends string ? K : never
-}[keyof NonNullable<ParsedResume["contact"]>], undefined>;
+type ContactField =
+  | "name"
+  | "location"
+  | "locationLabel"
+  | "website"
+  | "websiteUrl"
+  | "linkedin"
+  | "linkedinUrl"
+  | "github"
+  | "githubUrl"
+  | "email"
+  | "emailLabel"
+  | "phone"
+  | "phoneLabel";
 
 function ContactCard({ contact, onChange, onCustomChange }: {
   contact: ParsedResume["contact"] | null | undefined;
