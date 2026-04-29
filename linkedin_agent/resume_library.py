@@ -577,6 +577,7 @@ def _parse_contact_block(full_tex: str) -> Optional[Dict]:
         name = _grab(r"\\Huge\s+([^}\\]+)")
 
     location = _grab(r"Location:\s*([^\\]+?)\s*\\\\")
+    location_label = _grab(r"([^:\\]+):\s*[^\\]+?\s*\\\\") or "Location"
 
     # Three \href{URL}{\uline{TEXT}} pairs in order: website, linkedin, github.
     href_iter = list(re.finditer(r"\\href\{([^{}]*)\}\{\\uline\{([^{}]*)\}\}", block_text))
@@ -597,12 +598,15 @@ def _parse_contact_block(full_tex: str) -> Optional[Dict]:
         email = _grab(r"Email:\s*\\href\{[^}]*\}\{\\uline\{([^}]+)\}\}")
 
     phone = _grab(r"Mobile:\s*([^\\]+?)\s*\\\\")
+    email_label = _grab(r"([^:\\]+):\s*\\href\{mailto:") or "Email"
+    phone_label = _grab(r"\$\|\s*([^:\\]+):\s*[^\\]+?\s*\\\\") or "Mobile"
 
     return {
         "blockStart":   block_start,
         "blockEnd":     block_end,
         "name":         name,
         "location":     location,
+        "locationLabel": location_label,
         "website":      website,
         "websiteUrl":   website_url,
         "linkedin":     linkedin,
@@ -611,6 +615,9 @@ def _parse_contact_block(full_tex: str) -> Optional[Dict]:
         "githubUrl":    github_url,
         "email":        email,
         "phone":        phone,
+        "emailLabel":   email_label,
+        "phoneLabel":   phone_label,
+        "customFields": [],
         "marked":       marked,
     }
 
@@ -630,6 +637,7 @@ def _render_contact_block(contact: Dict) -> List[str]:
 
     name      = esc(contact.get("name", ""))
     location  = esc(contact.get("location", ""))
+    location_label = esc(contact.get("locationLabel", "Location") or "Location")
     website     = esc(contact.get("website", ""))
     website_url = (contact.get("websiteUrl") or "").strip()
     linkedin     = esc(contact.get("linkedin", ""))
@@ -637,20 +645,34 @@ def _render_contact_block(contact: Dict) -> List[str]:
     github       = esc(contact.get("github", "GitHub"))
     github_url   = (contact.get("githubUrl") or "").strip()
     email     = (contact.get("email") or "").strip()
+    email_label = esc(contact.get("emailLabel", "Email") or "Email")
     phone     = esc(contact.get("phone", ""))
+    phone_label = esc(contact.get("phoneLabel", "Mobile") or "Mobile")
+    custom_fields = contact.get("customFields") if isinstance(contact.get("customFields"), list) else []
+
+    extra_lines: List[str] = []
+    for f in custom_fields:
+        if not isinstance(f, dict):
+            continue
+        label = esc((f.get("label") or "").strip())
+        value = esc((f.get("value") or "").strip())
+        if not label and not value:
+            continue
+        extra_lines.append(f"  {label or 'Field'}: {value} \\\\")
 
     return [
         _CONTACT_START,
         r"\begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}",
         f"  \\textbf{{\\Huge {name} \\vspace{{2pt}}}} &",
-        f"  Location: {location} \\\\",
+        f"  {location_label}: {location} \\\\",
         "",
         f"  \\href{{{website_url}}}{{\\uline{{{website}}}}} $|$",
         f"  \\href{{{linkedin_url}}}{{\\uline{{{linkedin}}}}} $|$",
         f"  \\href{{{github_url}}}{{\\uline{{{github}}}}}",
         "  &",
-        f"  Email: \\href{{mailto:{email}}}{{\\uline{{{email}}}}} $|$",
-        f"  Mobile: {phone} \\\\",
+        f"  {email_label}: \\href{{mailto:{email}}}{{\\uline{{{email}}}}} $|$",
+        f"  {phone_label}: {phone} \\\\",
+        *extra_lines,
         r"\end{tabular*}",
         _CONTACT_END,
     ]
@@ -873,6 +895,7 @@ def parse_resume_tex(full_tex: str) -> Dict:
             "marked":       False,
             "name":         DEFAULT_CONTACT.get("name", ""),
             "location":     DEFAULT_CONTACT.get("location", ""),
+            "locationLabel": "Location",
             "website":      DEFAULT_CONTACT.get("website", ""),
             "websiteUrl":   DEFAULT_CONTACT.get("website_url", ""),
             "linkedin":     DEFAULT_CONTACT.get("linkedin", ""),
@@ -881,6 +904,9 @@ def parse_resume_tex(full_tex: str) -> Dict:
             "githubUrl":    DEFAULT_CONTACT.get("github_url", ""),
             "email":        DEFAULT_CONTACT.get("email", ""),
             "phone":        DEFAULT_CONTACT.get("phone", ""),
+            "emailLabel":   "Email",
+            "phoneLabel":   "Mobile",
+            "customFields": [],
             "synthetic":    True,   # signals to splicer: insert, don't replace
         }
     return {"rawTex": full_tex, "sections": sections, "contact": contact}
@@ -983,7 +1009,63 @@ def splice_bullets_into_tex(full_tex: str, parsed: Dict) -> str:
     return "\n".join(lines) + ("\n" if full_tex.endswith("\n") else "")
 
 
-def recompile_resume_from_tex(folder: str, full_tex: str) -> Dict:
+def _apply_pdf_layout_to_tex(full_tex: str, layout: Optional[Dict]) -> str:
+    """Apply user-selected PDF layout settings to a LaTeX source string."""
+    if not isinstance(layout, dict):
+        layout = {}
+
+    page_size = str(layout.get("pageSize") or "letter").lower()
+    if page_size not in {"a4", "letter"}:
+        page_size = "letter"
+
+    density = str(layout.get("density") or "standard").lower()
+    if density not in {"compact", "standard", "spacious"}:
+        density = "standard"
+
+    try:
+        font_scale = int(layout.get("fontScale", 0))
+    except Exception:
+        font_scale = 0
+    if font_scale not in {-1, 0, 1}:
+        font_scale = 0
+
+    doc_size = { -1: "10pt", 0: "11pt", 1: "12pt" }[font_scale]
+    header_size = { -1: r"\LARGE", 0: r"\Huge", 1: r"\huge" }[font_scale]
+
+    margin_map = {
+        "compact":  {"odds": "-0.55in", "top": "-0.35in", "textheight": "1.45in", "textwidth": "1.05in"},
+        "standard": {"odds": "-0.50in", "top": "-0.25in", "textheight": "1.30in", "textwidth": "1.00in"},
+        "spacious": {"odds": "-0.42in", "top": "-0.15in", "textheight": "1.12in", "textwidth": "0.90in"},
+    }[density]
+
+    out = full_tex
+    out = re.sub(
+        r"\\documentclass\[[^\]]*\]\{article\}",
+        rf"\\documentclass[{page_size}paper,{doc_size}]{{article}}",
+        out,
+        count=1,
+    )
+
+    out = re.sub(r"\\addtolength\{\\oddsidemargin\}\{[^}]*\}",  rf"\\addtolength{{\\oddsidemargin}}{{{margin_map['odds']}}}", out, count=1)
+    out = re.sub(r"\\addtolength\{\\evensidemargin\}\{[^}]*\}", rf"\\addtolength{{\\evensidemargin}}{{{margin_map['odds']}}}", out, count=1)
+    out = re.sub(r"\\addtolength\{\\topmargin\}\{[^}]*\}",      rf"\\addtolength{{\\topmargin}}{{{margin_map['top']}}}", out, count=1)
+    out = re.sub(r"\\addtolength\{\\textheight\}\{[^}]*\}",     rf"\\addtolength{{\\textheight}}{{{margin_map['textheight']}}}", out, count=1)
+    out = re.sub(r"\\addtolength\{\\textwidth\}\{[^}]*\}",      rf"\\addtolength{{\\textwidth}}{{{margin_map['textwidth']}}}", out, count=1)
+
+    # Keep contact header visible in PDF by adding a tiny top spacer and
+    # using the configured heading size.
+    out = re.sub(r"\\textbf\{\\Huge\s+", rf"\\textbf{{{header_size} ", out, count=1)
+    if "\\begin{tabular*}{\\textwidth}{l@{\\extracolsep{\\fill}}r}" in out:
+        out = out.replace(
+            "\\begin{tabular*}{\\textwidth}{l@{\\extracolsep{\\fill}}r}",
+            "\\vspace*{2pt}\n\\begin{tabular*}{\\textwidth}{l@{\\extracolsep{\\fill}}r}",
+            1,
+        )
+
+    return out
+
+
+def recompile_resume_from_tex(folder: str, full_tex: str, layout: Optional[Dict] = None) -> Dict:
     """
     Overwrite the .tex file at `folder` with `full_tex`, re-run pdflatex, and
     return {"folder", "tex_path", "pdf_path", "compiled", "compile_error"}.
@@ -1002,8 +1084,9 @@ def recompile_resume_from_tex(folder: str, full_tex: str) -> Dict:
     filename = tex_files[0]
     tex_path = os.path.join(folder_path, filename)
 
+    rendered_tex = _apply_pdf_layout_to_tex(full_tex, layout)
     with open(tex_path, "w", encoding="utf-8") as f:
-        f.write(full_tex)
+        f.write(rendered_tex)
     logger.info(f"Re-saved .tex  |  {tex_path}  |  {len(full_tex)} chars")
 
     result = {"folder": folder, "folder_path": folder_path, "tex_path": tex_path, "pdf_path": None}

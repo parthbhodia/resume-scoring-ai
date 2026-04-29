@@ -117,12 +117,21 @@ export interface ParsedContact {
   githubUrl:    string;
   email:        string;
   phone:        string;
+  locationLabel?: string;
+  emailLabel?: string;
+  phoneLabel?: string;
+  customFields?: Array<{ id: string; label: string; value: string }>;
 }
 
 export interface ParsedResume {
   sections: ParsedSection[];
   rawTex: string;              // original .tex — needed so backend can splice
   contact?: ParsedContact | null;
+  pdfLayout?: {
+    pageSize?: "a4" | "letter";
+    density?: "compact" | "standard" | "spacious";
+    fontScale?: -1 | 0 | 1;
+  };
 }
 
 // SSE event shapes from Python backend

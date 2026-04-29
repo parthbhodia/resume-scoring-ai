@@ -49,6 +49,12 @@ const _newId = () => `b-${Date.now().toString(36)}-${Math.random().toString(36).
 
 interface HistoryEntry { savedAt: number; tree: ParsedResume; }
 
+const DEFAULT_PDF_LAYOUT: NonNullable<ParsedResume["pdfLayout"]> = {
+  pageSize: "letter",
+  density: "standard",
+  fontScale: 0,
+};
+
 export default function ResumeEditor({ initial, saving, saveError, folder, onSave, onAIEdit, doctorIssues, pdfUrl }: Props) {
   // We work on a draft copy so cancel/reset is one setState away.
   const [draft, setDraft] = useState<ParsedResume>(initial);
@@ -105,12 +111,31 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
       const base = d.contact ?? {
         blockStart: -1, blockEnd: -1, marked: false, synthetic: true,
         name: "", location: "",
+        locationLabel: "Location",
         website: "", websiteUrl: "",
         linkedin: "", linkedinUrl: "",
         github: "GitHub", githubUrl: "",
         email: "", phone: "",
+        emailLabel: "Email",
+        phoneLabel: "Mobile",
+        customFields: [],
       };
       return { ...d, contact: { ...base, [field]: value } as ParsedResume["contact"] };
+    });
+  }, []);
+
+  const updateContactCustom = useCallback((nextCustom: Array<{ id: string; label: string; value: string }>) => {
+    setDraft(d => {
+      const base = d.contact ?? {
+        blockStart: -1, blockEnd: -1, marked: false, synthetic: true,
+        name: "", location: "", locationLabel: "Location",
+        website: "", websiteUrl: "",
+        linkedin: "", linkedinUrl: "",
+        github: "GitHub", githubUrl: "",
+        email: "", phone: "", emailLabel: "Email", phoneLabel: "Mobile",
+        customFields: [],
+      };
+      return { ...d, contact: { ...base, customFields: nextCustom } as ParsedResume["contact"] };
     });
   }, []);
 
@@ -127,6 +152,17 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
       });
       return { ...d, sections };
     });
+  }, []);
+
+  const updatePdfLayout = useCallback((patch: Partial<NonNullable<ParsedResume["pdfLayout"]>>) => {
+    setDraft(d => ({
+      ...d,
+      pdfLayout: {
+        ...DEFAULT_PDF_LAYOUT,
+        ...(d.pdfLayout ?? {}),
+        ...patch,
+      },
+    }));
   }, []);
 
   /** Generic per-entry bullet-list mutator — used by add / delete / reorder. */
@@ -318,7 +354,64 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
           <ContactCard
             contact={draft.contact ?? null}
             onChange={updateContact}
+            onCustomChange={updateContactCustom}
           />
+
+          <div style={{
+            marginBottom: 18,
+            background: "var(--surface)", border: "1px solid var(--border)",
+            borderRadius: 12, padding: 12,
+          }}>
+            <div style={{
+              fontSize: 11, color: "var(--dim)", letterSpacing: 0.6,
+              textTransform: "uppercase", fontWeight: 700, marginBottom: 10,
+            }}>
+              PDF layout
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+              <label style={{ display: "block" }}>
+                <div style={{ fontSize: 9.5, color: "var(--dim)", marginBottom: 3, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+                  Page size
+                </div>
+                <select
+                  value={draft.pdfLayout?.pageSize ?? DEFAULT_PDF_LAYOUT.pageSize}
+                  onChange={e => updatePdfLayout({ pageSize: e.target.value as "a4" | "letter" })}
+                  style={{ width: "100%", fontSize: 12, padding: "7px 9px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text)", fontFamily: "inherit" }}
+                >
+                  <option value="letter">Letter</option>
+                  <option value="a4">A4</option>
+                </select>
+              </label>
+              <label style={{ display: "block" }}>
+                <div style={{ fontSize: 9.5, color: "var(--dim)", marginBottom: 3, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+                  Density
+                </div>
+                <select
+                  value={draft.pdfLayout?.density ?? DEFAULT_PDF_LAYOUT.density}
+                  onChange={e => updatePdfLayout({ density: e.target.value as "compact" | "standard" | "spacious" })}
+                  style={{ width: "100%", fontSize: 12, padding: "7px 9px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text)", fontFamily: "inherit" }}
+                >
+                  <option value="compact">Compact</option>
+                  <option value="standard">Standard</option>
+                  <option value="spacious">Spacious</option>
+                </select>
+              </label>
+              <label style={{ display: "block" }}>
+                <div style={{ fontSize: 9.5, color: "var(--dim)", marginBottom: 3, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+                  Font scale
+                </div>
+                <select
+                  value={String(draft.pdfLayout?.fontScale ?? DEFAULT_PDF_LAYOUT.fontScale)}
+                  onChange={e => updatePdfLayout({ fontScale: Number(e.target.value) as -1 | 0 | 1 })}
+                  style={{ width: "100%", fontSize: 12, padding: "7px 9px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text)", fontFamily: "inherit" }}
+                >
+                  <option value="-1">Smaller</option>
+                  <option value="0">Default</option>
+                  <option value="1">Larger</option>
+                </select>
+              </label>
+            </div>
+          </div>
 
           {draft.sections.map((section, si) => (
             <SectionBlock
@@ -405,14 +498,18 @@ type DragHandle = React.MutableRefObject<{ sIdx: number; eIdx: number; bIdx: num
  * with — which means brand-new contacts on legacy resumes won't accidentally
  * insert garbage into the .tex.
  */
-type ContactField = keyof NonNullable<ParsedResume["contact"]>;
+type ContactField = Exclude<{
+  [K in keyof NonNullable<ParsedResume["contact"]>]: NonNullable<ParsedResume["contact"]>[K] extends string ? K : never
+}[keyof NonNullable<ParsedResume["contact"]>], undefined>;
 
-function ContactCard({ contact, onChange }: {
+function ContactCard({ contact, onChange, onCustomChange }: {
   contact: ParsedResume["contact"] | null | undefined;
   onChange: (field: ContactField, value: string) => void;
+  onCustomChange: (next: Array<{ id: string; label: string; value: string }>) => void;
 }) {
   const [open, setOpen] = useState(true);
   const c = contact ?? null;
+  const customFields = c?.customFields ?? [];
   // Writable when:
   //   1. The parser found a real marker block (blockStart >= 0), OR
   //   2. The parser handed us a synthetic block — on save the splicer
@@ -465,8 +562,11 @@ function ContactCard({ contact, onChange }: {
           display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8,
         }}>
           <ContactField label="Name"           value={c?.name      ?? ""} onChange={v => onChange("name", v)}      readOnly={!writable} />
+          <ContactField label="Location label" value={c?.locationLabel ?? "Location"} onChange={v => onChange("locationLabel", v)} readOnly={!writable} />
           <ContactField label="Location"       value={c?.location  ?? ""} onChange={v => onChange("location", v)}  readOnly={!writable} />
+          <ContactField label="Email label"    value={c?.emailLabel ?? "Email"} onChange={v => onChange("emailLabel", v)} readOnly={!writable} />
           <ContactField label="Email"          value={c?.email     ?? ""} onChange={v => onChange("email", v)}     readOnly={!writable} type="email" />
+          <ContactField label="Phone label"    value={c?.phoneLabel ?? "Mobile"} onChange={v => onChange("phoneLabel", v)} readOnly={!writable} />
           <ContactField label="Phone"          value={c?.phone     ?? ""} onChange={v => onChange("phone", v)}     readOnly={!writable} />
           <ContactField label="Website (text)" value={c?.website   ?? ""} onChange={v => onChange("website", v)}   readOnly={!writable} />
           <ContactField label="Website URL"    value={c?.websiteUrl?? ""} onChange={v => onChange("websiteUrl", v)} readOnly={!writable} type="url" />
@@ -474,6 +574,45 @@ function ContactCard({ contact, onChange }: {
           <ContactField label="LinkedIn URL"    value={c?.linkedinUrl?? ""} onChange={v => onChange("linkedinUrl", v)} readOnly={!writable} type="url" />
           <ContactField label="GitHub (text)"  value={c?.github     ?? ""} onChange={v => onChange("github", v)}   readOnly={!writable} />
           <ContactField label="GitHub URL"     value={c?.githubUrl  ?? ""} onChange={v => onChange("githubUrl", v)} readOnly={!writable} type="url" />
+          <div style={{ gridColumn: "1 / -1", marginTop: 6 }}>
+            <div style={{ fontSize: 9.5, color: "var(--dim)", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+              Extra fields
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {customFields.map((f, i) => (
+                <div key={f.id || i} style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: 6 }}>
+                  <input
+                    value={f.label}
+                    onChange={e => onCustomChange(customFields.map((x, xi) => xi === i ? { ...x, label: e.target.value } : x))}
+                    disabled={!writable}
+                    placeholder="Label"
+                    style={{ fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--surface2)", color: "var(--text)", fontFamily: "inherit" }}
+                  />
+                  <input
+                    value={f.value}
+                    onChange={e => onCustomChange(customFields.map((x, xi) => xi === i ? { ...x, value: e.target.value } : x))}
+                    disabled={!writable}
+                    placeholder="Value"
+                    style={{ fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--surface2)", color: "var(--text)", fontFamily: "inherit" }}
+                  />
+                  <button
+                    onClick={() => onCustomChange(customFields.filter((_, xi) => xi !== i))}
+                    disabled={!writable}
+                    style={{ fontSize: 11, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--surface2)", color: "var(--dim)", cursor: writable ? "pointer" : "not-allowed", fontFamily: "inherit" }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => onCustomChange([...customFields, { id: _newId(), label: "", value: "" }])}
+                disabled={!writable}
+                style={{ alignSelf: "flex-start", fontSize: 11, padding: "6px 10px", border: "1px dashed var(--border)", borderRadius: 6, background: "transparent", color: "var(--accent)", cursor: writable ? "pointer" : "not-allowed", fontFamily: "inherit" }}
+              >
+                + Add field
+              </button>
+            </div>
+          </div>
           {!writable && (
             <div style={{
               gridColumn: "1 / -1",
@@ -1245,6 +1384,9 @@ function PreviewSurface({ resume, pdfUrl, dirty }: {
   // updates. We track the "user manually overrode" state to avoid yanking
   // them out of PDF mode if they explicitly chose it.
   const [userOverride, setUserOverride] = useState(false);
+  const [pdfRev, setPdfRev] = useState(0);
+  const [pdfZoom, setPdfZoom] = useState<"fit-width" | "fit-page" | "100">("fit-width");
+  const prevDirtyRef = useRef(dirty);
   useEffect(() => {
     if (userOverride) return;
     queueMicrotask(() => {
@@ -1253,13 +1395,29 @@ function PreviewSurface({ resume, pdfUrl, dirty }: {
     });
   }, [dirty, pdfUrl, mode, userOverride]);
 
+  // Force a fresh PDF fetch after each successful save.
+  // Without this, some browsers keep showing a cached iframe even when
+  // the backend has recompiled the file at the same URL.
+  useEffect(() => {
+    const wasDirty = prevDirtyRef.current;
+    if (wasDirty && !dirty && pdfUrl) setPdfRev(v => v + 1);
+    prevDirtyRef.current = dirty;
+  }, [dirty, pdfUrl]);
+
+  const pdfSrc = useMemo(() => {
+    if (!pdfUrl) return null;
+    const join = pdfUrl.includes("?") ? "&" : "?";
+    const zoomParam = pdfZoom === "100" ? "100" : pdfZoom;
+    return `${pdfUrl}${join}v=${pdfRev}#toolbar=0&navpanes=0&page=1&zoom=${zoomParam}`;
+  }, [pdfRev, pdfUrl, pdfZoom]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {pdfUrl && (
         <div style={{
-          display: "flex", gap: 4, padding: 3,
+          display: "flex", gap: 6, padding: 3,
           background: "var(--surface2)", borderRadius: 7,
-          alignSelf: "flex-end",
+          alignSelf: "flex-end", alignItems: "center", flexWrap: "wrap",
         }}>
           {(["html", "pdf"] as const).map(m => (
             <button
@@ -1280,6 +1438,31 @@ function PreviewSurface({ resume, pdfUrl, dirty }: {
               {m === "pdf" && dirty && <span style={{ marginLeft: 4, color: "var(--orange)" }}>•</span>}
             </button>
           ))}
+          {mode === "pdf" && (
+            <>
+              <span style={{ fontSize: 10.5, color: "var(--dim)", marginLeft: 4 }}>Zoom</span>
+              {([
+                { key: "fit-width", label: "Fit width" },
+                { key: "fit-page", label: "Fit page" },
+                { key: "100", label: "100%" },
+              ] as const).map(z => (
+                <button
+                  key={z.key}
+                  onClick={() => setPdfZoom(z.key)}
+                  style={{
+                    fontSize: 10.5, padding: "4px 8px",
+                    background: pdfZoom === z.key ? "var(--surface)" : "transparent",
+                    color: pdfZoom === z.key ? "var(--text)" : "var(--dim)",
+                    border: "none", borderRadius: 5,
+                    fontWeight: pdfZoom === z.key ? 600 : 400,
+                    cursor: "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  {z.label}
+                </button>
+              ))}
+            </>
+          )}
         </div>
       )}
 
@@ -1290,7 +1473,7 @@ function PreviewSurface({ resume, pdfUrl, dirty }: {
           maxHeight: "78vh",
         }}>
           <iframe
-            src={pdfUrl + "#toolbar=0&navpanes=0"}
+            src={pdfSrc ?? undefined}
             title="Compiled PDF preview"
             style={{
               width: "100%", height: "78vh", border: "none",
@@ -1332,14 +1515,22 @@ function PreviewPane({ resume }: { resume: ParsedResume }) {
   const header = useMemo(() => {
     const c = resume.contact;
     if (c && (c.name || c.email)) {
-      const linkParts = [c.email, c.phone].filter(Boolean).join(" | ");
+      const emailLabel = c.emailLabel || "Email";
+      const phoneLabel = c.phoneLabel || "Mobile";
+      const locationLabel = c.locationLabel || "Location";
+      const linkParts = [
+        c.email ? `${emailLabel}: ${c.email}` : "",
+        c.phone ? `${phoneLabel}: ${c.phone}` : "",
+      ].filter(Boolean).join(" | ");
       const profileParts = [c.website, c.linkedin, c.github].filter(p => p && p.toLowerCase() !== "github" || c.githubUrl).join(" | ");
+      const extras = (c.customFields ?? []).filter(f => f.label.trim() || f.value.trim()).map(f => `${f.label.trim() || "Field"}: ${f.value.trim()}`);
       return {
         name: c.name || "(name not set)",
         lines: [
-          c.location,
+          c.location ? `${locationLabel}: ${c.location}` : "",
           linkParts,
           profileParts,
+          ...extras,
         ].filter(Boolean),
       };
     }

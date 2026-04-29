@@ -26,7 +26,14 @@ import ResumeEditor from "./ResumeEditor";
 import AtsPanel, { type AtsResult } from "./AtsPanel";
 import ShareButton from "./ShareButton";
 
-type Tab = "edit" | "ats";
+type Tab = "edit" | "ats" | "analysis";
+
+interface ResumeAnalysisResult {
+  overall: { score: number; summary: string };
+  sections: Array<{ name: string; score: number; summary: string }>;
+  tips: Array<{ severity: "urgent" | "critical" | "optional"; title: string; detail: string }>;
+  counts: { urgent: number; critical: number; optional: number };
+}
 
 export default function ResumeView({ folder }: { folder: string }) {
   const router = useRouter();
@@ -46,6 +53,10 @@ export default function ResumeView({ folder }: { folder: string }) {
   const [atsLoading, setAtsLoading] = useState(false);
   const [atsError,   setAtsError]   = useState<string | null>(null);
   const [doctorIssues, setDoctorIssues] = useState<Record<string, { id: string; severity: "warn" | "info"; msg: string }[]>>({});
+  const [analysis, setAnalysis] = useState<ResumeAnalysisResult | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisAt, setAnalysisAt] = useState<number | null>(null);
 
   // Pull current user
   useEffect(() => {
@@ -58,6 +69,7 @@ export default function ResumeView({ folder }: { folder: string }) {
     let cancelled = false;
     setLoading(true); setError(null);
     setTree(null); setMeta(null); setAtsResult(null); setDoctorIssues({});
+    setAnalysis(null); setAnalysisError(null); setAnalysisAt(null);
 
     (async () => {
       try {
@@ -146,6 +158,26 @@ export default function ResumeView({ folder }: { folder: string }) {
     }
   }, [folder, user?.id, atsJd]);
 
+  const runAnalysis = useCallback(async () => {
+    if (!tree) return;
+    setAnalysisLoading(true); setAnalysisError(null);
+    try {
+      const resp = await fetch(apiUrl(`/api/resume-analysis/${encodeURIComponent(folder)}`), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jd: atsJd.slice(0, 8000), user_id: user?.id ?? "local", parsed: tree }),
+      });
+      const json = await parseJsonOrThrow<ResumeAnalysisResult & { error?: string }>(resp);
+      if (!resp.ok) throw new Error(json.error ?? "Resume analysis failed.");
+      setAnalysis(json);
+      setAnalysisAt(Date.now());
+      setActiveTab("analysis");
+    } catch (e: unknown) {
+      setAnalysisError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAnalysisLoading(false);
+    }
+  }, [tree, folder, atsJd, user?.id]);
+
   const useAsBase = () => {
     router.push(`/?base=${encodeURIComponent(folder)}`);
   };
@@ -177,6 +209,16 @@ export default function ResumeView({ folder }: { folder: string }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button
+            onClick={runAnalysis}
+            disabled={analysisLoading || !tree}
+            style={{
+              fontSize: 12, padding: "8px 14px",
+              background: "var(--accent)", border: "none",
+              borderRadius: 8, color: "#fff", cursor: analysisLoading ? "wait" : "pointer", fontFamily: "inherit",
+              fontWeight: 600, opacity: analysisLoading || !tree ? 0.65 : 1,
+            }}
+          >{analysisLoading ? "Analyzing..." : "Analyze resume"}</button>
           <button
             onClick={useAsBase}
             title="Start a new generation using this resume as the base"
@@ -217,7 +259,7 @@ export default function ResumeView({ folder }: { folder: string }) {
         background: "var(--surface2)", borderRadius: 9, padding: 3,
         width: "fit-content",
       }}>
-        {(["edit", "ats"] as Tab[]).map(t => (
+        {(["edit", "ats", "analysis"] as Tab[]).map(t => (
           <button
             key={t}
             onClick={() => {
@@ -235,7 +277,11 @@ export default function ResumeView({ folder }: { folder: string }) {
               boxShadow: activeTab === t ? "0 1px 3px rgba(0,0,0,0.2)" : "none",
             }}
           >
-            {t === "edit" ? "Edit & Preview" : atsResult ? `ATS  ${atsResult.score}` : "ATS check"}
+            {t === "edit"
+              ? "Edit & Preview"
+              : t === "ats"
+                ? (atsResult ? `ATS  ${atsResult.score}` : "ATS check")
+                : (analysis ? `Analysis  ${analysis.overall.score}/10` : "Analysis")}
           </button>
         ))}
       </div>
@@ -312,6 +358,55 @@ export default function ResumeView({ folder }: { folder: string }) {
           )}
           {atsResult && !atsLoading && (
             <AtsPanel result={atsResult} rechecking={atsLoading} onRecheck={runAts} />
+          )}
+        </div>
+      )}
+
+      {!loading && !error && tree && activeTab === "analysis" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {!analysis && !analysisLoading && !analysisError && (
+            <div style={{ padding: 18, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", color: "var(--dim)", fontSize: 13 }}>
+              Click <strong style={{ color: "var(--text)" }}>Analyze resume</strong> to generate section scores and prioritized fixes.
+            </div>
+          )}
+          {analysisError && (
+            <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 10, color: "var(--red)", fontSize: 12, background: "var(--surface)" }}>
+              Couldn&apos;t analyze resume: {analysisError}
+            </div>
+          )}
+          {analysis && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)" }}>
+                <div style={{ fontSize: 11, color: "var(--dim)", textTransform: "uppercase", marginBottom: 5 }}>Overall</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>{analysis.overall.score}/10</div>
+                <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>{analysis.overall.summary}</div>
+                <div style={{ marginTop: 8, fontSize: 11, color: "var(--dim)" }}>
+                  {analysis.counts.urgent} urgent · {analysis.counts.critical} critical · {analysis.counts.optional} optional fixes
+                  {analysisAt ? ` · analyzed ${new Date(analysisAt).toLocaleTimeString()}` : ""}
+                </div>
+              </div>
+
+              {analysis.sections.map(s => (
+                <div key={s.name} style={{ padding: 14, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                    <div style={{ fontSize: 16, fontWeight: 650, color: "var(--text)" }}>{s.name}</div>
+                    <div style={{ fontSize: 12, color: "var(--accent)", fontWeight: 700 }}>{s.score}/10</div>
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>{s.summary}</div>
+                </div>
+              ))}
+
+              <div style={{ padding: 14, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)" }}>
+                <div style={{ fontSize: 12, color: "var(--dim)", textTransform: "uppercase", marginBottom: 8 }}>Top fixes</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {analysis.tips.map((t, i) => (
+                    <div key={`${t.title}-${i}`} style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>
+                      <strong>{i + 1}. {t.title}</strong> - {t.detail}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}

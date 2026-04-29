@@ -308,7 +308,8 @@ async def api_resume_save(request: Request):
     new_tex = splice_bullets_into_tex(raw_tex, parsed)
 
     loop   = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, recompile_resume_from_tex, folder, new_tex)
+    layout = parsed.get("pdfLayout") if isinstance(parsed, dict) else None
+    result = await loop.run_in_executor(None, recompile_resume_from_tex, folder, new_tex, layout)
 
     if not result.get("compiled"):
         return JSONResponse({
@@ -413,6 +414,139 @@ async def api_doctor_check(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
     total = sum(len(v) for v in issues.values())
     return JSONResponse({"issues": issues, "total": total})
+
+
+def _analysis_section_scores(parsed: dict, issues: dict) -> list:
+    sections = parsed.get("sections") or []
+    out = []
+    for sec in sections:
+        name = (sec.get("name") or "Section").strip()
+        bullets = []
+        for e in sec.get("entries", []):
+            bullets.extend(e.get("bullets", []))
+        warn = 0
+        info = 0
+        for b in bullets:
+            bid = b.get("id")
+            for it in (issues.get(bid) or []):
+                if it.get("severity") == "warn":
+                    warn += 1
+                else:
+                    info += 1
+        score = max(1, min(10, round(9 - warn * 1.1 - info * 0.4)))
+        summary = (
+            "Strong section with clear, ATS-friendly wording."
+            if warn == 0 and info <= 1 else
+            "Good structure, but tighten phrasing and add concrete impact in a few bullets."
+            if warn <= 2 else
+            "Needs cleanup: too many weak or ambiguous bullets may hurt recruiter confidence."
+        )
+        out.append({"name": name, "score": score, "summary": summary, "warn": warn, "info": info})
+    return out
+
+
+def _analysis_tips(ats: dict, sections: list, issues: dict) -> tuple[list, dict]:
+    tips = []
+    checks = ats.get("checks") or []
+    for c in checks:
+        if c.get("pass"):
+            continue
+        sev = "critical"
+        if c.get("id") in {"word_count", "page_count", "single_column"}:
+            sev = "urgent"
+        tips.append({
+            "severity": sev,
+            "title": c.get("name") or "Fix ATS issue",
+            "detail": c.get("detail") or "",
+        })
+
+    missing = [k for k in (ats.get("keywords") or []) if k.get("status") == "missing"]
+    for k in missing[:3]:
+        tips.append({
+            "severity": "optional",
+            "title": f"Add missing keyword: {k.get('keyword')}",
+            "detail": "Include this term naturally in experience bullets where factual.",
+        })
+
+    warn_total = sum(1 for arr in issues.values() for it in arr if it.get("severity") == "warn")
+    if warn_total >= 4:
+        tips.append({
+            "severity": "critical",
+            "title": "Strengthen weak bullets",
+            "detail": "Several bullets look vague or low-signal. Lead with action + measurable outcome.",
+        })
+
+    # Dedup by title while preserving order
+    seen = set()
+    deduped = []
+    for t in tips:
+        title = t.get("title") or ""
+        if title in seen:
+            continue
+        seen.add(title)
+        deduped.append(t)
+
+    counts = {
+        "urgent": sum(1 for t in deduped if t["severity"] == "urgent"),
+        "critical": sum(1 for t in deduped if t["severity"] == "critical"),
+        "optional": sum(1 for t in deduped if t["severity"] == "optional"),
+    }
+    return deduped[:8], counts
+
+
+async def api_resume_analysis(request: Request):
+    """POST /api/resume-analysis/{folder} — combined ATS + writing analysis.
+
+    Body: {"user_id": "...", "jd": "...", "parsed": ParsedResume?}
+    Returns section scores + prioritized fixes for UX-friendly report views.
+    """
+    folder = request.path_params["folder"]
+    if ".." in folder or "/" in folder:
+        return JSONResponse({"error": "invalid folder"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    jd = (body.get("jd") or "").strip()
+    user_id = (body.get("user_id") or "").strip() or "local"
+    parsed = body.get("parsed") if isinstance(body.get("parsed"), dict) else None
+
+    if parsed is None:
+        tex = get_resume_tex(folder)
+        if tex is None and user_id:
+            tex = download_tex(user_id, folder)
+        if tex is None:
+            return JSONResponse({"error": "resume not found"}, status_code=404)
+        parsed = parse_resume_tex(tex)
+
+    loop = asyncio.get_event_loop()
+    try:
+        ats = await loop.run_in_executor(None, ats_check, folder, jd, user_id, None)
+        issues = doctor_check_resume(parsed)
+    except FileNotFoundError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    except Exception as exc:
+        logger.exception("resume analysis failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    sections = _analysis_section_scores(parsed, issues)
+    tips, counts = _analysis_tips(ats, sections, issues)
+    overall = round(((ats.get("score") or 0) / 10 + (sum(s["score"] for s in sections) / max(1, len(sections)))) / 2)
+    summary = (
+        "Overall structure is strong and ATS-friendly, with a few high-impact fixes needed before submitting."
+        if overall >= 7 else
+        "Resume is promising but needs structural and wording improvements before applying broadly."
+    )
+
+    return JSONResponse({
+        "overall": {"score": overall, "summary": summary},
+        "sections": [{"name": s["name"], "score": s["score"], "summary": s["summary"]} for s in sections],
+        "tips": tips,
+        "counts": counts,
+        "ats": ats,
+    })
 
 
 # ── Share links (Phase 8b) ───────────────────────────────────────────────────
@@ -848,6 +982,7 @@ routes = [
     Route("/api/ai-edit-bullet",           api_ai_edit_bullet,methods=["POST"]),
     Route("/api/ats-check/{folder}",     api_ats_check,     methods=["POST"]),
     Route("/api/doctor-check",             api_doctor_check,   methods=["POST"]),
+    Route("/api/resume-analysis/{folder}", api_resume_analysis, methods=["POST"]),
     Route("/api/share/{folder}",           api_share_create,  methods=["POST"]),
     Route("/api/share/{shortid}",         api_share_resolve, methods=["GET"]),
     Route("/api/share/{shortid}",         api_share_revoke, methods=["DELETE"]),
