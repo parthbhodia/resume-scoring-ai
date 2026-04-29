@@ -574,17 +574,17 @@ function ContactCard({ contact, onChange, onCustomChange }: {
         }}>
           <ContactField label="Name"           value={c?.name      ?? ""} onChange={v => onChange("name", v)}      readOnly={!writable} />
           <ContactField label="Location label" value={c?.locationLabel ?? "Location"} onChange={v => onChange("locationLabel", v)} readOnly={!writable} />
-          <ContactField label="Location"       value={c?.location  ?? ""} onChange={v => onChange("location", v)}  readOnly={!writable} />
+          <ContactField label="Location"       value={c?.location  ?? ""} onChange={v => onChange("location", v)}  readOnly={!writable} onClear={() => onChange("location", "")} />
           <ContactField label="Email label"    value={c?.emailLabel ?? "Email"} onChange={v => onChange("emailLabel", v)} readOnly={!writable} />
-          <ContactField label="Email"          value={c?.email     ?? ""} onChange={v => onChange("email", v)}     readOnly={!writable} type="email" />
+          <ContactField label="Email"          value={c?.email     ?? ""} onChange={v => onChange("email", v)}     readOnly={!writable} type="email" onClear={() => onChange("email", "")} />
           <ContactField label="Phone label"    value={c?.phoneLabel ?? "Mobile"} onChange={v => onChange("phoneLabel", v)} readOnly={!writable} />
-          <ContactField label="Phone"          value={c?.phone     ?? ""} onChange={v => onChange("phone", v)}     readOnly={!writable} />
-          <ContactField label="Website (text)" value={c?.website   ?? ""} onChange={v => onChange("website", v)}   readOnly={!writable} />
-          <ContactField label="Website URL"    value={c?.websiteUrl?? ""} onChange={v => onChange("websiteUrl", v)} readOnly={!writable} type="url" />
-          <ContactField label="LinkedIn (text)" value={c?.linkedin   ?? ""} onChange={v => onChange("linkedin", v)} readOnly={!writable} />
-          <ContactField label="LinkedIn URL"    value={c?.linkedinUrl?? ""} onChange={v => onChange("linkedinUrl", v)} readOnly={!writable} type="url" />
-          <ContactField label="GitHub (text)"  value={c?.github     ?? ""} onChange={v => onChange("github", v)}   readOnly={!writable} />
-          <ContactField label="GitHub URL"     value={c?.githubUrl  ?? ""} onChange={v => onChange("githubUrl", v)} readOnly={!writable} type="url" />
+          <ContactField label="Phone"          value={c?.phone     ?? ""} onChange={v => onChange("phone", v)}     readOnly={!writable} onClear={() => onChange("phone", "")} />
+          <ContactField label="Website (text)" value={c?.website   ?? ""} onChange={v => onChange("website", v)}   readOnly={!writable} onClear={() => { onChange("website", ""); onChange("websiteUrl", ""); }} />
+          <ContactField label="Website URL"    value={c?.websiteUrl?? ""} onChange={v => onChange("websiteUrl", v)} readOnly={!writable} type="url" onClear={() => onChange("websiteUrl", "")} />
+          <ContactField label="LinkedIn (text)" value={c?.linkedin   ?? ""} onChange={v => onChange("linkedin", v)} readOnly={!writable} onClear={() => { onChange("linkedin", ""); onChange("linkedinUrl", ""); }} />
+          <ContactField label="LinkedIn URL"    value={c?.linkedinUrl?? ""} onChange={v => onChange("linkedinUrl", v)} readOnly={!writable} type="url" onClear={() => onChange("linkedinUrl", "")} />
+          <ContactField label="GitHub (text)"  value={c?.github     ?? ""} onChange={v => onChange("github", v)}   readOnly={!writable} onClear={() => { onChange("github", ""); onChange("githubUrl", ""); }} />
+          <ContactField label="GitHub URL"     value={c?.githubUrl  ?? ""} onChange={v => onChange("githubUrl", v)} readOnly={!writable} type="url" onClear={() => onChange("githubUrl", "")} />
           <div style={{ gridColumn: "1 / -1", marginTop: 6 }}>
             <div style={{ fontSize: 9.5, color: "var(--dim)", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
               Extra fields
@@ -640,9 +640,9 @@ function ContactCard({ contact, onChange, onCustomChange }: {
   );
 }
 
-function ContactField({ label, value, onChange, readOnly, type = "text" }: {
+function ContactField({ label, value, onChange, readOnly, type = "text", onClear }: {
   label: string; value: string; onChange: (v: string) => void;
-  readOnly?: boolean; type?: string;
+  readOnly?: boolean; type?: string; onClear?: () => void;
 }) {
   return (
     <label style={{ display: "block" }}>
@@ -650,20 +650,32 @@ function ContactField({ label, value, onChange, readOnly, type = "text" }: {
         fontSize: 9.5, color: "var(--dim)", letterSpacing: 0.4,
         textTransform: "uppercase", fontWeight: 600, marginBottom: 3,
       }}>{label}</div>
-      <input
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        disabled={readOnly}
-        style={{
-          width: "100%", fontSize: 12, padding: "6px 9px",
-          background: readOnly ? "var(--surface)" : "var(--surface2)",
-          color: readOnly ? "var(--dim)" : "var(--text)",
-          border: "1px solid var(--border)", borderRadius: 6,
-          fontFamily: "inherit", letterSpacing: -0.1,
-          cursor: readOnly ? "not-allowed" : "text",
-        }}
-      />
+      <div style={{ display: "grid", gridTemplateColumns: onClear ? "1fr auto" : "1fr", gap: 6 }}>
+        <input
+          type={type}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          disabled={readOnly}
+          style={{
+            width: "100%", fontSize: 12, padding: "6px 9px",
+            background: readOnly ? "var(--surface)" : "var(--surface2)",
+            color: readOnly ? "var(--dim)" : "var(--text)",
+            border: "1px solid var(--border)", borderRadius: 6,
+            fontFamily: "inherit", letterSpacing: -0.1,
+            cursor: readOnly ? "not-allowed" : "text",
+          }}
+        />
+        {onClear && (
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={readOnly}
+            style={{ fontSize: 11, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--surface2)", color: "var(--dim)", cursor: readOnly ? "not-allowed" : "pointer", fontFamily: "inherit" }}
+          >
+            Remove
+          </button>
+        )}
+      </div>
     </label>
   );
 }
@@ -1396,7 +1408,7 @@ function PreviewSurface({ resume, pdfUrl, dirty }: {
   // them out of PDF mode if they explicitly chose it.
   const [userOverride, setUserOverride] = useState(false);
   const [pdfRev, setPdfRev] = useState(0);
-  const [pdfZoom, setPdfZoom] = useState<"fit-width" | "fit-page" | "100">("fit-width");
+  const [pdfZoom, setPdfZoom] = useState<"page-width" | "page-fit" | "100">("page-width");
   const prevDirtyRef = useRef(dirty);
   useEffect(() => {
     if (userOverride) return;
@@ -1453,8 +1465,8 @@ function PreviewSurface({ resume, pdfUrl, dirty }: {
             <>
               <span style={{ fontSize: 10.5, color: "var(--dim)", marginLeft: 4 }}>Zoom</span>
               {([
-                { key: "fit-width", label: "Fit width" },
-                { key: "fit-page", label: "Fit page" },
+                { key: "page-width", label: "Fit width" },
+                { key: "page-fit", label: "Fit page" },
                 { key: "100", label: "100%" },
               ] as const).map(z => (
                 <button

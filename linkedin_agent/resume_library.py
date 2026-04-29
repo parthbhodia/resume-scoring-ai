@@ -942,7 +942,7 @@ def splice_bullets_into_tex(full_tex: str, parsed: Dict) -> str:
         c_end   = contact.get("blockEnd",   -1)
         if isinstance(c_start, int) and isinstance(c_end, int) and 0 <= c_start <= c_end < len(lines):
             edits.append((c_start, c_end, _render_contact_block(contact)))
-        elif contact.get("synthetic") and any(contact.get(k) for k in ("name", "email", "phone", "location")):
+        elif any(contact.get(k) for k in ("name", "email", "phone", "location", "website", "linkedin", "github")):
             # Find `\begin{document}` and insert immediately after it (with a
             # blank line above for breathing room).
             for j, ln in enumerate(lines):
