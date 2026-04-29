@@ -31,9 +31,6 @@ export const metadata: Metadata = {
   publisher: "Resunova",
   applicationName: SITE_NAME,
   category: "Productivity",
-  alternates: {
-    canonical: SITE_URL,
-  },
   openGraph: {
     type: "website",
     url: SITE_URL,
@@ -121,11 +118,6 @@ const jsonLd = {
         "@type": "Offer",
         "price": "0",
         "priceCurrency": "USD",
-      },
-      "aggregateRating": {
-        "@type": "AggregateRating",
-        "ratingValue": "4.8",
-        "ratingCount": "2400",
       },
     },
   ],
