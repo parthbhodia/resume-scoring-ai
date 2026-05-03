@@ -3,18 +3,21 @@
 /* ── Dark theme (default) ────────────────────────────────────── */
 :root,
 [data-theme="dark"] {
-  --bg:          #000000;
+  --bg:          #0a0a0b;
   --surface:     #1c1c1e;
-  --surface2:    #272729;
-  --surface3:    #2a2a2d;
+  --surface2:    #252527;
+  --surface3:    #2c2c2e;
   --border:      rgba(255,255,255,0.08);
-  --border-h:    rgba(255,255,255,0.14);
-  --text:        #ffffff;
-  --muted:       rgba(255,255,255,0.72);
-  --dim:         rgba(255,255,255,0.44);
+  --border-h:    rgba(255,255,255,0.15);
+  --text:        #f2f2f3;
+  --muted:       rgba(242,242,243,0.68);
+  --dim:         rgba(242,242,243,0.40);
   --accent:      #0071e3;
   --accent-h:    #0077ed;
   --accent-bg:   rgba(0,113,227,0.12);
+  --amber:       #c4793a;
+  --amber-h:     #d4874a;
+  --amber-bg:    rgba(196,121,58,0.14);
   --green:       #34d399;
   --green-bg:    rgba(52,211,153,0.12);
   --yellow:      #fbbf24;
@@ -22,28 +25,32 @@
   --red:         #f87171;
   --red-bg:      rgba(248,113,113,0.12);
   --orange:      #fb923c;
-  --shadow:      rgba(0,0,0,0.22) 3px 5px 30px 0px;
+  --glass-bg:    rgba(10,10,11,0.80);
+  --shadow:      0 4px 32px rgba(0,0,0,0.32);
+  --shadow-sm:   0 1px 8px rgba(0,0,0,0.22);
   --radius:      8px;
   --radius-lg:   12px;
+  --radius-xl:   16px;
+  --transition:  0.18s cubic-bezier(0.4,0,0.2,1);
 }
 
 /* ── Light theme ─────────────────────────────────────────────── */
-:root, [data-theme="dark"] { --glass-bg: rgba(0,0,0,0.72); }
-[data-theme="light"]       { --glass-bg: rgba(255,255,255,0.82); }
-
 [data-theme="light"] {
-  --bg:          #f5f5f7;
+  --bg:          #f4f2ef;
   --surface:     #ffffff;
-  --surface2:    #f2f2f7;
-  --surface3:    #e5e5ea;
-  --border:      rgba(0,0,0,0.09);
-  --border-h:    rgba(0,0,0,0.16);
-  --text:        #1d1d1f;
-  --muted:       rgba(0,0,0,0.70);
-  --dim:         rgba(0,0,0,0.40);
+  --surface2:    #f0ede8;
+  --surface3:    #e8e4de;
+  --border:      rgba(0,0,0,0.08);
+  --border-h:    rgba(0,0,0,0.15);
+  --text:        #1a1814;
+  --muted:       rgba(26,24,20,0.68);
+  --dim:         rgba(26,24,20,0.40);
   --accent:      #0071e3;
-  --accent-h:    #0077ed;
+  --accent-h:    #005cc5;
   --accent-bg:   rgba(0,113,227,0.10);
+  --amber:       #c4793a;
+  --amber-h:     #a8612a;
+  --amber-bg:    rgba(196,121,58,0.10);
   --green:       #059669;
   --green-bg:    rgba(5,150,105,0.10);
   --yellow:      #b45309;
@@ -51,9 +58,13 @@
   --red:         #dc2626;
   --red-bg:      rgba(220,38,38,0.10);
   --orange:      #c2410c;
-  --shadow:      rgba(0,0,0,0.10) 3px 5px 30px 0px;
+  --glass-bg:    rgba(244,242,239,0.88);
+  --shadow:      0 4px 32px rgba(0,0,0,0.10);
+  --shadow-sm:   0 1px 8px rgba(0,0,0,0.07);
   --radius:      8px;
   --radius-lg:   12px;
+  --radius-xl:   16px;
+  --transition:  0.18s cubic-bezier(0.4,0,0.2,1);
 }
 
 @theme inline {
@@ -62,6 +73,7 @@
   --color-surface2: var(--surface2);
   --color-surface3: var(--surface3);
   --color-accent:   var(--accent);
+  --color-amber:    var(--amber);
   --color-green:    var(--green);
   --color-yellow:   var(--yellow);
   --color-red:      var(--red);
@@ -74,25 +86,35 @@
 
 html, body {
   height: 100%;
-  font-family: 'SF Pro Text', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  /* DM Sans loaded via layout.tsx Google Fonts — gives the app the same
+     refined feel as the landing page without the serif heaviness */
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  font-feature-settings: "ss01", "cv11";
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
-  line-height: 1.47;
-  letter-spacing: -0.2px;
+  line-height: 1.5;
+  letter-spacing: -0.15px;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── Scrollbar ────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+
+/* ── Buttons: pointer + transition base ────────────────────── */
+button { cursor: pointer; font-family: inherit; }
+button:disabled { cursor: not-allowed; opacity: 0.5; }
+a { cursor: pointer; }
 
 /* ── Form elements ────────────────────────────────────────── */
 input, textarea, select {
   font-family: inherit;
   font-size: 14px;
-  letter-spacing: -0.2px;
+  letter-spacing: -0.1px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -100,44 +122,73 @@ input, textarea, select {
   padding: 10px 12px;
   outline: none;
   width: 100%;
-  transition: border-color 0.15s;
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
 input:hover, textarea:hover { border-color: var(--border-h); }
 input:focus, textarea:focus, select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(0,113,227,0.18);
+  box-shadow: 0 0 0 3px rgba(0,113,227,0.16);
 }
 input::placeholder, textarea::placeholder { color: var(--dim); }
-textarea { resize: vertical; line-height: 1.5; }
+textarea { resize: vertical; line-height: 1.6; }
 select { appearance: none; cursor: pointer; }
 select option { background: var(--surface); }
 
+/* ── Skeleton shimmer ─────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius);
+}
+
 /* ── Animations ───────────────────────────────────────────── */
-@keyframes fadeIn   { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn   { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pulse-bg { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 @keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes scaleIn  { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
 
-.fade-in { animation: fadeIn 0.3s cubic-bezier(0.4,0,0.2,1) both; }
+.fade-in     { animation: fadeIn 0.28s cubic-bezier(0.4,0,0.2,1) both; }
+.fade-in-up  { animation: fadeInUp 0.38s cubic-bezier(0.16,1,0.3,1) both; }
+.scale-in    { animation: scaleIn 0.22s cubic-bezier(0.4,0,0.2,1) both; }
+
+/* ── Stagger helpers ──────────────────────────────────────── */
+.stagger-1 { animation-delay: 0.06s; }
+.stagger-2 { animation-delay: 0.12s; }
+.stagger-3 { animation-delay: 0.18s; }
+.stagger-4 { animation-delay: 0.24s; }
+
+/* ── Reduced motion ───────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 /* ── Mobile responsive overrides ──────────────────────────── */
 /* Use !important to beat React inline styles. */
 @media (max-width: 768px) {
   .rb-root      { grid-template-columns: 1fr !important; }
   .rb-sidebar   { display: none !important; }
-  .rb-header    { padding: 0 16px !important; }
   .rb-page      { padding: 24px 16px 60px !important; }
-  .rb-hero-title{ font-size: 26px !important; letter-spacing: -0.8px !important; }
+  .rb-hero-title{ font-size: 28px !important; letter-spacing: -0.8px !important; }
   .rb-hero br   { display: none; }
   .rb-grid-2    { grid-template-columns: 1fr !important; }
   .rb-score-row { flex-direction: column !important; align-items: center !important; text-align: center; gap: 16px !important; }
   .rb-score-card{ padding: 22px 18px 20px !important; }
   .resume-editor-workspace { grid-template-columns: 1fr !important; }
+  .app-nav-links { display: none !important; }
 }
 
 @media (max-width: 480px) {
   .rb-hero-title { font-size: 22px !important; }
   .rb-page       { padding: 18px 12px 50px !important; }
-  .rb-header     { padding: 0 12px !important; }
 }
 
 /* Landing page mobile */

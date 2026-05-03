@@ -429,29 +429,48 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
 
           {/* ── Hero (pre-generation) ── */}
           {!result && !generating && (
-            <div style={{ textAlign: "center", marginBottom: 48 }} className="fade-in rb-hero">
-              <div className="rb-hero-title" style={{ fontSize: 34, fontWeight: 700, letterSpacing: -1.2, lineHeight: 1.15, marginBottom: 12 }}>
-                Tailor your resume to<br />any job description
+            <div style={{ marginBottom: 40 }} className="rb-hero">
+
+              {/* Editorial heading */}
+              <div className="fade-in rb-hero-title" style={{
+                fontFamily: "'Cormorant Garant', Georgia, serif",
+                fontSize: 42, fontWeight: 600, lineHeight: 1.1,
+                letterSpacing: -1.2, marginBottom: 14, color: "var(--text)",
+              }}>
+                Tailor your résumé to{" "}
+                <em style={{ fontStyle: "italic", color: "var(--amber)" }}>any</em>
+                <br />job description.
               </div>
-              <p style={{ fontSize: 15, color: "var(--muted)", letterSpacing: -0.3, marginBottom: 28, lineHeight: 1.6 }}>
-                Upload your resume, paste a job description, and get an AI-optimized<br />
-                resume that speaks the company&apos;s language.
+
+              <p className="fade-in stagger-1" style={{
+                fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
+                marginBottom: 28, maxWidth: 520, letterSpacing: -0.1,
+              }}>
+                Upload your current résumé, paste the job posting, and receive
+                an AI-tailored version with match score, gap analysis, and
+                ATS-safe PDF — in under 60 seconds.
               </p>
-              <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-                {["Upload your resume", "Paste the job description", "Get a tailored resume"].map((s, i) => (
-                  <div key={i} style={{
-                    display: "flex", alignItems: "center", gap: 7,
-                    padding: "6px 14px",
+
+              {/* 3-step process pills */}
+              <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[
+                  { n: "01", label: "Upload résumé" },
+                  { n: "02", label: "Paste job posting" },
+                  { n: "03", label: "Get tailored result" },
+                ].map(({ n, label }) => (
+                  <div key={n} style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "7px 14px",
                     background: "var(--surface)", border: "1px solid var(--border)",
-                    borderRadius: 20, fontSize: 12, color: "var(--muted)", letterSpacing: -0.2,
+                    borderRadius: 24, fontSize: 12.5, color: "var(--muted)",
+                    letterSpacing: -0.1,
                   }}>
                     <span style={{
-                      width: 17, height: 17, borderRadius: "50%",
-                      background: "var(--accent)", color: "#fff",
-                      fontSize: 9, fontWeight: 700,
-                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                    }}>{i + 1}</span>
-                    {s}
+                      fontFamily: "'Cormorant Garant', Georgia, serif",
+                      fontSize: 11, fontWeight: 700, color: "var(--amber)",
+                      letterSpacing: 0.5, minWidth: 18,
+                    }}>{n}</span>
+                    {label}
                   </div>
                 ))}
               </div>
@@ -1104,26 +1123,30 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
 function StepCard({ step, title, subtitle, children }: {
   step: number; title: string; subtitle: string; children: React.ReactNode;
 }) {
+  const stepNum = String(step).padStart(2, "0");
   return (
-    <div style={{
+    <div className={`fade-in-up stagger-${step}`} style={{
       background: "var(--surface)", border: "1px solid var(--border)",
-      borderRadius: 14, padding: "20px 22px", marginBottom: 14,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+      borderRadius: 14, padding: "20px 22px", marginBottom: 12,
+      transition: "border-color var(--transition), box-shadow var(--transition)",
+    }}
+    onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border-h)"; }}
+    onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)"; }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 16 }}>
+        {/* Amber editorial step number */}
         <div style={{
-          width: 24, height: 24, borderRadius: "50%",
-          background: "var(--accent)", color: "#fff",
-          fontSize: 11, fontWeight: 700,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          flexShrink: 0, letterSpacing: 0,
-        }}>
-          {step}
-        </div>
+          fontFamily: "'Cormorant Garant', Georgia, serif",
+          fontSize: 13, fontWeight: 700, letterSpacing: 0.3,
+          color: "var(--amber)", flexShrink: 0,
+          width: 24, textAlign: "center",
+        }}>{stepNum}</div>
+        <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0 }} />
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: -0.4, color: "var(--text)", lineHeight: 1 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, letterSpacing: -0.3, color: "var(--text)", lineHeight: 1 }}>
             {title}
           </div>
-          <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 3, letterSpacing: -0.1 }}>
+          <div style={{ fontSize: 11.5, color: "var(--dim)", marginTop: 3, letterSpacing: -0.1 }}>
             {subtitle}
           </div>
         </div>

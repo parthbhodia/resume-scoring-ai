@@ -159,38 +159,67 @@ export default function AppShell({ children }: { children: ReactNode }) {
       {/* ── Persistent top navbar ──────────────────────────── */}
       <header style={{
         position: "sticky", top: 0, zIndex: 50,
-        height: HEADER_H, padding: "0 18px",
-        display: "flex", alignItems: "center", gap: 10,
+        height: HEADER_H, padding: "0 20px",
+        display: "flex", alignItems: "center", gap: 4,
         background: "var(--glass-bg)",
-        backdropFilter: "blur(20px) saturate(180%)",
-        WebkitBackdropFilter: "blur(20px) saturate(180%)",
+        backdropFilter: "blur(24px) saturate(200%)",
+        WebkitBackdropFilter: "blur(24px) saturate(200%)",
         borderBottom: "1px solid var(--border)",
       }}>
 
-        {/* Logo */}
+        {/* Logo — Cormorant Garant wordmark matching landing page */}
         <div
           onClick={() => switchView("builder")}
-          style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}
+          style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", userSelect: "none", flexShrink: 0 }}
         >
           <div style={{
-            width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-            background: "linear-gradient(135deg, var(--accent), #4ca0ff)",
+            width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+            background: "var(--amber)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontWeight: 700, fontSize: 14, letterSpacing: -0.4,
+            color: "#fff", fontWeight: 700, fontSize: 13,
+            fontFamily: "'Cormorant Garant', Georgia, serif",
+            letterSpacing: 0.2,
+            boxShadow: "0 1px 4px rgba(196,121,58,0.35)",
           }}>R</div>
-          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.4, color: "var(--text)" }}>
+          <span style={{
+            fontSize: 18, fontWeight: 600, letterSpacing: -0.3,
+            fontFamily: "'Cormorant Garant', Georgia, serif",
+            color: "var(--text)",
+            lineHeight: 1,
+          }}>
             Resunova
           </span>
         </div>
 
-        {/* Current view label (subtle breadcrumb) */}
-        <div style={{
-          fontSize: 12, color: "var(--dim)", letterSpacing: -0.1,
-          paddingLeft: 6, borderLeft: "1px solid var(--border)",
-          marginLeft: 2, lineHeight: 1,
-        }}>
-          {VIEW_LABELS[active]}
-        </div>
+        {/* Divider */}
+        <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 8px", flexShrink: 0 }} />
+
+        {/* Inline nav links (hidden on mobile via .app-nav-links) */}
+        <nav className="app-nav-links" style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          {(["builder", "library", "analyze"] as AppView[]).map(v => {
+            const isActive = v === active;
+            return (
+              <button
+                key={v}
+                onClick={() => switchView(v)}
+                style={{
+                  fontSize: 13, fontWeight: isActive ? 600 : 500,
+                  padding: "5px 11px", borderRadius: 7,
+                  border: "none", fontFamily: "inherit",
+                  background: isActive ? "var(--amber-bg)" : "transparent",
+                  color: isActive ? "var(--amber)" : "var(--muted)",
+                  cursor: "pointer",
+                  transition: "background var(--transition), color var(--transition)",
+                  letterSpacing: -0.1,
+                }}
+                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "var(--surface2)"; }}
+                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
+              >
+                {VIEW_LABELS[v]}
+              </button>
+            );
+          })}
+        </nav>
 
         {/* Spacer */}
         <div style={{ flex: 1 }} />
@@ -201,13 +230,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
           {theme === "dark" ? (
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
               <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5"/>
               <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4"
                 stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
             </svg>
           ) : (
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
               <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z"
                 stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
             </svg>
@@ -220,22 +249,20 @@ export default function AppShell({ children }: { children: ReactNode }) {
           title={historyOpen ? "Hide history" : "Resume history"}
           active={historyOpen}
         >
-          {/* Clock / history icon */}
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
             <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
             <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </NavIconBtn>
 
-        {/* Nav drawer toggle */}
+        {/* Nav drawer toggle (hamburger) */}
         <NavIconBtn
           onClick={() => { setNavOpen(o => !o); setHistoryOpen(false); }}
-          title={navOpen ? "Hide navigation" : "Show navigation"}
+          title={navOpen ? "Hide menu" : "Menu"}
           active={navOpen}
         >
-          {/* Hamburger / menu icon */}
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-            <path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
           </svg>
         </NavIconBtn>
 
@@ -309,7 +336,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         boxShadow: navOpen ? "4px 0 24px rgba(0,0,0,0.18)" : "none",
       }}>
         {/* Nav items */}
-        <nav style={{ flex: 1, padding: "12px 8px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
+        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 1, overflowY: "auto" }}>
           {(Object.keys(VIEW_LABELS) as AppView[]).map(v => {
             const isActive = v === active;
             const badge    = BADGES[v];
@@ -319,25 +346,26 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 onClick={() => switchView(v)}
                 style={{
                   display: "flex", alignItems: "center", gap: 10,
-                  padding: "9px 12px", borderRadius: 8,
-                  background: isActive ? "var(--accent-bg)" : "transparent",
-                  border: "none", cursor: "pointer", fontFamily: "inherit",
-                  color: isActive ? "var(--accent)" : "var(--muted)",
-                  fontSize: 13, fontWeight: isActive ? 600 : 500, letterSpacing: -0.2,
-                  textAlign: "left", transition: "background 0.12s",
+                  padding: "8px 11px", borderRadius: 8,
+                  background: isActive ? "var(--amber-bg)" : "transparent",
+                  border: isActive ? "1px solid rgba(196,121,58,0.2)" : "1px solid transparent",
+                  cursor: "pointer", fontFamily: "inherit",
+                  color: isActive ? "var(--amber)" : "var(--muted)",
+                  fontSize: 13, fontWeight: isActive ? 600 : 500, letterSpacing: -0.15,
+                  textAlign: "left", transition: "background var(--transition), color var(--transition), border-color var(--transition)",
                 }}
-                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "var(--surface2)"; }}
-                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
+                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; } }}
+                onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; } }}
               >
-                <span style={{ display: "inline-flex", color: isActive ? "var(--accent)" : "var(--dim)", flexShrink: 0 }}>
+                <span style={{ display: "inline-flex", color: isActive ? "var(--amber)" : "var(--dim)", flexShrink: 0, transition: "color var(--transition)" }}>
                   {VIEW_ICONS[v]}
                 </span>
                 <span style={{ flex: 1 }}>{VIEW_LABELS[v]}</span>
                 {badge && (
                   <span style={{
                     fontSize: 9, padding: "2px 6px", borderRadius: 4,
-                    background: "var(--surface2)", color: "var(--dim)",
-                    letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 700,
+                    background: "var(--surface3)", color: "var(--dim)",
+                    letterSpacing: 0.5, textTransform: "uppercase", fontWeight: 700,
                   }}>{badge}</span>
                 )}
               </button>
@@ -392,15 +420,15 @@ function NavIconBtn({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+        width: 30, height: 30, borderRadius: 7, flexShrink: 0,
         background: active
-          ? "var(--accent-bg)"
+          ? "var(--amber-bg)"
           : hover ? "var(--surface2)" : "transparent",
-        border: active ? "1px solid rgba(0,113,227,0.3)" : "1px solid transparent",
+        border: active ? "1px solid rgba(196,121,58,0.25)" : "1px solid transparent",
         cursor: "pointer",
         display: "flex", alignItems: "center", justifyContent: "center",
-        color: active ? "var(--accent)" : hover ? "var(--text)" : "var(--dim)",
-        transition: "background 0.12s, color 0.12s, border-color 0.12s",
+        color: active ? "var(--amber)" : hover ? "var(--text)" : "var(--dim)",
+        transition: "background var(--transition), color var(--transition), border-color var(--transition)",
       }}
     >
       {children}

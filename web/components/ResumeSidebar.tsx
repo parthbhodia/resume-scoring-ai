@@ -46,8 +46,12 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
       overflow: "hidden",
     }}>
       {/* Header */}
-      <div style={{ padding: "20px 18px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 14 }}>
+      <div style={{ padding: "18px 16px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, color: "var(--amber)",
+          letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 14,
+          fontFamily: "'Cormorant Garant', Georgia, serif",
+        }}>
           History
         </div>
 
@@ -84,8 +88,17 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
       {/* List */}
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 10px 20px" }}>
         {loading ? (
-          <div style={{ padding: "24px 0", textAlign: "center" }}>
-            <div style={{ width: 16, height: 16, border: "2px solid var(--surface2)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto" }} />
+          /* Skeleton rows while loading */
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "4px 0" }}>
+            {[1,2,3,4].map(i => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px" }}>
+                <div className="skeleton" style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0 }} />
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+                  <div className="skeleton" style={{ height: 12, borderRadius: 4, width: `${55 + i * 10}%` }} />
+                  <div className="skeleton" style={{ height: 10, borderRadius: 4, width: `${35 + i * 8}%` }} />
+                </div>
+              </div>
+            ))}
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ padding: "24px 8px", textAlign: "center" }}>
