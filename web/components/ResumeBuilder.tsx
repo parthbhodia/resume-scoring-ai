@@ -477,6 +477,9 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
             </div>
           )}
 
+          {/* ── Inputs (hidden once results are shown) ── */}
+          {!result && !generating && (<>
+
           {/* ── Step 1: Resume ── */}
           <StepCard step={1} title="Your resume" subtitle="Upload your current resume as a PDF">
             <input
@@ -681,6 +684,8 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
             )}
           </button>
 
+          </>)} {/* end !result && !generating inputs block */}
+
           {/* Live Google Search activity (Gemini grounding) */}
           {hasWebResearch && (
             <div style={{ marginBottom: 16 }} className="fade-in">
@@ -784,11 +789,29 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
           {result && (
             <div className="fade-in">
 
-              {/* Divider */}
+              {/* Results header row */}
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
                 <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
                 <span style={{ fontSize: 11, color: "var(--dim)", letterSpacing: 0.5, textTransform: "uppercase" }}>Results</span>
                 <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                <button
+                  onClick={() => setResult(null)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "6px 12px", borderRadius: 8,
+                    background: "var(--surface2)", border: "1px solid var(--border)",
+                    color: "var(--muted)", fontSize: 12, fontWeight: 500,
+                    cursor: "pointer", fontFamily: "inherit", letterSpacing: -0.2,
+                    whiteSpace: "nowrap",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.color = "var(--text)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--muted)"; }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M1 6a5 5 0 109.9-1M1 6V2m0 4h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  Try new resume
+                </button>
               </div>
 
               {/* Score hero card */}
@@ -805,24 +828,28 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                   borderRadius: "50%", pointerEvents: "none",
                 }} />
 
-                {/* Top row: ring + match label + action buttons */}
-                <div className="rb-score-row" style={{ display: "flex", alignItems: "center", gap: 24, position: "relative", marginBottom: ratings?.verdict ? 16 : 0 }}>
+                <div className="rb-score-row" style={{ display: "flex", alignItems: "flex-start", gap: 24, position: "relative" }}>
                   {ratings ? (
-                    <ScoreRing score={score} size={120} />
+                    <ScoreRing score={score} size={130} />
                   ) : (
-                    <div style={{ width: 120, height: 120, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <div style={{ width: 130, height: 130, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       <Spinner />
                     </div>
                   )}
 
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 5 }}>
+                  <div style={{ flex: 1, paddingTop: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 }}>
                       {company} · {role}
                     </div>
                     {ratings ? (
-                      <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.6, color: "var(--text)", lineHeight: 1.2 }}>
-                        {score >= 80 ? "Strong match" : score >= 65 ? "Good match" : score >= 50 ? "Moderate match" : "Needs work"}
-                      </div>
+                      <>
+                        <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: -0.6, color: "var(--text)", marginBottom: 8, lineHeight: 1.3 }}>
+                          {score >= 80 ? "Strong match" : score >= 65 ? "Good match" : score >= 50 ? "Moderate match" : "Needs work"}
+                        </div>
+                        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: 0 }}>
+                          {ratings.verdict}
+                        </p>
+                      </>
                     ) : (
                       <div style={{ fontSize: 13, color: "var(--dim)" }}>Analysing match…</div>
                     )}
@@ -860,18 +887,6 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                     </div>
                   )}
                 </div>
-
-                {/* Full-width verdict paragraph below the top row */}
-                {ratings?.verdict && (
-                  <p style={{
-                    fontSize: 13, color: "var(--muted)", lineHeight: 1.7,
-                    letterSpacing: -0.2, margin: 0,
-                    paddingTop: 4,
-                    borderTop: "1px solid var(--border)",
-                  }}>
-                    {ratings.verdict}
-                  </p>
-                )}
               </div>
 
               {/* Strengths + Gaps */}
