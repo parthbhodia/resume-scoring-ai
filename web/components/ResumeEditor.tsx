@@ -256,9 +256,12 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
     <div
       className="resume-editor-workspace"
       style={{
-      display: "block",
+      display: "grid",
+      gridTemplateColumns: "minmax(560px, 1.18fr) minmax(420px, 0.82fr)",
+      gap: 18,
       // Tall enough to feel like a real workspace, short enough to not eat the page.
       minHeight: 600,
+      alignItems: "start",
     }}>
       {/* ── EDITOR PANE ───────────────────────────────────────── */}
       <div style={{
@@ -472,6 +475,12 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
         </div>
       </div>
 
+      {/* ── PREVIEW PANE ──────────────────────────────────────── */}
+      <PreviewSurface
+        resume={draft}
+        pdfUrl={pdfUrl ?? null}
+        dirty={dirty}
+      />
     </div>
   );
 }
