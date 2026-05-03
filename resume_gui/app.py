@@ -1011,7 +1011,20 @@ _UNNECESSARY = re.compile(
 
 def _recruiter_checks(text: str) -> dict:
     """Run 10 recruiter checks on plain-text resume content."""
-    lines   = [l.strip() for l in text.splitlines() if l.strip()]
+    raw_lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+    # Merge orphan bullet glyphs: some PDFs put "•" on its own line
+    # followed by the bullet text on the next line.
+    lines: list[str] = []
+    i = 0
+    while i < len(raw_lines):
+        ln = raw_lines[i]
+        if re.match(r"^[•\-–*▪▸]\s*$", ln) and i + 1 < len(raw_lines):
+            lines.append(ln.rstrip() + " " + raw_lines[i + 1])
+            i += 2
+        else:
+            lines.append(ln)
+            i += 1
 
     # Lines that are clearly contact / header noise — skip from bullet lists
     _NOISE_RE = re.compile(
@@ -1195,6 +1208,68 @@ def _recruiter_checks(text: str) -> dict:
         "items": short_bullets[:6],
     })
 
+    # 11. Role depth — detect under-described work experience entries
+    # Match realistic years (1960-2029) or month+year — avoids phone-number false positives
+    _ROLE_HEADER_RE = re.compile(
+        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* (?:19|20)\d{2}"
+        r"|(?:19|20)\d{2}\s*[-–]\s*(?:(?:19|20)\d{2}|[Pp]resent|[Cc]urrent)",
+        re.IGNORECASE,
+    )
+    # Lines that look like job/edu titles (contain a separator + no bullet glyph)
+    _TITLE_LINE_RE = re.compile(r"[|\-–•@]|\bat\b|\bfor\b", re.IGNORECASE)
+
+    def _parse_role_blocks(all_lines):
+        roles, cur_header, cur_bullets = [], None, []
+        prev_non_bullet = ""
+        for ln in all_lines:
+            is_bullet = bool(re.match(r"^[•\-–*▪▸]", ln))
+            has_date  = bool(_ROLE_HEADER_RE.search(ln))
+            if has_date and not is_bullet:
+                if cur_header is not None:
+                    roles.append((cur_header, cur_bullets))
+                # If this line is ONLY a date range (≤ 4 tokens), prepend the previous
+                # title line so we capture "Fullstack Developer | Eccalon LLC" + date
+                if len(ln.split()) <= 4 and prev_non_bullet and not _ROLE_HEADER_RE.search(prev_non_bullet):
+                    cur_header = prev_non_bullet + "  " + ln
+                else:
+                    cur_header = ln
+                cur_bullets = []
+            elif cur_header and is_bullet:
+                cur_bullets.append(ln)
+            if not is_bullet:
+                prev_non_bullet = ln
+        if cur_header:
+            roles.append((cur_header, cur_bullets))
+        return roles
+
+    role_blocks = _parse_role_blocks(lines)
+    weak_roles = []
+    for header, role_bullets in role_blocks:
+        has_numbers  = any(_NUMBER_RE.search(b) for b in role_bullets)
+        bullet_count = len(role_bullets)
+        if bullet_count < 3 or not has_numbers:
+            reason = []
+            if bullet_count < 3:
+                reason.append(f"only {bullet_count} bullet{'s' if bullet_count != 1 else ''}")
+            if not has_numbers:
+                reason.append("no quantified results")
+            weak_roles.append(f"{header}  [{', '.join(reason)}]")
+
+    if role_blocks:
+        rd_score = max(0, round(10 - len(weak_roles) * (10 / max(len(role_blocks), 1))))
+    else:
+        rd_score = 10
+    checks.append({
+        "id": "role_depth", "name": "Role Descriptions",
+        "score": rd_score, "passed": rd_score >= 7,
+        "detail": (
+            "Each role should have at least 3 bullets and at least one quantified result "
+            "(a percentage, dollar amount, team size, or time saved). "
+            "Thin roles signal low impact to recruiters — flesh them out with specific achievements."
+        ),
+        "items": weak_roles[:6],
+    })
+
     overall = round(sum(c["score"] for c in checks) / len(checks) * 10)
     passed_names = [c["name"] for c in checks if c["passed"]]
     failed_names = [c["name"] for c in checks if not c["passed"]]
@@ -1293,6 +1368,60 @@ async def api_analyze_folder(request: Request):
     return JSONResponse(result)
 
 
+async def api_rewrite_role(request: Request):
+    """POST /api/rewrite-role — rewrite a weak role using AI.
+    Body: { "header": "Job Title | Company • Dates", "bullets": ["• bullet1", ...] }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    header  = (body.get("header") or "").strip()
+    bullets = body.get("bullets") or []
+    if not header:
+        return JSONResponse({"error": "header required"}, status_code=400)
+
+    bullets_text = "\n".join(bullets) if bullets else "(no bullets provided)"
+    prompt = (
+        f"You are a professional resume writer. Rewrite the following work experience role "
+        f"to be much stronger and more impactful for a tech recruiter.\n\n"
+        f"Role: {header}\n"
+        f"Current bullets:\n{bullets_text}\n\n"
+        f"Instructions:\n"
+        f"- Write exactly 3-4 strong bullet points\n"
+        f"- Each bullet MUST start with a powerful past-tense action verb\n"
+        f"- Each bullet MUST include a quantified result (%, $, time saved, team size, etc.) "
+        f"— if the original has no numbers, invent plausible but conservative estimates\n"
+        f"- Remove weak verbs (helped, assisted, worked on, was responsible for)\n"
+        f"- Remove pronouns (I, my, we)\n"
+        f"- Format: return ONLY the bullet points, one per line, each starting with •\n"
+        f"- Do not include the role header, just the bullets"
+    )
+
+    loop = asyncio.get_event_loop()
+
+    def _call_llm():
+        try:
+            # Reuse the same LLM routing (Gemini → Grok fallback) as the bullet rewriter
+            text = ai_rewrite_bullet("", prompt, "")
+            return text.strip() if text else None
+        except Exception as exc:
+            logger.warning(f"rewrite_role LLM call failed: {exc}")
+            return None
+
+    text = await loop.run_in_executor(None, _call_llm)
+    if not text:
+        return JSONResponse({"error": "LLM unavailable"}, status_code=503)
+
+    # Parse out bullet lines
+    rewritten = [l.strip() for l in text.splitlines() if l.strip() and re.match(r"^[•\-–*]", l.strip())]
+    if not rewritten:
+        rewritten = [l.strip() for l in text.splitlines() if l.strip()]
+
+    return JSONResponse({"bullets": rewritten})
+
+
 async def serve_pdf(request: Request):
     folder   = request.path_params["folder"]
     filename = request.path_params["filename"]
@@ -1330,6 +1459,7 @@ routes = [
     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
+    Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),
     Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
 

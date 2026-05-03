@@ -39,7 +39,7 @@ function Spinner() {
 }
 
 const CHECK_ORDER = [
-  "quantify","weak_verbs","action","pronouns","repetition",
+  "quantify","weak_verbs","role_depth","action","pronouns","repetition",
   "dates","contact","length","unnecessary","density",
 ];
 
@@ -59,8 +59,10 @@ export default function AnalyzeResume() {
   const [error,     setError]     = useState<string | null>(null);
   const [result,    setResult]    = useState<AnalysisResult | null>(null);
   const [selected,  setSelected]  = useState<string | null>(null);
-  const [rewriting, setRewriting] = useState<string | null>(null);
-  const [rewrites,  setRewrites]  = useState<Record<string, string>>({});
+  const [rewriting,     setRewriting]     = useState<string | null>(null);
+  const [rewrites,      setRewrites]      = useState<Record<string, string>>({});
+  const [roleRewriting, setRoleRewriting] = useState<string | null>(null);
+  const [roleRewrites,  setRoleRewrites]  = useState<Record<string, string[]>>({});
 
   // Stored resumes
   const [storedResumes, setStoredResumes] = useState<StoredResume[]>([]);
@@ -156,6 +158,24 @@ export default function AnalyzeResume() {
       if (json.text) setRewrites(r => ({ ...r, [bullet]: json.text }));
     } catch { /* swallow */ } finally {
       setRewriting(null);
+    }
+  };
+
+  const rewriteRole = async (item: string) => {
+    if (roleRewrites[item] || roleRewriting === item) return;
+    setRoleRewriting(item);
+    // item format: "Header  [reason]" — split on double-space
+    const header = item.split(/\s{2,}/)[0].trim();
+    try {
+      const resp = await fetch(apiUrl("/api/rewrite-role"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ header, bullets: [] }),
+      });
+      const json = await resp.json();
+      if (json.bullets?.length) setRoleRewrites(r => ({ ...r, [item]: json.bullets }));
+    } catch { /* swallow */ } finally {
+      setRoleRewriting(null);
     }
   };
 
@@ -358,18 +378,31 @@ export default function AnalyzeResume() {
                 {activeCheck.items.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>
-                      {activeCheck.id === "quantify" ? "Bullets missing metrics — click to rewrite" : "Flagged lines"}
+                      {activeCheck.id === "quantify" ? "Bullets missing metrics — click to rewrite"
+                        : activeCheck.id === "role_depth" ? "Weak roles — click to rewrite with AI"
+                        : "Flagged lines"}
                     </div>
-                    {activeCheck.items.map((item, i) => (
-                      <BulletCard
-                        key={i}
-                        bullet={item}
-                        canRewrite={activeCheck.id === "quantify" || activeCheck.id === "weak_verbs"}
-                        rewrite={rewrites[item]}
-                        rewriting={rewriting === item}
-                        onRewrite={() => rewriteBullet(item)}
-                      />
-                    ))}
+                    {activeCheck.id === "role_depth"
+                      ? activeCheck.items.map((item, i) => (
+                          <RoleCard
+                            key={i}
+                            item={item}
+                            rewrites={roleRewrites[item]}
+                            rewriting={roleRewriting === item}
+                            onRewrite={() => rewriteRole(item)}
+                          />
+                        ))
+                      : activeCheck.items.map((item, i) => (
+                          <BulletCard
+                            key={i}
+                            bullet={item}
+                            canRewrite={activeCheck.id === "quantify" || activeCheck.id === "weak_verbs"}
+                            rewrite={rewrites[item]}
+                            rewriting={rewriting === item}
+                            onRewrite={() => rewriteBullet(item)}
+                          />
+                        ))
+                    }
                   </div>
                 )}
               </div>
@@ -446,11 +479,56 @@ function UploadZone({ dragging, onDragOver, onDragLeave, onDrop, onClick, error 
           Drop your resume PDF here
         </div>
         <div style={{ fontSize: 13, color: "var(--muted)" }}>
-          or click to browse — we&apos;ll run {10} recruiter checks instantly
+          or click to browse — we&apos;ll run {11} recruiter checks instantly
         </div>
       </div>
       {error && (
         <div style={{ marginTop: 12, fontSize: 13, color: "var(--red)" }}>{error}</div>
+      )}
+    </div>
+  );
+}
+
+function RoleCard({ item, rewrites, rewriting, onRewrite }: {
+  item: string; rewrites?: string[]; rewriting: boolean; onRewrite: () => void;
+}) {
+  // item = "Header  [reason]"
+  const bracketIdx = item.lastIndexOf("  [");
+  const header = bracketIdx > -1 ? item.slice(0, bracketIdx) : item;
+  const reason = bracketIdx > -1 ? item.slice(bracketIdx + 2) : "";
+  return (
+    <div style={{ background: "var(--surface2)", borderRadius: 10, padding: "12px 14px" }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>{header}</div>
+      {reason && (
+        <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 10 }}>{reason}</div>
+      )}
+      {rewrites && rewrites.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 2 }}>
+            AI-Suggested Rewrites
+          </div>
+          {rewrites.map((b, i) => (
+            <div key={i} style={{
+              fontSize: 13, color: "var(--text)", lineHeight: 1.55,
+              borderLeft: "3px solid var(--green)", paddingLeft: 10,
+            }}>{b}</div>
+          ))}
+        </div>
+      ) : (
+        <button
+          onClick={onRewrite}
+          disabled={rewriting}
+          style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "6px 12px", borderRadius: 7,
+            background: "var(--accent)", border: "none", color: "#fff",
+            fontSize: 12, fontWeight: 500, cursor: rewriting ? "default" : "pointer",
+            opacity: rewriting ? 0.7 : 1,
+          }}
+        >
+          {rewriting ? <Spinner /> : "✦"}
+          {rewriting ? "Rewriting role…" : "Rewrite this role"}
+        </button>
       )}
     </div>
   );
