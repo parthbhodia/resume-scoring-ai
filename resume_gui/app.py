@@ -1347,11 +1347,297 @@ def _latex_to_plain(tex: str) -> str:
     return tex.strip()
 
 
+# ── Comprehensive AI-powered resume analysis ──────────────────────────────────
+
+_ANALYSIS_PROMPT = """\
+You are an expert resume reviewer and career coach. Analyze the following resume \
+using the principles below and return ONLY a valid JSON object — no markdown, no \
+code fences, no prose outside the JSON.
+
+ANALYSIS PRINCIPLES:
+1. READABILITY: Are bullets short, skimmable, and concise? Penalize bullets longer \
+than 2-3 lines or paragraphs. Does the resume survive a 30-second skim? Detect \
+clutter, inconsistent spacing, poor section organization.
+2. ATS COMPATIBILITY: Detect ATS risks: tables, multi-column layouts, text boxes, \
+headers/footers embedded in content, images, icons, excessive styling. Check \
+whether section headings are standard (Experience, Education, Skills, etc.). \
+Verify contact info (email, phone, LinkedIn) is easy to extract.
+3. JOB MATCH: If a JD is provided, extract key keywords, skills, tools, \
+responsibilities, and qualifications. Measure overlap. Identify missing important \
+keywords. Suggest where to add them naturally without keyword stuffing.
+4. ACHIEVEMENT QUALITY: Are bullets responsibility-oriented or achievement-oriented? \
+Reward bullets that show impact, ownership, outcomes, and business value. Penalize \
+vague duties like "Responsible for managing..." or "Worked on...".
+5. QUANTIFICATION: Detect numbers, percentages, dollar values, time saved, users \
+served, performance improvements, revenue impact, cost savings, scale, rankings. \
+Reward quantified bullets. Flag those that could use metrics.
+6. SECTION STRUCTURE: Detect common sections (Summary, Experience, Education, \
+Skills, Projects, Certifications, Links). Warn if Objective section exists. \
+Recommend Summary only when it adds unique value (e.g., career transition). \
+Check whether the strongest/most relevant sections appear higher.
+7. LANGUAGE QUALITY: Check spelling/grammar/punctuation. Detect passive voice. \
+Detect buzzwords, filler, vague phrases, unnecessary jargon, acronyms. Check \
+tense consistency (past roles = past tense, current role may use present, \
+achievements = past tense).
+8. TECHNICAL BRANDING: GitHub/portfolio/project links present? Clear technical \
+skills section? Programming languages, frameworks, databases, cloud tools, \
+testing tools listed?
+
+SCORING GUIDANCE:
+90-100 = Excellent, highly recruiter-friendly and ATS-safe.
+75-89  = Strong but needs minor improvements.
+60-74  = Decent but has several missed opportunities.
+40-59  = Weak; needs major restructuring.
+<40    = Poor; likely to fail ATS and recruiter screens.
+
+CRITICAL RULES:
+- Be SPECIFIC, not generic. Tell exactly WHERE and HOW to fix each issue.
+- When rewriting bullets, PRESERVE TRUTHFULNESS. Mark invented metrics \
+  as "[X%]", "[$Y]", or "[~N]".
+- For bulletAnalysis: analyze ONLY the 8 WEAKEST bullets (lowest-quality ones). \
+  Skip good bullets.
+- If no JD is provided: set jobMatch in categoryScores to null, set \
+  keywordScore to null, leave matchedKeywords/missingKeywords empty.
+- Prioritize improvements that increase interview chances most.
+{jd_section}
+
+RESUME TEXT:
+{resume_text}
+
+Return ONLY this JSON (no markdown fences, no explanation):
+{{
+  "overallScore": <integer 0-100>,
+  "categoryScores": {{
+    "readability": <0-100>,
+    "atsCompatibility": <0-100>,
+    "jobMatch": <0-100 or null>,
+    "achievementQuality": <0-100>,
+    "quantification": <0-100>,
+    "sectionStructure": <0-100>,
+    "languageQuality": <0-100>,
+    "technicalBranding": <0-100>
+  }},
+  "summary": "<2-3 sentence specific overall assessment>",
+  "topStrengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
+  "topIssues": [
+    {{
+      "issue": "<short problem title>",
+      "severity": "<low|medium|high>",
+      "whyItMatters": "<1-2 sentences on impact>",
+      "suggestion": "<concrete actionable fix>"
+    }}
+  ],
+  "atsWarnings": [
+    {{"warning": "<ATS issue>", "suggestion": "<fix>"}}
+  ],
+  "keywordAnalysis": {{
+    "matchedKeywords": ["<keyword>"],
+    "missingKeywords": ["<keyword>"],
+    "keywordScore": <0-100 or null>,
+    "suggestions": ["<where/how to naturally add missing keyword>"]
+  }},
+  "bulletAnalysis": [
+    {{
+      "originalBullet": "<exact bullet text, truncated to 150 chars>",
+      "score": <0-100>,
+      "issues": ["<issue 1>", "<issue 2>"],
+      "improvedBullet": "<stronger rewritten version>"
+    }}
+  ],
+  "sectionFeedback": [
+    {{"section": "<name>", "score": <0-100>, "feedback": "<specific feedback>"}}
+  ],
+  "rewriteSuggestions": [
+    {{"before": "<weak line>", "after": "<improved line>", "reason": "<why better>"}}
+  ],
+  "finalRecommendations": [
+    "<most impactful action 1>",
+    "<action 2>",
+    "<action 3>",
+    "<action 4>"
+  ]
+}}
+"""
+
+
+def _llm_json_call(prompt: str) -> Optional[dict]:
+    """Call Gemini 2.5 Flash (primary) or Grok (fallback) for a JSON response."""
+    import time
+
+    google_key = os.environ.get("GOOGLE_API_KEY")
+    if google_key:
+        try:
+            from google import genai as _genai  # type: ignore
+            from google.genai import types as _gtypes  # type: ignore
+            client = _genai.Client(api_key=google_key)
+            cfg = _gtypes.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+            )
+            r = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=cfg,
+            )
+            text = (r.text or "").strip()
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+            return json.loads(text)
+        except Exception as exc:
+            logger.warning(f"Gemini analysis failed: {exc}")
+
+    xai_key = os.environ.get("XAI_API_KEY")
+    if xai_key:
+        try:
+            from openai import OpenAI  # type: ignore
+            model = os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning")
+            xai = OpenAI(api_key=xai_key, base_url="https://api.x.ai/v1")
+            r = xai.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                response_format={"type": "json_object"},
+            )
+            text = (r.choices[0].message.content or "").strip()
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+            return json.loads(text)
+        except Exception as exc:
+            logger.warning(f"Grok analysis failed: {exc}")
+
+    return None
+
+
+def _normalize_analysis(raw: dict) -> dict:
+    """Ensure the LLM result has all required keys with sane defaults."""
+    cs_defaults = {
+        "readability": 50, "atsCompatibility": 50, "jobMatch": None,
+        "achievementQuality": 50, "quantification": 50,
+        "sectionStructure": 50, "languageQuality": 50, "technicalBranding": 50,
+    }
+    cs = raw.get("categoryScores") or {}
+    for k, v in cs_defaults.items():
+        if k not in cs:
+            cs[k] = v
+    scores = [v for v in cs.values() if isinstance(v, (int, float))]
+    raw.setdefault("overallScore", round(sum(scores) / len(scores)) if scores else 50)
+    raw.setdefault("summary", "Analysis complete.")
+    raw.setdefault("topStrengths", [])
+    raw.setdefault("topIssues", [])
+    raw.setdefault("atsWarnings", [])
+    raw.setdefault("keywordAnalysis", {
+        "matchedKeywords": [], "missingKeywords": [], "keywordScore": None, "suggestions": [],
+    })
+    raw.setdefault("bulletAnalysis", [])
+    raw.setdefault("sectionFeedback", [])
+    raw.setdefault("rewriteSuggestions", [])
+    raw.setdefault("finalRecommendations", [])
+    raw["categoryScores"] = cs
+    return raw
+
+
+def _regex_to_comprehensive(struct: dict, jd: str) -> dict:
+    """Convert _recruiter_checks output to comprehensive format (LLM unavailable fallback)."""
+    checks = struct.get("checks", [])
+
+    def _s(cid: str) -> int:
+        c = next((x for x in checks if x["id"] == cid), None)
+        return round((c["score"] / 10) * 100) if c else 50
+
+    quant  = _s("quantify")
+    weak   = _s("weak_verbs")
+    action = _s("action")
+    pron   = _s("pronouns")
+    rep    = _s("repetition")
+    dens   = _s("density")
+    dates  = _s("dates")
+    cont   = _s("contact")
+    leng   = _s("length")
+    rdepth = _s("role_depth")
+    unnec  = _s("unnecessary")
+
+    overall = struct.get("overall", 60)
+    issues = []
+    for c in checks:
+        if not c.get("passed"):
+            sev = "high" if c["score"] < 5 else "medium"
+            first_items = "; ".join(str(x) for x in (c.get("items") or [])[:2])
+            issues.append({
+                "issue": c["name"],
+                "severity": sev,
+                "whyItMatters": c.get("detail", ""),
+                "suggestion": f"Fix these: {first_items}" if first_items else c.get("detail", "")[:80],
+            })
+
+    return {
+        "overallScore": overall,
+        "categoryScores": {
+            "readability":       round((dens + leng) / 2),
+            "atsCompatibility":  round((dates + cont) / 2),
+            "jobMatch":          None,
+            "achievementQuality": round((weak + action + rdepth) / 3),
+            "quantification":    quant,
+            "sectionStructure":  round((dates + unnec) / 2),
+            "languageQuality":   round((pron + rep) / 2),
+            "technicalBranding": 50,
+        },
+        "summary": (
+            (struct.get("summary_ok") or "") + " " + (struct.get("summary_bad") or "")
+        ).strip() or "Resume analysis complete. Fix the highlighted issues to improve your score.",
+        "topStrengths": [c["name"] for c in checks if c.get("passed")][:3],
+        "topIssues":    issues[:6],
+        "atsWarnings":  [],
+        "keywordAnalysis": {
+            "matchedKeywords": [], "missingKeywords": [],
+            "keywordScore": None, "suggestions": [],
+        },
+        "bulletAnalysis":       [],
+        "sectionFeedback":      [],
+        "rewriteSuggestions":   [],
+        "finalRecommendations": [
+            "Add quantified results (%, $, numbers) to at least 50% of your bullets.",
+            "Replace weak verbs (helped, assisted, worked on) with strong action verbs.",
+            "Ensure every job entry has at least 3 achievement-focused bullets.",
+            "Verify contact section includes email, phone, and LinkedIn URL.",
+        ],
+    }
+
+
+def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
+    """Full resume analysis: structural regex + LLM deep-dive."""
+    # Structural checks (fast, always run)
+    struct = _recruiter_checks(text)
+
+    # Build LLM prompt
+    jd_section = (
+        f"\nJOB DESCRIPTION (analyze keyword match against this):\n{jd[:3000]}"
+        if jd.strip()
+        else "\n(No job description provided. Set jobMatch and keywordScore to null.)"
+    )
+    prompt = _ANALYSIS_PROMPT.format(
+        jd_section=jd_section,
+        resume_text=text[:6000],
+    )
+
+    raw = _llm_json_call(prompt)
+    if raw and isinstance(raw, dict):
+        return _normalize_analysis(raw)
+
+    logger.warning("LLM unavailable for comprehensive analysis — using regex fallback")
+    return _regex_to_comprehensive(struct, jd)
+
+
 async def api_analyze_upload(request: Request):
-    """POST /api/analyze-upload — upload a PDF and run recruiter checks."""
+    """POST /api/analyze-upload — upload a PDF and run comprehensive AI analysis.
+
+    Form fields:
+      file  — PDF binary
+      jd    — optional job description text
+    """
     try:
-        form = await request.form()
+        form   = await request.form()
         upload = form.get("file")
+        jd     = (form.get("jd") or "").strip()
         if not upload:
             return JSONResponse({"error": "No file provided"}, status_code=400)
         data = await upload.read()
@@ -1359,7 +1645,8 @@ async def api_analyze_upload(request: Request):
             text = _extract_pdf_text(pdf)
         if not text.strip():
             return JSONResponse({"error": "Could not extract text from PDF"}, status_code=400)
-        result = _recruiter_checks(text)
+        loop   = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _analyze_resume_comprehensive, text, jd)
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("analyze_upload failed")
@@ -1367,7 +1654,7 @@ async def api_analyze_upload(request: Request):
 
 
 async def api_analyze_folder(request: Request):
-    """POST /api/analyze-folder/{folder} — run recruiter checks on a stored resume."""
+    """POST /api/analyze-folder/{folder} — run comprehensive analysis on a stored resume."""
     folder = request.path_params.get("folder", "").strip()
     if not folder or ".." in folder:
         return JSONResponse({"error": "invalid folder"}, status_code=400)
@@ -1378,33 +1665,32 @@ async def api_analyze_folder(request: Request):
     except Exception:
         pass
     user_id = body.get("user_id", "")
+    jd      = (body.get("jd") or "").strip()
 
     loop = asyncio.get_event_loop()
 
     def _run():
-        # Try local TeX first
+        # 1. Local filesystem (fresh Railway deploy or local dev)
         tex_path = os.path.join(LIBRARY_ROOT, folder, "resume.tex")
         if os.path.isfile(tex_path):
             with open(tex_path, encoding="utf-8", errors="ignore") as f:
                 return _latex_to_plain(f.read())
 
-        # Try Supabase download
-        supabase = _supabase_client()
-        if supabase and user_id:
+        # 2. Supabase Storage via the shared download_tex helper
+        if user_id:
             try:
-                bucket = supabase.storage.from_("resumes")
-                tex_bytes = bucket.download(f"{user_id}/{folder}/resume.tex")
-                return _latex_to_plain(tex_bytes.decode("utf-8", errors="ignore"))
+                tex = download_tex(user_id, folder)
+                if tex:
+                    return _latex_to_plain(tex)
             except Exception as e:
-                logger.warning(f"analyze_folder: supabase tex download failed: {e}")
-
+                logger.warning(f"analyze_folder: download_tex failed: {e}")
         return None
 
     plain = await loop.run_in_executor(None, _run)
     if not plain:
         return JSONResponse({"error": "Could not load resume text"}, status_code=404)
 
-    result = _recruiter_checks(plain)
+    result = await loop.run_in_executor(None, _analyze_resume_comprehensive, plain, jd)
     return JSONResponse(result)
 
 

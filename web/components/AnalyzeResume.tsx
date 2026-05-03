@@ -5,21 +5,44 @@ import ScoreRing from "./ScoreRing";
 import { apiUrl } from "@/lib/utils";
 import { getSupabaseClient } from "@/lib/supabase";
 
-interface Check {
-  id: string;
-  name: string;
-  score: number;
-  passed: boolean;
-  detail: string;
-  items: string[];
-}
+// ── Interfaces ────────────────────────────────────────────────────────────────
 
 interface AnalysisResult {
-  overall: number;
-  summary_ok: string;
-  summary_bad: string;
-  checks: Check[];
-  bullets: string[];
+  overallScore: number;
+  categoryScores: {
+    readability: number;
+    atsCompatibility: number;
+    jobMatch: number | null;
+    achievementQuality: number;
+    quantification: number;
+    sectionStructure: number;
+    languageQuality: number;
+    technicalBranding: number;
+  };
+  summary: string;
+  topStrengths: string[];
+  topIssues: Array<{
+    issue: string;
+    severity: "low" | "medium" | "high";
+    whyItMatters: string;
+    suggestion: string;
+  }>;
+  atsWarnings: Array<{ warning: string; suggestion: string }>;
+  keywordAnalysis: {
+    matchedKeywords: string[];
+    missingKeywords: string[];
+    keywordScore: number | null;
+    suggestions: string[];
+  };
+  bulletAnalysis: Array<{
+    originalBullet: string;
+    score: number;
+    issues: string[];
+    improvedBullet: string;
+  }>;
+  sectionFeedback: Array<{ section: string; score: number; feedback: string }>;
+  rewriteSuggestions: Array<{ before: string; after: string; reason: string }>;
+  finalRecommendations: string[];
 }
 
 interface StoredResume {
@@ -28,38 +51,7 @@ interface StoredResume {
   role: string;
 }
 
-// ── Check groups ────────────────────────────────────────────────────────────
-const CHECK_GROUPS = [
-  {
-    id: "content",
-    label: "Content & Impact",
-    badge: "HIGH SCORE IMPACT",
-    badgeColor: "var(--accent)",
-    description: "These checks have the biggest impact on how recruiters perceive your experience. Each bullet should show ownership, action, and a measurable result.",
-    checkIds: ["quantify", "weak_verbs", "role_depth", "density"],
-  },
-  {
-    id: "writing",
-    label: "Writing Quality",
-    badge: "IMPORTANT",
-    badgeColor: "#f59e0b",
-    description: "Recruiters scan for writing professionalism. Passive phrasing, repeated verbs, and personal pronouns all signal a weaker candidate.",
-    checkIds: ["action", "pronouns", "repetition"],
-  },
-  {
-    id: "format",
-    label: "Format & Structure",
-    badge: "STRUCTURE",
-    badgeColor: "#6366f1",
-    description: "ATS systems and recruiters need to parse your resume correctly. Missing contact details, dates, or awkward phrases block your application before anyone reads it.",
-    checkIds: ["dates", "contact", "length", "unnecessary"],
-  },
-] as const;
-
-const CHECK_ORDER = [
-  "quantify","weak_verbs","role_depth","action","pronouns","repetition",
-  "dates","contact","length","unnecessary","density",
-];
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseFolder(folder: string): { company: string; role: string } {
   const parts = folder.split("_");
@@ -69,30 +61,90 @@ function parseFolder(folder: string): { company: string; role: string } {
   return { company: folder, role: "" };
 }
 
+function scoreColor(score: number | null): string {
+  if (score === null) return "var(--border)";
+  if (score >= 80) return "var(--green)";
+  if (score >= 60) return "var(--yellow)";
+  return "var(--red)";
+}
+
+function scoreLabel(score: number): string {
+  if (score >= 85) return "Excellent";
+  if (score >= 70) return "Strong";
+  if (score >= 55) return "Good";
+  return "Needs Work";
+}
+
+function severityColor(severity: "low" | "medium" | "high"): string {
+  if (severity === "high") return "var(--red)";
+  if (severity === "medium") return "#f59e0b";
+  return "var(--accent)";
+}
+
+function severityBg(severity: "low" | "medium" | "high"): string {
+  if (severity === "high") return "rgba(248,113,113,0.12)";
+  if (severity === "medium") return "rgba(245,158,11,0.12)";
+  return "rgba(99,102,241,0.12)";
+}
+
+const LOADING_MESSAGES = [
+  "Extracting resume text…",
+  "Running structural checks…",
+  "AI is analyzing bullets…",
+  "Generating suggestions…",
+];
+
+const CATEGORY_LABELS: Array<{ key: keyof AnalysisResult["categoryScores"]; label: string }> = [
+  { key: "readability", label: "Readability" },
+  { key: "atsCompatibility", label: "ATS Safety" },
+  { key: "jobMatch", label: "Job Match" },
+  { key: "achievementQuality", label: "Achievement" },
+  { key: "quantification", label: "Quantification" },
+  { key: "sectionStructure", label: "Structure" },
+  { key: "languageQuality", label: "Language" },
+  { key: "technicalBranding", label: "Tech Brand" },
+];
+
+// ── Spinner ───────────────────────────────────────────────────────────────────
+
 function Spinner({ size = 18 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 18 18" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}>
-      <circle cx="9" cy="9" r="7" stroke="var(--border)" strokeWidth="2.5"/>
-      <path d="M9 2a7 7 0 017 7" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round"/>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 18 18"
+      fill="none"
+      style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}
+    >
+      <circle cx="9" cy="9" r="7" stroke="var(--border)" strokeWidth="2.5" />
+      <path d="M9 2a7 7 0 017 7" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </svg>
   );
 }
 
+// ── Main component ────────────────────────────────────────────────────────────
+
 export default function AnalyzeResume() {
-  const fileRef  = useRef<HTMLInputElement>(null);
-  const [dragging,  setDragging]  = useState(false);
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState<string | null>(null);
-  const [result,    setResult]    = useState<AnalysisResult | null>(null);
-  const [rewriting, setRewriting] = useState<string | null>(null);
-  const [rewrites,  setRewrites]  = useState<Record<string, string>>({});
-  const [roleRewriting, setRoleRewriting] = useState<string | null>(null);
-  const [roleRewrites,  setRoleRewrites]  = useState<Record<string, string[]>>({});
-  const [expanded,  setExpanded]  = useState<Record<string, boolean>>({});
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [jd, setJd] = useState("");
+  const [loadingMsg, setLoadingMsg] = useState(0);
   const [storedResumes, setStoredResumes] = useState<StoredResume[]>([]);
   const [loadingStored, setLoadingStored] = useState(false);
+  const [expandedBullets, setExpandedBullets] = useState<Record<number, boolean>>({});
 
+  // Cycle loading messages every 3s
+  useEffect(() => {
+    if (!loading) { setLoadingMsg(0); return; }
+    const iv = setInterval(() => setLoadingMsg(m => (m + 1) % LOADING_MESSAGES.length), 3000);
+    return () => clearInterval(iv);
+  }, [loading]);
+
+  // Fetch stored resumes
   useEffect(() => {
     setLoadingStored(true);
     const supabase = getSupabaseClient();
@@ -112,148 +164,130 @@ export default function AnalyzeResume() {
     });
   }, []);
 
-  const processResult = (json: AnalysisResult) => {
-    const sorted = [...json.checks].sort((a, b) => {
-      const ai = CHECK_ORDER.indexOf(a.id);
-      const bi = CHECK_ORDER.indexOf(b.id);
-      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-    });
-    setResult({ ...json, checks: sorted });
-    // Auto-expand failed checks
-    const exp: Record<string, boolean> = {};
-    sorted.filter(c => !c.passed).forEach(c => { exp[c.id] = true; });
-    setExpanded(exp);
-  };
-
   const run = useCallback(async (file: File) => {
-    setLoading(true); setError(null); setResult(null); setRewrites({}); setRoleRewrites({});
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setExpandedBullets({});
     const fd = new FormData();
     fd.append("file", file);
+    if (jd.trim()) fd.append("jd", jd);
     try {
       const resp = await fetch(apiUrl("/api/analyze-upload"), { method: "POST", body: fd });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
-      processResult(json);
+      setResult(json as AnalysisResult);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
-    } finally { setLoading(false); }
-  }, []);
+    } finally {
+      setLoading(false);
+    }
+  }, [jd]);
 
   const runFolder = useCallback(async (folder: string) => {
-    setLoading(true); setError(null); setResult(null); setRewrites({}); setRoleRewrites({});
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setExpandedBullets({});
     try {
       const supabase = getSupabaseClient();
       const { data: { user } } = await supabase.auth.getUser();
       const resp = await fetch(apiUrl(`/api/analyze-folder/${encodeURIComponent(folder)}`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: user?.id ?? "" }),
+        body: JSON.stringify({ user_id: user?.id ?? "", jd }),
       });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
-      processResult(json);
+      setResult(json as AnalysisResult);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
-    } finally { setLoading(false); }
-  }, []);
-
-  const rewriteBullet = async (bullet: string) => {
-    if (rewrites[bullet]) return;
-    setRewriting(bullet);
-    try {
-      const resp = await fetch(apiUrl("/api/ai-edit-bullet"), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: bullet, instruction: "Rewrite this bullet to be stronger: add a quantified outcome, start with a powerful action verb, and remove any weak or passive language. Keep it factual — do not invent numbers." }),
-      });
-      const json = await resp.json();
-      if (json.text) setRewrites(r => ({ ...r, [bullet]: json.text }));
-    } catch { /* swallow */ } finally { setRewriting(null); }
-  };
-
-  const rewriteRole = async (item: string) => {
-    if (roleRewrites[item] || roleRewriting === item) return;
-    setRoleRewriting(item);
-    const header = item.split(/\s{2,}/)[0].trim();
-    try {
-      const resp = await fetch(apiUrl("/api/rewrite-role"), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ header, bullets: [] }),
-      });
-      const json = await resp.json();
-      if (json.bullets?.length) setRoleRewrites(r => ({ ...r, [item]: json.bullets }));
-    } catch { /* swallow */ } finally { setRoleRewriting(null); }
-  };
+    } finally {
+      setLoading(false);
+    }
+  }, [jd]);
 
   const onFile = (f: File | null | undefined) => {
     if (!f || !f.name.endsWith(".pdf")) { setError("Please upload a PDF file."); return; }
     run(f);
   };
 
-  const checks = result?.checks ?? [];
-
-  // Build group stats for sidebar
-  const groupStats = CHECK_GROUPS.map(g => {
-    const groupChecks = g.checkIds.map(id => checks.find(c => c.id === id)).filter(Boolean) as Check[];
-    const issues = groupChecks.filter(c => !c.passed).length;
-    const total  = groupChecks.length;
-    return { ...g, issues, total, groupChecks };
-  });
+  // Sort issues high → medium → low
+  const sortedIssues = result?.topIssues
+    ? [...result.topIssues].sort((a, b) => {
+        const order = { high: 0, medium: 1, low: 2 };
+        return order[a.severity] - order[b.severity];
+      })
+    : [];
 
   return (
     <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
-      {/* ── Left sidebar ─────────────────────────────── */}
+
+      {/* ── Left sidebar ──────────────────────────────── */}
       <aside style={{
-        width: 220, flexShrink: 0, borderRight: "1px solid var(--border)",
-        overflowY: "auto", display: "flex", flexDirection: "column",
-        background: "var(--surface)", padding: "24px 16px",
+        width: 280,
+        flexShrink: 0,
+        borderRight: "1px solid var(--border)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--surface)",
+        padding: "24px 16px",
       }}>
         {result ? (
           <>
             {/* Score ring */}
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>
                 Resume Score
               </div>
-              <ScoreRing score={result.overall} size={100} label="" />
-              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginTop: 8 }}>
-                {result.overall >= 75 ? "Strong" : result.overall >= 55 ? "Good" : "Needs Work"}
+              <ScoreRing score={result.overallScore} size={110} label="" />
+              <div style={{
+                fontSize: 14, fontWeight: 700, marginTop: 8,
+                color: scoreColor(result.overallScore),
+              }}>
+                {scoreLabel(result.overallScore)}
               </div>
             </div>
 
-            {/* Rescan button */}
+            {/* Analyze another button */}
             <button
-              onClick={() => { setResult(null); setError(null); }}
+              onClick={() => { setResult(null); setError(null); setExpandedBullets({}); }}
               style={{
                 width: "100%", padding: "9px 14px", borderRadius: 8,
                 background: "var(--accent)", border: "none", color: "#fff",
                 fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 20,
               }}
             >
-              ↑ Scan another resume
+              ↑ Analyze another
             </button>
 
-            {/* Category bars */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {groupStats.map(g => (
-                <a key={g.id} href={`#group-${g.id}`} style={{ textDecoration: "none" }}>
-                  <div>
+            {/* Category score bars */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+              {CATEGORY_LABELS.map(({ key, label }) => {
+                const score = result.categoryScores[key];
+                const color = scoreColor(score);
+                const pct = score !== null ? score : 0;
+                return (
+                  <div key={key}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{g.label}</span>
-                      <span style={{ fontSize: 11, color: g.issues > 0 ? "var(--red)" : "var(--green)", fontWeight: 600 }}>
-                        {g.issues > 0 ? `${g.issues} issue${g.issues > 1 ? "s" : ""}` : "✓ Clear"}
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: score === null ? "var(--dim)" : color }}>
+                        {score === null ? "N/A" : score}
                       </span>
                     </div>
                     <div style={{ height: 5, borderRadius: 3, background: "var(--surface2)", overflow: "hidden" }}>
                       <div style={{
-                        height: "100%", borderRadius: 3,
-                        width: `${((g.total - g.issues) / Math.max(g.total, 1)) * 100}%`,
-                        background: g.issues === 0 ? "var(--green)" : g.issues >= g.total / 2 ? "var(--red)" : "#f59e0b",
+                        height: "100%",
+                        borderRadius: 3,
+                        width: `${pct}%`,
+                        background: score === null ? "var(--border)" : color,
                         transition: "width 0.8s ease",
                       }} />
                     </div>
                   </div>
-                </a>
-              ))}
+                );
+              })}
             </div>
           </>
         ) : (
@@ -264,7 +298,9 @@ export default function AnalyzeResume() {
             </div>
 
             {loadingStored ? (
-              <div style={{ display: "flex", justifyContent: "center", paddingTop: 20 }}><Spinner /></div>
+              <div style={{ display: "flex", justifyContent: "center", paddingTop: 20 }}>
+                <Spinner />
+              </div>
             ) : storedResumes.length === 0 ? (
               <div style={{ fontSize: 12, color: "var(--dim)", textAlign: "center", paddingTop: 20, lineHeight: 1.6 }}>
                 No saved resumes yet.<br />Upload a PDF to get started.
@@ -282,16 +318,28 @@ export default function AnalyzeResume() {
                       cursor: "pointer", textAlign: "left", fontFamily: "inherit",
                       transition: "background 0.12s, border-color 0.12s",
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "var(--accent-bg)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.background = "var(--accent-bg)";
+                      e.currentTarget.style.borderColor = "var(--accent)";
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.background = "var(--surface2)";
+                      e.currentTarget.style.borderColor = "var(--border)";
+                    }}
                   >
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color: "var(--dim)", flexShrink: 0 }}>
-                      <path d="M3 2h7l3 3v9H3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
-                      <path d="M10 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                      <path d="M3 2h7l3 3v9H3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                      <path d="M10 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
                     </svg>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.company}</div>
-                      {r.role && <div style={{ fontSize: 11, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.role}</div>}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {r.company}
+                      </div>
+                      {r.role && (
+                        <div style={{ fontSize: 11, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {r.role}
+                        </div>
+                      )}
                     </div>
                   </button>
                 ))}
@@ -301,223 +349,476 @@ export default function AnalyzeResume() {
         )}
       </aside>
 
-      {/* ── Main panel ──────────────────────────────── */}
+      {/* ── Main panel ────────────────────────────────── */}
       <main style={{ flex: 1, overflowY: "auto", padding: "32px 40px" }}>
 
-        {/* Upload state */}
+        {/* Pre-result upload state */}
         {!result && !loading && (
-          <>
-            <UploadZone
-              dragging={dragging}
+          <div style={{ maxWidth: 560, margin: "0 auto" }}>
+            {/* JD textarea */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--dim)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                Paste job description (optional — unlocks keyword analysis)
+              </label>
+              <textarea
+                value={jd}
+                onChange={e => setJd(e.target.value)}
+                placeholder="Paste the job description here to get tailored keyword matching and job fit scoring…"
+                rows={5}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  border: "1px solid var(--border)",
+                  background: "var(--surface)",
+                  color: "var(--text)",
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* Drop zone */}
+            <div
               onDragOver={e => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={e => { e.preventDefault(); setDragging(false); onFile(e.dataTransfer.files[0]); }}
               onClick={() => fileRef.current?.click()}
-              error={error}
-            />
-          </>
-        )}
+              style={{
+                border: `2px dashed ${dragging ? "var(--accent)" : "var(--border)"}`,
+                borderRadius: 16,
+                padding: "56px 32px",
+                cursor: "pointer",
+                background: dragging ? "rgba(99,102,241,0.04)" : "var(--surface)",
+                transition: "border-color 0.15s, background 0.15s",
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
+                Drop your resume PDF here
+              </div>
+              <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                or click to browse — we&apos;ll give you a full AI-powered report
+              </div>
+            </div>
 
-        {loading && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, paddingTop: 80, color: "var(--muted)" }}>
-            <Spinner size={24} />
-            <span style={{ fontSize: 14 }}>Analysing your resume…</span>
+            {error && (
+              <div style={{ marginTop: 12, fontSize: 13, color: "var(--red)" }}>{error}</div>
+            )}
           </div>
         )}
 
-        {result && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 36 }}>
-            {groupStats.map(g => (
-              <section key={g.id} id={`group-${g.id}`}>
-                {/* Group header */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                  <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", margin: 0 }}>{g.label}</h2>
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: "3px 8px",
-                    borderRadius: 20, background: `${g.badgeColor}20`, color: g.badgeColor,
-                    textTransform: "uppercase",
-                  }}>{g.badge}</span>
-                </div>
-                <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, margin: "0 0 14px" }}>
-                  {g.description}
-                </p>
+        {/* Loading state */}
+        {loading && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, paddingTop: 100 }}>
+            <Spinner size={28} />
+            <span style={{ fontSize: 15, color: "var(--muted)", fontWeight: 500, transition: "opacity 0.3s" }}>
+              {LOADING_MESSAGES[loadingMsg]}
+            </span>
+          </div>
+        )}
 
-                {/* Check rows */}
-                <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-                  {g.groupChecks.map((check, idx) => (
-                    <CheckRow
-                      key={check.id}
-                      check={check}
-                      isLast={idx === g.groupChecks.length - 1}
-                      expanded={!!expanded[check.id]}
-                      onToggle={() => setExpanded(e => ({ ...e, [check.id]: !e[check.id] }))}
-                      rewrites={rewrites}
-                      rewriting={rewriting}
-                      onRewriteBullet={rewriteBullet}
-                      roleRewrites={roleRewrites}
-                      roleRewriting={roleRewriting}
-                      onRewriteRole={rewriteRole}
-                    />
+        {/* Result state */}
+        {result && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 32, maxWidth: 760 }}>
+
+            {/* 1. Summary banner */}
+            <section>
+              <div style={{
+                background: "var(--surface2)",
+                border: "1px solid var(--border)",
+                borderRadius: 14,
+                padding: "20px 24px",
+              }}>
+                <p style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.7, margin: "0 0 16px" }}>
+                  {result.summary}
+                </p>
+                {result.topStrengths.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {result.topStrengths.slice(0, 3).map((s, i) => (
+                      <span key={i} style={{
+                        fontSize: 12, fontWeight: 600, padding: "4px 12px",
+                        borderRadius: 20, background: "rgba(52,211,153,0.12)", color: "var(--green)",
+                      }}>
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* 2. Top Issues */}
+            {sortedIssues.length > 0 && (
+              <section>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", margin: "0 0 14px" }}>
+                  Top Issues
+                </h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {sortedIssues.map((issue, i) => (
+                    <div key={i} style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: 12,
+                      padding: "16px 18px",
+                      background: "var(--surface)",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: "3px 8px",
+                          borderRadius: 20, textTransform: "uppercase", letterSpacing: 0.4,
+                          background: severityBg(issue.severity),
+                          color: severityColor(issue.severity),
+                        }}>
+                          {issue.severity}
+                        </span>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+                          {issue.issue}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 10px", lineHeight: 1.6 }}>
+                        {issue.whyItMatters}
+                      </p>
+                      <div style={{
+                        background: "var(--surface2)",
+                        borderRadius: 8,
+                        padding: "10px 14px",
+                        fontSize: 13,
+                        color: "var(--text)",
+                        lineHeight: 1.6,
+                        borderLeft: "3px solid var(--accent)",
+                      }}>
+                        {issue.suggestion}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </section>
-            ))}
+            )}
+
+            {/* 3. ATS Warnings */}
+            {result.atsWarnings.length > 0 && (
+              <section>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", margin: "0 0 14px" }}>
+                  ATS Warnings
+                </h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {result.atsWarnings.map((w, i) => (
+                    <div key={i} style={{
+                      border: "1px solid rgba(245,158,11,0.3)",
+                      borderRadius: 10,
+                      padding: "14px 16px",
+                      background: "rgba(245,158,11,0.06)",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                        <span style={{ fontSize: 15, lineHeight: 1, marginTop: 1 }}>⚠️</span>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: "#f59e0b", marginBottom: 4 }}>
+                            {w.warning}
+                          </div>
+                          <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
+                            {w.suggestion}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* 4. Keyword Analysis */}
+            {result.keywordAnalysis.keywordScore !== null && (
+              <section>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                  <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", margin: 0 }}>
+                    Keyword Analysis
+                  </h2>
+                  <span style={{
+                    fontSize: 13, fontWeight: 700, padding: "3px 12px",
+                    borderRadius: 20,
+                    background: scoreColor(result.keywordAnalysis.keywordScore) === "var(--green)"
+                      ? "rgba(52,211,153,0.12)"
+                      : scoreColor(result.keywordAnalysis.keywordScore) === "var(--yellow)"
+                      ? "rgba(245,158,11,0.12)"
+                      : "rgba(248,113,113,0.12)",
+                    color: scoreColor(result.keywordAnalysis.keywordScore),
+                  }}>
+                    {result.keywordAnalysis.keywordScore}/100
+                  </span>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+                  {/* Matched */}
+                  <div style={{
+                    border: "1px solid var(--border)", borderRadius: 12,
+                    padding: "14px 16px", background: "var(--surface)",
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 10 }}>
+                      Matched Keywords
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {result.keywordAnalysis.matchedKeywords.length === 0 ? (
+                        <span style={{ fontSize: 12, color: "var(--dim)" }}>None found</span>
+                      ) : result.keywordAnalysis.matchedKeywords.map((kw, i) => (
+                        <span key={i} style={{
+                          fontSize: 11, fontWeight: 500, padding: "3px 9px",
+                          borderRadius: 20, background: "rgba(52,211,153,0.12)", color: "var(--green)",
+                        }}>
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Missing */}
+                  <div style={{
+                    border: "1px solid var(--border)", borderRadius: 12,
+                    padding: "14px 16px", background: "var(--surface)",
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--red)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 10 }}>
+                      Missing Keywords
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {result.keywordAnalysis.missingKeywords.length === 0 ? (
+                        <span style={{ fontSize: 12, color: "var(--dim)" }}>None — great coverage!</span>
+                      ) : result.keywordAnalysis.missingKeywords.map((kw, i) => (
+                        <span key={i} style={{
+                          fontSize: 11, fontWeight: 500, padding: "3px 9px",
+                          borderRadius: 20, background: "rgba(248,113,113,0.12)", color: "var(--red)",
+                        }}>
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {result.keywordAnalysis.suggestions.length > 0 && (
+                  <div style={{
+                    border: "1px solid var(--border)", borderRadius: 10,
+                    padding: "14px 16px", background: "var(--surface2)",
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
+                      Suggestions
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+                      {result.keywordAnalysis.suggestions.map((s, i) => (
+                        <li key={i} style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* 5. Bullet Analysis */}
+            {result.bulletAnalysis.length > 0 && (
+              <section>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", margin: "0 0 14px" }}>
+                  Weakest Bullets — AI Rewrites
+                </h2>
+                <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+                  {result.bulletAnalysis.map((bullet, i) => {
+                    const isExpanded = !!expandedBullets[i];
+                    const bColor = bullet.score < 50
+                      ? "var(--red)"
+                      : bullet.score < 70
+                      ? "#f59e0b"
+                      : "var(--green)";
+                    const bBg = bullet.score < 50
+                      ? "rgba(248,113,113,0.12)"
+                      : bullet.score < 70
+                      ? "rgba(245,158,11,0.12)"
+                      : "rgba(52,211,153,0.12)";
+                    return (
+                      <div
+                        key={i}
+                        style={{ borderBottom: i === result.bulletAnalysis.length - 1 ? "none" : "1px solid var(--border)" }}
+                      >
+                        {/* Accordion header */}
+                        <div
+                          onClick={() => setExpandedBullets(e => ({ ...e, [i]: !e[i] }))}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 12,
+                            padding: "14px 18px", cursor: "pointer",
+                            background: isExpanded ? "var(--surface2)" : "var(--surface)",
+                            transition: "background 0.1s",
+                          }}
+                        >
+                          <span style={{
+                            fontSize: 11, fontWeight: 700, padding: "2px 8px",
+                            borderRadius: 20, background: bBg, color: bColor, flexShrink: 0,
+                          }}>
+                            {bullet.score}
+                          </span>
+                          <span style={{
+                            fontSize: 13, color: "var(--muted)", flex: 1, minWidth: 0,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {bullet.originalBullet}
+                          </span>
+                          <svg
+                            width="16" height="16" viewBox="0 0 16 16" fill="none"
+                            style={{
+                              flexShrink: 0,
+                              transition: "transform 0.2s",
+                              transform: isExpanded ? "rotate(180deg)" : "none",
+                            }}
+                          >
+                            <path d="M4 6l4 4 4-4" stroke="var(--dim)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </div>
+
+                        {/* Accordion body */}
+                        {isExpanded && (
+                          <div style={{ padding: "12px 18px 16px", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 10 }}>
+                            {bullet.issues.length > 0 && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                {bullet.issues.map((issue, j) => (
+                                  <span key={j} style={{
+                                    fontSize: 11, fontWeight: 500, padding: "2px 8px",
+                                    borderRadius: 20, background: "rgba(248,113,113,0.10)", color: "var(--red)",
+                                  }}>
+                                    {issue}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{
+                              fontSize: 13, color: "var(--muted)", fontStyle: "italic",
+                              borderLeft: "3px solid var(--border)", paddingLeft: 12,
+                              lineHeight: 1.6,
+                            }}>
+                              {bullet.originalBullet}
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--dim)", fontSize: 12, fontWeight: 600 }}>
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                <path d="M6 1v10M1 6l5 5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                              AI improved version
+                            </div>
+                            <div style={{
+                              fontSize: 13, color: "var(--green)",
+                              borderLeft: "3px solid var(--green)", paddingLeft: 12,
+                              lineHeight: 1.6,
+                            }}>
+                              {bullet.improvedBullet}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {/* 6. Section Feedback */}
+            {result.sectionFeedback.length > 0 && (
+              <section>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", margin: "0 0 14px" }}>
+                  Section Feedback
+                </h2>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+                  {result.sectionFeedback.map((sf, i) => (
+                    <div key={i} style={{
+                      border: "1px solid var(--border)", borderRadius: 12,
+                      padding: "14px 16px", background: "var(--surface)",
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{sf.section}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: scoreColor(sf.score) }}>{sf.score}</span>
+                      </div>
+                      <div style={{ height: 4, borderRadius: 2, background: "var(--surface2)", overflow: "hidden", marginBottom: 8 }}>
+                        <div style={{
+                          height: "100%", borderRadius: 2,
+                          width: `${sf.score}%`,
+                          background: scoreColor(sf.score),
+                          transition: "width 0.6s ease",
+                        }} />
+                      </div>
+                      <p style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, margin: 0 }}>{sf.feedback}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* 7. Rewrite Suggestions */}
+            {result.rewriteSuggestions.length > 0 && (
+              <section>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", margin: "0 0 14px" }}>
+                  Suggested Rewrites
+                </h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {result.rewriteSuggestions.map((rw, i) => (
+                    <div key={i} style={{
+                      border: "1px solid var(--border)", borderRadius: 12,
+                      padding: "16px 18px", background: "var(--surface)",
+                    }}>
+                      <div style={{
+                        fontSize: 13, color: "var(--muted)", fontStyle: "italic",
+                        borderLeft: "3px solid var(--border)", paddingLeft: 12,
+                        lineHeight: 1.6, marginBottom: 10,
+                      }}>
+                        {rw.before}
+                      </div>
+                      <div style={{
+                        fontSize: 13, color: "var(--green)",
+                        borderLeft: "3px solid var(--green)", paddingLeft: 12,
+                        lineHeight: 1.6, marginBottom: 10,
+                      }}>
+                        {rw.after}
+                      </div>
+                      <div style={{
+                        fontSize: 11, color: "var(--dim)", fontStyle: "italic",
+                        paddingLeft: 15,
+                      }}>
+                        {rw.reason}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* 8. Final Recommendations */}
+            {result.finalRecommendations.length > 0 && (
+              <section>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", margin: "0 0 14px" }}>
+                  Final Recommendations
+                </h2>
+                <div style={{
+                  border: "1px solid var(--border)", borderRadius: 12,
+                  padding: "18px 20px", background: "var(--surface2)",
+                }}>
+                  <ol style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+                    {result.finalRecommendations.map((rec, i) => (
+                      <li key={i} style={{ fontSize: 14, color: "var(--text)", lineHeight: 1.6 }}>
+                        {rec}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </section>
+            )}
+
           </div>
         )}
       </main>
 
-      <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => onFile(e.target.files?.[0])} />
-    </div>
-  );
-}
-
-// ── CheckRow ─────────────────────────────────────────────────────────────────
-function CheckRow({ check, isLast, expanded, onToggle, rewrites, rewriting, onRewriteBullet, roleRewrites, roleRewriting, onRewriteRole }: {
-  check: Check; isLast: boolean; expanded: boolean; onToggle: () => void;
-  rewrites: Record<string, string>; rewriting: string | null; onRewriteBullet: (b: string) => void;
-  roleRewrites: Record<string, string[]>; roleRewriting: string | null; onRewriteRole: (r: string) => void;
-}) {
-  const canExpand = check.items.length > 0;
-  return (
-    <div style={{ borderBottom: isLast ? "none" : "1px solid var(--border)" }}>
-      {/* Row header */}
-      <div
-        onClick={canExpand ? onToggle : undefined}
-        style={{
-          display: "flex", alignItems: "flex-start", gap: 14,
-          padding: "16px 20px", cursor: canExpand ? "pointer" : "default",
-          background: expanded ? "var(--surface2)" : "var(--surface)",
-          transition: "background 0.1s",
-        }}
-      >
-        {/* Pass/fail dot */}
-        <div style={{
-          width: 22, height: 22, borderRadius: "50%", flexShrink: 0, marginTop: 1,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          background: check.passed ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)",
-        }}>
-          {check.passed
-            ? <svg width="11" height="11" viewBox="0 0 11 11"><path d="M2 5.5l2.5 2.5 4.5-4.5" stroke="var(--green)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
-            : <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2l-6 6" stroke="var(--red)" strokeWidth="1.8" strokeLinecap="round"/></svg>
-          }
-        </div>
-
-        {/* Name + detail */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>{check.name}</span>
-            <span style={{
-              fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 600,
-              background: check.passed ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)",
-              color: check.passed ? "var(--green)" : "var(--red)",
-              letterSpacing: 0.3, textTransform: "uppercase",
-            }}>
-              {check.passed ? "Pass" : `Score ${check.score}/10`}
-            </span>
-          </div>
-          <p style={{ fontSize: 13, color: "var(--muted)", margin: 0, lineHeight: 1.6 }}>
-            {check.detail}
-          </p>
-        </div>
-
-        {/* Expand chevron */}
-        {canExpand && (
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 2, transition: "transform 0.2s", transform: expanded ? "rotate(180deg)" : "none" }}>
-            <path d="M4 6l4 4 4-4" stroke="var(--dim)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        )}
-      </div>
-
-      {/* Expanded items */}
-      {expanded && canExpand && (
-        <div style={{ padding: "0 20px 16px 56px", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
-            {check.id === "quantify" ? "Bullets missing metrics — click to improve"
-              : check.id === "role_depth" ? "Under-described roles — click to rewrite"
-              : "Flagged items"}
-          </div>
-          {check.id === "role_depth"
-            ? check.items.map((item, i) => {
-                const bracketIdx = item.lastIndexOf("  [");
-                const header = bracketIdx > -1 ? item.slice(0, bracketIdx) : item;
-                const reason = bracketIdx > -1 ? item.slice(bracketIdx + 2) : "";
-                const rewrites = roleRewrites[item];
-                return (
-                  <div key={i} style={{ background: "var(--surface2)", borderRadius: 9, padding: "12px 14px" }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{header}</div>
-                    {reason && <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 8 }}>{reason}</div>}
-                    {rewrites ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 2 }}>AI Suggestions</div>
-                        {rewrites.map((b, j) => (
-                          <div key={j} style={{ fontSize: 13, color: "var(--text)", borderLeft: "3px solid var(--green)", paddingLeft: 10, lineHeight: 1.55 }}>{b}</div>
-                        ))}
-                      </div>
-                    ) : (
-                      <button onClick={() => onRewriteRole(item)} disabled={roleRewriting === item} style={{
-                        display: "flex", alignItems: "center", gap: 6, padding: "6px 12px",
-                        borderRadius: 7, background: "var(--accent)", border: "none", color: "#fff",
-                        fontSize: 12, fontWeight: 500, cursor: roleRewriting === item ? "default" : "pointer",
-                        opacity: roleRewriting === item ? 0.7 : 1,
-                      }}>
-                        {roleRewriting === item ? <><Spinner size={14} /> Rewriting…</> : <>✦ Rewrite this role</>}
-                      </button>
-                    )}
-                  </div>
-                );
-              })
-            : check.items.map((item, i) => {
-                const canRewrite = check.id === "quantify" || check.id === "weak_verbs";
-                const rewrite = rewrites[item];
-                return (
-                  <div key={i} style={{ background: "var(--surface2)", borderRadius: 9, padding: "10px 14px" }}>
-                    <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, fontStyle: "italic", borderLeft: "3px solid var(--border)", paddingLeft: 10, marginBottom: rewrite || canRewrite ? 8 : 0 }}>
-                      {item}
-                    </div>
-                    {rewrite && (
-                      <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.55, borderLeft: "3px solid var(--green)", paddingLeft: 10, marginBottom: 6 }}>
-                        {rewrite}
-                      </div>
-                    )}
-                    {canRewrite && !rewrite && (
-                      <button onClick={() => onRewriteBullet(item)} disabled={rewriting === item} style={{
-                        display: "flex", alignItems: "center", gap: 6, padding: "5px 11px",
-                        borderRadius: 6, background: "var(--accent)", border: "none", color: "#fff",
-                        fontSize: 11, fontWeight: 500, cursor: rewriting === item ? "default" : "pointer",
-                        opacity: rewriting === item ? 0.7 : 1,
-                      }}>
-                        {rewriting === item ? <><Spinner size={13} /> Rewriting…</> : <>✦ Improve this bullet</>}
-                      </button>
-                    )}
-                  </div>
-                );
-              })
-          }
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Upload zone ───────────────────────────────────────────────────────────────
-function UploadZone({ dragging, onDragOver, onDragLeave, onDrop, onClick, error }: {
-  dragging: boolean; error: string | null;
-  onDragOver: React.DragEventHandler; onDragLeave: React.DragEventHandler;
-  onDrop: React.DragEventHandler; onClick: () => void;
-}) {
-  return (
-    <div style={{ maxWidth: 520, margin: "60px auto 0", textAlign: "center" }}>
-      <div onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onClick={onClick} style={{
-        border: `2px dashed ${dragging ? "var(--accent)" : "var(--border)"}`,
-        borderRadius: 16, padding: "56px 32px", cursor: "pointer",
-        background: dragging ? "rgba(99,102,241,0.04)" : "var(--surface)",
-        transition: "border-color 0.15s, background 0.15s",
-      }}>
-        <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Drop your resume PDF here</div>
-        <div style={{ fontSize: 13, color: "var(--muted)" }}>or click to browse — we&apos;ll run 11 recruiter checks instantly</div>
-      </div>
-      {error && <div style={{ marginTop: 12, fontSize: 13, color: "var(--red)" }}>{error}</div>}
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf"
+        style={{ display: "none" }}
+        onChange={e => onFile(e.target.files?.[0])}
+      />
     </div>
   );
 }
