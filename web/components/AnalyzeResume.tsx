@@ -28,15 +28,33 @@ interface StoredResume {
   role: string;
 }
 
-function Spinner() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ animation: "spin 0.8s linear infinite" }}>
-      <circle cx="9" cy="9" r="7" stroke="var(--border)" strokeWidth="2.5"/>
-      <path d="M9 2a7 7 0 017 7" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round"/>
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-    </svg>
-  );
-}
+// ── Check groups ────────────────────────────────────────────────────────────
+const CHECK_GROUPS = [
+  {
+    id: "content",
+    label: "Content & Impact",
+    badge: "HIGH SCORE IMPACT",
+    badgeColor: "var(--accent)",
+    description: "These checks have the biggest impact on how recruiters perceive your experience. Each bullet should show ownership, action, and a measurable result.",
+    checkIds: ["quantify", "weak_verbs", "role_depth", "density"],
+  },
+  {
+    id: "writing",
+    label: "Writing Quality",
+    badge: "IMPORTANT",
+    badgeColor: "#f59e0b",
+    description: "Recruiters scan for writing professionalism. Passive phrasing, repeated verbs, and personal pronouns all signal a weaker candidate.",
+    checkIds: ["action", "pronouns", "repetition"],
+  },
+  {
+    id: "format",
+    label: "Format & Structure",
+    badge: "STRUCTURE",
+    badgeColor: "#6366f1",
+    description: "ATS systems and recruiters need to parse your resume correctly. Missing contact details, dates, or awkward phrases block your application before anyone reads it.",
+    checkIds: ["dates", "contact", "length", "unnecessary"],
+  },
+] as const;
 
 const CHECK_ORDER = [
   "quantify","weak_verbs","role_depth","action","pronouns","repetition",
@@ -44,12 +62,21 @@ const CHECK_ORDER = [
 ];
 
 function parseFolder(folder: string): { company: string; role: string } {
-  // Folder format: "CompanyName_RoleTitle" or "CompanyName_RoleTitle_timestamp"
   const parts = folder.split("_");
   if (parts.length >= 2) {
     return { company: parts[0], role: parts.slice(1, -1).join(" ") || parts[1] };
   }
   return { company: folder, role: "" };
+}
+
+function Spinner({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 18 18" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}>
+      <circle cx="9" cy="9" r="7" stroke="var(--border)" strokeWidth="2.5"/>
+      <path d="M9 2a7 7 0 017 7" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round"/>
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    </svg>
+  );
 }
 
 export default function AnalyzeResume() {
@@ -58,29 +85,24 @@ export default function AnalyzeResume() {
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
   const [result,    setResult]    = useState<AnalysisResult | null>(null);
-  const [selected,  setSelected]  = useState<string | null>(null);
-  const [rewriting,     setRewriting]     = useState<string | null>(null);
-  const [rewrites,      setRewrites]      = useState<Record<string, string>>({});
+  const [rewriting, setRewriting] = useState<string | null>(null);
+  const [rewrites,  setRewrites]  = useState<Record<string, string>>({});
   const [roleRewriting, setRoleRewriting] = useState<string | null>(null);
   const [roleRewrites,  setRoleRewrites]  = useState<Record<string, string[]>>({});
-
-  // Stored resumes
+  const [expanded,  setExpanded]  = useState<Record<string, boolean>>({});
   const [storedResumes, setStoredResumes] = useState<StoredResume[]>([]);
   const [loadingStored, setLoadingStored] = useState(false);
 
-  // Load stored resumes on mount — fetch both local and Supabase-backed folders
   useEffect(() => {
     setLoadingStored(true);
     const supabase = getSupabaseClient();
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       try {
-        // api_resumes returns an array of {folder, has_pdf, ...} objects
         const url = user?.id
           ? apiUrl(`/api/resumes?user_id=${encodeURIComponent(user.id)}`)
           : apiUrl("/api/resumes");
         const resp = await fetch(url);
         const data = await resp.json();
-        // Handle both array format [{folder,...}] and object format {resumes:[...]}
         const folders: string[] = Array.isArray(data)
           ? data.map((r: { folder: string }) => r.folder)
           : (data.resumes || []);
@@ -90,38 +112,35 @@ export default function AnalyzeResume() {
     });
   }, []);
 
+  const processResult = (json: AnalysisResult) => {
+    const sorted = [...json.checks].sort((a, b) => {
+      const ai = CHECK_ORDER.indexOf(a.id);
+      const bi = CHECK_ORDER.indexOf(b.id);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+    setResult({ ...json, checks: sorted });
+    // Auto-expand failed checks
+    const exp: Record<string, boolean> = {};
+    sorted.filter(c => !c.passed).forEach(c => { exp[c.id] = true; });
+    setExpanded(exp);
+  };
+
   const run = useCallback(async (file: File) => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    setSelected(null);
-    setRewrites({});
+    setLoading(true); setError(null); setResult(null); setRewrites({}); setRoleRewrites({});
     const fd = new FormData();
     fd.append("file", file);
     try {
       const resp = await fetch(apiUrl("/api/analyze-upload"), { method: "POST", body: fd });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
-      const sorted = [...json.checks].sort((a: Check, b: Check) => {
-        const ai = CHECK_ORDER.indexOf(a.id);
-        const bi = CHECK_ORDER.indexOf(b.id);
-        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-      });
-      setResult({ ...json, checks: sorted });
-      setSelected(sorted.find((c: Check) => !c.passed)?.id ?? sorted[0]?.id ?? null);
+      processResult(json);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, []);
 
   const runFolder = useCallback(async (folder: string) => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    setSelected(null);
-    setRewrites({});
+    setLoading(true); setError(null); setResult(null); setRewrites({}); setRoleRewrites({});
     try {
       const supabase = getSupabaseClient();
       const { data: { user } } = await supabase.auth.getUser();
@@ -132,114 +151,123 @@ export default function AnalyzeResume() {
       });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
-      const sorted = [...json.checks].sort((a: Check, b: Check) => {
-        const ai = CHECK_ORDER.indexOf(a.id);
-        const bi = CHECK_ORDER.indexOf(b.id);
-        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-      });
-      setResult({ ...json, checks: sorted });
-      setSelected(sorted.find((c: Check) => !c.passed)?.id ?? sorted[0]?.id ?? null);
+      processResult(json);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, []);
-
-  const onFile = (f: File | null | undefined) => {
-    if (!f || !f.name.endsWith(".pdf")) { setError("Please upload a PDF file."); return; }
-    run(f);
-  };
 
   const rewriteBullet = async (bullet: string) => {
     if (rewrites[bullet]) return;
     setRewriting(bullet);
     try {
       const resp = await fetch(apiUrl("/api/ai-edit-bullet"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: bullet, instruction: "Rewrite this bullet to be stronger: add a quantified outcome, start with a powerful action verb, and remove any weak or passive language. Keep it factual — do not invent numbers." }),
       });
       const json = await resp.json();
       if (json.text) setRewrites(r => ({ ...r, [bullet]: json.text }));
-    } catch { /* swallow */ } finally {
-      setRewriting(null);
-    }
+    } catch { /* swallow */ } finally { setRewriting(null); }
   };
 
   const rewriteRole = async (item: string) => {
     if (roleRewrites[item] || roleRewriting === item) return;
     setRoleRewriting(item);
-    // item format: "Header  [reason]" — split on double-space
     const header = item.split(/\s{2,}/)[0].trim();
     try {
       const resp = await fetch(apiUrl("/api/rewrite-role"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ header, bullets: [] }),
       });
       const json = await resp.json();
       if (json.bullets?.length) setRoleRewrites(r => ({ ...r, [item]: json.bullets }));
-    } catch { /* swallow */ } finally {
-      setRoleRewriting(null);
-    }
+    } catch { /* swallow */ } finally { setRoleRewriting(null); }
   };
 
-  const checks    = result?.checks ?? [];
-  const failed    = checks.filter(c => !c.passed);
-  const passed    = checks.filter(c => c.passed);
-  const activeCheck = checks.find(c => c.id === selected) ?? null;
+  const onFile = (f: File | null | undefined) => {
+    if (!f || !f.name.endsWith(".pdf")) { setError("Please upload a PDF file."); return; }
+    run(f);
+  };
+
+  const checks = result?.checks ?? [];
+
+  // Build group stats for sidebar
+  const groupStats = CHECK_GROUPS.map(g => {
+    const groupChecks = g.checkIds.map(id => checks.find(c => c.id === id)).filter(Boolean) as Check[];
+    const issues = groupChecks.filter(c => !c.passed).length;
+    const total  = groupChecks.length;
+    return { ...g, issues, total, groupChecks };
+  });
 
   return (
     <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
-      {/* ── Left sidebar ───────────────────────────── */}
+      {/* ── Left sidebar ─────────────────────────────── */}
       <aside style={{
         width: 220, flexShrink: 0, borderRight: "1px solid var(--border)",
         overflowY: "auto", display: "flex", flexDirection: "column",
-        background: "var(--surface)", padding: "20px 0",
+        background: "var(--surface)", padding: "24px 16px",
       }}>
-        {result && (
+        {!result ? (
+          /* Empty state sidebar */
+          <div style={{ textAlign: "center", color: "var(--dim)", fontSize: 12, paddingTop: 40 }}>
+            Upload a resume to see your score
+          </div>
+        ) : (
           <>
-            <div style={{ padding: "0 16px 16px", borderBottom: "1px solid var(--border)", marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <ScoreRing score={result.overall} size={56} label="" />
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>Overall</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-                    {result.overall >= 75 ? "Strong" : result.overall >= 55 ? "Good" : "Needs work"}
-                  </div>
-                </div>
+            {/* Score ring */}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>
+                Resume Score
+              </div>
+              <ScoreRing score={result.overall} size={100} label="" />
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginTop: 8 }}>
+                {result.overall >= 75 ? "Strong" : result.overall >= 55 ? "Good" : "Needs Work"}
               </div>
             </div>
 
-            {failed.length > 0 && (
-              <>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.5, textTransform: "uppercase", padding: "0 16px 6px" }}>
-                  Top Fixes
-                </div>
-                {failed.map(c => (
-                  <SidebarItem key={c.id} check={c} active={selected === c.id} onClick={() => setSelected(c.id)} />
-                ))}
-              </>
-            )}
+            {/* Upload & rescan */}
+            <button
+              onClick={() => { setResult(null); setError(null); }}
+              style={{
+                width: "100%", padding: "9px 14px", borderRadius: 8,
+                background: "var(--accent)", border: "none", color: "#fff",
+                fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 20,
+              }}
+            >
+              ↑ Scan another resume
+            </button>
 
-            {passed.length > 0 && (
-              <>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.5, textTransform: "uppercase", padding: "16px 16px 6px" }}>
-                  Completed
-                </div>
-                {passed.map(c => (
-                  <SidebarItem key={c.id} check={c} active={selected === c.id} onClick={() => setSelected(c.id)} />
-                ))}
-              </>
-            )}
+            {/* Category bars */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {groupStats.map(g => (
+                <a key={g.id} href={`#group-${g.id}`} style={{ textDecoration: "none" }}>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{g.label}</span>
+                      <span style={{ fontSize: 11, color: g.issues > 0 ? "var(--red)" : "var(--green)", fontWeight: 600 }}>
+                        {g.issues > 0 ? `${g.issues} issue${g.issues > 1 ? "s" : ""}` : "✓ Clear"}
+                      </span>
+                    </div>
+                    <div style={{ height: 5, borderRadius: 3, background: "var(--surface2)", overflow: "hidden" }}>
+                      <div style={{
+                        height: "100%", borderRadius: 3,
+                        width: `${((g.total - g.issues) / Math.max(g.total, 1)) * 100}%`,
+                        background: g.issues === 0 ? "var(--green)" : g.issues >= g.total / 2 ? "var(--red)" : "#f59e0b",
+                        transition: "width 0.8s ease",
+                      }} />
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
           </>
         )}
       </aside>
 
-      {/* ── Main panel ─────────────────────────────── */}
-      <main style={{ flex: 1, overflowY: "auto", padding: "32px 36px" }}>
-        {/* Upload zone + stored resumes — visible if no result */}
+      {/* ── Main panel ──────────────────────────────── */}
+      <main style={{ flex: 1, overflowY: "auto", padding: "32px 40px" }}>
+
+        {/* Upload state */}
         {!result && !loading && (
           <>
             <UploadZone
@@ -250,56 +278,31 @@ export default function AnalyzeResume() {
               onClick={() => fileRef.current?.click()}
               error={error}
             />
-
-            {/* My Resumes picker */}
             {(storedResumes.length > 0 || loadingStored) && (
               <div style={{ maxWidth: 520, margin: "28px auto 0" }}>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  marginBottom: 12,
-                }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                   <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                  <span style={{ fontSize: 12, color: "var(--dim)", letterSpacing: 0.2 }}>or pick a saved resume</span>
+                  <span style={{ fontSize: 12, color: "var(--dim)" }}>or pick a saved resume</span>
                   <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
                 </div>
-
                 {loadingStored ? (
-                  <div style={{ display: "flex", justifyContent: "center", padding: "12px 0" }}>
-                    <Spinner />
-                  </div>
+                  <div style={{ display: "flex", justifyContent: "center", padding: 12 }}><Spinner /></div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {storedResumes.map(r => (
-                      <button
-                        key={r.folder}
-                        onClick={() => runFolder(r.folder)}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 12,
-                          padding: "12px 16px", borderRadius: 10,
-                          border: "1px solid var(--border)",
-                          background: "var(--surface)", cursor: "pointer",
-                          textAlign: "left", fontFamily: "inherit",
-                          transition: "background 0.12s, border-color 0.12s",
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.background = "var(--surface2)";
-                          e.currentTarget.style.borderColor = "var(--accent)";
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.background = "var(--surface)";
-                          e.currentTarget.style.borderColor = "var(--border)";
-                        }}
+                      <button key={r.folder} onClick={() => runFolder(r.folder)} style={{
+                        display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
+                        borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
+                        cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                        transition: "background 0.12s, border-color 0.12s",
+                      }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.borderColor = "var(--border)"; }}
                       >
                         <span style={{ fontSize: 18 }}>📄</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>
-                            {r.company}
-                          </div>
-                          {r.role && (
-                            <div style={{ fontSize: 12, color: "var(--dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {r.role}
-                            </div>
-                          )}
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{r.company}</div>
+                          {r.role && <div style={{ fontSize: 12, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.role}</div>}
                         </div>
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: "var(--dim)", flexShrink: 0 }}>
                           <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
@@ -315,155 +318,186 @@ export default function AnalyzeResume() {
 
         {loading && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, paddingTop: 80, color: "var(--muted)" }}>
-            <Spinner />
+            <Spinner size={24} />
             <span style={{ fontSize: 14 }}>Analysing your resume…</span>
           </div>
         )}
 
         {result && (
-          <>
-            {/* Summary banner */}
-            <div style={{
-              background: "var(--surface)", border: "1px solid var(--border)",
-              borderRadius: 14, padding: "20px 24px", marginBottom: 24,
-            }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 8 }}>
-                Your score is based on {result.checks.length} recruiter checks.
-              </div>
-              {result.summary_ok && (
-                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
-                  <span style={{ color: "var(--green)", marginTop: 1 }}>✓</span>
-                  <span style={{ fontSize: 13, color: "var(--muted)" }}>
-                    Scored well in <strong style={{ color: "var(--text)" }}>{result.summary_ok.replace("Scored well in ", "").replace(".", "")}</strong>.
-                  </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 36 }}>
+            {groupStats.map(g => (
+              <section key={g.id} id={`group-${g.id}`}>
+                {/* Group header */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                  <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", margin: 0 }}>{g.label}</h2>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: "3px 8px",
+                    borderRadius: 20, background: `${g.badgeColor}20`, color: g.badgeColor,
+                    textTransform: "uppercase",
+                  }}>{g.badge}</span>
                 </div>
-              )}
-              {result.summary_bad && (
-                <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <span style={{ color: "var(--red)", marginTop: 1 }}>✗</span>
-                  <span style={{ fontSize: 13, color: "var(--muted)" }}>
-                    Needs work on <strong style={{ color: "var(--text)" }}>{result.summary_bad.replace("Needs work on ", "").replace(".", "")}</strong>.
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Check detail */}
-            {activeCheck && (
-              <div style={{
-                background: "var(--surface)", border: "1px solid var(--border)",
-                borderRadius: 14, padding: "22px 24px", marginBottom: 24,
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                  <div style={{
-                    width: 32, height: 32, borderRadius: 8,
-                    background: activeCheck.passed ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 15,
-                  }}>
-                    {activeCheck.passed ? "✓" : "✗"}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{activeCheck.name}</div>
-                    <div style={{ fontSize: 12, color: "var(--dim)" }}>Score: {activeCheck.score}/10</div>
-                  </div>
-                  <div style={{
-                    marginLeft: "auto", padding: "4px 10px", borderRadius: 20,
-                    background: activeCheck.passed ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)",
-                    fontSize: 11, fontWeight: 600, color: activeCheck.passed ? "var(--green)" : "var(--red)",
-                    textTransform: "uppercase", letterSpacing: 0.3,
-                  }}>
-                    {activeCheck.passed ? "Pass" : "Fix needed"}
-                  </div>
-                </div>
-
-                <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, margin: "0 0 16px" }}>
-                  {activeCheck.detail}
+                <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, margin: "0 0 14px" }}>
+                  {g.description}
                 </p>
 
-                {activeCheck.items.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>
-                      {activeCheck.id === "quantify" ? "Bullets missing metrics — click to rewrite"
-                        : activeCheck.id === "role_depth" ? "Weak roles — click to rewrite with AI"
-                        : "Flagged lines"}
-                    </div>
-                    {activeCheck.id === "role_depth"
-                      ? activeCheck.items.map((item, i) => (
-                          <RoleCard
-                            key={i}
-                            item={item}
-                            rewrites={roleRewrites[item]}
-                            rewriting={roleRewriting === item}
-                            onRewrite={() => rewriteRole(item)}
-                          />
-                        ))
-                      : activeCheck.items.map((item, i) => (
-                          <BulletCard
-                            key={i}
-                            bullet={item}
-                            canRewrite={activeCheck.id === "quantify" || activeCheck.id === "weak_verbs"}
-                            rewrite={rewrites[item]}
-                            rewriting={rewriting === item}
-                            onRewrite={() => rewriteBullet(item)}
-                          />
-                        ))
-                    }
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Re-analyse button */}
-            <button
-              onClick={() => { setResult(null); setError(null); }}
-              style={{
-                padding: "9px 18px", borderRadius: 9, border: "1px solid var(--border)",
-                background: "transparent", color: "var(--muted)", fontSize: 13, cursor: "pointer",
-              }}
-            >
-              Analyse another resume
-            </button>
-          </>
+                {/* Check rows */}
+                <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+                  {g.groupChecks.map((check, idx) => (
+                    <CheckRow
+                      key={check.id}
+                      check={check}
+                      isLast={idx === g.groupChecks.length - 1}
+                      expanded={!!expanded[check.id]}
+                      onToggle={() => setExpanded(e => ({ ...e, [check.id]: !e[check.id] }))}
+                      rewrites={rewrites}
+                      rewriting={rewriting}
+                      onRewriteBullet={rewriteBullet}
+                      roleRewrites={roleRewrites}
+                      roleRewriting={roleRewriting}
+                      onRewriteRole={rewriteRole}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
         )}
       </main>
 
-      <input
-        ref={fileRef} type="file" accept=".pdf"
-        style={{ display: "none" }}
-        onChange={e => onFile(e.target.files?.[0])}
-      />
+      <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => onFile(e.target.files?.[0])} />
     </div>
   );
 }
 
-function SidebarItem({ check, active, onClick }: { check: Check; active: boolean; onClick: () => void }) {
+// ── CheckRow ─────────────────────────────────────────────────────────────────
+function CheckRow({ check, isLast, expanded, onToggle, rewrites, rewriting, onRewriteBullet, roleRewrites, roleRewriting, onRewriteRole }: {
+  check: Check; isLast: boolean; expanded: boolean; onToggle: () => void;
+  rewrites: Record<string, string>; rewriting: string | null; onRewriteBullet: (b: string) => void;
+  roleRewrites: Record<string, string[]>; roleRewriting: string | null; onRewriteRole: (r: string) => void;
+}) {
+  const canExpand = check.items.length > 0;
   return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex", alignItems: "center", gap: 8, width: "100%",
-        padding: "8px 16px", border: "none", cursor: "pointer", textAlign: "left",
-        background: active ? "var(--surface2)" : "transparent",
-        borderLeft: active ? "2px solid var(--accent)" : "2px solid transparent",
-      }}
-    >
-      <span style={{ fontSize: 12, color: check.passed ? "var(--green)" : "var(--red)", flexShrink: 0 }}>
-        {check.passed ? "✓" : "✗"}
-      </span>
-      <span style={{ fontSize: 13, color: "var(--text)", flex: 1, fontWeight: active ? 500 : 400 }}>
-        {check.name}
-      </span>
-      {!check.passed && (
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--red)" }}>{check.score}</span>
+    <div style={{ borderBottom: isLast ? "none" : "1px solid var(--border)" }}>
+      {/* Row header */}
+      <div
+        onClick={canExpand ? onToggle : undefined}
+        style={{
+          display: "flex", alignItems: "flex-start", gap: 14,
+          padding: "16px 20px", cursor: canExpand ? "pointer" : "default",
+          background: expanded ? "var(--surface2)" : "var(--surface)",
+          transition: "background 0.1s",
+        }}
+      >
+        {/* Pass/fail dot */}
+        <div style={{
+          width: 22, height: 22, borderRadius: "50%", flexShrink: 0, marginTop: 1,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: check.passed ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)",
+        }}>
+          {check.passed
+            ? <svg width="11" height="11" viewBox="0 0 11 11"><path d="M2 5.5l2.5 2.5 4.5-4.5" stroke="var(--green)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
+            : <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2l-6 6" stroke="var(--red)" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          }
+        </div>
+
+        {/* Name + detail */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>{check.name}</span>
+            <span style={{
+              fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 600,
+              background: check.passed ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)",
+              color: check.passed ? "var(--green)" : "var(--red)",
+              letterSpacing: 0.3, textTransform: "uppercase",
+            }}>
+              {check.passed ? "Pass" : `Score ${check.score}/10`}
+            </span>
+          </div>
+          <p style={{ fontSize: 13, color: "var(--muted)", margin: 0, lineHeight: 1.6 }}>
+            {check.detail}
+          </p>
+        </div>
+
+        {/* Expand chevron */}
+        {canExpand && (
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 2, transition: "transform 0.2s", transform: expanded ? "rotate(180deg)" : "none" }}>
+            <path d="M4 6l4 4 4-4" stroke="var(--dim)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+      </div>
+
+      {/* Expanded items */}
+      {expanded && canExpand && (
+        <div style={{ padding: "0 20px 16px 56px", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
+            {check.id === "quantify" ? "Bullets missing metrics — click to improve"
+              : check.id === "role_depth" ? "Under-described roles — click to rewrite"
+              : "Flagged items"}
+          </div>
+          {check.id === "role_depth"
+            ? check.items.map((item, i) => {
+                const bracketIdx = item.lastIndexOf("  [");
+                const header = bracketIdx > -1 ? item.slice(0, bracketIdx) : item;
+                const reason = bracketIdx > -1 ? item.slice(bracketIdx + 2) : "";
+                const rewrites = roleRewrites[item];
+                return (
+                  <div key={i} style={{ background: "var(--surface2)", borderRadius: 9, padding: "12px 14px" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{header}</div>
+                    {reason && <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 8 }}>{reason}</div>}
+                    {rewrites ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 2 }}>AI Suggestions</div>
+                        {rewrites.map((b, j) => (
+                          <div key={j} style={{ fontSize: 13, color: "var(--text)", borderLeft: "3px solid var(--green)", paddingLeft: 10, lineHeight: 1.55 }}>{b}</div>
+                        ))}
+                      </div>
+                    ) : (
+                      <button onClick={() => onRewriteRole(item)} disabled={roleRewriting === item} style={{
+                        display: "flex", alignItems: "center", gap: 6, padding: "6px 12px",
+                        borderRadius: 7, background: "var(--accent)", border: "none", color: "#fff",
+                        fontSize: 12, fontWeight: 500, cursor: roleRewriting === item ? "default" : "pointer",
+                        opacity: roleRewriting === item ? 0.7 : 1,
+                      }}>
+                        {roleRewriting === item ? <><Spinner size={14} /> Rewriting…</> : <>✦ Rewrite this role</>}
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            : check.items.map((item, i) => {
+                const canRewrite = check.id === "quantify" || check.id === "weak_verbs";
+                const rewrite = rewrites[item];
+                return (
+                  <div key={i} style={{ background: "var(--surface2)", borderRadius: 9, padding: "10px 14px" }}>
+                    <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, fontStyle: "italic", borderLeft: "3px solid var(--border)", paddingLeft: 10, marginBottom: rewrite || canRewrite ? 8 : 0 }}>
+                      {item}
+                    </div>
+                    {rewrite && (
+                      <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.55, borderLeft: "3px solid var(--green)", paddingLeft: 10, marginBottom: 6 }}>
+                        {rewrite}
+                      </div>
+                    )}
+                    {canRewrite && !rewrite && (
+                      <button onClick={() => onRewriteBullet(item)} disabled={rewriting === item} style={{
+                        display: "flex", alignItems: "center", gap: 6, padding: "5px 11px",
+                        borderRadius: 6, background: "var(--accent)", border: "none", color: "#fff",
+                        fontSize: 11, fontWeight: 500, cursor: rewriting === item ? "default" : "pointer",
+                        opacity: rewriting === item ? 0.7 : 1,
+                      }}>
+                        {rewriting === item ? <><Spinner size={13} /> Rewriting…</> : <>✦ Improve this bullet</>}
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+          }
+        </div>
       )}
-      {check.passed && (
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--green)" }}>10</span>
-      )}
-    </button>
+    </div>
   );
 }
 
+// ── Upload zone ───────────────────────────────────────────────────────────────
 function UploadZone({ dragging, onDragOver, onDragLeave, onDrop, onClick, error }: {
   dragging: boolean; error: string | null;
   onDragOver: React.DragEventHandler; onDragLeave: React.DragEventHandler;
@@ -471,112 +505,17 @@ function UploadZone({ dragging, onDragOver, onDragLeave, onDrop, onClick, error 
 }) {
   return (
     <div style={{ maxWidth: 520, margin: "60px auto 0", textAlign: "center" }}>
-      <div
-        onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onClick={onClick}
-        style={{
-          border: `2px dashed ${dragging ? "var(--accent)" : "var(--border)"}`,
-          borderRadius: 16, padding: "56px 32px", cursor: "pointer",
-          background: dragging ? "rgba(99,102,241,0.04)" : "var(--surface)",
-          transition: "border-color 0.15s, background 0.15s",
-        }}
-      >
-        <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
-          Drop your resume PDF here
-        </div>
-        <div style={{ fontSize: 13, color: "var(--muted)" }}>
-          or click to browse — we&apos;ll run {11} recruiter checks instantly
-        </div>
-      </div>
-      {error && (
-        <div style={{ marginTop: 12, fontSize: 13, color: "var(--red)" }}>{error}</div>
-      )}
-    </div>
-  );
-}
-
-function RoleCard({ item, rewrites, rewriting, onRewrite }: {
-  item: string; rewrites?: string[]; rewriting: boolean; onRewrite: () => void;
-}) {
-  // item = "Header  [reason]"
-  const bracketIdx = item.lastIndexOf("  [");
-  const header = bracketIdx > -1 ? item.slice(0, bracketIdx) : item;
-  const reason = bracketIdx > -1 ? item.slice(bracketIdx + 2) : "";
-  return (
-    <div style={{ background: "var(--surface2)", borderRadius: 10, padding: "12px 14px" }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>{header}</div>
-      {reason && (
-        <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 10 }}>{reason}</div>
-      )}
-      {rewrites && rewrites.length > 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 4 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 2 }}>
-            AI-Suggested Rewrites
-          </div>
-          {rewrites.map((b, i) => (
-            <div key={i} style={{
-              fontSize: 13, color: "var(--text)", lineHeight: 1.55,
-              borderLeft: "3px solid var(--green)", paddingLeft: 10,
-            }}>{b}</div>
-          ))}
-        </div>
-      ) : (
-        <button
-          onClick={onRewrite}
-          disabled={rewriting}
-          style={{
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "6px 12px", borderRadius: 7,
-            background: "var(--accent)", border: "none", color: "#fff",
-            fontSize: 12, fontWeight: 500, cursor: rewriting ? "default" : "pointer",
-            opacity: rewriting ? 0.7 : 1,
-          }}
-        >
-          {rewriting ? <Spinner /> : "✦"}
-          {rewriting ? "Rewriting role…" : "Rewrite this role"}
-        </button>
-      )}
-    </div>
-  );
-}
-
-function BulletCard({ bullet, canRewrite, rewrite, rewriting, onRewrite }: {
-  bullet: string; canRewrite: boolean;
-  rewrite?: string; rewriting: boolean; onRewrite: () => void;
-}) {
-  return (
-    <div style={{ background: "var(--surface2)", borderRadius: 10, padding: "12px 14px" }}>
-      <div style={{
-        fontSize: 13, color: "var(--muted)", lineHeight: 1.55,
-        fontStyle: "italic", marginBottom: rewrite || canRewrite ? 10 : 0,
-        borderLeft: "3px solid var(--border)", paddingLeft: 10,
+      <div onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onClick={onClick} style={{
+        border: `2px dashed ${dragging ? "var(--accent)" : "var(--border)"}`,
+        borderRadius: 16, padding: "56px 32px", cursor: "pointer",
+        background: dragging ? "rgba(99,102,241,0.04)" : "var(--surface)",
+        transition: "border-color 0.15s, background 0.15s",
       }}>
-        {bullet}
+        <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
+        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Drop your resume PDF here</div>
+        <div style={{ fontSize: 13, color: "var(--muted)" }}>or click to browse — we&apos;ll run 11 recruiter checks instantly</div>
       </div>
-      {rewrite && (
-        <div style={{
-          fontSize: 13, color: "var(--text)", lineHeight: 1.55,
-          borderLeft: "3px solid var(--green)", paddingLeft: 10, marginBottom: 6,
-        }}>
-          {rewrite}
-        </div>
-      )}
-      {canRewrite && !rewrite && (
-        <button
-          onClick={onRewrite}
-          disabled={rewriting}
-          style={{
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "6px 12px", borderRadius: 7,
-            background: "var(--accent)", border: "none", color: "#fff",
-            fontSize: 12, fontWeight: 500, cursor: rewriting ? "default" : "pointer",
-            opacity: rewriting ? 0.7 : 1,
-          }}
-        >
-          {rewriting ? <Spinner /> : "✦"}
-          {rewriting ? "Rewriting…" : "Generate suggestion"}
-        </button>
-      )}
+      {error && <div style={{ marginTop: 12, fontSize: 13, color: "var(--red)" }}>{error}</div>}
     </div>
   );
 }

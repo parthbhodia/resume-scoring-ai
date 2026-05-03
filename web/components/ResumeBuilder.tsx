@@ -613,14 +613,16 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                 <input value={role} onChange={e => setRole(e.target.value)} placeholder="e.g. Fullstack Engineer" />
               </Field>
             </div>
-            <Field label="Job description">
-              <textarea
-                value={jd}
-                onChange={e => setJd(e.target.value)}
-                placeholder="Paste the full job description here — or import from a link above."
-                style={{ minHeight: 140, lineHeight: 1.55 }}
-              />
-            </Field>
+            {!result && (
+              <Field label="Job description">
+                <textarea
+                  value={jd}
+                  onChange={e => setJd(e.target.value)}
+                  placeholder="Paste the full job description here — or import from a link above."
+                  style={{ minHeight: 140, lineHeight: 1.55 }}
+                />
+              </Field>
+            )}
           </StepCard>
 
           {/* Base resume indicator */}

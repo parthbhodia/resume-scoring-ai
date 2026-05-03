@@ -27,10 +27,39 @@
  * collapses to icons-only via the `rb-shell-compact` CSS rule (added below).
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
+
+type Theme = "dark" | "light";
+
+function applyTheme(t: Theme) {
+  document.documentElement.setAttribute("data-theme", t);
+}
+
+/** Persist + apply theme. Returns [theme, toggle]. */
+function useTheme(): [Theme, () => void] {
+  const [theme, setTheme] = useState<Theme>("dark");
+
+  // On mount: read saved preference (or default dark).
+  useEffect(() => {
+    const saved = (localStorage.getItem("rn-theme") as Theme | null) || "dark";
+    setTheme(saved);
+    applyTheme(saved);
+  }, []);
+
+  const toggle = useCallback(() => {
+    setTheme(prev => {
+      const next: Theme = prev === "dark" ? "light" : "dark";
+      localStorage.setItem("rn-theme", next);
+      applyTheme(next);
+      return next;
+    });
+  }, []);
+
+  return [theme, toggle];
+}
 
 export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs";
 
@@ -96,6 +125,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const active  = useAppView();
   const [user, setUser] = useState<User | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, toggleTheme] = useTheme();
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -142,23 +172,58 @@ export default function AppShell({ children }: { children: ReactNode }) {
         position: "sticky", top: 0, height: "100vh",
       }}>
         {/* Brand */}
-        <div
-          onClick={() => router.push("/?view=builder")}
-          style={{
-            padding: "20px 18px 16px",
-            display: "flex", alignItems: "center", gap: 9,
-            cursor: "pointer", borderBottom: "1px solid var(--border)",
-          }}
-        >
-          <div style={{
-            width: 28, height: 28, borderRadius: 8,
-            background: "linear-gradient(135deg, var(--accent), #4ca0ff)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontWeight: 700, fontSize: 14, letterSpacing: -0.4,
-          }}>R</div>
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.4, color: "var(--text)" }}>
-            Resunova
+        <div style={{
+          padding: "14px 12px 14px 18px",
+          display: "flex", alignItems: "center", gap: 9,
+          borderBottom: "1px solid var(--border)",
+        }}>
+          <div
+            onClick={() => router.push("/?view=builder")}
+            style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flex: 1, minWidth: 0 }}
+          >
+            <div style={{
+              width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+              background: "linear-gradient(135deg, var(--accent), #4ca0ff)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#fff", fontWeight: 700, fontSize: 14, letterSpacing: -0.4,
+            }}>R</div>
+            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.4, color: "var(--text)" }}>
+              Resunova
+            </div>
           </div>
+
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            style={{
+              flexShrink: 0, width: 28, height: 28, borderRadius: 7,
+              background: "var(--surface2)", border: "1px solid var(--border)",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              color: "var(--dim)", transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = "var(--surface3)";
+              e.currentTarget.style.color = "var(--text)";
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = "var(--surface2)";
+              e.currentTarget.style.color = "var(--dim)";
+            }}
+          >
+            {theme === "dark" ? (
+              /* Sun icon */
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+            ) : (
+              /* Moon icon */
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+              </svg>
+            )}
+          </button>
         </div>
 
         {/* Nav */}
