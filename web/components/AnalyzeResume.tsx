@@ -418,14 +418,80 @@ export default function AnalyzeResume() {
       {/* ── Main panel ────────────────────────────────── */}
       <main className="az-main" style={{ flex: 1, overflowY: "auto", padding: "28px 36px", minWidth: 0 }}>
 
-        {/* Mobile history toggle bar */}
+        <style>{`
+          @media (max-width: 767px) {
+            .az-history-bar     { display: flex !important; }
+            .az-mobile-score    { display: block !important; }
+            .az-main            { padding: 16px 14px 60px !important; }
+          }
+        `}</style>
+
+        {/* ── Mobile-only score card (shown when result exists) ── */}
+        {result && (
+          <div className="az-mobile-score" style={{ display: "none", marginBottom: 20 }}>
+            {/* Score row */}
+            <div style={{
+              background: "var(--surface)", border: "1px solid var(--border)",
+              borderRadius: 14, padding: "18px 16px", marginBottom: 12,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <ScoreRing score={result.overallScore} size={80} label="" />
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, fontFamily: "'Cormorant Garant', Georgia, serif", marginBottom: 4 }}>
+                    Resume Score
+                  </div>
+                  <div style={{ fontSize: 32, fontWeight: 700, color: scoreColor(result.overallScore), lineHeight: 1 }}>
+                    {result.overallScore}
+                    <span style={{ fontSize: 14, fontWeight: 400, color: "var(--dim)" }}>/100</span>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: scoreColor(result.overallScore), marginTop: 2 }}>
+                    {scoreLabel(result.overallScore)}
+                  </div>
+                </div>
+                <div style={{ flex: 1 }} />
+                <button
+                  onClick={() => { setResult(null); setError(null); setExpandedBullets({}); }}
+                  style={{
+                    padding: "8px 14px", borderRadius: 8, border: "none",
+                    background: "var(--amber)", color: "#fff",
+                    fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    whiteSpace: "nowrap", flexShrink: 0,
+                  }}
+                >New ↑</button>
+              </div>
+            </div>
+
+            {/* Category bars */}
+            <div style={{
+              background: "var(--surface)", border: "1px solid var(--border)",
+              borderRadius: 14, padding: "14px 16px",
+              display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px",
+            }}>
+              {CATEGORY_LABELS.map(({ key, label }) => {
+                const score = result.categoryScores[key];
+                const color = scoreColor(score);
+                const pct = score !== null ? score : 0;
+                return (
+                  <div key={key}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                      <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>{label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: score === null ? "var(--dim)" : color }}>
+                        {score === null ? "–" : score}
+                      </span>
+                    </div>
+                    <div style={{ height: 3, borderRadius: 2, background: "var(--surface2)", overflow: "hidden" }}>
+                      <div style={{ height: "100%", borderRadius: 2, width: `${pct}%`, background: score === null ? "var(--border)" : color, transition: "width 0.9s cubic-bezier(0.16,1,0.3,1)" }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Mobile history toggle bar (pre-result only) */}
         {!result && (
-          <div style={{
-            display: "none",
-            marginBottom: 16,
-          }}
-          className="az-history-bar"
-          >
+          <div className="az-history-bar" style={{ display: "none", marginBottom: 16 }}>
             <button
               onClick={() => setHistoryOpen(o => !o)}
               style={{
@@ -434,7 +500,6 @@ export default function AnalyzeResume() {
                 border: "1px solid var(--border)", background: "var(--surface)",
                 cursor: "pointer", fontFamily: "inherit",
                 fontSize: 13, color: "var(--muted)",
-                transition: "background var(--transition)",
               }}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -445,9 +510,6 @@ export default function AnalyzeResume() {
             </button>
           </div>
         )}
-        <style>{`
-          @media (max-width: 767px) { .az-history-bar { display: flex !important; } }
-        `}</style>
 
         {/* Pre-result upload state */}
         {!result && !loading && (
