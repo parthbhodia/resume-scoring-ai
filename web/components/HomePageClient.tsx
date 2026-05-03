@@ -20,6 +20,7 @@ import AppShell, { useAppView } from "@/components/AppShell";
 import ResumeBuilder from "@/components/ResumeBuilder";
 import ResumeLibrary from "@/components/ResumeLibrary";
 import ResumeView from "@/components/ResumeView";
+import AnalyzeResume from "@/components/AnalyzeResume";
 
 export default function HomePageClient() {
   return (
@@ -43,6 +44,7 @@ function RouterView() {
   }
   if (view === "profile") return <PlaceholderPanel title="Profile" subtitle="Coming next — your Personal, Education, Work Experience, Skills, EEO, and Resume defaults all in one place." />;
   if (view === "jobs") return <PlaceholderPanel title="Jobs" subtitle="Coming soon — autoapply will live here once your profile is set up." />;
+  if (view === "analyze") return <AnalyzeResume />;
   return <ResumeBuilder initialBaseFolder={base || null} />;
 }
 

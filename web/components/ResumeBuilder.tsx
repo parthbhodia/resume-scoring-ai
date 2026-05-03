@@ -803,28 +803,24 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                   borderRadius: "50%", pointerEvents: "none",
                 }} />
 
-                <div className="rb-score-row" style={{ display: "flex", alignItems: "flex-start", gap: 24, position: "relative" }}>
+                {/* Top row: ring + match label + action buttons */}
+                <div className="rb-score-row" style={{ display: "flex", alignItems: "center", gap: 24, position: "relative", marginBottom: ratings?.verdict ? 16 : 0 }}>
                   {ratings ? (
-                    <ScoreRing score={score} size={130} />
+                    <ScoreRing score={score} size={120} />
                   ) : (
-                    <div style={{ width: 130, height: 130, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <div style={{ width: 120, height: 120, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       <Spinner />
                     </div>
                   )}
 
-                  <div style={{ flex: 1, paddingTop: 4 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 5 }}>
                       {company} · {role}
                     </div>
                     {ratings ? (
-                      <>
-                        <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: -0.6, color: "var(--text)", marginBottom: 8, lineHeight: 1.3 }}>
-                          {score >= 80 ? "Strong match" : score >= 65 ? "Good match" : score >= 50 ? "Moderate match" : "Needs work"}
-                        </div>
-                        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: 0 }}>
-                          {ratings.verdict}
-                        </p>
-                      </>
+                      <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.6, color: "var(--text)", lineHeight: 1.2 }}>
+                        {score >= 80 ? "Strong match" : score >= 65 ? "Good match" : score >= 50 ? "Moderate match" : "Needs work"}
+                      </div>
                     ) : (
                       <div style={{ fontSize: 13, color: "var(--dim)" }}>Analysing match…</div>
                     )}
@@ -862,6 +858,18 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                     </div>
                   )}
                 </div>
+
+                {/* Full-width verdict paragraph below the top row */}
+                {ratings?.verdict && (
+                  <p style={{
+                    fontSize: 13, color: "var(--muted)", lineHeight: 1.7,
+                    letterSpacing: -0.2, margin: 0,
+                    paddingTop: 4,
+                    borderTop: "1px solid var(--border)",
+                  }}>
+                    {ratings.verdict}
+                  </p>
+                )}
               </div>
 
               {/* Strengths + Gaps */}

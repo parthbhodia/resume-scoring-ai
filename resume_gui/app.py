@@ -956,6 +956,289 @@ async def api_backfill_tex(request: Request):
     return JSONResponse(result)
 
 
+# ── Recruiter Checks ──────────────────────────────────────────────────────────
+
+_WEAK_VERBS = re.compile(
+    r"\b(helped|assisted|worked on|was responsible for|participated in|"
+    r"involved in|contributed to|supported|utilized|leveraged|liaised|"
+    r"managed|handled|did|made|got|went|used|had|tried|attempted)\b",
+    re.IGNORECASE,
+)
+_PRONOUN_RE  = re.compile(r"\b(I|me|my|we|our|us)\b", re.IGNORECASE)
+_DATE_RE     = re.compile(
+    r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
+    r"Dec(?:ember)?)[,. ]+\d{4}\b"
+    r"|\b\d{4}\s*[-–]\s*(?:\d{4}|Present|Current)\b",
+    re.IGNORECASE,
+)
+_NUMBER_RE   = re.compile(r"\b\d[\d,]*%?|\$[\d,]+[KkMmBb]?")
+_EMAIL_RE    = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+_PHONE_RE    = re.compile(r"(\+?\d[\d\s\-().]{7,}\d)")
+_LINKEDIN_RE = re.compile(r"linkedin\.com/in/", re.IGNORECASE)
+_UNNECESSARY = re.compile(
+    r"\b(references available|references furnished|responsible for|"
+    r"duties included|objective:|career objective|to obtain a|"
+    r"seeking a position)\b",
+    re.IGNORECASE,
+)
+
+
+def _recruiter_checks(text: str) -> dict:
+    """Run 10 recruiter checks on plain-text resume content."""
+    lines   = [l.strip() for l in text.splitlines() if l.strip()]
+    bullets = [l for l in lines if re.match(r"^[•\-–*]|\w", l) and len(l) > 30]
+
+    checks = []
+
+    # 1. Quantify impact
+    unquant = [b for b in bullets if not _NUMBER_RE.search(b)]
+    q_score = max(0, round(10 - len(unquant) * 1.2))
+    checks.append({
+        "id": "quantify", "name": "Quantified Impact",
+        "score": q_score, "passed": q_score >= 7,
+        "detail": (
+            "Recruiters scan for numbers — percentages, dollar amounts, team sizes, "
+            "timeframes. Bullets without metrics feel vague. Aim for at least 50% of "
+            "your bullets to contain a quantified result."
+        ),
+        "items": unquant[:8],
+    })
+
+    # 2. Weak verbs
+    weak_hits = [b for b in bullets if _WEAK_VERBS.search(b)]
+    wv_score  = max(0, round(10 - len(weak_hits) * 2))
+    checks.append({
+        "id": "weak_verbs", "name": "Strong Action Verbs",
+        "score": wv_score, "passed": wv_score >= 7,
+        "detail": (
+            "Passive or generic verbs ('helped', 'assisted', 'was responsible for') "
+            "dilute impact. Replace them with strong, specific verbs that show ownership: "
+            "Led, Architected, Reduced, Drove, Launched, Automated."
+        ),
+        "items": weak_hits[:8],
+    })
+
+    # 3. Action verb at start
+    no_action = [b for b in bullets if not re.match(r"^[A-Z][a-z]+ed\b|^[A-Z][a-z]+s\b|^[A-Z][a-z]+ing\b|^[A-Z][a-z]{2,}", b)]
+    av_score  = max(0, round(10 - len(no_action) * 1.5))
+    checks.append({
+        "id": "action", "name": "Action Verb Start",
+        "score": av_score, "passed": av_score >= 7,
+        "detail": (
+            "Every bullet should start with a strong action verb. This signals "
+            "initiative and makes your resume easier to skim."
+        ),
+        "items": no_action[:6],
+    })
+
+    # 4. Pronouns
+    pronoun_hits = [l for l in lines if _PRONOUN_RE.search(l)]
+    pron_score   = 10 if not pronoun_hits else max(0, 10 - len(pronoun_hits) * 3)
+    checks.append({
+        "id": "pronouns", "name": "No Personal Pronouns",
+        "score": pron_score, "passed": pron_score >= 8,
+        "detail": (
+            "Resumes should be written in the implied first person without using "
+            "'I', 'me', 'my', 'we', etc. Remove all personal pronouns."
+        ),
+        "items": pronoun_hits[:6],
+    })
+
+    # 5. Repetition
+    verb_counts: dict[str, int] = {}
+    for b in bullets:
+        m = re.match(r"^([A-Z][a-z]+)", b)
+        if m:
+            verb_counts[m.group(1)] = verb_counts.get(m.group(1), 0) + 1
+    repeated = [f"'{v}' used {n} times" for v, n in verb_counts.items() if n >= 3]
+    rep_score = 10 if not repeated else max(0, 10 - len(repeated) * 2)
+    checks.append({
+        "id": "repetition", "name": "Verb Variety",
+        "score": rep_score, "passed": rep_score >= 7,
+        "detail": (
+            "Using the same action verb repeatedly makes your resume monotonous. "
+            "Vary your verbs across bullets to showcase a broader skill set."
+        ),
+        "items": repeated,
+    })
+
+    # 6. Dates present
+    has_dates = bool(_DATE_RE.search(text))
+    date_score = 10 if has_dates else 0
+    checks.append({
+        "id": "dates", "name": "Dates Present",
+        "score": date_score, "passed": has_dates,
+        "detail": (
+            "Recruiters need dates to understand your career timeline. "
+            "Every job and education entry should include start and end dates "
+            "(or 'Present' for your current role)."
+        ),
+        "items": [] if has_dates else ["No dates detected in the resume"],
+    })
+
+    # 7. Contact info
+    has_email    = bool(_EMAIL_RE.search(text))
+    has_phone    = bool(_PHONE_RE.search(text))
+    has_linkedin = bool(_LINKEDIN_RE.search(text))
+    contact_issues = []
+    if not has_email:    contact_issues.append("Email address not found")
+    if not has_phone:    contact_issues.append("Phone number not found")
+    if not has_linkedin: contact_issues.append("LinkedIn URL not found")
+    contact_score = 10 - len(contact_issues) * 3
+    checks.append({
+        "id": "contact", "name": "Contact Information",
+        "score": contact_score, "passed": contact_score >= 7,
+        "detail": (
+            "Your contact section should include an email, phone number, and LinkedIn "
+            "profile URL. Missing any of these reduces your chances of being contacted."
+        ),
+        "items": contact_issues,
+    })
+
+    # 8. Resume length
+    word_count = len(text.split())
+    if word_count < 300:
+        len_score, len_note = 4, f"Too short ({word_count} words) — aim for 400–700"
+    elif word_count > 900:
+        len_score, len_note = 5, f"Too long ({word_count} words) — aim for 400–700"
+    else:
+        len_score, len_note = 10, f"Good length ({word_count} words)"
+    checks.append({
+        "id": "length", "name": "Resume Length",
+        "score": len_score, "passed": len_score >= 7,
+        "detail": (
+            "A one-page resume (400–700 words) is ideal for most candidates. "
+            "Two pages are acceptable for 10+ years of experience. "
+            "Anything shorter looks thin; anything longer loses the reader."
+        ),
+        "items": [] if len_score >= 7 else [len_note],
+    })
+
+    # 9. Unnecessary phrases
+    unnec_hits = list({m.group(0).lower() for m in _UNNECESSARY.finditer(text)})
+    un_score   = 10 if not unnec_hits else max(0, 10 - len(unnec_hits) * 3)
+    checks.append({
+        "id": "unnecessary", "name": "Unnecessary Phrases",
+        "score": un_score, "passed": un_score >= 8,
+        "detail": (
+            "Phrases like 'References available upon request' or 'Objective: To obtain a '  "
+            "waste space and signal an outdated template. Remove them entirely."
+        ),
+        "items": [f'Remove: "{p}"' for p in unnec_hits],
+    })
+
+    # 10. Bullet density (short bullets)
+    short_bullets = [b for b in bullets if len(b.split()) < 6]
+    dens_score    = max(0, round(10 - len(short_bullets) * 2))
+    checks.append({
+        "id": "density", "name": "Bullet Depth",
+        "score": dens_score, "passed": dens_score >= 7,
+        "detail": (
+            "Bullets under 6 words are too thin to convey impact. "
+            "Each bullet should tell a mini-story: Action + Context + Result."
+        ),
+        "items": short_bullets[:6],
+    })
+
+    overall = round(sum(c["score"] for c in checks) / len(checks) * 10)
+    passed_names = [c["name"] for c in checks if c["passed"]]
+    failed_names = [c["name"] for c in checks if not c["passed"]]
+    summary_ok  = ("Scored well in " + ", ".join(passed_names[:3])) if passed_names else ""
+    summary_bad = ("Needs work on "  + ", ".join(failed_names[:3])) if failed_names else ""
+
+    return {
+        "overall":     overall,
+        "summary_ok":  summary_ok,
+        "summary_bad": summary_bad,
+        "checks":      checks,
+        "bullets":     bullets[:20],
+    }
+
+
+def _latex_to_plain(tex: str) -> str:
+    """Strip common LaTeX markup to produce readable plain text for analysis."""
+    # Remove comments
+    tex = re.sub(r"%.*", "", tex)
+    # Extract text from common resume macros
+    tex = re.sub(r"\\resumeQuadHeading\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}", r"\1 \2 \3 \4", tex)
+    tex = re.sub(r"\\resumeTrioHeading\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}", r"\1 \2 \3", tex)
+    tex = re.sub(r"\\resumeItem\{([^}]*)\}", r"• \1", tex)
+    tex = re.sub(r"\\resumeItem\s*\{([^}]*)\}", r"• \1", tex)
+    tex = re.sub(r"\\textbf\{([^}]*)\}", r"\1", tex)
+    tex = re.sub(r"\\textit\{([^}]*)\}", r"\1", tex)
+    tex = re.sub(r"\\emph\{([^}]*)\}", r"\1", tex)
+    tex = re.sub(r"\\href\{[^}]*\}\{([^}]*)\}", r"\1", tex)
+    tex = re.sub(r"\\section\*?\{([^}]*)\}", r"\n\1\n", tex)
+    # Remove remaining commands
+    tex = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{[^}]*\})*", "", tex)
+    # Clean up
+    tex = re.sub(r"[{}]", "", tex)
+    tex = re.sub(r"\n{3,}", "\n\n", tex)
+    return tex.strip()
+
+
+async def api_analyze_upload(request: Request):
+    """POST /api/analyze-upload — upload a PDF and run recruiter checks."""
+    try:
+        form = await request.form()
+        upload = form.get("file")
+        if not upload:
+            return JSONResponse({"error": "No file provided"}, status_code=400)
+        data = await upload.read()
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+        if not text.strip():
+            return JSONResponse({"error": "Could not extract text from PDF"}, status_code=400)
+        result = _recruiter_checks(text)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("analyze_upload failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def api_analyze_folder(request: Request):
+    """POST /api/analyze-folder/{folder} — run recruiter checks on a stored resume."""
+    folder = request.path_params.get("folder", "").strip()
+    if not folder or ".." in folder:
+        return JSONResponse({"error": "invalid folder"}, status_code=400)
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    user_id = body.get("user_id", "")
+
+    loop = asyncio.get_event_loop()
+
+    def _run():
+        # Try local TeX first
+        tex_path = os.path.join(LIBRARY_ROOT, folder, "resume.tex")
+        if os.path.isfile(tex_path):
+            with open(tex_path, encoding="utf-8", errors="ignore") as f:
+                return _latex_to_plain(f.read())
+
+        # Try Supabase download
+        supabase = _supabase_client()
+        if supabase and user_id:
+            try:
+                bucket = supabase.storage.from_("resumes")
+                tex_bytes = bucket.download(f"{user_id}/{folder}/resume.tex")
+                return _latex_to_plain(tex_bytes.decode("utf-8", errors="ignore"))
+            except Exception as e:
+                logger.warning(f"analyze_folder: supabase tex download failed: {e}")
+
+        return None
+
+    plain = await loop.run_in_executor(None, _run)
+    if not plain:
+        return JSONResponse({"error": "Could not load resume text"}, status_code=404)
+
+    result = _recruiter_checks(plain)
+    return JSONResponse(result)
+
+
 async def serve_pdf(request: Request):
     folder   = request.path_params["folder"]
     filename = request.path_params["filename"]
@@ -991,6 +1274,8 @@ routes = [
     Route("/api/version/{folder}/{version}", api_version_load, methods=["GET"]),
     Route("/api/storage-status",            api_storage_status,methods=["GET"]),
     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
+    Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
+    Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
     Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
 

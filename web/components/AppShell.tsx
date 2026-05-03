@@ -32,11 +32,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
 
-export type AppView = "builder" | "library" | "profile" | "jobs";
+export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs";
 
 const VIEW_LABELS: Record<AppView, string> = {
   builder:  "Resume Builder",
   library:  "My Resumes",
+  analyze:  "Analyze Resume",
   profile:  "Profile",
   jobs:     "Jobs",
 };
@@ -54,6 +55,13 @@ const VIEW_ICONS: Record<AppView, ReactNode> = {
       <rect x="2.5" y="2.5" width="3.5" height="11" rx="1" stroke="currentColor" strokeWidth="1.4"/>
       <rect x="6.5" y="2.5" width="3.5" height="11" rx="1" stroke="currentColor" strokeWidth="1.4"/>
       <rect x="10.5" y="2.5" width="3" height="11" rx="1" stroke="currentColor" strokeWidth="1.4"/>
+    </svg>
+  ),
+  analyze: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4"/>
+      <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+      <path d="M5 7h4M7 5v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
     </svg>
   ),
   profile: (
@@ -78,9 +86,8 @@ const BADGES: Partial<Record<AppView, string>> = {
 export function useAppView(): AppView {
   const params = useSearchParams();
   const raw = (params?.get("view") || "builder").toLowerCase();
-  return (Object.keys(VIEW_LABELS) as AppView[]).includes(raw as AppView)
-    ? (raw as AppView)
-    : "builder";
+  const valid: AppView[] = ["builder", "library", "analyze", "profile", "jobs"];
+  return valid.includes(raw as AppView) ? (raw as AppView) : "builder";
 }
 
 export default function AppShell({ children }: { children: ReactNode }) {
