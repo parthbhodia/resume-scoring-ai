@@ -15,7 +15,7 @@ import AtsPanel, { type AtsResult } from "./AtsPanel";
 import ShareButton   from "./ShareButton";
 import type { ParsedResume, ParsedBullet } from "@/lib/types";
 
-type Tab = "analysis" | "ats" | "changes" | "edit";
+type Tab = "analysis" | "ats" | "edit";
 
 function extractJdKeywords(jdText: string): string[] {
   const STOP = new Set([
@@ -767,23 +767,6 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
             </div>
           )}
 
-          {/* Live preview during generation */}
-          {generating && preview && (
-            <div style={{ marginBottom: 28 }} className="fade-in">
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: -0.1, marginBottom: 8, textTransform: "uppercase" }}>
-                Live preview
-              </div>
-              <div style={{
-                background: "var(--surface)", border: "1px solid var(--border)",
-                borderRadius: 10, padding: "14px 16px",
-                maxHeight: 200, overflow: "auto",
-              }}>
-                <pre style={{ fontSize: 11, lineHeight: 1.65, color: "var(--green)", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-                  {preview}
-                </pre>
-              </div>
-            </div>
-          )}
 
           {/* ── Results ── */}
           {result && (
@@ -889,6 +872,19 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                 </div>
               </div>
 
+              {/* Inline diff — changes highlighted right below the PDF card */}
+              {result.diff.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
+                    Changes to your resume&ensp;
+                    <span style={{ color: "var(--green)", fontWeight: 600 }}>+{result.adds}</span>
+                    <span style={{ color: "var(--dim)" }}> / </span>
+                    <span style={{ color: "var(--red)", fontWeight: 600 }}>−{result.removes}</span>
+                  </div>
+                  <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={result.baseFolder} baseLoaded={result.baseLoaded} jdKeywords={jdKeywords} />
+                </div>
+              )}
+
               {/* Strengths + Gaps */}
               {ratings && (ratings.whats_working?.length > 0 || ratings.gaps?.length > 0) && (
                 <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
@@ -969,11 +965,10 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                 display: "flex", gap: 2, marginBottom: 18,
                 background: "var(--surface2)", borderRadius: 9, padding: 3,
               }}>
-                {(["analysis", "ats", "changes", "edit"] as Tab[]).map(t => {
+                {(["analysis", "ats", "edit"] as Tab[]).map(t => {
                   const labels: Record<Tab, string> = {
                     analysis: "Analysis",
                     ats:      atsResult ? `ATS  ${atsResult.score}` : "ATS check",
-                    changes:  result.diff.length ? `Changes  +${result.adds} −${result.removes}` : "Changes",
                     edit:     "Edit bullets",
                   };
                   return (
@@ -1041,9 +1036,6 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                     />
                   )}
                 </>
-              )}
-              {activeTab === "changes" && (
-                <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={result.baseFolder} baseLoaded={result.baseLoaded} jdKeywords={jdKeywords} />
               )}
               {activeTab === "edit" && (
                 <>
