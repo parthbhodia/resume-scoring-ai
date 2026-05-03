@@ -988,7 +988,8 @@ _WEAK_VERBS = re.compile(
     r"managed|handled|did|made|got|went|used|had|tried|attempted)\b",
     re.IGNORECASE,
 )
-_PRONOUN_RE  = re.compile(r"\b(I|me|my|we|our|us)\b", re.IGNORECASE)
+_PRONOUN_RE  = re.compile(r"\b(I|[Mm]e|[Mm]y|[Ww]e|[Oo]ur|[Uu]s)\b")
+# Note: no IGNORECASE — we need to distinguish "us" from "US" (country code)
 _DATE_RE     = re.compile(
     r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
     r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
