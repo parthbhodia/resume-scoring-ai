@@ -1652,7 +1652,7 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         '  "criteria": [\n'
         '    {\n'
         '      "name": "<specific skill or requirement from JD>",\n'
-        '      "weight": "<High if the JD lists it as required/core/must-have OR the company's primary domain depends on it; Medium if clearly preferred but not blocking; Low only if explicitly optional or nice-to-have>",\n'
+        '      "weight": "<High if the JD lists it as required/core/must-have OR the company primary domain depends on it; Medium if clearly preferred but not blocking; Low only if explicitly optional or nice-to-have>",\n'
         '      "score": <1-10>,\n'
         '      "notes": "<honest note in SECOND PERSON, e.g. \'You built X at Y\' — quoting actual experience from the resume>"\n'
         '    }\n'
