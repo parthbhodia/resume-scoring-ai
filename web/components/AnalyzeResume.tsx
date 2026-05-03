@@ -136,6 +136,8 @@ export default function AnalyzeResume() {
   const [storedResumes, setStoredResumes] = useState<StoredResume[]>([]);
   const [loadingStored, setLoadingStored] = useState(false);
   const [expandedBullets, setExpandedBullets] = useState<Record<number, boolean>>({});
+  // History sidebar — hidden by default on mobile, visible on desktop
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Cycle loading messages every 3s
   useEffect(() => {
@@ -144,21 +146,24 @@ export default function AnalyzeResume() {
     return () => clearInterval(iv);
   }, [loading]);
 
-  // Fetch stored resumes
+  // Fetch stored resumes — always scoped to the signed-in user
   useEffect(() => {
     setLoadingStored(true);
     const supabase = getSupabaseClient();
     supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user?.id) { setLoadingStored(false); return; }
       try {
-        const url = user?.id
-          ? apiUrl(`/api/resumes?user_id=${encodeURIComponent(user.id)}`)
-          : apiUrl("/api/resumes");
-        const resp = await fetch(url);
+        const resp = await fetch(apiUrl(`/api/resumes?user_id=${encodeURIComponent(user.id)}`));
         const data = await resp.json();
-        const folders: string[] = Array.isArray(data)
-          ? data.map((r: { folder: string }) => r.folder)
-          : (data.resumes || []);
-        setStoredResumes(folders.map(folder => ({ folder, ...parseFolder(folder) })));
+        // DB returns [{folder, company, role, score, ...}]; local fallback [{folder,...}]
+        const records: StoredResume[] = Array.isArray(data)
+          ? data.map((r: { folder: string; company?: string; role?: string }) => ({
+              folder:  r.folder,
+              company: r.company || parseFolder(r.folder).company,
+              role:    r.role    || parseFolder(r.folder).role,
+            }))
+          : [];
+        setStoredResumes(records);
       } catch { /* silently ignore */ }
       setLoadingStored(false);
     });
@@ -220,137 +225,229 @@ export default function AnalyzeResume() {
       })
     : [];
 
-  return (
-    <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
-
-      {/* ── Left sidebar ──────────────────────────────── */}
-      <aside style={{
-        width: 280,
-        flexShrink: 0,
-        borderRight: "1px solid var(--border)",
-        overflowY: "auto",
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--surface)",
-        padding: "24px 16px",
-      }}>
-        {result ? (
-          <>
-            {/* Score ring */}
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>
-                Resume Score
-              </div>
-              <ScoreRing score={result.overallScore} size={110} label="" />
-              <div style={{
-                fontSize: 14, fontWeight: 700, marginTop: 8,
-                color: scoreColor(result.overallScore),
-              }}>
-                {scoreLabel(result.overallScore)}
-              </div>
+  /* ── Shared sidebar content ─────────────────── */
+  const sidebarContent = (
+    <>
+      {result ? (
+        <>
+          {/* Score ring */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10, fontFamily: "'Cormorant Garant', Georgia, serif" }}>
+              Resume Score
             </div>
+            <ScoreRing score={result.overallScore} size={100} label="" />
+            <div style={{ fontSize: 14, fontWeight: 700, marginTop: 8, color: scoreColor(result.overallScore) }}>
+              {scoreLabel(result.overallScore)}
+            </div>
+          </div>
 
-            {/* Analyze another button */}
-            <button
-              onClick={() => { setResult(null); setError(null); setExpandedBullets({}); }}
-              style={{
-                width: "100%", padding: "9px 14px", borderRadius: 8,
-                background: "var(--accent)", border: "none", color: "#fff",
-                fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 20,
-              }}
-            >
-              ↑ Analyze another
-            </button>
+          {/* Analyze another button */}
+          <button
+            onClick={() => { setResult(null); setError(null); setExpandedBullets({}); setHistoryOpen(false); }}
+            style={{
+              width: "100%", padding: "9px 14px", borderRadius: 8,
+              background: "var(--amber)", border: "none", color: "#fff",
+              fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginBottom: 20,
+              transition: "opacity var(--transition)",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; }}
+            onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
+          >
+            ↑ Analyze another
+          </button>
 
-            {/* Category score bars */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-              {CATEGORY_LABELS.map(({ key, label }) => {
-                const score = result.categoryScores[key];
-                const color = scoreColor(score);
-                const pct = score !== null ? score : 0;
-                return (
-                  <div key={key}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{label}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: score === null ? "var(--dim)" : color }}>
-                        {score === null ? "N/A" : score}
-                      </span>
-                    </div>
-                    <div style={{ height: 5, borderRadius: 3, background: "var(--surface2)", overflow: "hidden" }}>
-                      <div style={{
-                        height: "100%",
-                        borderRadius: 3,
-                        width: `${pct}%`,
-                        background: score === null ? "var(--border)" : color,
-                        transition: "width 0.8s ease",
-                      }} />
-                    </div>
+          {/* Category score bars */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {CATEGORY_LABELS.map(({ key, label }) => {
+              const score = result.categoryScores[key];
+              const color = scoreColor(score);
+              const pct = score !== null ? score : 0;
+              return (
+                <div key={key}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 500, color: "var(--muted)" }}>{label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: score === null ? "var(--dim)" : color }}>
+                      {score === null ? "N/A" : score}
+                    </span>
                   </div>
-                );
-              })}
-            </div>
-          </>
-        ) : (
-          /* Pre-result: show history of saved resumes */
-          <>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12 }}>
-              My Resumes
-            </div>
+                  <div style={{ height: 4, borderRadius: 2, background: "var(--surface2)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 2, width: `${pct}%`, background: score === null ? "var(--border)" : color, transition: "width 0.9s cubic-bezier(0.16,1,0.3,1)" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        /* Pre-result: history of saved resumes */
+        <>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14, fontFamily: "'Cormorant Garant', Georgia, serif" }}>
+            My Resumes
+          </div>
 
-            {loadingStored ? (
-              <div style={{ display: "flex", justifyContent: "center", paddingTop: 20 }}>
-                <Spinner />
-              </div>
-            ) : storedResumes.length === 0 ? (
-              <div style={{ fontSize: 12, color: "var(--dim)", textAlign: "center", paddingTop: 20, lineHeight: 1.6 }}>
-                No saved resumes yet.<br />Upload a PDF to get started.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {storedResumes.map(r => (
-                  <button
-                    key={r.folder}
-                    onClick={() => runFolder(r.folder)}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      padding: "10px 12px", borderRadius: 8,
-                      border: "1px solid var(--border)", background: "var(--surface2)",
-                      cursor: "pointer", textAlign: "left", fontFamily: "inherit",
-                      transition: "background 0.12s, border-color 0.12s",
-                    }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.background = "var(--accent-bg)";
-                      e.currentTarget.style.borderColor = "var(--accent)";
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.background = "var(--surface2)";
-                      e.currentTarget.style.borderColor = "var(--border)";
-                    }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color: "var(--dim)", flexShrink: 0 }}>
+          {loadingStored ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[1,2,3].map(i => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
+                  <div className="skeleton" style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0 }} />
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+                    <div className="skeleton" style={{ height: 11, borderRadius: 3, width: "75%" }} />
+                    <div className="skeleton" style={{ height: 10, borderRadius: 3, width: "55%" }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : storedResumes.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--dim)", textAlign: "center", paddingTop: 24, lineHeight: 1.7 }}>
+              No saved résumés yet.<br />
+              <span style={{ fontSize: 12 }}>Generate one in the Builder tab<br />or upload a PDF below.</span>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {storedResumes.map(r => (
+                <button
+                  key={r.folder}
+                  onClick={() => { runFolder(r.folder); setHistoryOpen(false); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "9px 10px", borderRadius: 8,
+                    border: "1px solid var(--border)", background: "transparent",
+                    cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                    transition: "background var(--transition), border-color var(--transition)",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--amber-bg)"; e.currentTarget.style.borderColor = "rgba(196,121,58,0.3)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "var(--border)"; }}
+                >
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                    background: "var(--surface2)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color: "var(--dim)" }}>
                       <path d="M3 2h7l3 3v9H3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
                       <path d="M10 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
                     </svg>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {r.company}
-                      </div>
-                      {r.role && (
-                        <div style={{ fontSize: 11, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {r.role}
-                        </div>
-                      )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.company}
                     </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        )}
+                    {r.role && (
+                      <div style={{ fontSize: 11, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 }}>
+                        {r.role}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)", position: "relative" }}>
+
+      {/* ── Mobile backdrop (close history panel) ─── */}
+      {historyOpen && (
+        <div
+          onClick={() => setHistoryOpen(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 29,
+            background: "rgba(0,0,0,0.28)",
+          }}
+        />
+      )}
+
+      {/* ── Sidebar — desktop static; mobile slide-in via CSS class ── */}
+      <style>{`
+        .az-sidebar {
+          width: 260px;
+          flex-shrink: 0;
+          border-right: 1px solid var(--border);
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          background: var(--surface);
+          padding: 20px 14px;
+          transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
+        }
+        @media (max-width: 767px) {
+          .az-sidebar {
+            position: fixed;
+            top: 0; left: 0; bottom: 0;
+            z-index: 30;
+            width: 280px;
+            box-shadow: 4px 0 24px rgba(0,0,0,0.18);
+            transform: translateX(-100%);
+          }
+          .az-sidebar.open {
+            transform: translateX(0);
+          }
+          .az-main { padding: 20px 16px 60px !important; }
+        }
+      `}</style>
+      <aside className={`az-sidebar${historyOpen ? " open" : ""}`}>
+        {/* Sidebar header with close button */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+            History
+          </span>
+          <button
+            onClick={() => setHistoryOpen(false)}
+            title="Hide history"
+            style={{
+              width: 24, height: 24, borderRadius: 6,
+              border: "none", background: "var(--surface2)",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              color: "var(--dim)", transition: "background var(--transition)",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+        {sidebarContent}
       </aside>
 
       {/* ── Main panel ────────────────────────────────── */}
-      <main style={{ flex: 1, overflowY: "auto", padding: "32px 40px" }}>
+      <main className="az-main" style={{ flex: 1, overflowY: "auto", padding: "28px 36px", minWidth: 0 }}>
+
+        {/* Mobile history toggle bar */}
+        {!result && (
+          <div style={{
+            display: "none",
+            marginBottom: 16,
+          }}
+          className="az-history-bar"
+          >
+            <button
+              onClick={() => setHistoryOpen(o => !o)}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 14px", borderRadius: 8,
+                border: "1px solid var(--border)", background: "var(--surface)",
+                cursor: "pointer", fontFamily: "inherit",
+                fontSize: 13, color: "var(--muted)",
+                transition: "background var(--transition)",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
+                <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              {storedResumes.length > 0 ? `My Résumés (${storedResumes.length})` : "My Résumés"}
+            </button>
+          </div>
+        )}
+        <style>{`
+          @media (max-width: 767px) { .az-history-bar { display: flex !important; } }
+        `}</style>
 
         {/* Pre-result upload state */}
         {!result && !loading && (

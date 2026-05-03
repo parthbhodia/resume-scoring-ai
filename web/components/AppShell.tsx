@@ -39,7 +39,7 @@ function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>("dark");
 
   useEffect(() => {
-    const saved = (localStorage.getItem("rn-theme") as Theme | null) || "dark";
+    const saved = (localStorage.getItem("rn-theme") as Theme | null) || "light";
     setTheme(saved);
     applyTheme(saved);
   }, []);

@@ -91,31 +91,31 @@ async def homepage(request: Request):
 
 async def api_resumes(request: Request):
     user_id = (request.query_params.get("user_id") or "").strip()
-    resumes = list_resumes()
 
-    # On production the local LIBRARY_ROOT is empty; pull folder names from Supabase
-    if not resumes and user_id:
+    # 1. Try the Supabase `resumes` *table* first — this is the authoritative source
+    #    and is properly scoped to the authenticated user.
+    if user_id:
         supabase = _supabase_client()
         if supabase:
             try:
-                # List objects under user_id/ prefix — each unique "directory" is a folder
-                items = supabase.storage.from_("resumes").list(user_id, {"limit": 200})
-                seen: set[str] = set()
-                for item in (items or []):
-                    name = item.get("name", "")
-                    if name and name not in seen:
-                        seen.add(name)
-                        resumes.append({
-                            "folder": name,
-                            "path": f"supabase://{user_id}/{name}",
-                            "tex_files": [],
-                            "pdf_files": [],
-                            "has_pdf": False,
-                        })
+                rows = (
+                    supabase.table("resumes")
+                    .select("folder, company, role, score, pdf_url, created_at")
+                    .eq("user_id", user_id)
+                    .order("created_at", desc=True)
+                    .execute()
+                    .data or []
+                )
+                if rows:
+                    logger.info(f"GET /api/resumes  |  {len(rows)} DB rows  user={user_id}")
+                    return JSONResponse(rows)
             except Exception as exc:
-                logger.warning(f"api_resumes: supabase list failed: {exc}")
+                logger.warning(f"api_resumes: DB query failed: {exc}")
 
-    logger.info(f"GET /api/resumes  |  {len(resumes)} entries  user={user_id or 'anon'}")
+    # 2. Fall back to local disk (dev mode only — never exposes other users' data
+    #    because local resumes have no user_id concept).
+    resumes = list_resumes()
+    logger.info(f"GET /api/resumes  |  {len(resumes)} local entries  user={user_id or 'anon'}")
     return JSONResponse(resumes)
 
 

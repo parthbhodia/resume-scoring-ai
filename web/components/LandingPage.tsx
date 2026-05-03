@@ -25,9 +25,9 @@ const A = {
 type Theme = "dark" | "light";
 
 function useLandingTheme(): [Theme, () => void] {
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("light");
   useEffect(() => {
-    const saved = (localStorage.getItem("rn-theme") as Theme | null) || "dark";
+    const saved = (localStorage.getItem("rn-theme") as Theme | null) || "light";
     setTheme(saved);
     document.documentElement.setAttribute("data-theme", saved);
   }, []);
