@@ -42,6 +42,11 @@ _GROK_FALLBACK_MODELS = (
     os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning"),
 )
 
+# Reasoning-tier models used for analytical tasks (match scoring, ratings).
+# gemini-2.5-pro has deep thinking enabled; grok-4 is xAI's reasoning model.
+_REASONING_MODEL_GEMINI = "gemini-2.5-pro"
+_REASONING_MODEL_GROK   = os.environ.get("GROK_REASONING_MODEL", "grok-4")
+
 
 def _backoff_if_rate_limited(exc: BaseException, default_wait: float = 5.0) -> None:
     """
@@ -1667,27 +1672,37 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
         f"RESUME BODY (LaTeX — ignore formatting commands, read only the content. This is the ONLY source of truth about the candidate's experience):\n{latex_body[:6000]}"
     )
-    fallback_models = _model_chain(model)
-    for i, m in enumerate(fallback_models):
+    # Use reasoning models for ratings: pro → flash → grok-4 (reasoning) → grok fast
+    reasoning_chain: list[str] = [_REASONING_MODEL_GEMINI, "gemini-2.5-flash"]
+    if os.environ.get("XAI_API_KEY"):
+        reasoning_chain += [_REASONING_MODEL_GROK, "grok-4-1-fast-non-reasoning"]
+
+    for i, m in enumerate(reasoning_chain):
         if i > 0:
-            time.sleep(2)  # brief pause between retries
+            time.sleep(2)
         try:
             if _is_grok(m):
-                result = _json_grok(m, prompt, temperature=0.2)
+                result = _json_grok(m, prompt, temperature=1)
                 if not result:
                     continue
             else:
+                # Enable thinking for Gemini 2.5 models
+                thinking_cfg = (
+                    types.ThinkingConfig(thinking_budget=8000)
+                    if "2.5" in m else None
+                )
+                gen_cfg = types.GenerateContentConfig(
+                    temperature=1,  # required when thinking is on
+                    **({"thinking_config": thinking_cfg} if thinking_cfg else {}),
+                )
                 r = client.models.generate_content(
-                    model=m,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(temperature=0.2),
+                    model=m, contents=prompt, config=gen_cfg,
                 )
                 text = (r.text or "").strip()
                 text = re.sub(r"^```[a-z]*\n?", "", text)
                 text = re.sub(r"\n?```$", "", text)
                 result = json.loads(text)
-            if m != model:
-                logger.info(f"Ratings used fallback model: {m}")
+            logger.info(f"Ratings used model: {m}")
             return result
         except Exception as exc:
             logger.warning(f"Rating call failed on {m}: {exc}")
@@ -1726,20 +1741,28 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         f"OLD RESUME (LaTeX):\n{old_body[:4500]}\n\n"
         f"NEW RESUME (LaTeX):\n{new_body[:4500]}"
     )
-    fallback_models = _model_chain(model, _GEMINI_FALLBACK_MODELS)
-    for i, m in enumerate(fallback_models):
+    analysis_chain: list[str] = [_REASONING_MODEL_GEMINI, "gemini-2.5-flash"]
+    if os.environ.get("XAI_API_KEY"):
+        analysis_chain += [_REASONING_MODEL_GROK, "grok-4-1-fast-non-reasoning"]
+    for i, m in enumerate(analysis_chain):
         if i > 0:
             time.sleep(1)
         try:
             if _is_grok(m):
-                data = _json_grok(m, prompt, temperature=0.2)
+                data = _json_grok(m, prompt, temperature=1)
                 if not data:
                     continue
             else:
+                thinking_cfg = (
+                    types.ThinkingConfig(thinking_budget=5000)
+                    if "2.5" in m else None
+                )
+                gen_cfg = types.GenerateContentConfig(
+                    temperature=1,
+                    **({"thinking_config": thinking_cfg} if thinking_cfg else {}),
+                )
                 r = client.models.generate_content(
-                    model=m,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(temperature=0.2),
+                    model=m, contents=prompt, config=gen_cfg,
                 )
                 text = (r.text or "").strip()
                 text = re.sub(r"^```[a-z]*\n?", "", text)
