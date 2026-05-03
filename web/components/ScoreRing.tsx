@@ -2,9 +2,9 @@
 import { useEffect, useRef } from "react";
 import { scoreColor } from "@/lib/utils";
 
-interface Props { score: number; size?: number; }
+interface Props { score: number; size?: number; label?: string; }
 
-export default function ScoreRing({ score, size = 120 }: Props) {
+export default function ScoreRing({ score, size = 120, label = "Match score" }: Props) {
   const arcRef  = useRef<SVGCircleElement>(null);
   const valRef  = useRef<HTMLSpanElement>(null);
   const r       = (size / 2) - 8;
@@ -57,9 +57,11 @@ export default function ScoreRing({ score, size = 120 }: Props) {
           <span ref={valRef} style={{ fontSize: 30, fontWeight: 700, letterSpacing: -1.5, color }}>0</span>
           <span style={{ fontSize: 13, color: "var(--dim)", fontWeight: 400 }}>/100</span>
         </div>
-        <div style={{ fontSize: 11, color: "var(--dim)", letterSpacing: -0.1, marginTop: 3 }}>
-          Match score
-        </div>
+        {label && (
+          <div style={{ fontSize: 11, color: "var(--dim)", letterSpacing: -0.1, marginTop: 3 }}>
+            {label}
+          </div>
+        )}
       </div>
     </div>
   );

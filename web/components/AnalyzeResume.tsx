@@ -176,7 +176,7 @@ export default function AnalyzeResume() {
           <>
             <div style={{ padding: "0 16px 16px", borderBottom: "1px solid var(--border)", marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <ScoreRing score={result.overall} size={56} />
+                <ScoreRing score={result.overall} size={56} label="" />
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>Overall</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
