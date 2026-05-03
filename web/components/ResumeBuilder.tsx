@@ -9,7 +9,6 @@ import ScoreRing    from "./ScoreRing";
 import CriteriaTable from "./CriteriaTable";
 import DiffView     from "./DiffView";
 import SourcesPanel from "./SourcesPanel";
-import ResumeSidebar from "./ResumeSidebar";
 import ResumeEditor  from "./ResumeEditor";
 import AtsPanel, { type AtsResult } from "./AtsPanel";
 import ShareButton   from "./ShareButton";
@@ -420,46 +419,10 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
   const score   = ratings?.match_score ?? 0;
 
   return (
-    <div className="rb-root" style={{ display: "grid", gridTemplateColumns: "1fr 288px", minHeight: "100vh", background: "var(--bg)" }}>
+    <div className="rb-root" style={{ minHeight: "100vh", background: "var(--bg)" }}>
 
       {/* ── Main ── */}
       <main style={{ overflowY: "auto", display: "flex", flexDirection: "column" }}>
-
-        {/* Sticky nav */}
-        <header className="rb-header" style={{
-          position: "sticky", top: 0, zIndex: 20,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "0 48px", height: 54,
-          background: "rgba(0,0,0,0.82)", backdropFilter: "blur(20px) saturate(180%)",
-          borderBottom: "1px solid var(--border)",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <div style={{
-              width: 26, height: 26, borderRadius: 7,
-              background: "var(--accent)", flexShrink: 0,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <rect x="1.5" y="0.5" width="7" height="9" rx="1.2" stroke="white" strokeWidth="1.2"/>
-                <path d="M4 4h5M4 6h3.5M4 8h4.5" stroke="white" strokeWidth="1" strokeLinecap="round"/>
-              </svg>
-            </div>
-            <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: -0.5, color: "var(--text)" }}>ResumeAI</span>
-          </div>
-          {user && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 12, color: "var(--dim)", letterSpacing: -0.2 }}>{user.email}</span>
-              <button
-                onClick={() => getSupabaseClient().auth.signOut()}
-                style={{
-                  fontSize: 12, padding: "4px 11px",
-                  background: "var(--surface2)", border: "1px solid var(--border)",
-                  borderRadius: 6, color: "var(--muted)", cursor: "pointer", fontFamily: "inherit",
-                }}
-              >Sign out</button>
-            </div>
-          )}
-        </header>
 
         {/* Page content */}
         <div className="rb-page" style={{ padding: "44px 48px 80px", maxWidth: 820, margin: "0 auto", width: "100%" }}>
@@ -1132,11 +1095,6 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
         </div>
       </main>
 
-      {/* ── Sidebar ── */}
-      <ResumeSidebar
-        activeFolder={result?.folder ?? null}
-        onSelect={f => setBaseFolder(f)}
-      />
     </div>
   );
 }

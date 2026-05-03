@@ -25,6 +25,7 @@ import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
+import ResumeSidebar from "./ResumeSidebar";
 
 export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs";
 
@@ -119,7 +120,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [user, setUser]             = useState<User | null>(null);
   const [menuOpen, setMenuOpen]     = useState(false);
   const [theme, toggleTheme]        = useTheme();
-  const [navOpen, setNavOpen]       = useState(false); // sidebar hidden by default
+  const [navOpen, setNavOpen]       = useState(false);     // left nav drawer
+  const [historyOpen, setHistoryOpen] = useState(false);   // right history drawer
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -140,7 +142,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   const switchView = (next: AppView) => {
     router.push(`/?view=${next}`);
-    setNavOpen(false); // close drawer on navigate
+    setNavOpen(false);
+    setHistoryOpen(false);
   };
 
   const onSignOut = async () => {
@@ -211,16 +214,28 @@ export default function AppShell({ children }: { children: ReactNode }) {
           )}
         </NavIconBtn>
 
+        {/* History drawer toggle */}
+        <NavIconBtn
+          onClick={() => { setHistoryOpen(o => !o); setNavOpen(false); }}
+          title={historyOpen ? "Hide history" : "Resume history"}
+          active={historyOpen}
+        >
+          {/* Clock / history icon */}
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
+            <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </NavIconBtn>
+
         {/* Nav drawer toggle */}
         <NavIconBtn
-          onClick={() => setNavOpen(o => !o)}
+          onClick={() => { setNavOpen(o => !o); setHistoryOpen(false); }}
           title={navOpen ? "Hide navigation" : "Show navigation"}
           active={navOpen}
         >
-          {/* Panel / sidebar icon */}
+          {/* Hamburger / menu icon */}
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-            <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.4"/>
-            <path d="M5.5 1.5v13" stroke="currentColor" strokeWidth="1.4"/>
+            <path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
           </svg>
         </NavIconBtn>
 
@@ -270,19 +285,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
         {children}
       </main>
 
-      {/* ── Backdrop (click to close drawer) ─────────────── */}
+      {/* ── Backdrop (shared — click to close whichever drawer is open) ── */}
       <div
-        onClick={() => setNavOpen(false)}
+        onClick={() => { setNavOpen(false); setHistoryOpen(false); }}
         style={{
           position: "fixed", inset: 0, top: HEADER_H, zIndex: 39,
           background: "rgba(0,0,0,0.28)",
-          opacity: navOpen ? 1 : 0,
-          pointerEvents: navOpen ? "auto" : "none",
+          opacity: (navOpen || historyOpen) ? 1 : 0,
+          pointerEvents: (navOpen || historyOpen) ? "auto" : "none",
           transition: "opacity 0.22s",
         }}
       />
 
-      {/* ── Navigation drawer ─────────────────────────────── */}
+      {/* ── Navigation drawer (left) ──────────────────────── */}
       <aside style={{
         position: "fixed", top: HEADER_H, left: 0, bottom: 0, zIndex: 40,
         width: 220,
@@ -339,6 +354,23 @@ export default function AppShell({ children }: { children: ReactNode }) {
           }}>{user?.email || "Loading…"}</div>
         </div>
       </aside>
+
+      {/* ── History drawer (right) ───────────────────────── */}
+      <div style={{
+        position: "fixed", top: HEADER_H, right: 0, bottom: 0, zIndex: 40,
+        width: 260,
+        transform: historyOpen ? "translateX(0)" : "translateX(100%)",
+        transition: "transform 0.22s cubic-bezier(0.4,0,0.2,1)",
+        boxShadow: historyOpen ? "-4px 0 24px rgba(0,0,0,0.18)" : "none",
+      }}>
+        <ResumeSidebar
+          activeFolder={null}
+          onSelect={folder => {
+            router.push(`/?base=${encodeURIComponent(folder)}`);
+            setHistoryOpen(false);
+          }}
+        />
+      </div>
     </div>
   );
 }
