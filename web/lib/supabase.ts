@@ -16,9 +16,18 @@ export function getSupabaseClient(): SupabaseClient {
 /* ── Resume CRUD ─────────────────────────────────────────── */
 
 export async function fetchResumes(): Promise<ResumeRecord[]> {
-  const { data, error } = await getSupabaseClient()
+  const db = getSupabaseClient();
+
+  // Always scope to the signed-in user — prevents data leakage and ensures
+  // the query satisfies Supabase RLS policies (which require a matching user_id).
+  const { data: { session } } = await db.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return [];          // not authenticated → empty list, not all rows
+
+  const { data, error } = await db
     .from("resumes")
     .select("*, criteria(*)")
+    .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as ResumeRecord[];
