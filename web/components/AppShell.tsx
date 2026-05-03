@@ -116,10 +116,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, [menuOpen]);
 
   const switchView = (next: AppView) => {
-    // Preserve auth state but drop view-scoped params (like ?resume=) when
-    // navigating between top-level views — they won't make sense in the new view.
-    const url = next === "builder" ? "/" : `/?view=${next}`;
-    router.push(url);
+    // All views use /?view=<name> so the URL always changes on tab switch,
+    // which guarantees a fresh component mount even when returning to builder.
+    router.push(`/?view=${next}`);
   };
 
   const onSignOut = async () => {
@@ -144,7 +143,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       }}>
         {/* Brand */}
         <div
-          onClick={() => switchView("builder")}
+          onClick={() => router.push("/?view=builder")}
           style={{
             padding: "20px 18px 16px",
             display: "flex", alignItems: "center", gap: 9,

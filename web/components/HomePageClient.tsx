@@ -45,7 +45,8 @@ function RouterView() {
   if (view === "profile") return <PlaceholderPanel title="Profile" subtitle="Coming next — your Personal, Education, Work Experience, Skills, EEO, and Resume defaults all in one place." />;
   if (view === "jobs") return <PlaceholderPanel title="Jobs" subtitle="Coming soon — autoapply will live here once your profile is set up." />;
   if (view === "analyze") return <AnalyzeResume />;
-  return <ResumeBuilder initialBaseFolder={base || null} />;
+  // key=base ensures remount when switching from a library-loaded resume to fresh builder
+  return <ResumeBuilder key={`builder-${base}`} initialBaseFolder={base || null} />;
 }
 
 function ShellSkeleton() {
