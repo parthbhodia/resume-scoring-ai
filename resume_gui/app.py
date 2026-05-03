@@ -968,7 +968,7 @@ def _extract_pdf_text(pdf) -> str:
     """
     pages_text = []
     for page in pdf.pages:
-        words = page.extract_words(x_tolerance=3, y_tolerance=3, keep_blank_chars=False)
+        words = page.extract_words(x_tolerance=1, y_tolerance=3, keep_blank_chars=False)
         if not words:
             # Fallback to plain extract_text for image-heavy pages
             pages_text.append(page.extract_text() or "")
