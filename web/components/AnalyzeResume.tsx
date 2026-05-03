@@ -207,12 +207,7 @@ export default function AnalyzeResume() {
         overflowY: "auto", display: "flex", flexDirection: "column",
         background: "var(--surface)", padding: "24px 16px",
       }}>
-        {!result ? (
-          /* Empty state sidebar */
-          <div style={{ textAlign: "center", color: "var(--dim)", fontSize: 12, paddingTop: 40 }}>
-            Upload a resume to see your score
-          </div>
-        ) : (
+        {result ? (
           <>
             {/* Score ring */}
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
@@ -225,7 +220,7 @@ export default function AnalyzeResume() {
               </div>
             </div>
 
-            {/* Upload & rescan */}
+            {/* Rescan button */}
             <button
               onClick={() => { setResult(null); setError(null); }}
               style={{
@@ -261,6 +256,48 @@ export default function AnalyzeResume() {
               ))}
             </div>
           </>
+        ) : (
+          /* Pre-result: show history of saved resumes */
+          <>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12 }}>
+              My Resumes
+            </div>
+
+            {loadingStored ? (
+              <div style={{ display: "flex", justifyContent: "center", paddingTop: 20 }}><Spinner /></div>
+            ) : storedResumes.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--dim)", textAlign: "center", paddingTop: 20, lineHeight: 1.6 }}>
+                No saved resumes yet.<br />Upload a PDF to get started.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {storedResumes.map(r => (
+                  <button
+                    key={r.folder}
+                    onClick={() => runFolder(r.folder)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "10px 12px", borderRadius: 8,
+                      border: "1px solid var(--border)", background: "var(--surface2)",
+                      cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                      transition: "background 0.12s, border-color 0.12s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "var(--accent-bg)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color: "var(--dim)", flexShrink: 0 }}>
+                      <path d="M3 2h7l3 3v9H3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                      <path d="M10 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                    </svg>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.company}</div>
+                      {r.role && <div style={{ fontSize: 11, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.role}</div>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </aside>
 
@@ -278,41 +315,6 @@ export default function AnalyzeResume() {
               onClick={() => fileRef.current?.click()}
               error={error}
             />
-            {(storedResumes.length > 0 || loadingStored) && (
-              <div style={{ maxWidth: 520, margin: "28px auto 0" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                  <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                  <span style={{ fontSize: 12, color: "var(--dim)" }}>or pick a saved resume</span>
-                  <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                </div>
-                {loadingStored ? (
-                  <div style={{ display: "flex", justifyContent: "center", padding: 12 }}><Spinner /></div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {storedResumes.map(r => (
-                      <button key={r.folder} onClick={() => runFolder(r.folder)} style={{
-                        display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
-                        borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
-                        cursor: "pointer", textAlign: "left", fontFamily: "inherit",
-                        transition: "background 0.12s, border-color 0.12s",
-                      }}
-                        onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.borderColor = "var(--border)"; }}
-                      >
-                        <span style={{ fontSize: 18 }}>📄</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{r.company}</div>
-                          {r.role && <div style={{ fontSize: 12, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.role}</div>}
-                        </div>
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: "var(--dim)", flexShrink: 0 }}>
-                          <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </>
         )}
 

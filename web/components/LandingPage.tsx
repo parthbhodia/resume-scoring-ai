@@ -33,7 +33,7 @@ export default function LandingPage() {
         position: "sticky", top: 0, zIndex: 50,
         height: 60, padding: "0 36px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: "rgba(0,0,0,0.72)", backdropFilter: "blur(20px) saturate(180%)",
+        background: "var(--glass-bg)", backdropFilter: "blur(20px) saturate(180%)",
         borderBottom: "1px solid var(--border)",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>

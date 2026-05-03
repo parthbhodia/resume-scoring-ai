@@ -5,11 +5,12 @@
  *
  * Structure:
  *   ┌──────────┬────────────────────────────────────────────┐
- *   │  Logo    │                                            │
+ *   │  Logo  ☀│                                            │
  *   ├──────────┤                                            │
  *   │ Resume   │                                            │
  *   │ Builder  │              children                      │
  *   │ Library  │              (the active view)             │
+ *   │ Analyze  │                                            │
  *   │ Profile  │                                            │
  *   │ Jobs     │                                            │
  *   ├──────────┤                                            │
@@ -17,20 +18,21 @@
  *   └──────────┴────────────────────────────────────────────┘
  *
  * Routing:
- *   - View state is a query param (?view=builder|library|profile|jobs)
+ *   - View state is a query param (?view=builder|library|analyze|profile|jobs)
  *     because GH Pages serves the static `output: "export"` build, and
  *     dynamic per-view subroutes would require generateStaticParams().
  *   - Defaults to "builder" when absent.
  *   - Selecting a specific resume from the library uses ?view=library&resume=<folder>.
  *
- * The sidebar is sticky, full-height, and 220px wide on desktop. Mobile
- * collapses to icons-only via the `rb-shell-compact` CSS rule (added below).
+ * The sidebar is sticky, full-height, and 220px wide on desktop.
  */
 
 import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
+
+export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs";
 
 type Theme = "dark" | "light";
 
@@ -42,7 +44,7 @@ function applyTheme(t: Theme) {
 function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>("dark");
 
-  // On mount: read saved preference (or default dark).
+  // On mount: read saved preference (default dark).
   useEffect(() => {
     const saved = (localStorage.getItem("rn-theme") as Theme | null) || "dark";
     setTheme(saved);
@@ -60,8 +62,6 @@ function useTheme(): [Theme, () => void] {
 
   return [theme, toggle];
 }
-
-export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs";
 
 const VIEW_LABELS: Record<AppView, string> = {
   builder:  "Resume Builder",
@@ -120,12 +120,12 @@ export function useAppView(): AppView {
 }
 
 export default function AppShell({ children }: { children: ReactNode }) {
-  const router  = useRouter();
-  const params  = useSearchParams();
-  const active  = useAppView();
-  const [user, setUser] = useState<User | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [theme, toggleTheme] = useTheme();
+  const router   = useRouter();
+  const active   = useAppView();
+  const [user, setUser]         = useState<User | null>(null);
+  const [menuOpen, setMenuOpen]   = useState(false);
+  const [theme, toggleTheme]      = useTheme();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -161,17 +161,22 @@ export default function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="rb-app-shell" style={{
       display: "grid",
-      gridTemplateColumns: "220px 1fr",
+      gridTemplateColumns: sidebarOpen ? "220px 1fr" : "0px 1fr",
+      transition: "grid-template-columns 0.22s cubic-bezier(0.4,0,0.2,1)",
       minHeight: "100vh", background: "var(--bg)",
     }}>
       {/* ── Sidebar ─────────────────────────────────────────── */}
       <aside style={{
         background: "var(--surface)",
-        borderRight: "1px solid var(--border)",
+        borderRight: sidebarOpen ? "1px solid var(--border)" : "none",
         display: "flex", flexDirection: "column",
         position: "sticky", top: 0, height: "100vh",
+        overflow: "hidden",
+        width: sidebarOpen ? 220 : 0,
+        transition: "width 0.22s cubic-bezier(0.4,0,0.2,1), border-color 0.22s",
+        minWidth: 0,
       }}>
-        {/* Brand */}
+        {/* Brand row (logo + theme toggle) */}
         <div style={{
           padding: "14px 12px 14px 18px",
           display: "flex", alignItems: "center", gap: 9,
@@ -192,7 +197,27 @@ export default function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          {/* Theme toggle */}
+          {/* Sidebar collapse */}
+          <button
+            onClick={() => setSidebarOpen(false)}
+            title="Hide sidebar"
+            style={{
+              flexShrink: 0, width: 28, height: 28, borderRadius: 7,
+              background: "var(--surface2)", border: "1px solid var(--border)",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              color: "var(--dim)", transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--dim)"; }}
+          >
+            {/* Sidebar panel icon */}
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.4"/>
+              <path d="M5.5 1.5v13" stroke="currentColor" strokeWidth="1.4"/>
+            </svg>
+          </button>
+
+          {/* Theme toggle — sun (light mode) / moon (dark mode) */}
           <button
             onClick={toggleTheme}
             title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
@@ -212,15 +237,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
             }}
           >
             {theme === "dark" ? (
-              /* Sun icon */
+              /* Sun — click to go light */
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5"/>
-                <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4"
+                  stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
               </svg>
             ) : (
-              /* Moon icon */
+              /* Moon — click to go dark */
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z"
+                  stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
               </svg>
             )}
           </button>
@@ -327,6 +354,28 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* ── Content ─────────────────────────────────────────── */}
       <main style={{ minWidth: 0, position: "relative" }}>
+        {/* Floating sidebar re-open button (shown when sidebar is hidden) */}
+        {!sidebarOpen && (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            title="Show sidebar"
+            style={{
+              position: "absolute", top: 14, left: 14, zIndex: 40,
+              width: 32, height: 32, borderRadius: 8,
+              background: "var(--surface)", border: "1px solid var(--border)",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              color: "var(--dim)", transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.color = "var(--dim)"; }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.4"/>
+              <path d="M5.5 1.5v13" stroke="currentColor" strokeWidth="1.4"/>
+            </svg>
+          </button>
+        )}
         {children}
       </main>
     </div>
