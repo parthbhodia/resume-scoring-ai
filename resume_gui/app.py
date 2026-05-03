@@ -1037,18 +1037,34 @@ def _recruiter_checks(text: str) -> dict:
     """Run 10 recruiter checks on plain-text resume content."""
     raw_lines = [l.strip() for l in text.splitlines() if l.strip()]
 
-    # Merge orphan bullet glyphs: some PDFs put "•" on its own line
-    # followed by the bullet text on the next line.
-    lines: list[str] = []
+    # Pass 1: merge orphan bullet glyphs (some PDFs emit "•" on its own line)
+    merged: list[str] = []
     i = 0
     while i < len(raw_lines):
         ln = raw_lines[i]
         if re.match(r"^[•\-–*▪▸]\s*$", ln) and i + 1 < len(raw_lines):
-            lines.append(ln.rstrip() + " " + raw_lines[i + 1])
+            merged.append(ln.rstrip() + " " + raw_lines[i + 1])
             i += 2
         else:
-            lines.append(ln)
+            merged.append(ln)
             i += 1
+
+    # Pass 2: merge wrapped continuation lines back into their parent bullet.
+    # A continuation line is one that starts with a bullet glyph followed by a
+    # lowercase letter (or a conjunction/preposition) — this happens when
+    # pdfplumber assigns the bullet glyph to the second visual line of a
+    # long bullet that wraps.  e.g.:
+    #   "• Collaborated with the sales team …"   ← real bullet start
+    #   "• the sales team to identify routes …"  ← wrapped continuation
+    _CONTINUATION_RE = re.compile(r"^[•\-–*▪▸]\s+[a-z]")
+    lines: list[str] = []
+    for ln in merged:
+        if _CONTINUATION_RE.match(ln) and lines:
+            # Strip the leading glyph and space, append to previous line
+            tail = re.sub(r"^[•\-–*▪▸]\s+", "", ln)
+            lines[-1] = lines[-1].rstrip() + " " + tail
+        else:
+            lines.append(ln)
 
     # Lines that are clearly contact / header noise — skip from bullet lists
     _NOISE_RE = re.compile(

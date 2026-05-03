@@ -1,10 +1,31 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { getSupabaseClient } from "@/lib/supabase";
+
+type Theme = "dark" | "light";
+
+function useLandingTheme(): [Theme, () => void] {
+  const [theme, setTheme] = useState<Theme>("dark");
+  useEffect(() => {
+    const saved = (localStorage.getItem("rn-theme") as Theme | null) || "dark";
+    setTheme(saved);
+    document.documentElement.setAttribute("data-theme", saved);
+  }, []);
+  const toggle = useCallback(() => {
+    setTheme(prev => {
+      const next: Theme = prev === "dark" ? "light" : "dark";
+      localStorage.setItem("rn-theme", next);
+      document.documentElement.setAttribute("data-theme", next);
+      return next;
+    });
+  }, []);
+  return [theme, toggle];
+}
 
 export default function LandingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
+  const [theme, toggleTheme]  = useLandingTheme();
 
   async function signInWithGoogle() {
     setLoading(true);
@@ -41,7 +62,7 @@ export default function LandingPage() {
           <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: -0.5 }}>Resunova</span>
         </div>
 
-        <nav className="lp-nav" style={{ display: "flex", alignItems: "center", gap: 28 }}>
+        <nav className="lp-nav" style={{ display: "flex", alignItems: "center", gap: 20 }}>
           {[
             { lbl: "Features",    id: "features" },
             { lbl: "How it works", id: "how" },
@@ -57,6 +78,34 @@ export default function LandingPage() {
               }}
             >{l.lbl}</button>
           ))}
+
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            style={{
+              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+              background: "var(--surface2)", border: "1px solid var(--border)",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              color: "var(--dim)", transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "var(--dim)"; }}
+          >
+            {theme === "dark" ? (
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4"
+                  stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z"
+                  stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+              </svg>
+            )}
+          </button>
+
           <button
             onClick={signInWithGoogle}
             disabled={loading}

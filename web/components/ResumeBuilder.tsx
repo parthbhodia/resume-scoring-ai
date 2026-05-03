@@ -48,13 +48,32 @@ const EMPTY_RESULT: GenerationResult = {
   sources: [], latexPreview: "", status: "",
 };
 
+const SS_KEY = "rn_builder_draft";
+function loadDraft() {
+  try { return JSON.parse(sessionStorage.getItem(SS_KEY) ?? "{}"); } catch { return {}; }
+}
+function saveDraft(patch: Record<string, unknown>) {
+  try {
+    const prev = loadDraft();
+    sessionStorage.setItem(SS_KEY, JSON.stringify({ ...prev, ...patch }));
+  } catch { /* quota / SSR */ }
+}
+
 export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder?: string | null } = {}) {
-  const [company,    setCompany]    = useState("");
-  const [role,       setRole]       = useState("");
-  const [jd,         setJd]         = useState("");
+  const draft0 = loadDraft();
+  const [company,    setCompanyRaw]    = useState<string>(draft0.company ?? "");
+  const [role,       setRoleRaw]       = useState<string>(draft0.role ?? "");
+  const [jd,         setJdRaw]         = useState<string>(draft0.jd ?? "");
+  const [jobUrl,     setJobUrlRaw]     = useState<string>(draft0.jobUrl ?? "");
   const model = "gemini-2.5-flash";
   // Pre-load a base when arriving via /?base=<folder> from the library view.
   const [baseFolder, setBaseFolder] = useState<string | null>(initialBaseFolder ?? null);
+
+  // Wrap setters to also persist to sessionStorage
+  const setCompany = (v: string) => { setCompanyRaw(v); saveDraft({ company: v }); };
+  const setRole    = (v: string) => { setRoleRaw(v);    saveDraft({ role: v }); };
+  const setJd      = (v: string) => { setJdRaw(v);      saveDraft({ jd: v }); };
+  const setJobUrl  = (v: string) => { setJobUrlRaw(v);  saveDraft({ jobUrl: v }); };
 
   const [generating, setGenerating] = useState(false);
   const [statusMsg,  setStatusMsg]  = useState("");
@@ -79,7 +98,6 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
   const [uploadError,         setUploadError]         = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [jobUrl,       setJobUrl]       = useState("");
   const [extractingJd, setExtractingJd] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
 
@@ -767,6 +785,24 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
             </div>
           )}
 
+
+          {/* ── Streaming LaTeX preview (during generation) ── */}
+          {generating && preview && (
+            <div style={{ marginBottom: 28 }} className="fade-in">
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: -0.1, marginBottom: 8, textTransform: "uppercase" }}>
+                Live preview
+              </div>
+              <div style={{
+                background: "var(--surface)", border: "1px solid var(--border)",
+                borderRadius: 10, padding: "14px 16px",
+                maxHeight: 200, overflow: "auto",
+              }}>
+                <pre style={{ fontSize: 11, lineHeight: 1.65, color: "var(--green)", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                  {preview}
+                </pre>
+              </div>
+            </div>
+          )}
 
           {/* ── Results ── */}
           {result && (

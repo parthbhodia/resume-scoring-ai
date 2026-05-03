@@ -1,30 +1,24 @@
 "use client";
 
 /**
- * AppShell — sidebar + content layout for the signed-in app.
+ * AppShell — persistent top navbar + collapsible left drawer for signed-in app.
  *
- * Structure:
- *   ┌──────────┬────────────────────────────────────────────┐
- *   │  Logo  ☀│                                            │
- *   ├──────────┤                                            │
- *   │ Resume   │                                            │
- *   │ Builder  │              children                      │
- *   │ Library  │              (the active view)             │
- *   │ Analyze  │                                            │
- *   │ Profile  │                                            │
- *   │ Jobs     │                                            │
- *   ├──────────┤                                            │
- *   │ User     │                                            │
- *   └──────────┴────────────────────────────────────────────┘
+ * Layout:
+ *   ┌──────────────────────────────────────────────────────────────────┐
+ *   │  [R] Resunova                                  ☀  [◧]  [avatar] │  ← sticky top bar
+ *   ├──────────────────────────────────────────────────────────────────┤
+ *   │                                                                  │
+ *   │                        children                                  │
+ *   │                        (the active view, full width)             │
+ *   │                                                                  │
+ *   └──────────────────────────────────────────────────────────────────┘
+ *
+ * Navigation drawer (hidden by default, opens on panel-icon click):
+ *   Slides in from the left as an overlay, closes on backdrop click.
  *
  * Routing:
- *   - View state is a query param (?view=builder|library|analyze|profile|jobs)
- *     because GH Pages serves the static `output: "export"` build, and
- *     dynamic per-view subroutes would require generateStaticParams().
- *   - Defaults to "builder" when absent.
- *   - Selecting a specific resume from the library uses ?view=library&resume=<folder>.
- *
- * The sidebar is sticky, full-height, and 220px wide on desktop.
+ *   ?view=builder|library|analyze|profile|jobs  (defaults: builder)
+ *   ?view=library&resume=<folder>               (specific resume)
  */
 
 import { useEffect, useState, useCallback, type ReactNode } from "react";
@@ -40,11 +34,9 @@ function applyTheme(t: Theme) {
   document.documentElement.setAttribute("data-theme", t);
 }
 
-/** Persist + apply theme. Returns [theme, toggle]. */
 function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>("dark");
 
-  // On mount: read saved preference (default dark).
   useEffect(() => {
     const saved = (localStorage.getItem("rn-theme") as Theme | null) || "dark";
     setTheme(saved);
@@ -119,13 +111,15 @@ export function useAppView(): AppView {
   return valid.includes(raw as AppView) ? (raw as AppView) : "builder";
 }
 
+const HEADER_H = 56;
+
 export default function AppShell({ children }: { children: ReactNode }) {
-  const router   = useRouter();
-  const active   = useAppView();
-  const [user, setUser]         = useState<User | null>(null);
-  const [menuOpen, setMenuOpen]   = useState(false);
-  const [theme, toggleTheme]      = useTheme();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const router  = useRouter();
+  const active  = useAppView();
+  const [user, setUser]             = useState<User | null>(null);
+  const [menuOpen, setMenuOpen]     = useState(false);
+  const [theme, toggleTheme]        = useTheme();
+  const [navOpen, setNavOpen]       = useState(false); // sidebar hidden by default
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -134,21 +128,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Close the user-menu popover on outside click.
+  // Close user-menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     const onDoc = (e: MouseEvent) => {
-      const tgt = e.target as HTMLElement;
-      if (!tgt.closest("[data-user-menu]")) setMenuOpen(false);
+      if (!(e.target as HTMLElement).closest("[data-user-menu]")) setMenuOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
 
   const switchView = (next: AppView) => {
-    // All views use /?view=<name> so the URL always changes on tab switch,
-    // which guarantees a fresh component mount even when returning to builder.
     router.push(`/?view=${next}`);
+    setNavOpen(false); // close drawer on navigate
   };
 
   const onSignOut = async () => {
@@ -159,102 +151,150 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const initial = (user?.email || "?").charAt(0).toUpperCase();
 
   return (
-    <div className="rb-app-shell" style={{
-      display: "grid",
-      gridTemplateColumns: sidebarOpen ? "220px 1fr" : "0px 1fr",
-      transition: "grid-template-columns 0.22s cubic-bezier(0.4,0,0.2,1)",
-      minHeight: "100vh", background: "var(--bg)",
-    }}>
-      {/* ── Sidebar ─────────────────────────────────────────── */}
-      <aside style={{
-        background: "var(--surface)",
-        borderRight: sidebarOpen ? "1px solid var(--border)" : "none",
-        display: "flex", flexDirection: "column",
-        position: "sticky", top: 0, height: "100vh",
-        overflow: "hidden",
-        width: sidebarOpen ? 220 : 0,
-        transition: "width 0.22s cubic-bezier(0.4,0,0.2,1), border-color 0.22s",
-        minWidth: 0,
+    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+
+      {/* ── Persistent top navbar ──────────────────────────── */}
+      <header style={{
+        position: "sticky", top: 0, zIndex: 50,
+        height: HEADER_H, padding: "0 18px",
+        display: "flex", alignItems: "center", gap: 10,
+        background: "var(--glass-bg)",
+        backdropFilter: "blur(20px) saturate(180%)",
+        WebkitBackdropFilter: "blur(20px) saturate(180%)",
+        borderBottom: "1px solid var(--border)",
       }}>
-        {/* Brand row (logo + theme toggle) */}
-        <div style={{
-          padding: "14px 12px 14px 18px",
-          display: "flex", alignItems: "center", gap: 9,
-          borderBottom: "1px solid var(--border)",
-        }}>
-          <div
-            onClick={() => router.push("/?view=builder")}
-            style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flex: 1, minWidth: 0 }}
-          >
-            <div style={{
-              width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-              background: "linear-gradient(135deg, var(--accent), #4ca0ff)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              color: "#fff", fontWeight: 700, fontSize: 14, letterSpacing: -0.4,
-            }}>R</div>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.4, color: "var(--text)" }}>
-              Resunova
-            </div>
-          </div>
 
-          {/* Sidebar collapse */}
-          <button
-            onClick={() => setSidebarOpen(false)}
-            title="Hide sidebar"
-            style={{
-              flexShrink: 0, width: 28, height: 28, borderRadius: 7,
-              background: "var(--surface2)", border: "1px solid var(--border)",
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-              color: "var(--dim)", transition: "background 0.12s, color 0.12s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--dim)"; }}
-          >
-            {/* Sidebar panel icon */}
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.4"/>
-              <path d="M5.5 1.5v13" stroke="currentColor" strokeWidth="1.4"/>
-            </svg>
-          </button>
-
-          {/* Theme toggle — sun (light mode) / moon (dark mode) */}
-          <button
-            onClick={toggleTheme}
-            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            style={{
-              flexShrink: 0, width: 28, height: 28, borderRadius: 7,
-              background: "var(--surface2)", border: "1px solid var(--border)",
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-              color: "var(--dim)", transition: "background 0.12s, color 0.12s",
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = "var(--surface3)";
-              e.currentTarget.style.color = "var(--text)";
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = "var(--surface2)";
-              e.currentTarget.style.color = "var(--dim)";
-            }}
-          >
-            {theme === "dark" ? (
-              /* Sun — click to go light */
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5"/>
-                <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4"
-                  stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
-            ) : (
-              /* Moon — click to go dark */
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z"
-                  stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-              </svg>
-            )}
-          </button>
+        {/* Logo */}
+        <div
+          onClick={() => switchView("builder")}
+          style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}
+        >
+          <div style={{
+            width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+            background: "linear-gradient(135deg, var(--accent), #4ca0ff)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#fff", fontWeight: 700, fontSize: 14, letterSpacing: -0.4,
+          }}>R</div>
+          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.4, color: "var(--text)" }}>
+            Resunova
+          </span>
         </div>
 
-        {/* Nav */}
-        <nav style={{ flex: 1, padding: "12px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
+        {/* Current view label (subtle breadcrumb) */}
+        <div style={{
+          fontSize: 12, color: "var(--dim)", letterSpacing: -0.1,
+          paddingLeft: 6, borderLeft: "1px solid var(--border)",
+          marginLeft: 2, lineHeight: 1,
+        }}>
+          {VIEW_LABELS[active]}
+        </div>
+
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Theme toggle */}
+        <NavIconBtn
+          onClick={toggleTheme}
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {theme === "dark" ? (
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5"/>
+              <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4"
+                stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+            </svg>
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z"
+                stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+            </svg>
+          )}
+        </NavIconBtn>
+
+        {/* Nav drawer toggle */}
+        <NavIconBtn
+          onClick={() => setNavOpen(o => !o)}
+          title={navOpen ? "Hide navigation" : "Show navigation"}
+          active={navOpen}
+        >
+          {/* Panel / sidebar icon */}
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.4"/>
+            <path d="M5.5 1.5v13" stroke="currentColor" strokeWidth="1.4"/>
+          </svg>
+        </NavIconBtn>
+
+        {/* User avatar + dropdown */}
+        <div data-user-menu style={{ position: "relative" }}>
+          <button
+            onClick={() => setMenuOpen(o => !o)}
+            style={{
+              width: 32, height: 32, borderRadius: "50%",
+              background: menuOpen ? "var(--accent-bg)" : "var(--surface2)",
+              border: `1px solid ${menuOpen ? "var(--accent)" : "var(--border)"}`,
+              cursor: "pointer", fontFamily: "inherit",
+              color: menuOpen ? "var(--accent)" : "var(--text)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 600, fontSize: 12.5, letterSpacing: -0.2,
+              transition: "background 0.12s, border-color 0.12s",
+            }}
+          >{initial}</button>
+
+          {menuOpen && (
+            <div style={{
+              position: "absolute", top: "calc(100% + 8px)", right: 0,
+              minWidth: 180, background: "var(--surface)",
+              border: "1px solid var(--border)", borderRadius: 10,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+              padding: 6, zIndex: 60,
+            }}>
+              <div style={{
+                padding: "7px 10px 6px", fontSize: 11,
+                color: "var(--dim)", letterSpacing: -0.1,
+                borderBottom: "1px solid var(--border)", marginBottom: 4,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>{user?.email || "…"}</div>
+              <MenuBtn onClick={() => { switchView("profile"); setMenuOpen(false); }}>
+                Profile settings
+              </MenuBtn>
+              <MenuBtn onClick={onSignOut} danger>
+                Sign out
+              </MenuBtn>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* ── Main content ─────────────────────────────────── */}
+      <main style={{ minWidth: 0 }}>
+        {children}
+      </main>
+
+      {/* ── Backdrop (click to close drawer) ─────────────── */}
+      <div
+        onClick={() => setNavOpen(false)}
+        style={{
+          position: "fixed", inset: 0, top: HEADER_H, zIndex: 39,
+          background: "rgba(0,0,0,0.28)",
+          opacity: navOpen ? 1 : 0,
+          pointerEvents: navOpen ? "auto" : "none",
+          transition: "opacity 0.22s",
+        }}
+      />
+
+      {/* ── Navigation drawer ─────────────────────────────── */}
+      <aside style={{
+        position: "fixed", top: HEADER_H, left: 0, bottom: 0, zIndex: 40,
+        width: 220,
+        background: "var(--surface)",
+        borderRight: "1px solid var(--border)",
+        display: "flex", flexDirection: "column",
+        transform: navOpen ? "translateX(0)" : "translateX(-100%)",
+        transition: "transform 0.22s cubic-bezier(0.4,0,0.2,1)",
+        boxShadow: navOpen ? "4px 0 24px rgba(0,0,0,0.18)" : "none",
+      }}>
+        {/* Nav items */}
+        <nav style={{ flex: 1, padding: "12px 8px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
           {(Object.keys(VIEW_LABELS) as AppView[]).map(v => {
             const isActive = v === active;
             const badge    = BADGES[v];
@@ -274,9 +314,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "var(--surface2)"; }}
                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
               >
-                <span style={{
-                  display: "inline-flex", color: isActive ? "var(--accent)" : "var(--dim)", flexShrink: 0,
-                }}>
+                <span style={{ display: "inline-flex", color: isActive ? "var(--accent)" : "var(--dim)", flexShrink: 0 }}>
                   {VIEW_ICONS[v]}
                 </span>
                 <span style={{ flex: 1 }}>{VIEW_LABELS[v]}</span>
@@ -292,92 +330,77 @@ export default function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        {/* User chip */}
-        <div data-user-menu style={{ position: "relative", borderTop: "1px solid var(--border)", padding: 10 }}>
-          <button
-            onClick={() => setMenuOpen(o => !o)}
-            style={{
-              width: "100%", display: "flex", alignItems: "center", gap: 10,
-              padding: "9px 10px", borderRadius: 8, background: menuOpen ? "var(--surface2)" : "transparent",
-              border: "none", cursor: "pointer", fontFamily: "inherit",
-              color: "var(--text)", textAlign: "left",
-            }}
-          >
-            <div style={{
-              width: 28, height: 28, borderRadius: "50%",
-              background: "var(--surface3)", color: "var(--text)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontWeight: 600, fontSize: 12, letterSpacing: -0.2, flexShrink: 0,
-            }}>{initial}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: 11.5, color: "var(--text)", fontWeight: 600, letterSpacing: -0.1,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }}>{user?.email || "Loading…"}</div>
-              <div style={{ fontSize: 10, color: "var(--dim)" }}>{menuOpen ? "Tap to close" : "Tap for menu"}</div>
-            </div>
-          </button>
-
-          {menuOpen && (
-            <div style={{
-              position: "absolute", left: 10, right: 10, bottom: "calc(100% - 4px)",
-              background: "var(--surface)", border: "1px solid var(--border)",
-              borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.32)",
-              padding: 6, zIndex: 50,
-            }}>
-              <button
-                onClick={() => { switchView("profile"); setMenuOpen(false); }}
-                style={{
-                  width: "100%", padding: "8px 10px", textAlign: "left",
-                  fontSize: 12, color: "var(--text)", letterSpacing: -0.1,
-                  background: "transparent", border: "none", borderRadius: 6,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-              >Profile settings</button>
-              <button
-                onClick={onSignOut}
-                style={{
-                  width: "100%", padding: "8px 10px", textAlign: "left",
-                  fontSize: 12, color: "var(--red)", letterSpacing: -0.1,
-                  background: "transparent", border: "none", borderRadius: 6,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-              >Sign out</button>
-            </div>
-          )}
+        {/* User section at bottom */}
+        <div style={{ borderTop: "1px solid var(--border)", padding: "12px 10px" }}>
+          <div style={{
+            fontSize: 11.5, color: "var(--muted)", fontWeight: 500,
+            letterSpacing: -0.1, padding: "4px 6px",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>{user?.email || "Loading…"}</div>
         </div>
       </aside>
-
-      {/* ── Content ─────────────────────────────────────────── */}
-      <main style={{ minWidth: 0, position: "relative" }}>
-        {/* Floating sidebar re-open button (shown when sidebar is hidden) */}
-        {!sidebarOpen && (
-          <button
-            onClick={() => setSidebarOpen(true)}
-            title="Show sidebar"
-            style={{
-              position: "absolute", top: 14, left: 14, zIndex: 40,
-              width: 32, height: 32, borderRadius: 8,
-              background: "var(--surface)", border: "1px solid var(--border)",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-              color: "var(--dim)", transition: "background 0.12s, color 0.12s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.color = "var(--dim)"; }}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.4"/>
-              <path d="M5.5 1.5v13" stroke="currentColor" strokeWidth="1.4"/>
-            </svg>
-          </button>
-        )}
-        {children}
-      </main>
     </div>
+  );
+}
+
+/* ── Small icon button for the top nav ────────────────── */
+function NavIconBtn({
+  children, onClick, title, active = false,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  title?: string;
+  active?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+        background: active
+          ? "var(--accent-bg)"
+          : hover ? "var(--surface2)" : "transparent",
+        border: active ? "1px solid rgba(0,113,227,0.3)" : "1px solid transparent",
+        cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: active ? "var(--accent)" : hover ? "var(--text)" : "var(--dim)",
+        transition: "background 0.12s, color 0.12s, border-color 0.12s",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/* ── Dropdown menu item ────────────────────────────────── */
+function MenuBtn({
+  children, onClick, danger = false,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: "100%", padding: "8px 10px", textAlign: "left",
+        fontSize: 12.5, color: danger ? "var(--red)" : "var(--text)",
+        letterSpacing: -0.1,
+        background: hover ? "var(--surface2)" : "transparent",
+        border: "none", borderRadius: 6,
+        cursor: "pointer", fontFamily: "inherit",
+        transition: "background 0.1s",
+      }}
+    >
+      {children}
+    </button>
   );
 }

@@ -127,6 +127,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
+        {/* Inline theme-init: read localStorage before first paint → no FOUC */}
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('rn-theme')||'dark';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();` }} />
         <link rel="preconnect" href="https://www.googletagmanager.com" />
         <link rel="preconnect" href="https://eiumlptnsmowvkxucprl.supabase.co" />
         <Script

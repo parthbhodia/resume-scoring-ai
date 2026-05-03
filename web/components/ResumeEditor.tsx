@@ -18,6 +18,16 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type CSSProperties } from "react";
 import type { ParsedResume, ParsedBullet, ParsedSection, ParsedEntry } from "@/lib/types";
 
+/** Strip LaTeX markup from a label string so users see plain text. */
+function cleanLatex(raw: string): string {
+  return raw
+    .replace(/\\[a-zA-Z@]+(\{[^}]*\}|\[[^\]]*\])*/g, "") // \cmd{...} / \cmd[...]
+    .replace(/[{}$\\]/g, "")        // stray braces, dollar signs, backslashes
+    .replace(/\s*&\s*/g, " ")       // tabular column separator
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export interface DoctorIssue {
   id:       string;
   severity: "warn" | "info";
@@ -256,12 +266,9 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
     <div
       className="resume-editor-workspace"
       style={{
-      display: "grid",
-      gridTemplateColumns: "minmax(560px, 1.18fr) minmax(420px, 0.82fr)",
-      gap: 18,
+      display: "block",
       // Tall enough to feel like a real workspace, short enough to not eat the page.
       minHeight: 600,
-      alignItems: "start",
     }}>
       {/* ── EDITOR PANE ───────────────────────────────────────── */}
       <div style={{
@@ -475,12 +482,6 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
         </div>
       </div>
 
-      {/* ── PREVIEW PANE ──────────────────────────────────────── */}
-      <PreviewSurface
-        resume={draft}
-        pdfUrl={pdfUrl ?? null}
-        dirty={dirty}
-      />
     </div>
   );
 }
@@ -573,8 +574,11 @@ function ContactCard({ contact, onChange, onCustomChange }: {
           display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8,
         }}>
           <ContactField label="Name"           value={c?.name      ?? ""} onChange={v => onChange("name", v)}      readOnly={!writable} />
+          <ContactField label="Location label" value={cleanLatex(c?.locationLabel ?? "Location")} onChange={v => onChange("locationLabel", v)} readOnly={!writable} />
           <ContactField label="Location"       value={c?.location  ?? ""} onChange={v => onChange("location", v)}  readOnly={!writable} onClear={() => onChange("location", "")} />
+          <ContactField label="Email label"    value={cleanLatex(c?.emailLabel ?? "Email")} onChange={v => onChange("emailLabel", v)} readOnly={!writable} />
           <ContactField label="Email"          value={c?.email     ?? ""} onChange={v => onChange("email", v)}     readOnly={!writable} type="email" onClear={() => onChange("email", "")} />
+          <ContactField label="Phone label"    value={cleanLatex(c?.phoneLabel ?? "Mobile")} onChange={v => onChange("phoneLabel", v)} readOnly={!writable} />
           <ContactField label="Phone"          value={c?.phone     ?? ""} onChange={v => onChange("phone", v)}     readOnly={!writable} onClear={() => onChange("phone", "")} />
           <ContactField label="Website (text)" value={c?.website   ?? ""} onChange={v => onChange("website", v)}   readOnly={!writable} onClear={() => { onChange("website", ""); onChange("websiteUrl", ""); }} />
           <ContactField label="Website URL"    value={c?.websiteUrl?? ""} onChange={v => onChange("websiteUrl", v)} readOnly={!writable} type="url" onClear={() => onChange("websiteUrl", "")} />
