@@ -958,6 +958,30 @@ async def api_backfill_tex(request: Request):
 
 # ── Recruiter Checks ──────────────────────────────────────────────────────────
 
+def _extract_pdf_text(pdf) -> str:
+    """Extract text from a pdfplumber PDF object, reconstructing proper word spacing.
+
+    pdfplumber's default extract_text() sometimes collapses spaces between words
+    (especially in multi-column or tightly-set PDFs), producing concatenated blobs
+    like 'IamaSoftwareDeveloper'.  extract_words() uses glyph bounding boxes to
+    identify individual words, which we then reconstruct line-by-line.
+    """
+    pages_text = []
+    for page in pdf.pages:
+        words = page.extract_words(x_tolerance=3, y_tolerance=3, keep_blank_chars=False)
+        if not words:
+            # Fallback to plain extract_text for image-heavy pages
+            pages_text.append(page.extract_text() or "")
+            continue
+        # Group words by their approximate y-position (line)
+        line_map: dict[int, list[str]] = {}
+        for w in words:
+            y_key = round(float(w["top"]) / 4) * 4  # bucket every 4pt
+            line_map.setdefault(y_key, []).append(w["text"])
+        page_lines = [" ".join(tokens) for _, tokens in sorted(line_map.items())]
+        pages_text.append("\n".join(page_lines))
+    return "\n".join(pages_text)
+
 _WEAK_VERBS = re.compile(
     r"\b(helped|assisted|worked on|was responsible for|participated in|"
     r"involved in|contributed to|supported|utilized|leveraged|liaised|"
@@ -1211,7 +1235,7 @@ async def api_analyze_upload(request: Request):
             return JSONResponse({"error": "No file provided"}, status_code=400)
         data = await upload.read()
         with pdfplumber.open(io.BytesIO(data)) as pdf:
-            text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+            text = _extract_pdf_text(pdf)
         if not text.strip():
             return JSONResponse({"error": "Could not extract text from PDF"}, status_code=400)
         result = _recruiter_checks(text)
