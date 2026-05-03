@@ -90,8 +90,32 @@ async def homepage(request: Request):
 
 
 async def api_resumes(request: Request):
+    user_id = (request.query_params.get("user_id") or "").strip()
     resumes = list_resumes()
-    logger.info(f"GET /api/resumes  |  {len(resumes)} entries")
+
+    # On production the local LIBRARY_ROOT is empty; pull folder names from Supabase
+    if not resumes and user_id:
+        supabase = _supabase_client()
+        if supabase:
+            try:
+                # List objects under user_id/ prefix — each unique "directory" is a folder
+                items = supabase.storage.from_("resumes").list(user_id, {"limit": 200})
+                seen: set[str] = set()
+                for item in (items or []):
+                    name = item.get("name", "")
+                    if name and name not in seen:
+                        seen.add(name)
+                        resumes.append({
+                            "folder": name,
+                            "path": f"supabase://{user_id}/{name}",
+                            "tex_files": [],
+                            "pdf_files": [],
+                            "has_pdf": False,
+                        })
+            except Exception as exc:
+                logger.warning(f"api_resumes: supabase list failed: {exc}")
+
+    logger.info(f"GET /api/resumes  |  {len(resumes)} entries  user={user_id or 'anon'}")
     return JSONResponse(resumes)
 
 

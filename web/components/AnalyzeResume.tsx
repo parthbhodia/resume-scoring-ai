@@ -68,20 +68,26 @@ export default function AnalyzeResume() {
   const [storedResumes, setStoredResumes] = useState<StoredResume[]>([]);
   const [loadingStored, setLoadingStored] = useState(false);
 
-  // Load stored resumes on mount
+  // Load stored resumes on mount — fetch both local and Supabase-backed folders
   useEffect(() => {
     setLoadingStored(true);
-    fetch(apiUrl("/api/resumes"))
-      .then(r => r.json())
-      .then((data: { resumes?: string[] }) => {
-        const resumes = (data.resumes || []).map((folder: string) => ({
-          folder,
-          ...parseFolder(folder),
-        }));
-        setStoredResumes(resumes);
-      })
-      .catch(() => {/* silently ignore */})
-      .finally(() => setLoadingStored(false));
+    const supabase = getSupabaseClient();
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      try {
+        // api_resumes returns an array of {folder, has_pdf, ...} objects
+        const url = user?.id
+          ? apiUrl(`/api/resumes?user_id=${encodeURIComponent(user.id)}`)
+          : apiUrl("/api/resumes");
+        const resp = await fetch(url);
+        const data = await resp.json();
+        // Handle both array format [{folder,...}] and object format {resumes:[...]}
+        const folders: string[] = Array.isArray(data)
+          ? data.map((r: { folder: string }) => r.folder)
+          : (data.resumes || []);
+        setStoredResumes(folders.map(folder => ({ folder, ...parseFolder(folder) })));
+      } catch { /* silently ignore */ }
+      setLoadingStored(false);
+    });
   }, []);
 
   const run = useCallback(async (file: File) => {
