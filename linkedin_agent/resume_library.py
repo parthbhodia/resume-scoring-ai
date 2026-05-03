@@ -1647,7 +1647,7 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         '  "criteria": [\n'
         '    {\n'
         '      "name": "<specific skill or requirement from JD>",\n'
-        '      "weight": "<High|Medium|Low based on how critical it is in the JD>",\n'
+        '      "weight": "<High if the JD lists it as required/core/must-have OR the company's primary domain depends on it; Medium if clearly preferred but not blocking; Low only if explicitly optional or nice-to-have>",\n'
         '      "score": <1-10>,\n'
         '      "notes": "<honest note in SECOND PERSON, e.g. \'You built X at Y\' — quoting actual experience from the resume>"\n'
         '    }\n'
@@ -1658,6 +1658,7 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         "}\n\n"
         "Rules:\n"
         "- 6-10 criteria covering the most important JD requirements (mix of required and nice-to-have)\n"
+        "- Weight rule: if your notes say 'core', 'primary', 'critical', 'required', or 'must' the weight MUST be High — never Low\n"
         "- Notes must name actual companies, projects, or metrics from the RESUME BODY — never generic, never invented\n"
         "- gaps must include a concrete second-person plan (e.g. 'You haven't used LangGraph, but your dual-LLM pipeline at VibeIMG shows you can quickly pick up agentic frameworks')\n"
         "- match_score must be honest — do not inflate it\n"
