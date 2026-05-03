@@ -987,7 +987,31 @@ _UNNECESSARY = re.compile(
 def _recruiter_checks(text: str) -> dict:
     """Run 10 recruiter checks on plain-text resume content."""
     lines   = [l.strip() for l in text.splitlines() if l.strip()]
-    bullets = [l for l in lines if re.match(r"^[•\-–*]|\w", l) and len(l) > 30]
+
+    # Lines that are clearly contact / header noise — skip from bullet lists
+    _NOISE_RE = re.compile(
+        r"@|linkedin|github|\.com|phone|email|mobile|location|"
+        r"^\s*(education|experience|projects|skills|summary|objective|certifications)\s*$",
+        re.IGNORECASE,
+    )
+
+    def _is_content_bullet(line: str) -> bool:
+        if _NOISE_RE.search(line):
+            return False
+        # Must have at least 6 space-separated tokens (guards against merged-word PDF lines)
+        if len(line.split()) < 6:
+            return False
+        # Starts with an explicit bullet glyph — highest confidence
+        if re.match(r"^[•\-–*▪▸]", line):
+            return True
+        # Long enough sentence starting with a capital letter
+        if re.match(r"^[A-Z][a-z]", line) and len(line) > 60:
+            return True
+        return False
+
+    bullets = [l for l in lines if _is_content_bullet(l)]
+    # Explicit-bullet lines only (start with •/-/–/*): used for density check
+    explicit_bullets = [l for l in bullets if re.match(r"^[•\-–*▪▸]", l)]
 
     checks = []
 
@@ -1019,8 +1043,8 @@ def _recruiter_checks(text: str) -> dict:
         "items": weak_hits[:8],
     })
 
-    # 3. Action verb at start
-    no_action = [b for b in bullets if not re.match(r"^[A-Z][a-z]+ed\b|^[A-Z][a-z]+s\b|^[A-Z][a-z]+ing\b|^[A-Z][a-z]{2,}", b)]
+    # 3. Action verb at start — only check explicit bullet lines
+    no_action = [b for b in explicit_bullets if not re.match(r"^[•\-–*▪▸]\s*[A-Z][a-z]", b)]
     av_score  = max(0, round(10 - len(no_action) * 1.5))
     checks.append({
         "id": "action", "name": "Action Verb Start",
@@ -1128,8 +1152,8 @@ def _recruiter_checks(text: str) -> dict:
         "items": [f'Remove: "{p}"' for p in unnec_hits],
     })
 
-    # 10. Bullet density (short bullets)
-    short_bullets = [b for b in bullets if len(b.split()) < 6]
+    # 10. Bullet density (short explicit bullets only)
+    short_bullets = [b for b in explicit_bullets if len(b.split()) < 8]
     dens_score    = max(0, round(10 - len(short_bullets) * 2))
     checks.append({
         "id": "density", "name": "Bullet Depth",
