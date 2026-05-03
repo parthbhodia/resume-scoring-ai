@@ -967,6 +967,72 @@ export default function AnalyzeResume() {
               </section>
             )}
 
+            {/* ── Analyze another CTA ───────────────────── */}
+            <section>
+              <div style={{
+                borderTop: "1px solid var(--border)",
+                paddingTop: 32,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 16,
+                textAlign: "center",
+              }}>
+                <div>
+                  <div style={{
+                    fontFamily: "'Cormorant Garant', Georgia, serif",
+                    fontSize: 26, fontWeight: 600, letterSpacing: -0.5,
+                    color: "var(--text)", marginBottom: 6,
+                  }}>
+                    Ready to analyze another?
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
+                    Upload a new résumé PDF or paste a different job description<br />to get a fresh score and set of recommendations.
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+                  {/* Primary — upload new file */}
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "11px 22px", borderRadius: 10,
+                      background: "var(--amber)", border: "none", color: "#fff",
+                      fontSize: 13.5, fontWeight: 600, cursor: "pointer",
+                      transition: "opacity var(--transition)",
+                      letterSpacing: -0.2,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; }}
+                    onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 2v9M4 6l4-4 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                    </svg>
+                    Upload new résumé
+                  </button>
+
+                  {/* Secondary — clear and start over */}
+                  <button
+                    onClick={() => { setResult(null); setError(null); setExpandedBullets({}); setJd(""); setHistoryOpen(false); }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "11px 20px", borderRadius: 10,
+                      background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--muted)",
+                      fontSize: 13.5, fontWeight: 500, cursor: "pointer",
+                      transition: "background var(--transition), border-color var(--transition)",
+                      letterSpacing: -0.2,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.borderColor = "var(--border-h)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+                  >
+                    ← Start over
+                  </button>
+                </div>
+              </div>
+            </section>
+
           </div>
         )}
       </main>
