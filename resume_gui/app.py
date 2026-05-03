@@ -1023,19 +1023,24 @@ def _recruiter_checks(text: str) -> dict:
     def _is_content_bullet(line: str) -> bool:
         if _NOISE_RE.search(line):
             return False
-        # Must have at least 6 space-separated tokens (guards against merged-word PDF lines)
-        if len(line.split()) < 6:
+        words = line.split()
+        # Need at least 5 whitespace-separated tokens
+        if len(words) < 5:
+            return False
+        # Reject merged-word blobs from bad PDF extraction:
+        # e.g. "IamaSoftwareDeveloperwithover5years..." → max word > 20 chars
+        if max(len(w) for w in words) > 20:
             return False
         # Starts with an explicit bullet glyph — highest confidence
         if re.match(r"^[•\-–*▪▸]", line):
             return True
-        # Long enough sentence starting with a capital letter
+        # Substantive sentence starting with a capital letter (≥ 60 chars)
         if re.match(r"^[A-Z][a-z]", line) and len(line) > 60:
             return True
         return False
 
     bullets = [l for l in lines if _is_content_bullet(l)]
-    # Explicit-bullet lines only (start with •/-/–/*): used for density check
+    # Explicit-bullet lines only (start with •/-/–/*): used for density/action-verb checks
     explicit_bullets = [l for l in bullets if re.match(r"^[•\-–*▪▸]", l)]
 
     checks = []
