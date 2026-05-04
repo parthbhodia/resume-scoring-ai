@@ -48,9 +48,8 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
       {/* Header */}
       <div style={{ padding: "18px 16px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         <div style={{
-          fontSize: 11, fontWeight: 700, color: "var(--amber)",
+          fontSize: 11, fontWeight: 700, color: "var(--dim)",
           letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 14,
-          fontFamily: "'Cormorant Garant', Georgia, serif",
         }}>
           History
         </div>

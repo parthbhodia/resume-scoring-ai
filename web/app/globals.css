@@ -177,7 +177,7 @@ select option { background: var(--surface); }
   .rb-root      { grid-template-columns: 1fr !important; }
   .rb-sidebar   { display: none !important; }
   .rb-page      { padding: 24px 16px 60px !important; }
-  .rb-hero-title{ font-size: 28px !important; letter-spacing: -0.8px !important; }
+  .rb-hero-title{ font-size: 30px !important; letter-spacing: -1px !important; font-weight: 800 !important; }
   .rb-hero br   { display: none; }
   .rb-grid-2    { grid-template-columns: 1fr !important; }
   .rb-score-row { flex-direction: column !important; align-items: center !important; text-align: center; gap: 16px !important; }
@@ -209,3 +209,4 @@ select option { background: var(--surface); }
   .lp-hero-h1  { font-size: 30px !important; letter-spacing: -1.1px !important; }
   .lp-h2       { font-size: 22px !important; }
 }
+

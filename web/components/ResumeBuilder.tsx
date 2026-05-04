@@ -431,14 +431,13 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
           {!result && !generating && (
             <div style={{ marginBottom: 40 }} className="rb-hero">
 
-              {/* Editorial heading */}
+              {/* Bold heading */}
               <div className="fade-in rb-hero-title" style={{
-                fontFamily: "'Cormorant Garant', Georgia, serif",
-                fontSize: 42, fontWeight: 600, lineHeight: 1.1,
-                letterSpacing: -1.2, marginBottom: 14, color: "var(--text)",
+                fontSize: 52, fontWeight: 800, lineHeight: 1.05,
+                letterSpacing: -2, marginBottom: 14, color: "var(--text)",
               }}>
                 Tailor your résumé to{" "}
-                <em style={{ fontStyle: "italic", color: "var(--amber)" }}>any</em>
+                <span style={{ color: "var(--accent)" }}>any</span>
                 <br />job description.
               </div>
 
@@ -454,21 +453,22 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
               {/* 3-step process pills */}
               <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[
-                  { n: "01", label: "Upload résumé" },
-                  { n: "02", label: "Paste job posting" },
-                  { n: "03", label: "Get tailored result" },
+                  { n: 1, label: "Upload résumé" },
+                  { n: 2, label: "Paste job posting" },
+                  { n: 3, label: "Get tailored result" },
                 ].map(({ n, label }) => (
                   <div key={n} style={{
                     display: "flex", alignItems: "center", gap: 8,
-                    padding: "7px 14px",
+                    padding: "6px 12px 6px 8px",
                     background: "var(--surface)", border: "1px solid var(--border)",
                     borderRadius: 24, fontSize: 12.5, color: "var(--muted)",
                     letterSpacing: -0.1,
                   }}>
                     <span style={{
-                      fontFamily: "'Cormorant Garant', Georgia, serif",
-                      fontSize: 11, fontWeight: 700, color: "var(--amber)",
-                      letterSpacing: 0.5, minWidth: 18,
+                      width: 20, height: 20, borderRadius: "50%",
+                      background: "var(--accent)",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0,
                     }}>{n}</span>
                     {label}
                   </div>
@@ -1123,7 +1123,6 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
 function StepCard({ step, title, subtitle, children }: {
   step: number; title: string; subtitle: string; children: React.ReactNode;
 }) {
-  const stepNum = String(step).padStart(2, "0");
   return (
     <div className={`fade-in-up stagger-${step}`} style={{
       background: "var(--surface)", border: "1px solid var(--border)",
@@ -1133,15 +1132,14 @@ function StepCard({ step, title, subtitle, children }: {
     onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border-h)"; }}
     onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)"; }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 16 }}>
-        {/* Amber editorial step number */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        {/* Blue filled step circle */}
         <div style={{
-          fontFamily: "'Cormorant Garant', Georgia, serif",
-          fontSize: 13, fontWeight: 700, letterSpacing: 0.3,
-          color: "var(--amber)", flexShrink: 0,
-          width: 24, textAlign: "center",
-        }}>{stepNum}</div>
-        <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0 }} />
+          width: 22, height: 22, borderRadius: "50%",
+          background: "var(--accent)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0,
+        }}>{step}</div>
         <div>
           <div style={{ fontSize: 13.5, fontWeight: 600, letterSpacing: -0.3, color: "var(--text)", lineHeight: 1 }}>
             {title}

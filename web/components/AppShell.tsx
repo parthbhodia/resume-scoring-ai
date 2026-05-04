@@ -167,7 +167,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         borderBottom: "1px solid var(--border)",
       }}>
 
-        {/* Logo — Cormorant Garant wordmark matching landing page */}
+        {/* Logo — amber R lettermark + wordmark */}
         <div
           onClick={() => switchView("builder")}
           style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", userSelect: "none", flexShrink: 0 }}
@@ -176,14 +176,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
             width: 26, height: 26, borderRadius: 7, flexShrink: 0,
             background: "var(--amber)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontWeight: 700, fontSize: 13,
-            fontFamily: "'Cormorant Garant', Georgia, serif",
+            color: "#fff", fontWeight: 800, fontSize: 13,
             letterSpacing: 0.2,
             boxShadow: "0 1px 4px rgba(196,121,58,0.35)",
           }}>R</div>
           <span style={{
-            fontSize: 18, fontWeight: 600, letterSpacing: -0.3,
-            fontFamily: "'Cormorant Garant', Georgia, serif",
+            fontSize: 17, fontWeight: 700, letterSpacing: -0.5,
             color: "var(--text)",
             lineHeight: 1,
           }}>
@@ -206,8 +204,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   fontSize: 13, fontWeight: isActive ? 600 : 500,
                   padding: "5px 11px", borderRadius: 7,
                   border: "none", fontFamily: "inherit",
-                  background: isActive ? "var(--amber-bg)" : "transparent",
-                  color: isActive ? "var(--amber)" : "var(--muted)",
+                  background: isActive ? "var(--accent-bg)" : "transparent",
+                  color: isActive ? "var(--accent)" : "var(--muted)",
                   cursor: "pointer",
                   transition: "background var(--transition), color var(--transition)",
                   letterSpacing: -0.1,
@@ -347,17 +345,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 style={{
                   display: "flex", alignItems: "center", gap: 10,
                   padding: "8px 11px", borderRadius: 8,
-                  background: isActive ? "var(--amber-bg)" : "transparent",
-                  border: isActive ? "1px solid rgba(196,121,58,0.2)" : "1px solid transparent",
+                  background: isActive ? "var(--accent-bg)" : "transparent",
+                  border: isActive ? "1px solid rgba(0,113,227,0.2)" : "1px solid transparent",
                   cursor: "pointer", fontFamily: "inherit",
-                  color: isActive ? "var(--amber)" : "var(--muted)",
+                  color: isActive ? "var(--accent)" : "var(--muted)",
                   fontSize: 13, fontWeight: isActive ? 600 : 500, letterSpacing: -0.15,
                   textAlign: "left", transition: "background var(--transition), color var(--transition), border-color var(--transition)",
                 }}
                 onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; } }}
                 onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; } }}
               >
-                <span style={{ display: "inline-flex", color: isActive ? "var(--amber)" : "var(--dim)", flexShrink: 0, transition: "color var(--transition)" }}>
+                <span style={{ display: "inline-flex", color: isActive ? "var(--accent)" : "var(--dim)", flexShrink: 0, transition: "color var(--transition)" }}>
                   {VIEW_ICONS[v]}
                 </span>
                 <span style={{ flex: 1 }}>{VIEW_LABELS[v]}</span>
@@ -422,12 +420,12 @@ function NavIconBtn({
       style={{
         width: 30, height: 30, borderRadius: 7, flexShrink: 0,
         background: active
-          ? "var(--amber-bg)"
+          ? "var(--accent-bg)"
           : hover ? "var(--surface2)" : "transparent",
-        border: active ? "1px solid rgba(196,121,58,0.25)" : "1px solid transparent",
+        border: active ? "1px solid rgba(0,113,227,0.25)" : "1px solid transparent",
         cursor: "pointer",
         display: "flex", alignItems: "center", justifyContent: "center",
-        color: active ? "var(--amber)" : hover ? "var(--text)" : "var(--dim)",
+        color: active ? "var(--accent)" : hover ? "var(--text)" : "var(--dim)",
         transition: "background var(--transition), color var(--transition), border-color var(--transition)",
       }}
     >
