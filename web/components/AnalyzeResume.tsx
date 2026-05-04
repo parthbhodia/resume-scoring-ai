@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ScoreRing from "./ScoreRing";
 import { apiUrl } from "@/lib/utils";
-import { getSupabaseClient } from "@/lib/supabase";
+import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
+import type { AnalyzeRecord } from "@/lib/supabase";
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
+// Full strongly-typed shape of the AI analysis response.
+// AnalyzeRecord is imported from @/lib/supabase (result typed as `any` for
+// JSON column flexibility); we cast result → AnalysisResult when reading.
 
 interface AnalysisResult {
   overallScore: number;
@@ -111,50 +115,23 @@ function Spinner({ size = 18 }: { size?: number }) {
   );
 }
 
-// ── Analyze history (localStorage) ───────────────────────────────────────────
-// Stores the last MAX_HISTORY analysis results per user in localStorage.
-// Key format: rn_az_history_<userId>
-// Shape: AnalyzeRecord[]
+// ── Analyze history helpers ───────────────────────────────────────────────────
+// Primary store: Supabase `resume_analyses` table (cross-device, permanent).
+// Offline fallback: localStorage `rn_az_history_<userId>` (same AnalyzeRecord[]).
 
-const MAX_HISTORY = 20;
+const LS_KEY  = (uid: string) => `rn_az_history_${uid}`;
+const LS_MAX  = 20;
 
-interface AnalyzeRecord {
-  id:        string;          // unique id for this run
-  label:     string;          // filename or folder name
-  score:     number;
-  createdAt: string;          // ISO string
-  result:    AnalysisResult;
+function lsLoad(uid: string): AnalyzeRecord[] {
+  try { const r = localStorage.getItem(LS_KEY(uid)); return r ? JSON.parse(r) : []; }
+  catch { return []; }
 }
-
-function azHistoryKey(userId: string) {
-  return `rn_az_history_${userId}`;
+function lsSave(uid: string, recs: AnalyzeRecord[]) {
+  try { localStorage.setItem(LS_KEY(uid), JSON.stringify(recs.slice(0, LS_MAX))); }
+  catch { /* quota */ }
 }
-
-function loadAzHistory(userId: string): AnalyzeRecord[] {
-  try {
-    const raw = localStorage.getItem(azHistoryKey(userId));
-    return raw ? (JSON.parse(raw) as AnalyzeRecord[]) : [];
-  } catch { return []; }
-}
-
-function saveAzHistory(userId: string, records: AnalyzeRecord[]) {
-  try {
-    localStorage.setItem(azHistoryKey(userId), JSON.stringify(records.slice(0, MAX_HISTORY)));
-  } catch { /* quota — ignore */ }
-}
-
-function pushAzRecord(userId: string, label: string, result: AnalysisResult): AnalyzeRecord[] {
-  const rec: AnalyzeRecord = {
-    id:        `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    label,
-    score:     result.overallScore,
-    createdAt: new Date().toISOString(),
-    result,
-  };
-  const prev = loadAzHistory(userId);
-  const next = [rec, ...prev].slice(0, MAX_HISTORY);
-  saveAzHistory(userId, next);
-  return next;
+function lsPush(uid: string, rec: AnalyzeRecord) {
+  lsSave(uid, [rec, ...lsLoad(uid)]);
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -170,19 +147,28 @@ export default function AnalyzeResume() {
   const [expandedBullets, setExpandedBullets] = useState<Record<number, boolean>>({});
   const [historyOpen, setHistoryOpen]   = useState(false);
 
-  // Analyze history from localStorage
-  const [azHistory, setAzHistory]         = useState<AnalyzeRecord[]>([]);
-  const [userId, setUserId]               = useState<string | null>(null);
+  // Analyze history — loaded from Supabase, mirrored to localStorage
+  const [azHistory, setAzHistory]           = useState<AnalyzeRecord[]>([]);
+  const [userId, setUserId]                 = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
 
-  // Load user + history on mount
+  // Load user + history on mount: Supabase first, localStorage fallback
   useEffect(() => {
     const supabase = getSupabaseClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user?.id) { setLoadingHistory(false); return; }
       setUserId(user.id);
-      setAzHistory(loadAzHistory(user.id));
-      setLoadingHistory(false);
+      // Seed from localStorage immediately so UI isn't empty while fetching
+      setAzHistory(lsLoad(user.id));
+      try {
+        const rows = await fetchAnalyses(20);
+        setAzHistory(rows);
+        lsSave(user.id, rows);          // keep local cache in sync
+      } catch {
+        // Network/auth error — stay on localStorage data
+      } finally {
+        setLoadingHistory(false);
+      }
     });
   }, []);
 
@@ -193,12 +179,28 @@ export default function AnalyzeResume() {
     return () => clearInterval(iv);
   }, [loading]);
 
-  // Save result to localStorage history
-  const persistResult = useCallback((label: string, res: AnalysisResult) => {
-    if (!userId) return;
-    const updated = pushAzRecord(userId, label, res);
-    setAzHistory(updated);
-  }, [userId]);
+  // Persist result to Supabase + localStorage
+  const persistResult = useCallback(async (label: string, res: AnalysisResult) => {
+    const optimistic: AnalyzeRecord = {
+      id:        `local_${Date.now()}`,
+      label,
+      score:     res.overallScore,
+      createdAt: new Date().toISOString(),
+      result:    res,
+    };
+    // Optimistic update — show instantly
+    setAzHistory(prev => [optimistic, ...prev].slice(0, 20));
+    if (userId) lsPush(userId, optimistic);
+
+    try {
+      const newId = await insertAnalysis(label, res);
+      if (newId) {
+        // Replace optimistic row with real DB id
+        setAzHistory(prev => prev.map(r => r.id === optimistic.id ? { ...r, id: newId } : r));
+        if (userId) lsSave(userId, azHistory.map(r => r.id === optimistic.id ? { ...r, id: newId } : r));
+      }
+    } catch { /* DB save failed — localStorage copy is still intact */ }
+  }, [userId, azHistory]);
 
   const run = useCallback(async (file: File) => {
     setLoading(true);
@@ -254,11 +256,15 @@ export default function AnalyzeResume() {
     setHistoryOpen(false);
   }, []);
 
-  const deleteRecord = useCallback((id: string) => {
-    if (!userId) return;
+  const deleteRecord = useCallback(async (id: string) => {
+    // Optimistic remove
     const next = azHistory.filter(r => r.id !== id);
-    saveAzHistory(userId, next);
     setAzHistory(next);
+    if (userId) lsSave(userId, next);
+    // Skip DB delete for optimistic local-only rows
+    if (!id.startsWith("local_")) {
+      try { await deleteAnalysis(id); } catch { /* ignore */ }
+    }
   }, [userId, azHistory]);
 
   const onFile = (f: File | null | undefined) => {

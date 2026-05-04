@@ -1,6 +1,18 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { ResumeRecord, Criterion, RatingsData } from "./types";
 
+/* ── Analyze-history types ───────────────────────────────────── */
+// result is typed as Record<string,unknown> here because the DB stores raw
+// JSON — callers (AnalyzeResume.tsx) cast to their own full AnalysisResult.
+export interface AnalyzeRecord {
+  id:        string;
+  label:     string;
+  score:     number;
+  createdAt: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  result:    any;
+}
+
 // Lazy singleton — avoids crashing at build time when env vars aren't set
 let _client: SupabaseClient | null = null;
 
@@ -93,4 +105,65 @@ export async function upsertResume(
   }
 
   return resumeId;
+}
+
+/* ── Analyze history CRUD ────────────────────────────────────── */
+
+/** Fetch a user's analysis history, newest first. Returns [] if unauthenticated. */
+export async function fetchAnalyses(limit = 20): Promise<AnalyzeRecord[]> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.user?.id) return [];
+
+  const { data, error } = await db
+    .from("resume_analyses")
+    .select("id, label, score, result, created_at")
+    .eq("user_id", session.user.id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+
+  return (data ?? []).map((row) => ({
+    id:        row.id as string,
+    label:     row.label as string,
+    score:     row.score as number,
+    createdAt: row.created_at as string,
+    result:    row.result,
+  }));
+}
+
+/** Insert a new analysis row. Returns the new row id. */
+export async function insertAnalysis(
+  label: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  result: any,
+): Promise<string | null> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.user?.id) return null;
+
+  const { data, error } = await db
+    .from("resume_analyses")
+    .insert({
+      user_id: session.user.id,
+      label,
+      score:   result.overallScore,
+      result,
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return data.id as string;
+}
+
+/** Delete a single analysis row by id. */
+export async function deleteAnalysis(id: string): Promise<void> {
+  const db = getSupabaseClient();
+  const { error } = await db
+    .from("resume_analyses")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
 }
