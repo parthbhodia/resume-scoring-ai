@@ -1,8 +1,8 @@
 """
 Resume Generator GUI — Starlette backend
 Run locally:
-  cd C:/Users/parth/job-search
-  .venv/Scripts/python.exe resume_gui/app.py
+  .venv/Scripts/python.exe resume_gui/app.py   (Windows)
+  python resume_gui/app.py                      (macOS/Linux)
 
 Deploy on Railway:
   Set env vars: GOOGLE_API_KEY, LIBRARY_ROOT, ALLOWED_ORIGINS
@@ -1268,7 +1268,7 @@ def _recruiter_checks(text: str) -> dict:
                 if cur_header is not None:
                     roles.append((cur_header, cur_bullets))
                 # If this line is ONLY a date range (≤ 4 tokens), prepend the previous
-                # title line so we capture "Fullstack Developer | Eccalon LLC" + date
+                # title line so we capture "Job Title | Company Name" + date
                 if len(ln.split()) <= 4 and prev_non_bullet and not _ROLE_HEADER_RE.search(prev_non_bullet):
                     cur_header = prev_non_bullet + "  " + ln
                 else:

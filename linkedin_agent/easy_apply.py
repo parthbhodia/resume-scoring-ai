@@ -8,7 +8,7 @@ Requires:
 Credentials (set in .env):
     LINKEDIN_EMAIL
     LINKEDIN_PASSWORD
-    PHONE_NUMBER  (optional, defaults to Parth's number)
+    PHONE_NUMBER  (required — set in .env)
 """
 
 import json
@@ -31,7 +31,7 @@ class LinkedInEasyApply:
     def __init__(self):
         self.email = os.getenv("LINKEDIN_EMAIL", "")
         self.password = os.getenv("LINKEDIN_PASSWORD", "")
-        self.phone = os.getenv("PHONE_NUMBER", "4439294371")
+        self.phone = os.getenv("PHONE_NUMBER", "")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -112,15 +112,15 @@ class LinkedInEasyApply:
 
         # 3. Text / tel / number inputs
         _profile_answers = {
-            "phone": self.phone,
-            "mobile": self.phone,
-            "city": "Jersey City",
-            "zip": "07302",
-            "postal": "07302",
-            "linkedin": "https://linkedin.com/in/parthbhodia",
-            "website": "https://parthbhodia.com",
-            "portfolio": "https://parthbhodia.com",
-            "github": "https://github.com/parthbhodia",
+            "phone":     self.phone,
+            "mobile":    self.phone,
+            "city":      os.getenv("CONTACT_CITY", ""),
+            "zip":       os.getenv("CONTACT_ZIP", ""),
+            "postal":    os.getenv("CONTACT_ZIP", ""),
+            "linkedin":  os.getenv("CONTACT_LINKEDIN_URL", ""),
+            "website":   os.getenv("CONTACT_WEBSITE_URL", ""),
+            "portfolio": os.getenv("CONTACT_WEBSITE_URL", ""),
+            "github":    os.getenv("CONTACT_GITHUB_URL", ""),
         }
         for inp in page.query_selector_all('input[type="text"], input[type="tel"], input[type="number"]'):
             try:

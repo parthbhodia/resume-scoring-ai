@@ -31,6 +31,7 @@ from linkedin_agent.resume_library import (
     list_resumes,
     get_resume_tex,
     generate_latex_resume,
+    LIBRARY_ROOT,
 )
 from linkedin_agent import application_tracker
 
@@ -405,7 +406,7 @@ def generate_application_package(
 @tool
 def list_resume_library() -> dict:
     """
-    List all existing resumes in Parth's resume library.
+    List all existing resumes in the resume library.
     Shows folder names, available .tex and .pdf files for each role.
     """
     resumes = list_resumes()
@@ -413,7 +414,7 @@ def list_resume_library() -> dict:
         "success": True,
         "total": len(resumes),
         "resumes": resumes,
-        "library_path": "C:/Users/parth/OneDrive/Documents/resume/",
+        "library_path": LIBRARY_ROOT,
     }
 
 
@@ -429,8 +430,8 @@ def generate_latex_resume_tool(
     Generate a tailored LaTeX (.tex) resume for a specific job and save it to the resume library.
     Optionally compiles to PDF using pdflatex.
 
-    This creates a properly formatted resume in Parth's Rezume template style,
-    saved to C:/Users/parth/OneDrive/Documents/resume/<Company>_<Role>/.
+    This creates a properly formatted resume in the Rezume template style,
+    saved to LIBRARY_ROOT/<Company>_<Role>/.
 
     Args:
         company: Target company (e.g., "Stripe", "Meta")
@@ -619,22 +620,22 @@ def agent_node(state: AgentState) -> AgentState:
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
     system_message = SystemMessage(
-        content="""You are an intelligent LinkedIn job search and application assistant for Parth Bhodia.
+        content=f"""You are an intelligent LinkedIn job search and application assistant for {os.environ.get('CONTACT_NAME', 'the user')}.
 
 YOUR CAPABILITIES:
 1. Search real LinkedIn jobs by keywords, location, experience level, remote/on-site
 2. Fetch full job details for specific postings
-3. Load Parth's complete profile (always available — falls back to verified static data)
+3. Load the user's complete profile (always available — falls back to verified static data)
 4. Analyze job match: score, matching skills, gaps, tailoring tips
 5. Generate tailored plain-text resumes and cover letters
 6. Generate complete application packages saved to disk
-7. Generate tailored LaTeX resumes in Parth's Rezume template style, saved to his resume library
-8. List existing resumes in the library (C:/Users/parth/OneDrive/Documents/resume/)
+7. Generate tailored LaTeX resumes in the Rezume template style, saved to the resume library
+8. List existing resumes in the library ({LIBRARY_ROOT})
 9. Track job applications locally with status (applied/interviewing/offer/rejected)
 10. Update application statuses and view the full application pipeline
 
 RESUME LIBRARY:
-Parth has an existing library of tailored LaTeX resumes (Adobe, Google, Meta, DoorDash, etc.).
+The user has an existing library of tailored LaTeX resumes.
 When asked to create a resume for a new role, use `generate_latex_resume_tool` — it saves
 a properly formatted .tex file (and compiles to .pdf) in the library directory.
 

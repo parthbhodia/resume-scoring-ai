@@ -45,21 +45,9 @@ interface AnalysisResult {
   finalRecommendations: string[];
 }
 
-interface StoredResume {
-  folder: string;
-  company: string;
-  role: string;
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function parseFolder(folder: string): { company: string; role: string } {
-  const parts = folder.split("_");
-  if (parts.length >= 2) {
-    return { company: parts[0], role: parts.slice(1, -1).join(" ") || parts[1] };
-  }
-  return { company: folder, role: "" };
-}
 
 function scoreColor(score: number | null): string {
   if (score === null) return "var(--border)";
@@ -123,21 +111,80 @@ function Spinner({ size = 18 }: { size?: number }) {
   );
 }
 
+// ── Analyze history (localStorage) ───────────────────────────────────────────
+// Stores the last MAX_HISTORY analysis results per user in localStorage.
+// Key format: rn_az_history_<userId>
+// Shape: AnalyzeRecord[]
+
+const MAX_HISTORY = 20;
+
+interface AnalyzeRecord {
+  id:        string;          // unique id for this run
+  label:     string;          // filename or folder name
+  score:     number;
+  createdAt: string;          // ISO string
+  result:    AnalysisResult;
+}
+
+function azHistoryKey(userId: string) {
+  return `rn_az_history_${userId}`;
+}
+
+function loadAzHistory(userId: string): AnalyzeRecord[] {
+  try {
+    const raw = localStorage.getItem(azHistoryKey(userId));
+    return raw ? (JSON.parse(raw) as AnalyzeRecord[]) : [];
+  } catch { return []; }
+}
+
+function saveAzHistory(userId: string, records: AnalyzeRecord[]) {
+  try {
+    localStorage.setItem(azHistoryKey(userId), JSON.stringify(records.slice(0, MAX_HISTORY)));
+  } catch { /* quota — ignore */ }
+}
+
+function pushAzRecord(userId: string, label: string, result: AnalysisResult): AnalyzeRecord[] {
+  const rec: AnalyzeRecord = {
+    id:        `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    label,
+    score:     result.overallScore,
+    createdAt: new Date().toISOString(),
+    result,
+  };
+  const prev = loadAzHistory(userId);
+  const next = [rec, ...prev].slice(0, MAX_HISTORY);
+  saveAzHistory(userId, next);
+  return next;
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function AnalyzeResume() {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [dragging, setDragging] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [jd, setJd] = useState("");
-  const [loadingMsg, setLoadingMsg] = useState(0);
-  const [storedResumes, setStoredResumes] = useState<StoredResume[]>([]);
-  const [loadingStored, setLoadingStored] = useState(false);
+  const [dragging, setDragging]         = useState(false);
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState<string | null>(null);
+  const [result, setResult]             = useState<AnalysisResult | null>(null);
+  const [jd, setJd]                     = useState("");
+  const [loadingMsg, setLoadingMsg]     = useState(0);
   const [expandedBullets, setExpandedBullets] = useState<Record<number, boolean>>({});
-  // History sidebar — hidden by default on mobile, visible on desktop
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyOpen, setHistoryOpen]   = useState(false);
+
+  // Analyze history from localStorage
+  const [azHistory, setAzHistory]         = useState<AnalyzeRecord[]>([]);
+  const [userId, setUserId]               = useState<string | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  // Load user + history on mount
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user?.id) { setLoadingHistory(false); return; }
+      setUserId(user.id);
+      setAzHistory(loadAzHistory(user.id));
+      setLoadingHistory(false);
+    });
+  }, []);
 
   // Cycle loading messages every 3s
   useEffect(() => {
@@ -146,28 +193,12 @@ export default function AnalyzeResume() {
     return () => clearInterval(iv);
   }, [loading]);
 
-  // Fetch stored resumes — always scoped to the signed-in user
-  useEffect(() => {
-    setLoadingStored(true);
-    const supabase = getSupabaseClient();
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user?.id) { setLoadingStored(false); return; }
-      try {
-        const resp = await fetch(apiUrl(`/api/resumes?user_id=${encodeURIComponent(user.id)}`));
-        const data = await resp.json();
-        // DB returns [{folder, company, role, score, ...}]; local fallback [{folder,...}]
-        const records: StoredResume[] = Array.isArray(data)
-          ? data.map((r: { folder: string; company?: string; role?: string }) => ({
-              folder:  r.folder,
-              company: r.company || parseFolder(r.folder).company,
-              role:    r.role    || parseFolder(r.folder).role,
-            }))
-          : [];
-        setStoredResumes(records);
-      } catch { /* silently ignore */ }
-      setLoadingStored(false);
-    });
-  }, []);
+  // Save result to localStorage history
+  const persistResult = useCallback((label: string, res: AnalysisResult) => {
+    if (!userId) return;
+    const updated = pushAzRecord(userId, label, res);
+    setAzHistory(updated);
+  }, [userId]);
 
   const run = useCallback(async (file: File) => {
     setLoading(true);
@@ -181,13 +212,15 @@ export default function AnalyzeResume() {
       const resp = await fetch(apiUrl("/api/analyze-upload"), { method: "POST", body: fd });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
-      setResult(json as AnalysisResult);
+      const res = json as AnalysisResult;
+      setResult(res);
+      persistResult(file.name.replace(/\.pdf$/i, ""), res);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setLoading(false);
     }
-  }, [jd]);
+  }, [jd, persistResult]);
 
   const runFolder = useCallback(async (folder: string) => {
     setLoading(true);
@@ -204,13 +237,29 @@ export default function AnalyzeResume() {
       });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
-      setResult(json as AnalysisResult);
+      const res = json as AnalysisResult;
+      setResult(res);
+      persistResult(folder, res);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setLoading(false);
     }
-  }, [jd]);
+  }, [jd, persistResult]);
+
+  // Restore a cached result instantly — no re-analysis needed
+  const restoreRecord = useCallback((rec: AnalyzeRecord) => {
+    setResult(rec.result);
+    setExpandedBullets({});
+    setHistoryOpen(false);
+  }, []);
+
+  const deleteRecord = useCallback((id: string) => {
+    if (!userId) return;
+    const next = azHistory.filter(r => r.id !== id);
+    saveAzHistory(userId, next);
+    setAzHistory(next);
+  }, [userId, azHistory]);
 
   const onFile = (f: File | null | undefined) => {
     if (!f || !f.name.endsWith(".pdf")) { setError("Please upload a PDF file."); return; }
@@ -279,13 +328,13 @@ export default function AnalyzeResume() {
           </div>
         </>
       ) : (
-        /* Pre-result: history of saved resumes */
+        /* Pre-result: analyze history from localStorage */
         <>
           <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14, fontFamily: "'Cormorant Garant', Georgia, serif" }}>
-            My Resumes
+            Recent Analyses
           </div>
 
-          {loadingStored ? (
+          {loadingHistory ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {[1,2,3].map(i => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
@@ -297,48 +346,71 @@ export default function AnalyzeResume() {
                 </div>
               ))}
             </div>
-          ) : storedResumes.length === 0 ? (
+          ) : azHistory.length === 0 ? (
             <div style={{ fontSize: 13, color: "var(--dim)", textAlign: "center", paddingTop: 24, lineHeight: 1.7 }}>
-              No saved résumés yet.<br />
-              <span style={{ fontSize: 12 }}>Generate one in the Builder tab<br />or upload a PDF below.</span>
+              No analyses yet.<br />
+              <span style={{ fontSize: 12 }}>Upload a PDF above<br />to get started.</span>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {storedResumes.map(r => (
-                <button
-                  key={r.folder}
-                  onClick={() => { runFolder(r.folder); setHistoryOpen(false); }}
+              {azHistory.map(rec => (
+                <div
+                  key={rec.id}
                   style={{
-                    display: "flex", alignItems: "center", gap: 10,
+                    display: "flex", alignItems: "center", gap: 6,
                     padding: "9px 10px", borderRadius: 8,
                     border: "1px solid var(--border)", background: "transparent",
-                    cursor: "pointer", textAlign: "left", fontFamily: "inherit",
                     transition: "background var(--transition), border-color var(--transition)",
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "var(--amber-bg)"; e.currentTarget.style.borderColor = "rgba(196,121,58,0.3)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "var(--border)"; }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = "var(--amber-bg)"; (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(196,121,58,0.3)"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)"; }}
                 >
-                  <div style={{
-                    width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                    background: "var(--surface2)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color: "var(--dim)" }}>
-                      <path d="M3 2h7l3 3v9H3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                      <path d="M10 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                    </svg>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {r.company}
+                  {/* Score badge + label — clicking restores result */}
+                  <button
+                    onClick={() => restoreRecord(rec)}
+                    style={{
+                      flex: 1, display: "flex", alignItems: "center", gap: 8,
+                      background: "none", border: "none", cursor: "pointer",
+                      textAlign: "left", fontFamily: "inherit", padding: 0, minWidth: 0,
+                    }}
+                  >
+                    <div style={{
+                      width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                      background: "var(--surface2)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 11, fontWeight: 700, color: scoreColor(rec.score),
+                    }}>
+                      {rec.score}
                     </div>
-                    {r.role && (
-                      <div style={{ fontSize: 11, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 }}>
-                        {r.role}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {rec.label}
                       </div>
-                    )}
-                  </div>
-                </button>
+                      <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 1 }}>
+                        {new Date(rec.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Delete */}
+                  <button
+                    onClick={() => deleteRecord(rec.id)}
+                    title="Remove"
+                    style={{
+                      width: 22, height: 22, borderRadius: 5, flexShrink: 0,
+                      border: "none", background: "transparent",
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                      color: "var(--dim)", transition: "background var(--transition), color var(--transition)",
+                      padding: 0,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(248,113,113,0.15)"; e.currentTarget.style.color = "var(--red)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--dim)"; }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                      <path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -506,7 +578,7 @@ export default function AnalyzeResume() {
                 <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
                 <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              {storedResumes.length > 0 ? `My Résumés (${storedResumes.length})` : "My Résumés"}
+              {azHistory.length > 0 ? `Recent Analyses (${azHistory.length})` : "Recent Analyses"}
             </button>
           </div>
         )}

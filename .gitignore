@@ -74,3 +74,7 @@ playwright-state/
 # Credentials (extra safety)
 credentials.json
 secrets.json
+
+# Personal profile data — local LinkedIn agent only, never commit
+linkedin_agent/parth_profile.py
+resumes/

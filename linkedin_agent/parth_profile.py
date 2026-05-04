@@ -1,9 +1,11 @@
 """
-Parth Bhodia — verified static profile.
+Static profile data — used by the LinkedIn agent as a local fallback when
+scraping is unavailable.
 
-Used as the primary profile source by the agent. Falls back to this whenever
-LinkedIn scraping fails (which it often does). All data is verified from
-actual resume files and work history.
+NOTE: This file contains personal data and is intended only for the
+local LinkedIn automation agent (linkedin_agent/). It must NEVER be
+imported or referenced by the web application (web/) or API backend
+(resume_gui/). Keep this file in .gitignore for any public fork.
 """
 
 PARTH_PROFILE = {

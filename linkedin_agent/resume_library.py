@@ -1,8 +1,8 @@
 """
 Resume Library Integration
 
-Reads and writes to Parth's resume library at:
-  C:/Users/parth/OneDrive/Documents/resume/
+Reads and writes to the resume library at the path set by the LIBRARY_ROOT
+environment variable.
 
 Each resume lives in its own subfolder with a consistent naming scheme.
 New resumes are generated as .tex files using the Rezume template,
@@ -237,20 +237,16 @@ def _markdown_to_latex_bold(text: str) -> Tuple[str, int]:
     return new_text, n
 
 
-LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", "C:/Users/parth/OneDrive/Documents/resume")
+LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", "")
 
-# Prefer the system pdflatex (cross-platform); fall back to the Windows MiKTeX path for
-# backwards-compat when running on the original Windows dev machine.
+# Prefer the system pdflatex (cross-platform); the binary must be on PATH or
+# pointed to by the PDFLATEX env var for PDF compilation to work.
 import shutil as _shutil
-PDFLATEX = (
-    _shutil.which("pdflatex")
-    or "C:/Users/parth/AppData/Local/Programs/MiKTeX/miktex/bin/x64/pdflatex.exe"
-)
+PDFLATEX = os.environ.get("PDFLATEX_PATH") or _shutil.which("pdflatex") or ""
 
-# LaTeX preamble — identical across all of Parth's resumes
+# LaTeX preamble — shared across all generated resumes
 _LATEX_PREAMBLE = r"""%-------------------------
 % Resume - {role} - {company}
-% Parth Bhodia
 % Based on: Rezume template by Nanu Panchamurthy
 %-------------------------
 
@@ -350,21 +346,20 @@ _LATEX_FOOTER = r"""
 \end{document}
 """
 
-# Default contact info — lives in the LaTeX header. Overridable via env vars
-# so a self-host deployment doesn't need a code edit. Single-user app today,
-# but the editor can override these per-folder via the structured `contact`
+# Default contact info — lives in the LaTeX header. Must be set via env vars.
+# The editor can also override these per-folder via the structured `contact`
 # field on `ParsedResume`.
 DEFAULT_CONTACT: Dict[str, str] = {
-    "name":          os.environ.get("CONTACT_NAME",          "Parth Bhodia"),
-    "location":      os.environ.get("CONTACT_LOCATION",      "Jersey City, NJ (NYC metro)"),
-    "website":       os.environ.get("CONTACT_WEBSITE",       "parthbhodia.com"),
-    "website_url":   os.environ.get("CONTACT_WEBSITE_URL",   "https://parthbhodia.github.io"),
-    "linkedin":      os.environ.get("CONTACT_LINKEDIN",      "LinkedIn/in/parthbhodia"),
-    "linkedin_url":  os.environ.get("CONTACT_LINKEDIN_URL",  "https://linkedin.com/in/parthbhodia"),
+    "name":          os.environ.get("CONTACT_NAME",          ""),
+    "location":      os.environ.get("CONTACT_LOCATION",      ""),
+    "website":       os.environ.get("CONTACT_WEBSITE",       ""),
+    "website_url":   os.environ.get("CONTACT_WEBSITE_URL",   ""),
+    "linkedin":      os.environ.get("CONTACT_LINKEDIN",      ""),
+    "linkedin_url":  os.environ.get("CONTACT_LINKEDIN_URL",  ""),
     "github":        os.environ.get("CONTACT_GITHUB",        "GitHub"),
-    "github_url":    os.environ.get("CONTACT_GITHUB_URL",    "https://github.com/parthbhodia"),
-    "email":         os.environ.get("CONTACT_EMAIL",         "parthbhodia08@gmail.com"),
-    "phone":         os.environ.get("CONTACT_PHONE",         "+1 4439294371"),
+    "github_url":    os.environ.get("CONTACT_GITHUB_URL",    ""),
+    "email":         os.environ.get("CONTACT_EMAIL",         ""),
+    "phone":         os.environ.get("CONTACT_PHONE",         ""),
 }
 
 
@@ -1789,6 +1784,31 @@ def _make_folder_name(company: str, role: str) -> str:
     return f"{company_slug}_{role_slug}"
 
 
+def _get_candidate_profile_block() -> str:
+    """Return the candidate profile text for LLM prompts.
+
+    Priority order:
+    1. CANDIDATE_PROFILE env var — set to a multiline profile string.
+    2. Minimal contact block built from DEFAULT_CONTACT env vars.
+
+    The full profile (experience, education, skills) must be provided via the
+    CANDIDATE_PROFILE env var. No personal data is hardcoded here.
+    """
+    from_env = os.environ.get("CANDIDATE_PROFILE", "").strip()
+    if from_env:
+        return from_env + "\n\n"
+
+    # Minimal fallback — contact header only
+    c = DEFAULT_CONTACT
+    return (
+        f"Name: {c['name']}\n"
+        f"Location: {c['location']}\n"
+        f"Email: {c['email']} | Phone: {c['phone']}\n"
+        f"Website: {c['website']} | LinkedIn: {c['linkedin_url']}\n\n"
+        "(Set CANDIDATE_PROFILE env var with full experience/education/skills for better results.)\n\n"
+    )
+
+
 def generate_latex_resume(
     company: str,
     role: str,
@@ -1868,48 +1888,7 @@ def generate_latex_resume(
         f"TARGET ROLE: {role}\nTARGET COMPANY: {company}\n\n"
         f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
         f"---\nCANDIDATE PROFILE (USE ONLY THESE FACTS):\n\n"
-        f"Name: Parth Bhodia\n"
-        f"Location: Jersey City, NJ (NYC metro)\n"
-        f"Email: parthbhodia08@gmail.com | Phone: +1 (443) 929-4371\n"
-        f"Website: parthbhodia.com | LinkedIn: linkedin.com/in/parthbhodia\n\n"
-        f"EXPERIENCE:\n"
-        f"1. Full-Stack Software Engineer, Eccalon LLC (May 2022 – Present, Remote)\n"
-        f"   - React + Node.js end-to-end features for federal/enterprise platforms, 100,000+ users\n"
-        f"   - PostgreSQL schema for high-traffic multi-tenant CMS\n"
-        f"   - gRPC streaming pipelines for real-time audio/text, mission-critical\n"
-        f"   - AWS Bedrock LLM contract analytics tool — 50% efficiency gain\n"
-        f"   - AWS Cognito + Lambda + API Gateway — secure auth\n"
-        f"   - WCAG 2.1 compliance (ARIA) for CMMC vendor certification platform\n"
-        f"   - BERT + XGBoost + TensorFlow — Code Compliant tool, SBOM reports, foreign code detection for US govt\n"
-        f"   - Page hydration + API batching (Chrome 6-connection limit) — frontend perf\n"
-        f"   - Tech: React, Redux, Node.js, Python, PostgreSQL, REST APIs, gRPC, AWS, TypeScript, Docker, Git\n\n"
-        f"2. Research Software Engineer, UMBC (Jan 2022 – Dec 2022, Halethorpe MD)\n"
-        f"   - Java Spring Boot + RabbitMQ + gRPC distributed backend, real-time geospatial sync\n"
-        f"   - GIS anomaly detection — Elasticsearch + Kibana\n"
-        f"   - Kubernetes deployment — minikube/lab\n"
-        f"   - Tech: Java, Spring Boot, RabbitMQ, gRPC, Elasticsearch, Kibana, Kubernetes\n\n"
-        f"3. Software Engineer, Tata Communications Ltd. (July 2018 – May 2021, Mumbai)\n"
-        f"   - Analytics dashboard (React + Django/Python) — 10,000+ users, 36% APAC revenue increase\n"
-        f"   - Python route optimization tool with REST API\n"
-        f"   - Jenkins CI/CD, mentored junior engineers\n"
-        f"   - Tech: React, JavaScript, Django, Python, MySQL, REST APIs, Jenkins, Git\n\n"
-        f"PROJECTS:\n"
-        f"- VibeIMG (2024): AI image gen SaaS — React+Redux, FastAPI, Stripe, Replicate Flux; "
-        f"dual LLM pipeline (xAI primary, Groq fallback); 60% latency improvement (25s->10s); profitable\n"
-        f"- Real-Time Tweet Sentiment Pipeline (Jan-Mar 2026): GCP: Twitter/X API -> Pub/Sub -> Dataflow -> "
-        f"Spanner (Change Streams) -> Cloud Functions -> NL API; ~2-5s latency\n"
-        f"- Nutri AI Scan (Oct 2022 - Feb 2023): Vue.js + OpenCV + MongoDB; 2nd place CBIC UMBC (25+ teams)\n\n"
-        f"EDUCATION:\n"
-        f"- MS Computer Science, UMBC (Aug 2021 - May 2023), Baltimore, MD\n"
-        f"- BE Information Technology, University of Mumbai (Aug 2014 - May 2018), Mumbai, IN\n\n"
-        f"SKILLS:\n"
-        f"Frontend: React, Redux, Vue.js, JavaScript/TypeScript (ES6+), HTML5, CSS3, WCAG 2.1/ARIA\n"
-        f"Backend & APIs: Node.js, REST APIs, GraphQL, Django, Spring Boot, gRPC, FastAPI\n"
-        f"AI/GenAI: AWS Bedrock, TensorFlow, BERT, XGBoost, OpenCV, xAI, Groq, Replicate Flux\n"
-        f"Data & Infra: PostgreSQL, MySQL, MongoDB, Elasticsearch, RabbitMQ, Docker\n"
-        f"Cloud: AWS (Bedrock, Lambda, Cognito, API Gateway), GCP (Pub/Sub, Dataflow, Spanner, Cloud Functions, NL API)\n"
-        f"DevOps & Testing: Jenkins, Git, CI/CD, Unit Testing, Integration Testing\n"
-        f"Languages: Python, JavaScript/TypeScript, Java, SQL\n"
+        f"{_get_candidate_profile_block()}"
         f"{base_section}"
         f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:2500]}\n\n"
         f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
@@ -1973,7 +1952,8 @@ def generate_latex_resume(
 
     safe_company = re.sub(r"[^\w]", "", company)
     safe_role = re.sub(r"[^\w]", "", role.replace(" ", "_"))
-    filename = f"Parth_Bhodia_{safe_company}_{safe_role}_Resume"
+    _safe_owner = re.sub(r"[^\w]", "_", DEFAULT_CONTACT.get("name", "Resume").strip()) or "Resume"
+    filename = f"{_safe_owner}_{safe_company}_{safe_role}_Resume"
     tex_path = os.path.join(folder_path, filename + ".tex")
 
     with open(tex_path, "w", encoding="utf-8") as f:
@@ -2065,49 +2045,14 @@ def _build_prompts(company, role, job_description, base_body, reference_tex, can
     if candidate_profile:
         profile_section = candidate_profile[:4000]
     else:
+        # Build a minimal contact header from env vars when no full profile is supplied.
+        # Callers should always pass candidate_profile for best results.
         profile_section = (
-            "Name: Parth Bhodia\n"
-            "Location: Jersey City, NJ (NYC metro)\n"
-            "Email: parthbhodia08@gmail.com | Phone: +1 (443) 929-4371\n"
-            "Website: parthbhodia.com | LinkedIn: linkedin.com/in/parthbhodia\n\n"
-            "EXPERIENCE:\n"
-            "1. Full-Stack Software Engineer, Eccalon LLC (May 2022 – Present, Remote)\n"
-            "   - React + Node.js end-to-end features for federal/enterprise platforms, 100,000+ users\n"
-            "   - PostgreSQL schema for high-traffic multi-tenant CMS\n"
-            "   - gRPC streaming pipelines for real-time audio/text, mission-critical\n"
-            "   - AWS Bedrock LLM contract analytics tool — 50% efficiency gain\n"
-            "   - AWS Cognito + Lambda + API Gateway — secure auth\n"
-            "   - WCAG 2.1 compliance (ARIA) for CMMC vendor certification platform\n"
-            "   - BERT + XGBoost + TensorFlow — Code Compliant tool, SBOM reports, foreign code detection for US govt\n"
-            "   - Page hydration + API batching (Chrome 6-connection limit) — frontend perf\n"
-            "   - Tech: React, Redux, Node.js, Python, PostgreSQL, REST APIs, gRPC, AWS, TypeScript, Docker, Git\n\n"
-            "2. Research Software Engineer, UMBC (Jan 2022 – Dec 2022, Halethorpe MD)\n"
-            "   - Java Spring Boot + RabbitMQ + gRPC distributed backend, real-time geospatial sync\n"
-            "   - GIS anomaly detection — Elasticsearch + Kibana\n"
-            "   - Kubernetes deployment — minikube/lab\n"
-            "   - Tech: Java, Spring Boot, RabbitMQ, gRPC, Elasticsearch, Kibana, Kubernetes\n\n"
-            "3. Software Engineer, Tata Communications Ltd. (July 2018 – May 2021, Mumbai)\n"
-            "   - Analytics dashboard (React + Django/Python) — 10,000+ users, 36% APAC revenue increase\n"
-            "   - Python route optimization tool with REST API\n"
-            "   - Jenkins CI/CD, mentored junior engineers\n"
-            "   - Tech: React, JavaScript, Django, Python, MySQL, REST APIs, Jenkins, Git\n\n"
-            "PROJECTS:\n"
-            "- VibeIMG (2024): AI image gen SaaS — React+Redux, FastAPI, Stripe, Replicate Flux; "
-            "dual LLM pipeline (xAI primary, Groq fallback); 60% latency improvement (25s->10s); profitable\n"
-            "- Real-Time Tweet Sentiment Pipeline (Jan-Mar 2026): GCP: Twitter/X API -> Pub/Sub -> Dataflow -> "
-            "Spanner (Change Streams) -> Cloud Functions -> NL API; ~2-5s latency\n"
-            "- Nutri AI Scan (Oct 2022 - Feb 2023): Vue.js + OpenCV + MongoDB; 2nd place CBIC UMBC (25+ teams)\n\n"
-            "EDUCATION:\n"
-            "- MS Computer Science, UMBC (Aug 2021 - May 2023), Baltimore, MD\n"
-            "- BE Information Technology, University of Mumbai (Aug 2014 - May 2018), Mumbai, IN\n\n"
-            "SKILLS:\n"
-            "Frontend: React, Redux, Vue.js, JavaScript/TypeScript (ES6+), HTML5, CSS3, WCAG 2.1/ARIA\n"
-            "Backend & APIs: Node.js, REST APIs, GraphQL, Django, Spring Boot, gRPC, FastAPI\n"
-            "AI/GenAI: AWS Bedrock, TensorFlow, BERT, XGBoost, OpenCV, xAI, Groq, Replicate Flux\n"
-            "Data & Infra: PostgreSQL, MySQL, MongoDB, Elasticsearch, RabbitMQ, Docker\n"
-            "Cloud: AWS (Bedrock, Lambda, Cognito, API Gateway), GCP (Pub/Sub, Dataflow, Spanner, Cloud Functions, NL API)\n"
-            "DevOps & Testing: Jenkins, Git, CI/CD, Unit Testing, Integration Testing\n"
-            "Languages: Python, JavaScript/TypeScript, Java, SQL\n"
+            f"Name: {DEFAULT_CONTACT['name']}\n"
+            f"Location: {DEFAULT_CONTACT['location']}\n"
+            f"Email: {DEFAULT_CONTACT['email']} | Phone: {DEFAULT_CONTACT['phone']}\n"
+            f"Website: {DEFAULT_CONTACT['website']} | LinkedIn: {DEFAULT_CONTACT['linkedin_url']}\n\n"
+            "(No detailed experience provided — tailor based on job description and any base resume.)\n"
         )
 
     user_prompt = (
@@ -2198,7 +2143,8 @@ def _save_and_compile(company, role, latex_body, compile_pdf=True):
 
     safe_company = re.sub(r"[^\w]", "", company)
     safe_role    = re.sub(r"[^\w]", "", role.replace(" ", "_"))
-    filename     = f"Parth_Bhodia_{safe_company}_{safe_role}_Resume"
+    _safe_owner  = re.sub(r"[^\w]", "_", DEFAULT_CONTACT.get("name", "Resume").strip()) or "Resume"
+    filename     = f"{_safe_owner}_{safe_company}_{safe_role}_Resume"
     tex_path     = os.path.join(folder_path, filename + ".tex")
 
     with open(tex_path, "w", encoding="utf-8") as f:

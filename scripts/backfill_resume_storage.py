@@ -5,7 +5,7 @@ Supabase Storage (resume-tex / resume-pdfs), and the local LIBRARY_ROOT.
 Three-way reconciliation:
   - DB rows (resumes table)               — what the sidebar shows
   - Storage objects (resume-tex bucket)   — what backend reads on edit / diff
-  - Local LIBRARY_ROOT folders            — what's still on Parth's disk
+  - Local LIBRARY_ROOT folders            — what's on the local disk
 
 For each row, it checks:
   1. Is there a corresponding .tex in Storage under user_id/folder.tex?
@@ -35,7 +35,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from dotenv import load_dotenv
 load_dotenv(REPO_ROOT / "linkedin_agent" / ".env")
 
-LIBRARY_ROOT = Path(os.environ.get("LIBRARY_ROOT", "C:/Users/parth/OneDrive/Documents/resume"))
+LIBRARY_ROOT = Path(os.environ.get("LIBRARY_ROOT", ""))
 
 
 def _client():

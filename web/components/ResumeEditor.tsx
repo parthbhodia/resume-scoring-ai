@@ -1612,18 +1612,9 @@ function PreviewPane({ resume }: { resume: ParsedResume }) {
 }
 
 function extractPreviewHeader(rawTex: string): { name: string; lines: string[] } {
-  // Keep the user-info section visible in the HTML preview. Prefer details from
-  // the generated .tex if present, then fall back to the canonical profile info.
-  const fallback = {
-    name: "Parth Bhodia",
-    lines: [
-      "Jersey City, NJ (NYC metro)",
-      "parthbhodia08@gmail.com | +1 (443) 929-4371",
-      "parthbhodia.com | linkedin.com/in/parthbhodia",
-    ],
-  };
+  const empty = { name: "(Name not parsed)", lines: [] };
+  if (!rawTex) return empty;
 
-  if (!rawTex) return fallback;
   const bodyStart = rawTex.includes("\\begin{document}")
     ? rawTex.split("\\begin{document}", 2)[1]
     : rawTex;
@@ -1643,11 +1634,19 @@ function extractPreviewHeader(rawTex: string): { name: string; lines: string[] }
     .filter(Boolean)
     .filter(s => !/(documentclass|usepackage|article|a4paper|11pt|textwidth|textheight|footskip|oddsidemargin|evensidemargin|topmargin|pdfgentounicode|glyphtounicode|pagestyle|fancy|renewcommand|newcommand|0in|=1)/i.test(s));
 
-  const name = cleaned.find(s => /parth\s+bhodia/i.test(s)) ?? fallback.name;
+  // Heuristic: the name is the first short line (~2-4 words, mostly letters)
+  // that doesn't look like an email / URL / phone number.
+  const nameLine = cleaned.find(s =>
+    s.length < 60
+    && /^[A-Za-z]/.test(s)
+    && !/[@+\d\/\\]/.test(s)
+    && s.split(/\s+/).length <= 5,
+  ) ?? empty.name;
+
   const lines = cleaned
-    .filter(s => s !== name)
-    .filter(s => /@|\+?\d|linkedin|github|jersey|city|nj|http|www|\.com/i.test(s))
+    .filter(s => s !== nameLine)
+    .filter(s => /@|\+?\d|linkedin|github|http|www|\.com/i.test(s))
     .slice(0, 3);
 
-  return { name, lines: lines.length ? lines : fallback.lines };
+  return { name: nameLine, lines };
 }
