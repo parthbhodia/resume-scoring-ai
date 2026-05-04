@@ -3,23 +3,37 @@ import { useState, useEffect, useCallback } from "react";
 import { getSupabaseClient } from "@/lib/supabase";
 
 // ── Design tokens ──────────────────────────────────────────────────────────
-const A = {
-  amber:      "#c4793a",
-  amberLight: "#f0dcc8",
-  amberGlow:  "rgba(196,121,58,0.18)",
-  green:      "#2d6a4f",
-  cream:      "#f7f3ee",
-  cream2:     "#ede9e2",
-  ink:        "#1a1814",
-  muted:      "#6b6457",
-  border:     "#ddd6cc",
-  // dark variants
-  dBg:        "#0f0d0a",
-  dBg2:       "#181512",
-  dInk:       "#f0ece3",
-  dMuted:     "#8a8070",
-  dBorder:    "#2c2820",
-  dSurface:   "#1a1712",
+// Cool slate palette — professional SaaS, not warm editorial
+const T = {
+  // Brand mark (logo R only — amber stays here)
+  brand:       "#c4793a",
+  brandGlow:   "rgba(196,121,58,0.20)",
+
+  // Primary action — consistent with app accent
+  blue:        "#2563eb",
+  blueHover:   "#1d4ed8",
+  blueGlow:    "rgba(37,99,235,0.14)",
+
+  // Semantic
+  green:       "#059669",
+  amber:       "#d97706",   // score bars only (not CTA)
+  teal:        "#0d9488",
+
+  // Light-mode neutrals
+  bg:          "#f6f8fa",
+  bg2:         "#eef0f3",
+  ink:         "#0d1117",
+  muted:       "#57606a",
+  border:      "#d0d7de",
+  surface:     "#ffffff",
+
+  // Dark-mode neutrals
+  dBg:         "#0d1117",
+  dBg2:        "#161b22",
+  dInk:        "#e6edf3",
+  dMuted:      "#8b949e",
+  dBorder:     "#30363d",
+  dSurface:    "#21262d",
 };
 
 type Theme = "dark" | "light";
@@ -59,9 +73,9 @@ const STEPS = [
 ];
 
 const REVIEWS = [
-  { quote: "The AI identified exactly what the recruiters were looking for. I went from zero interviews to three in one week.", name: "Sarah M.", role: "Software Engineer · hired at Meta",    avatar: "S", col: "#e76f51" },
-  { quote: "I didn't know my résumé was being rejected by ATS before anyone even read it. Resunova fixed that overnight.",    name: "James K.", role: "Product Manager · hired at Stripe",  avatar: "J", col: "#2a9d8f" },
-  { quote: "The bullet rewrites made my experience sound 10× more impactful. Completely changed my results.",                 name: "Aisha P.", role: "Data Analyst · hired at Airbnb",    avatar: "A", col: "#264653" },
+  { quote: "The AI identified exactly what the recruiters were looking for. I went from zero interviews to three in one week.", name: "Sarah M.", role: "Software Engineer · hired at Meta",    avatar: "S", col: "#2563eb" },
+  { quote: "I didn't know my résumé was being rejected by ATS before anyone even read it. Resunova fixed that overnight.",    name: "James K.", role: "Product Manager · hired at Stripe",  avatar: "J", col: "#059669" },
+  { quote: "The bullet rewrites made my experience sound 10× more impactful. Completely changed my results.",                 name: "Aisha P.", role: "Data Analyst · hired at Airbnb",    avatar: "A", col: "#7c3aed" },
 ];
 
 // ── Root ────────────────────────────────────────────────────────────────────
@@ -72,14 +86,14 @@ export default function LandingPage() {
   const dark = theme === "dark";
 
   const C = {
-    bg:      dark ? A.dBg      : A.cream,
-    bg2:     dark ? A.dBg2     : A.cream2,
-    ink:     dark ? A.dInk     : A.ink,
-    muted:   dark ? A.dMuted   : A.muted,
-    border:  dark ? A.dBorder  : A.border,
-    surface: dark ? A.dSurface : "#ffffff",
-    glow:    dark ? "rgba(196,121,58,0.14)" : A.amberGlow,
-    shadow:  dark ? "0 28px 72px rgba(0,0,0,0.64)" : "0 28px 72px rgba(26,24,20,0.13)",
+    bg:      dark ? T.dBg      : T.bg,
+    bg2:     dark ? T.dBg2     : T.bg2,
+    ink:     dark ? T.dInk     : T.ink,
+    muted:   dark ? T.dMuted   : T.muted,
+    border:  dark ? T.dBorder  : T.border,
+    surface: dark ? T.dSurface : T.surface,
+    glow:    dark ? "rgba(37,99,235,0.10)" : T.blueGlow,
+    shadow:  dark ? "0 28px 72px rgba(0,0,0,0.60)" : "0 28px 72px rgba(13,17,23,0.10)",
   };
 
   async function signIn() {
@@ -95,69 +109,74 @@ export default function LandingPage() {
   const scrollTo = (id: string) =>
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-  const btnStyle = (variant: "primary" | "ghost"): React.CSSProperties => ({
-    display:    "inline-flex",
-    alignItems: "center",
-    gap:        10,
-    padding:    variant === "primary" ? "13px 26px" : "13px 22px",
-    background: variant === "primary" ? A.amber : "transparent",
-    color:      variant === "primary" ? "#fff"   : C.muted,
-    border:     variant === "primary" ? "none"   : `1px solid ${C.border}`,
-    borderRadius: 10,
-    fontSize:   14, fontWeight: 600, letterSpacing: -0.2,
-    cursor:     loading ? "wait" : "pointer",
-    fontFamily: "inherit",
-    transition: "opacity 0.15s, border-color 0.15s, color 0.15s",
-    opacity:    loading ? 0.7 : 1,
-    boxShadow:  variant === "primary" ? `0 4px 20px ${A.amberGlow}` : "none",
+  const primaryBtn: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", gap: 10,
+    padding: "13px 26px",
+    background: T.blue, color: "#fff",
+    border: "none", borderRadius: 10,
+    fontSize: 14, fontWeight: 600, letterSpacing: -0.2,
+    cursor: loading ? "wait" : "pointer", fontFamily: "inherit",
+    transition: "background 0.15s, box-shadow 0.15s",
+    opacity: loading ? 0.7 : 1,
+    boxShadow: `0 4px 16px ${T.blueGlow}`,
     whiteSpace: "nowrap" as const,
-  });
+  };
+
+  const ghostBtn: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", gap: 10,
+    padding: "13px 22px",
+    background: "transparent", color: C.muted,
+    border: `1px solid ${C.border}`, borderRadius: 10,
+    fontSize: 14, fontWeight: 500, letterSpacing: -0.2,
+    cursor: "pointer", fontFamily: "inherit",
+    transition: "border-color 0.15s, color 0.15s",
+    whiteSpace: "nowrap" as const,
+  };
 
   return (
     <div style={{ background: C.bg, color: C.ink, fontFamily: "'DM Sans', -apple-system, sans-serif", minHeight: "100vh", overflowX: "hidden" }}>
 
-      {/* ───────────── Header ───────────────────────────── */}
-      <header style={{
+      {/* ───────────── Header ───────────────────────────────── */}
+      <header className="lp-header" style={{
         position: "sticky", top: 0, zIndex: 100,
-        height: 62, padding: "0 40px",
+        height: 60, padding: "0 40px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: dark ? "rgba(15,13,10,0.88)" : "rgba(247,243,238,0.90)",
-        backdropFilter: "blur(22px) saturate(160%)",
-        WebkitBackdropFilter: "blur(22px) saturate(160%)",
+        background: dark ? "rgba(13,17,23,0.92)" : "rgba(246,248,250,0.93)",
+        backdropFilter: "blur(20px) saturate(160%)",
+        WebkitBackdropFilter: "blur(20px) saturate(160%)",
         borderBottom: `1px solid ${C.border}`,
       }}>
-        {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+        {/* Logo — amber R mark + DM Sans wordmark */}
+        <div style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}>
           <div style={{
-            width: 30, height: 30, borderRadius: 7,
-            background: `linear-gradient(135deg, ${A.amber} 0%, #e8a06a 100%)`,
+            width: 28, height: 28, borderRadius: 7,
+            background: T.brand,
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontWeight: 700, fontSize: 16,
-            fontFamily: "'Cormorant Garant', serif",
-            boxShadow: `0 2px 8px ${A.amberGlow}`,
+            color: "#fff", fontWeight: 800, fontSize: 14,
+            boxShadow: `0 2px 8px ${T.brandGlow}`,
           }}>R</div>
-          <span style={{ fontFamily: "'Cormorant Garant', serif", fontSize: 20, fontWeight: 600, letterSpacing: -0.3, color: C.ink }}>
+          <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: -0.5, color: C.ink }}>
             Resunova
           </span>
         </div>
 
         {/* Nav */}
-        <nav style={{ display: "flex", alignItems: "center", gap: 28 }}>
+        <nav className="lp-nav" style={{ display: "flex", alignItems: "center", gap: 28 }}>
           {[["Features","features"],["How it works","how"],["Reviews","reviews"]].map(([lbl,id]) => (
             <button key={id} onClick={() => scrollTo(id)} style={{
               background: "none", border: "none", color: C.muted,
               fontSize: 13.5, cursor: "pointer", fontFamily: "inherit",
-              letterSpacing: -0.2, padding: 0, transition: "color 0.15s",
+              fontWeight: 500, letterSpacing: -0.2, padding: 0, transition: "color 0.15s",
             }}
             onMouseEnter={e => { (e.target as HTMLElement).style.color = C.ink; }}
             onMouseLeave={e => { (e.target as HTMLElement).style.color = C.muted; }}
             >{lbl}</button>
           ))}
 
-          {/* Theme */}
+          {/* Theme toggle */}
           <button onClick={toggleTheme} title={dark ? "Light mode" : "Dark mode"} style={{
             width: 32, height: 32, borderRadius: 8,
-            background: dark ? "#241f18" : A.cream2,
+            background: dark ? T.dBg2 : T.bg2,
             border: `1px solid ${C.border}`,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
             color: C.muted, transition: "color 0.15s",
@@ -168,62 +187,64 @@ export default function LandingPage() {
             }
           </button>
 
-          <button onClick={signIn} disabled={loading} style={btnStyle("primary")}>
+          <button onClick={signIn} disabled={loading} style={primaryBtn}>
             <GoogleG /> {loading ? "Loading…" : "Sign in"}
           </button>
         </nav>
       </header>
 
-      {/* ───────────── Hero ─────────────────────────────── */}
-      <section style={{ maxWidth: 1200, margin: "0 auto", padding: "80px 40px 80px", display: "grid", gridTemplateColumns: "1fr 460px", gap: 56, alignItems: "center", minHeight: "88vh" }}>
+      {/* ───────────── Hero ─────────────────────────────────── */}
+      <section className="lp-hero-grid" style={{ maxWidth: 1200, margin: "0 auto", padding: "80px 40px 80px", display: "grid", gridTemplateColumns: "1fr 460px", gap: 56, alignItems: "center", minHeight: "88vh" }}>
 
         {/* Left */}
         <div style={{ animation: "lpFadeUp 0.7s ease both" }}>
-          {/* Pill */}
+          {/* Pill badge */}
           <div style={{
             display: "inline-flex", alignItems: "center", gap: 8,
             padding: "5px 14px", marginBottom: 36,
-            background: C.glow, border: `1px solid ${A.amber}30`,
-            borderRadius: 100, fontSize: 12, color: A.amber,
-            fontWeight: 500, letterSpacing: 0.2,
+            background: C.glow, border: `1px solid ${T.blue}28`,
+            borderRadius: 100, fontSize: 12, color: T.blue,
+            fontWeight: 600, letterSpacing: 0.2,
           }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: A.amber, display: "inline-block", boxShadow: `0 0 6px ${A.amber}` }} />
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.blue, display: "inline-block" }} />
             AI-powered · Instant · ATS-safe
           </div>
 
-          {/* Headline */}
-          <h1 style={{
-            fontFamily: "'Cormorant Garant', serif",
-            fontSize: "clamp(52px, 6vw, 78px)",
-            fontWeight: 700, lineHeight: 1.05, letterSpacing: "-0.03em",
+          {/* Headline — DM Sans 800, not serif */}
+          <h1 className="lp-hero-h1" style={{
+            fontSize: "clamp(48px, 5.5vw, 72px)",
+            fontWeight: 800, lineHeight: 1.05, letterSpacing: "-0.03em",
             color: C.ink, margin: "0 0 28px",
           }}>
             Your résumé,<br />
-            <span style={{ color: A.amber, fontStyle: "italic" }}>finally fluent</span><br />
+            <span style={{ color: T.blue }}>finally fluent</span><br />
             in the language<br />of opportunity.
           </h1>
 
-          <p style={{ fontSize: 17, color: C.muted, lineHeight: 1.7, maxWidth: 440, margin: "0 0 44px", letterSpacing: -0.15 }}>
+          <p style={{ fontSize: 17, color: C.muted, lineHeight: 1.72, maxWidth: 440, margin: "0 0 44px", letterSpacing: -0.15 }}>
             Paste any job description and get an AI-tailored resume in 60 seconds — with a match score, gap analysis, and ATS-safe PDF.
           </p>
 
           {/* CTA row */}
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 40 }}>
-            <button onClick={signIn} disabled={loading} style={btnStyle("primary")}>
+            <button onClick={signIn} disabled={loading} style={primaryBtn}
+              onMouseEnter={e => { if (!loading) (e.currentTarget).style.background = T.blueHover; }}
+              onMouseLeave={e => { if (!loading) (e.currentTarget).style.background = T.blue; }}
+            >
               <GoogleG /> Get started — it&apos;s free
             </button>
-            <button onClick={() => scrollTo("how")} style={btnStyle("ghost")}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = A.amber; (e.currentTarget as HTMLElement).style.color = A.amber; }}
+            <button onClick={() => scrollTo("how")} style={ghostBtn}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = T.blue; (e.currentTarget as HTMLElement).style.color = T.blue; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = C.border; (e.currentTarget as HTMLElement).style.color = C.muted; }}
             >See how it works</button>
           </div>
 
-          {error && <p style={{ fontSize: 13, color: "#f87171", marginBottom: 16 }}>{error}</p>}
+          {error && <p style={{ fontSize: 13, color: "#f85149", marginBottom: 16 }}>{error}</p>}
 
           {/* Social proof */}
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <div style={{ display: "flex" }}>
-              {[["S","#e76f51"],["M","#2a9d8f"],["J","#e9c46a"],["A","#264653"],["K","#f4a261"]].map(([l,bg], i) => (
+              {[["S","#2563eb"],["M","#059669"],["J","#d97706"],["A","#7c3aed"],["K","#0d9488"]].map(([l,bg], i) => (
                 <div key={i} style={{
                   width: 28, height: 28, borderRadius: "50%",
                   background: bg, border: `2px solid ${C.bg}`,
@@ -243,7 +264,7 @@ export default function LandingPage() {
         <DemoCard dark={dark} C={C} />
       </section>
 
-      {/* ───────────── Stats ticker ─────────────────────── */}
+      {/* ───────────── Stats ticker ─────────────────────────── */}
       <div style={{ borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, background: C.bg2, overflow: "hidden", padding: "18px 0" }}>
         <div style={{ display: "flex", gap: 0, width: "max-content", animation: "ticker 36s linear infinite" }}>
           {[...Array(4)].flatMap(() => [
@@ -255,7 +276,7 @@ export default function LandingPage() {
             ["100%",    "Privacy guaranteed"],
           ]).map(([stat, lbl], i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 40px", flexShrink: 0 }}>
-              <span style={{ fontFamily: "'Cormorant Garant', serif", fontSize: 22, fontWeight: 700, color: A.amber }}>{stat}</span>
+              <span style={{ fontSize: 20, fontWeight: 700, color: T.blue, letterSpacing: -0.5 }}>{stat}</span>
               <span style={{ fontSize: 13, color: C.muted, whiteSpace: "nowrap" }}>{lbl}</span>
               <span style={{ color: C.border, marginLeft: 12, fontSize: 18 }}>·</span>
             </div>
@@ -263,39 +284,40 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* ───────────── Features ─────────────────────────── */}
+      {/* ───────────── Features ─────────────────────────────── */}
       <section id="features" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ marginBottom: 64 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: A.amber, textTransform: "uppercase", margin: "0 0 16px" }}>
+          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
             What we analyze
           </p>
-          <h2 style={{ fontFamily: "'Cormorant Garant', serif", fontSize: "clamp(36px, 4.5vw, 56px)", fontWeight: 700, lineHeight: 1.08, letterSpacing: "-0.03em", color: C.ink, margin: 0, maxWidth: 540 }}>
+          <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0, maxWidth: 540 }}>
             Every dimension of<br />a recruiter&apos;s decision.
           </h2>
         </div>
 
-        {/* Grid — gap trick for interior borders */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1, background: C.border, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden" }}>
+        {/* Grid */}
+        <div className="lp-feat-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1, background: C.border, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden" }}>
           {FEATURES.map((f, i) => <FeatureCell key={i} f={f} dark={dark} C={C} />)}
         </div>
       </section>
 
-      {/* ───────────── How it works ─────────────────────── */}
+      {/* ───────────── How it works ─────────────────────────── */}
       <section id="how" style={{ background: C.bg2, borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "100px 40px" }}>
           <div style={{ textAlign: "center", marginBottom: 72 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: A.amber, textTransform: "uppercase", margin: "0 0 16px" }}>The process</p>
-            <h2 style={{ fontFamily: "'Cormorant Garant', serif", fontSize: "clamp(36px, 4.5vw, 56px)", fontWeight: 700, lineHeight: 1.08, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>The process</p>
+            <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
               Three steps to a winning application.
             </h2>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 48 }}>
+          <div className="lp-step-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 48 }}>
             {STEPS.map((s, i) => (
               <div key={i}>
-                <div style={{ fontFamily: "'Cormorant Garant', serif", fontSize: 72, fontWeight: 700, color: A.amber, opacity: 0.35, lineHeight: 1, marginBottom: 20 }}>
+                {/* Step number — large bold DM Sans, blue */}
+                <div style={{ fontSize: 64, fontWeight: 800, color: T.blue, opacity: 0.18, lineHeight: 1, marginBottom: 20, letterSpacing: -3 }}>
                   0{i + 1}
                 </div>
-                <h3 style={{ fontFamily: "'Cormorant Garant', serif", fontSize: 24, fontWeight: 700, color: C.ink, margin: "0 0 12px" }}>{s.title}</h3>
+                <h3 style={{ fontSize: 20, fontWeight: 700, color: C.ink, margin: "0 0 12px", letterSpacing: -0.4 }}>{s.title}</h3>
                 <p style={{ fontSize: 14, color: C.muted, lineHeight: 1.72, margin: 0 }}>{s.desc}</p>
               </div>
             ))}
@@ -303,26 +325,32 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ───────────── Reviews ──────────────────────────── */}
+      {/* ───────────── Reviews ──────────────────────────────── */}
       <section id="reviews" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ textAlign: "center", marginBottom: 64 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: A.amber, textTransform: "uppercase", margin: "0 0 16px" }}>Testimonials</p>
-          <h2 style={{ fontFamily: "'Cormorant Garant', serif", fontSize: "clamp(36px, 4.5vw, 56px)", fontWeight: 700, lineHeight: 1.08, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>Testimonials</p>
+          <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
             From the people who got hired.
           </h2>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24 }}>
+        <div className="lp-rev-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24 }}>
           {REVIEWS.map((r, i) => (
             <div key={i} style={{
               padding: "30px 28px", background: C.surface,
               border: `1px solid ${C.border}`, borderRadius: 16,
-              transition: "box-shadow 0.2s",
+              transition: "box-shadow 0.2s, border-color 0.2s",
             }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = `0 8px 32px ${dark ? "rgba(0,0,0,0.4)" : "rgba(26,24,20,0.1)"}`; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = "none"; }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLElement).style.boxShadow = `0 8px 32px ${dark ? "rgba(0,0,0,0.4)" : "rgba(13,17,23,0.10)"}`;
+              (e.currentTarget as HTMLElement).style.borderColor = dark ? T.dBorder : "#c8d1da";
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLElement).style.boxShadow = "none";
+              (e.currentTarget as HTMLElement).style.borderColor = C.border;
+            }}
             >
               <div style={{ fontSize: 15, color: "#f59e0b", marginBottom: 16, letterSpacing: 2 }}>★★★★★</div>
-              <p style={{ fontFamily: "'Cormorant Garant', serif", fontSize: 20, fontStyle: "italic", color: C.ink, lineHeight: 1.62, margin: "0 0 22px" }}>
+              <p style={{ fontSize: 15, fontStyle: "italic", color: C.ink, lineHeight: 1.68, margin: "0 0 22px", fontWeight: 400, letterSpacing: -0.1 }}>
                 &ldquo;{r.quote}&rdquo;
               </p>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -337,9 +365,9 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ───────────── Final CTA ────────────────────────── */}
-      <section style={{ background: A.amber, padding: "100px 40px", textAlign: "center" }}>
-        <h2 style={{ fontFamily: "'Cormorant Garant', serif", fontSize: "clamp(44px, 6vw, 72px)", fontWeight: 700, lineHeight: 1.06, letterSpacing: "-0.04em", color: "#fff", margin: "0 0 20px" }}>
+      {/* ───────────── Final CTA ────────────────────────────── */}
+      <section style={{ background: T.blue, padding: "100px 40px", textAlign: "center" }}>
+        <h2 style={{ fontSize: "clamp(40px, 5.5vw, 68px)", fontWeight: 800, lineHeight: 1.06, letterSpacing: "-0.04em", color: "#fff", margin: "0 0 20px" }}>
           Your next interview<br />starts here.
         </h2>
         <p style={{ fontSize: 18, color: "rgba(255,255,255,0.78)", margin: "0 0 44px", lineHeight: 1.6 }}>
@@ -347,19 +375,23 @@ export default function LandingPage() {
         </p>
         <button onClick={signIn} disabled={loading} style={{
           display: "inline-flex", alignItems: "center", gap: 10,
-          padding: "16px 36px", background: "#fff", color: A.amber,
+          padding: "16px 36px", background: "#fff", color: T.blue,
           border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700,
           cursor: loading ? "wait" : "pointer", fontFamily: "inherit",
           letterSpacing: -0.3, boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-        }}>
+          transition: "opacity 0.15s",
+        }}
+        onMouseEnter={e => { (e.currentTarget).style.opacity = "0.92"; }}
+        onMouseLeave={e => { (e.currentTarget).style.opacity = "1"; }}
+        >
           <GoogleG /> {loading ? "Loading…" : "Get started — it's free"}
         </button>
       </section>
 
-      {/* ───────────── Footer ───────────────────────────── */}
-      <footer style={{ padding: "28px 40px", borderTop: `1px solid ${C.border}`, background: C.bg, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+      {/* ───────────── Footer ───────────────────────────────── */}
+      <footer className="lp-footer" style={{ padding: "28px 40px", borderTop: `1px solid ${C.border}`, background: C.bg, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 20, height: 20, borderRadius: 5, background: A.amber, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "'Cormorant Garant', serif" }}>R</div>
+          <div style={{ width: 20, height: 20, borderRadius: 5, background: T.brand, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 800 }}>R</div>
           <span style={{ fontSize: 13, color: C.muted }}>© 2026 Resunova</span>
         </div>
         <div style={{ display: "flex", gap: 24 }}>
@@ -372,7 +404,7 @@ export default function LandingPage() {
         </div>
       </footer>
 
-      {/* ── Global keyframes ───────────────────────────── */}
+      {/* ── Global keyframes ────────────────────────────────── */}
       <style>{`
         @keyframes lpFadeUp  { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
         @keyframes ticker    { from { transform: translateX(0); } to { transform: translateX(-50%); } }
@@ -405,10 +437,10 @@ function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
   }, []);
 
   const BARS = [
-    { label: "Job Match",            val: 78, col: A.amber },
-    { label: "Keywords",             val: 91, col: "#2d6a4f" },
-    { label: "Achievement Quality",  val: 64, col: "#e9a31a" },
-    { label: "ATS Compatibility",    val: 96, col: "#2a9d8f" },
+    { label: "Job Match",           val: 78, col: T.blue },
+    { label: "Keywords",            val: 91, col: T.green },
+    { label: "Achievement Quality", val: 64, col: T.amber },
+    { label: "ATS Compatibility",   val: 96, col: T.teal },
   ];
 
   const r = 30, circ = 2 * Math.PI * r;
@@ -419,7 +451,7 @@ function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
       border:        `1px solid ${C.border}`,
       borderRadius:  20,
       padding:       28,
-      boxShadow:     dark ? "0 32px 80px rgba(0,0,0,0.7)" : "0 32px 80px rgba(26,24,20,0.14)",
+      boxShadow:     dark ? "0 32px 80px rgba(0,0,0,0.60)" : "0 32px 80px rgba(13,17,23,0.12)",
       transform:     "rotate(1.5deg)",
       animation:     "cardSlide 0.8s cubic-bezier(0.34,1.36,0.64,1) 0.3s both",
       transformOrigin: "center top",
@@ -429,15 +461,16 @@ function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
         <div>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: C.muted, textTransform: "uppercase", marginBottom: 4 }}>Overall Match</div>
-          <div style={{ fontFamily: "'Cormorant Garant', serif", fontSize: 52, fontWeight: 700, lineHeight: 1, color: A.amber }}>
-            78<span style={{ fontSize: 20, color: C.muted, fontWeight: 400 }}>/100</span>
+          {/* Score number — DM Sans bold, blue */}
+          <div style={{ fontSize: 52, fontWeight: 800, lineHeight: 1, letterSpacing: -2, color: T.blue }}>
+            78<span style={{ fontSize: 20, color: C.muted, fontWeight: 400, letterSpacing: 0 }}>/100</span>
           </div>
         </div>
         {/* Mini ring */}
         <svg width={76} height={76} viewBox="0 0 76 76" style={{ flexShrink: 0 }}>
-          <circle cx={38} cy={38} r={r} fill="none" stroke={dark ? "#2c2820" : A.cream2} strokeWidth={6.5} />
+          <circle cx={38} cy={38} r={r} fill="none" stroke={dark ? T.dBg : T.bg2} strokeWidth={6.5} />
           <circle cx={38} cy={38} r={r} fill="none"
-            stroke={A.amber} strokeWidth={6.5} strokeLinecap="round"
+            stroke={T.blue} strokeWidth={6.5} strokeLinecap="round"
             strokeDasharray={circ}
             strokeDashoffset={filled ? circ * (1 - 0.78) : circ}
             transform="rotate(-90 38 38)"
@@ -455,7 +488,7 @@ function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
               <span style={{ fontSize: 12, color: C.muted }}>{b.label}</span>
               <span style={{ fontSize: 12, fontWeight: 600, color: b.col }}>{b.val}%</span>
             </div>
-            <div style={{ height: 5, borderRadius: 3, background: dark ? "#2c2820" : A.cream2, overflow: "hidden" }}>
+            <div style={{ height: 5, borderRadius: 3, background: dark ? T.dBg : T.bg2, overflow: "hidden" }}>
               <div style={{
                 height: "100%", borderRadius: 3, background: b.col,
                 width: filled ? `${b.val}%` : "0%",
@@ -471,20 +504,20 @@ function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
 
       {/* Bullet rewrite */}
       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: C.muted, textTransform: "uppercase", marginBottom: 10 }}>AI Rewrite</div>
-      <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(248,113,113,0.09)", borderLeft: "3px solid #f87171", fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 8, textDecoration: "line-through", opacity: 0.65 }}>
+      <div style={{ padding: "10px 12px", borderRadius: 8, background: dark ? "rgba(248,81,73,0.09)" : "rgba(207,34,46,0.07)", borderLeft: "3px solid #f85149", fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 8, textDecoration: "line-through", opacity: 0.65 }}>
         &ldquo;Worked on backend API features&rdquo;
       </div>
-      <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(45,106,79,0.1)", borderLeft: "3px solid #2d6a4f", fontSize: 12, color: C.ink, lineHeight: 1.6 }}>
+      <div style={{ padding: "10px 12px", borderRadius: 8, background: dark ? "rgba(63,185,80,0.08)" : "rgba(26,127,55,0.08)", borderLeft: `3px solid ${T.green}`, fontSize: 12, color: C.ink, lineHeight: 1.6 }}>
         &ldquo;Architected REST API serving 2M+ daily requests, cutting P95 latency 40%&rdquo;
       </div>
 
       {/* Badge */}
       <div style={{
         position: "absolute", top: -12, right: 20,
-        background: A.amber, color: "#fff",
+        background: T.blue, color: "#fff",
         fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
         padding: "4px 10px", borderRadius: 20, textTransform: "uppercase",
-        boxShadow: `0 2px 8px ${A.amberGlow}`,
+        boxShadow: `0 2px 8px ${T.blueGlow}`,
       }}>Live Preview</div>
     </div>
   );
@@ -499,13 +532,14 @@ function FeatureCell({ f, dark, C }: { f: typeof FEATURES[0]; dark: boolean; C: 
       onMouseLeave={() => setHover(false)}
       style={{
         padding: "36px 32px",
-        background: hover ? (dark ? "#201d18" : "#fdfaf6") : C.surface,
+        background: hover ? (dark ? "#1e2329" : "#f0f3f7") : C.surface,
         transition: "background 0.2s",
       }}
     >
-      <div style={{ fontFamily: "'Cormorant Garant', serif", fontSize: 13, fontWeight: 600, color: A.amber, letterSpacing: "0.05em", marginBottom: 14 }}>{f.num}</div>
-      <h3 style={{ fontFamily: "'Cormorant Garant', serif", fontSize: 22, fontWeight: 700, color: C.ink, margin: "0 0 10px", letterSpacing: -0.3 }}>{f.title}</h3>
-      <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.72, margin: 0 }}>{f.desc}</p>
+      {/* Feature number — bold blue DM Sans, no serif */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: T.blue, letterSpacing: "0.08em", marginBottom: 14 }}>{f.num}</div>
+      <h3 style={{ fontSize: 20, fontWeight: 700, color: C.ink, margin: "0 0 10px", letterSpacing: -0.4 }}>{f.title}</h3>
+      <p style={{ fontSize: 13.5, color: C.muted, lineHeight: 1.72, margin: 0 }}>{f.desc}</p>
     </div>
   );
 }
