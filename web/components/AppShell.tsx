@@ -22,9 +22,12 @@
  */
 
 import { useEffect, useState, useCallback, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
+import { CONTACT_EMAIL } from "@/lib/brand";
+import { LogoFull } from "./BrandLogo";
 import ResumeSidebar from "./ResumeSidebar";
 
 export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs";
@@ -167,27 +170,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
         borderBottom: "1px solid var(--border)",
       }}>
 
-        {/* Logo — amber R lettermark + wordmark */}
-        <div
+        {/* Logo — SVG mark + wordmark (shared with marketing + legal) */}
+        <button
+          type="button"
           onClick={() => switchView("builder")}
-          style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", userSelect: "none", flexShrink: 0 }}
+          aria-label="Resunova — go to resume builder"
+          style={{
+            display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none", flexShrink: 0,
+            background: "none", border: "none", padding: 0, fontFamily: "inherit",
+          }}
         >
-          <div style={{
-            width: 26, height: 26, borderRadius: 7, flexShrink: 0,
-            background: "var(--amber)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontWeight: 800, fontSize: 13,
-            letterSpacing: 0.2,
-            boxShadow: "0 1px 4px rgba(196,121,58,0.35)",
-          }}>R</div>
-          <span style={{
-            fontSize: 17, fontWeight: 700, letterSpacing: -0.5,
-            color: "var(--text)",
-            lineHeight: 1,
-          }}>
-            Resunova
-          </span>
-        </div>
+          <LogoFull markSize={26} textColor="var(--text)" />
+        </button>
 
         {/* Divider */}
         <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 8px", flexShrink: 0 }} />
@@ -309,6 +303,24 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <main style={{ minWidth: 0 }}>
         {children}
       </main>
+
+      {/* ── Footer — legal + contact (signed-in app) ─────── */}
+      <footer style={{
+        borderTop: "1px solid var(--border)",
+        padding: "12px 20px",
+        display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between",
+        gap: 10,
+        fontSize: 12, color: "var(--dim)",
+        background: "var(--surface)",
+      }}>
+        <span style={{ letterSpacing: -0.1 }}>© 2026 Resunova</span>
+        <nav style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
+          <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: "var(--muted)", textDecoration: "none" }}>{CONTACT_EMAIL}</a>
+          <Link href="/contact" prefetch={false} style={{ color: "var(--muted)", textDecoration: "none" }}>Contact</Link>
+          <Link href="/terms" prefetch={false} style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</Link>
+          <Link href="/privacy" prefetch={false} style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy</Link>
+        </nav>
+      </footer>
 
       {/* ── Backdrop (shared — click to close whichever drawer is open) ── */}
       <div

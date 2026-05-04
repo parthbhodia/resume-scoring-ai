@@ -1,6 +1,9 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabase";
+import { CONTACT_EMAIL, SITE_URL } from "@/lib/brand";
+import { LogoFull, LogoMark } from "./BrandLogo";
 
 // ── Design tokens ──────────────────────────────────────────────────────────
 // Cool slate palette — professional SaaS, not warm editorial
@@ -146,19 +149,10 @@ export default function LandingPage() {
         WebkitBackdropFilter: "blur(20px) saturate(160%)",
         borderBottom: `1px solid ${C.border}`,
       }}>
-        {/* Logo — amber R mark + DM Sans wordmark */}
-        <div style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 7,
-            background: T.brand,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontWeight: 800, fontSize: 14,
-            boxShadow: `0 2px 8px ${T.brandGlow}`,
-          }}>R</div>
-          <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: -0.5, color: C.ink }}>
-            Resunova
-          </span>
-        </div>
+        {/* Logo — shared SVG mark + wordmark */}
+        <Link href="/" prefetch={false} style={{ textDecoration: "none", color: "inherit" }} aria-label="Resunova home">
+          <LogoFull markSize={28} textColor={C.ink} />
+        </Link>
 
         {/* Nav */}
         <nav className="lp-nav" style={{ display: "flex", alignItems: "center", gap: 28 }}>
@@ -207,7 +201,7 @@ export default function LandingPage() {
             fontWeight: 600, letterSpacing: 0.2,
           }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.blue, display: "inline-block" }} />
-            AI-powered · Instant · ATS-safe
+            Completely free · For students &amp; the community · AI-powered · ATS-safe
           </div>
 
           {/* Headline — DM Sans 800, not serif */}
@@ -221,8 +215,11 @@ export default function LandingPage() {
             in the language<br />of opportunity.
           </h1>
 
-          <p style={{ fontSize: 17, color: C.muted, lineHeight: 1.72, maxWidth: 440, margin: "0 0 44px", letterSpacing: -0.15 }}>
+          <p style={{ fontSize: 17, color: C.muted, lineHeight: 1.72, maxWidth: 480, margin: "0 0 44px", letterSpacing: -0.15 }}>
             Paste any job description and get an AI-tailored resume in 60 seconds — with a match score, gap analysis, and ATS-safe PDF.
+            {" "}
+            <strong style={{ color: C.ink, fontWeight: 600 }}>Resunova is completely free</strong>
+            {" "}for the greater good of the community and students: everyone deserves a fair shot at the next opportunity, without paywalls or surprise charges.
           </p>
 
           {/* CTA row */}
@@ -268,6 +265,8 @@ export default function LandingPage() {
       <div style={{ borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, background: C.bg2, overflow: "hidden", padding: "18px 0" }}>
         <div style={{ display: "flex", gap: 0, width: "max-content", animation: "ticker 36s linear infinite" }}>
           {[...Array(4)].flatMap(() => [
+            ["$0",       "Completely free — always"],
+            ["∞",        "Students & community first"],
             ["2,400+",  "Résumés tailored"],
             ["89%",     "Interview rate lift"],
             ["60s",     "Average tailoring time"],
@@ -370,8 +369,9 @@ export default function LandingPage() {
         <h2 style={{ fontSize: "clamp(40px, 5.5vw, 68px)", fontWeight: 800, lineHeight: 1.06, letterSpacing: "-0.04em", color: "#fff", margin: "0 0 20px" }}>
           Your next interview<br />starts here.
         </h2>
-        <p style={{ fontSize: 18, color: "rgba(255,255,255,0.78)", margin: "0 0 44px", lineHeight: 1.6 }}>
-          Free to start. No templates required. Results in 60 seconds.
+        <p style={{ fontSize: 18, color: "rgba(255,255,255,0.78)", margin: "0 0 44px", lineHeight: 1.65, maxWidth: 560, marginLeft: "auto", marginRight: "auto" }}>
+          <strong style={{ color: "#fff", fontWeight: 600 }}>Completely free</strong>
+          {" "}— for students, lifelong learners, and anyone in the job-seeking community. No credit card, no hidden tiers. We built this for the greater good, not a gate fee. Results in 60 seconds; no templates required.
         </p>
         <button onClick={signIn} disabled={loading} style={{
           display: "inline-flex", alignItems: "center", gap: 10,
@@ -389,19 +389,58 @@ export default function LandingPage() {
       </section>
 
       {/* ───────────── Footer ───────────────────────────────── */}
-      <footer className="lp-footer" style={{ padding: "28px 40px", borderTop: `1px solid ${C.border}`, background: C.bg, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 20, height: 20, borderRadius: 5, background: T.brand, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 800 }}>R</div>
-          <span style={{ fontSize: 13, color: C.muted }}>© 2026 Resunova</span>
+      <footer className="lp-footer" style={{
+        padding: "32px 40px 36px",
+        borderTop: `1px solid ${C.border}`,
+        background: C.bg,
+        display: "grid",
+        gridTemplateColumns: "1fr auto",
+        gap: 24,
+        alignItems: "start",
+      }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <LogoMark size={22} />
+            <span style={{ fontSize: 14, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>Resunova</span>
+          </div>
+          <p style={{ fontSize: 13, color: C.muted, margin: 0, lineHeight: 1.65, maxWidth: 440 }}>
+            Offered <strong style={{ color: C.ink, fontWeight: 600 }}>completely free</strong> for students and the wider community — because strong tools should help everyone, not only those who can pay.
+            {" "}
+            We <strong style={{ color: C.ink, fontWeight: 600 }}>never sell your data</strong>
+            {" "}— we keep it only to run the product, understand usage through analytics, and improve quality so we can serve you better (
+            <Link href="/privacy" prefetch={false} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>Privacy Policy</Link>
+            ).
+            {" "}
+            Questions or feedback? Reach us at{" "}
+            <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>{CONTACT_EMAIL}</a>
+            {" "}— we typically reply within two business days.
+          </p>
+          <span style={{ fontSize: 12, color: C.muted }}>© 2026 Resunova. All rights reserved.</span>
         </div>
-        <div style={{ display: "flex", gap: 24 }}>
-          {["Privacy", "Terms", "Contact"].map(l => (
-            <span key={l} style={{ fontSize: 13, color: C.muted, cursor: "pointer", transition: "color 0.15s" }}
-              onMouseEnter={e => { (e.target as HTMLElement).style.color = C.ink; }}
-              onMouseLeave={e => { (e.target as HTMLElement).style.color = C.muted; }}
-            >{l}</span>
+        <nav className="lp-footer-nav" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }} aria-label="Legal">
+          {[
+            ["Contact", "/contact"],
+            ["Privacy Policy", "/privacy"],
+            ["Terms of Service", "/terms"],
+          ].map(([label, href]) => (
+            <Link
+              key={href}
+              href={href}
+              prefetch={false}
+              style={{ fontSize: 13, color: C.muted, textDecoration: "none", fontWeight: 500, transition: "color 0.15s" }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.ink; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.muted; }}
+            >
+              {label}
+            </Link>
           ))}
-        </div>
+          <a
+            href={SITE_URL}
+            style={{ fontSize: 12, color: C.muted, textDecoration: "none", marginTop: 4 }}
+          >
+            {SITE_URL.replace(/^https:\/\//, "")}
+          </a>
+        </nav>
       </footer>
 
       {/* ── Global keyframes ────────────────────────────────── */}
@@ -418,6 +457,10 @@ export default function LandingPage() {
           .lp-step-grid { grid-template-columns: 1fr !important; }
           .lp-rev-grid  { grid-template-columns: 1fr !important; }
           .lp-hero-h1   { font-size: 48px !important; }
+        }
+        @media (max-width: 640px) {
+          .lp-footer { grid-template-columns: 1fr !important; }
+          .lp-footer-nav { align-items: flex-start !important; }
         }
         @media (max-width: 540px) {
           .lp-feat-grid { grid-template-columns: 1fr !important; }

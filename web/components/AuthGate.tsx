@@ -6,7 +6,12 @@ import { getSupabaseClient } from "@/lib/supabase";
 import LandingPage from "./LandingPage";
 
 // Routes that intentionally bypass auth — design-system / preview pages.
-const PUBLIC_ROUTES = new Set<string>(["/editor-preview"]);
+const PUBLIC_ROUTES = new Set<string>([
+  "/editor-preview",
+  "/terms",
+  "/privacy",
+  "/contact",
+]);
 // Path prefixes that bypass auth — recipient share pages live at /r/<shortid>.
 const PUBLIC_PREFIXES = ["/r/"];
 

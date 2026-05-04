@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     template: "%s · Resunova",
   },
   description:
-    "Paste any job description and get an AI-tailored, ATS-friendly resume in under a minute. See your match score, fix the gaps, and land more interviews.",
+    "Completely free AI resume tailoring for students and the job-seeking community. Paste any job description, get a match score, gap analysis, and an ATS-friendly PDF in under a minute.",
   keywords: [
     "resume builder",
     "AI resume",
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     title: "Resunova — AI Resume Tailoring for Every Job Description",
     description:
-      "Paste any job description, get a tailored resume in 60 seconds. Match score, gap analysis, and ATS-friendly PDF included.",
+      "Completely free for students and the community. Tailor your resume in 60 seconds — match score, gap analysis, and ATS-friendly PDF included.",
     locale: "en_US",
     images: [
       {
@@ -52,7 +52,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Resunova — AI Resume Tailoring for Every Job Description",
     description:
-      "Paste any job description, get a tailored resume in 60 seconds. Match score, gap analysis, ATS-friendly PDF.",
+      "Completely free for students and the community. Tailor your resume in 60 seconds — match score, gap analysis, and ATS-friendly PDF.",
     images: [`${SITE_URL}/og-image.png`],
   },
   robots: {
@@ -113,7 +113,7 @@ const jsonLd = {
       "operatingSystem": "Web",
       "url": SITE_URL,
       "description":
-        "AI resume builder that tailors your resume to any job description, scores your fit, and exports an ATS-friendly PDF.",
+        "Completely free AI resume builder for students and the community — tailors your resume to any job description, scores your fit, and exports an ATS-friendly PDF.",
       "offers": {
         "@type": "Offer",
         "price": "0",

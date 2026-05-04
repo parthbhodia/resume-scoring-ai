@@ -7,6 +7,11 @@
  * or "the engine doing the work", use these constants instead.
  */
 
+/** Public site + legal pages */
+export const SITE_URL       = "https://www.resunova.io";
+export const CONTACT_EMAIL  = "hello@resunova.io";
+export const PRIVACY_EMAIL  = "privacy@resunova.io";
+
 export const MODEL_NAME    = "Resunova Atlas";
 export const MODEL_TAGLINE = "Tailored resume engine";
 
