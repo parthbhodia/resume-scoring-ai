@@ -7,7 +7,6 @@ import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
   bulletMatchesAnalysisCategory,
 } from "@/lib/analysisCategoryMatch";
-import { exportResumePreviewPdf } from "@/lib/exportResumePreviewPdf";
 
 // Re-export for legacy imports from this file path
 export { CATEGORY_ISSUE_KEYWORDS } from "@/lib/analysisCategoryMatch";
@@ -87,16 +86,19 @@ function mirrorToneStyles(score: number): { bar: string; bg: string; shadow: str
   };
 }
 
-/** When the API omits `extractedText`, rebuild a minimal "page" from bullets + section headers.
- *  Only emits the heading for the section that has bullets — avoids empty PROJECTS/EDUCATION shells. */
+/** When the API omits `extractedText`, rebuild a minimal "page" from bullets + section headers. */
 function syntheticExtractFromBullets(bullets: BulletItem[], sections: SectionItem[]): string {
   if (!bullets.length) return "";
   const bulletLines = bullets.map((b) => "- " + b.originalBullet.trim()).filter(Boolean);
   if (sections.length > 0) {
     const sectionNames = sections.map((s) => s.section.toUpperCase());
     const expIdx = sectionNames.findIndex((n) => n.includes("EXPERIENCE") || n.includes("WORK"));
-    const heading = expIdx >= 0 ? sectionNames[expIdx] : sectionNames[0];
-    return [heading, ...bulletLines].filter(Boolean).join("\n");
+    if (expIdx >= 0) {
+      const before = sectionNames.slice(0, expIdx + 1).join("\n");
+      const after = sectionNames.slice(expIdx + 1).join("\n");
+      return [before, ...bulletLines, after].filter(Boolean).join("\n");
+    }
+    return [sectionNames[0], ...bulletLines, ...sectionNames.slice(1)].filter(Boolean).join("\n");
   }
   return bulletLines.join("\n");
 }
@@ -188,7 +190,6 @@ export default function AnnotatedResumePanel({
 }: Props) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-  const [pdfExporting, setPdfExporting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
   const [mirrorBox, setMirrorBox] = useState<{
@@ -246,19 +247,6 @@ export default function AnnotatedResumePanel({
     ? bulletAnalysis.filter(b => bulletMatchesAnalysisCategory(b, activeCategory)).length
     : 0;
   const totalCount = bulletAnalysis.length;
-
-  const onSavePreviewPdf = useCallback(async () => {
-    const node = paperRef.current;
-    if (!node || !useLiveDoc || pdfExporting) return;
-    setPdfExporting(true);
-    try {
-      await exportResumePreviewPdf(node, `resume-preview-${new Date().toISOString().slice(0, 10)}.pdf`);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setPdfExporting(false);
-    }
-  }, [pdfExporting, useLiveDoc]);
 
   /** Maps `data-bullet-idx` on the preview page to a thick, score-colored frame (split / presentation column). */
   const updateMirrorPosition = useCallback(() => {
@@ -359,15 +347,7 @@ export default function AnnotatedResumePanel({
         overflow: "hidden",
         position: "sticky",
         top: 0,
-        ...(presentationOnly
-          ? {
-              flex: 1,
-              minHeight: 0,
-              height: "100%",
-              maxHeight: "100%",
-              alignSelf: "stretch",
-            }
-          : { maxHeight: "100vh" }),
+        ...(presentationOnly ? { flex: 1, minHeight: 0, maxHeight: "none", alignSelf: "stretch" } : { maxHeight: "100vh" }),
         fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
       }}
     >
@@ -469,8 +449,6 @@ export default function AnnotatedResumePanel({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          gap: 10,
-          flexWrap: "wrap",
         }}>
           <div style={{
             fontSize: 10,
@@ -487,7 +465,6 @@ export default function AnnotatedResumePanel({
             </svg>
             {presentationOnly ? "Résumé preview" : useLiveDoc ? "Live résumé" : "Analyzed lines"}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginLeft: "auto" }}>
           {activeCategory ? (
             <div style={{
               fontSize: 11,
@@ -507,31 +484,6 @@ export default function AnnotatedResumePanel({
               {totalCount} lines scored
             </div>
           )}
-          {useLiveDoc && (
-            <button
-              type="button"
-              onClick={onSavePreviewPdf}
-              disabled={pdfExporting}
-              title="Download the current preview (with session overrides) as a PDF"
-              style={{
-                fontSize: 10.5,
-                fontWeight: 700,
-                letterSpacing: 0.12,
-                padding: "6px 12px",
-                borderRadius: 8,
-                border: "1px solid #c5cee0",
-                background: "#fff",
-                color: pdfExporting ? "#b0bec5" : "#3949ab",
-                cursor: pdfExporting ? "wait" : "pointer",
-                fontFamily: "inherit",
-                flexShrink: 0,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {pdfExporting ? "Saving PDF…" : "Save as PDF"}
-            </button>
-          )}
-          </div>
         </div>
         {extractKind === "synthetic" && !presentationOnly ? (
           <div
@@ -642,7 +594,6 @@ export default function AnnotatedResumePanel({
         >
           {presentationOnly && (
             <div
-              className="az-pdf-ignore"
               aria-hidden
               style={{
                 position: "absolute",
