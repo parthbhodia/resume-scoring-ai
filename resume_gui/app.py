@@ -982,6 +982,51 @@ async def api_backfill_tex(request: Request):
 
 # ── Recruiter Checks ──────────────────────────────────────────────────────────
 
+
+def _merge_split_word_tokens(tokens: list[str]) -> list[str]:
+    """Fuse a lone uppercase letter with the following lowercase token.
+
+    pdfplumber occasionally splits words like ``Led`` into ``L`` + ``ed``.
+    """
+    skip_single = frozenset({"I", "A"})
+    out: list[str] = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if (
+            len(t) == 1
+            and t.isalpha()
+            and t.isupper()
+            and t not in skip_single
+            and i + 1 < len(tokens)
+        ):
+            nxt = tokens[i + 1]
+            if nxt and len(nxt) >= 2 and nxt[0].islower():
+                out.append(t + nxt)
+                i += 2
+                continue
+        out.append(t)
+        i += 1
+    return out
+
+
+def _post_clean_resume_text(text: str) -> str:
+    """Normalize PDF placeholder glyphs; keep line breaks for section structure."""
+    text = re.sub(r"\(\s*cid\s*:\s*\d+\)", " • ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bUsed\s*:\s*to\b", "Used to", text, flags=re.IGNORECASE)
+    lines = [" ".join(ln.split()) for ln in text.splitlines()]
+    return "\n".join(lines).strip()
+
+
+def _sanitize_bullet_display(s: str) -> str:
+    """Strip CID placeholders and collapse spaces in LLM bullet fields."""
+    if not isinstance(s, str):
+        return ""
+    s = re.sub(r"\(\s*cid\s*:\s*\d+\)", "", s, flags=re.IGNORECASE)
+    s = " ".join(s.split())
+    return s.strip()
+
+
 def _extract_pdf_text(pdf) -> str:
     """Extract text from a pdfplumber PDF object, reconstructing proper word spacing.
 
@@ -1002,9 +1047,12 @@ def _extract_pdf_text(pdf) -> str:
         for w in words:
             y_key = round(float(w["top"]) / 4) * 4  # bucket every 4pt
             line_map.setdefault(y_key, []).append(w["text"])
-        page_lines = [" ".join(tokens) for _, tokens in sorted(line_map.items())]
+        page_lines = [
+            " ".join(_merge_split_word_tokens(tokens))
+            for _, tokens in sorted(line_map.items())
+        ]
         pages_text.append("\n".join(page_lines))
-    return "\n".join(pages_text)
+    return _post_clean_resume_text("\n".join(pages_text))
 
 _WEAK_VERBS = re.compile(
     r"\b(helped|assisted|worked on|was responsible for|participated in|"
@@ -1396,6 +1444,8 @@ CRITICAL RULES:
   as "[X%]", "[$Y]", or "[~N]".
 - For bulletAnalysis: analyze ONLY the 8 WEAKEST bullets (lowest-quality ones). \
   Skip good bullets.
+- For each originalBullet field: copy the wording EXACTLY from RESUME TEXT (including • or -), \
+  after normalizing; do not drop the first letters of words.
 - If no JD is provided: set jobMatch in categoryScores to null, set \
   keywordScore to null, leave matchedKeywords/missingKeywords empty.
 - Prioritize improvements that increase interview chances most.
@@ -1533,6 +1583,12 @@ def _normalize_analysis(raw: dict) -> dict:
     raw.setdefault("rewriteSuggestions", [])
     raw.setdefault("finalRecommendations", [])
     raw["categoryScores"] = cs
+    bullets = raw.get("bulletAnalysis") or []
+    if isinstance(bullets, list):
+        for ba in bullets:
+            if isinstance(ba, dict):
+                ba["originalBullet"] = _sanitize_bullet_display(ba.get("originalBullet", ""))
+                ba["improvedBullet"] = _sanitize_bullet_display(ba.get("improvedBullet", ""))
     return raw
 
 
@@ -1647,6 +1703,8 @@ async def api_analyze_upload(request: Request):
             return JSONResponse({"error": "Could not extract text from PDF"}, status_code=400)
         loop   = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, _analyze_resume_comprehensive, text, jd)
+        if isinstance(result, dict):
+            result["extractedText"] = text[:25000]
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("analyze_upload failed")
@@ -1691,6 +1749,8 @@ async def api_analyze_folder(request: Request):
         return JSONResponse({"error": "Could not load resume text"}, status_code=404)
 
     result = await loop.run_in_executor(None, _analyze_resume_comprehensive, plain, jd)
+    if isinstance(result, dict):
+        result["extractedText"] = (plain or "")[:25000]
     return JSONResponse(result)
 
 
