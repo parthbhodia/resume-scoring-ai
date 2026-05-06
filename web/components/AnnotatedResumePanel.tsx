@@ -87,19 +87,16 @@ function mirrorToneStyles(score: number): { bar: string; bg: string; shadow: str
   };
 }
 
-/** When the API omits `extractedText`, rebuild a minimal "page" from bullets + section headers. */
+/** When the API omits `extractedText`, rebuild a minimal "page" from bullets + section headers.
+ *  Only emits the heading for the section that has bullets — avoids empty PROJECTS/EDUCATION shells. */
 function syntheticExtractFromBullets(bullets: BulletItem[], sections: SectionItem[]): string {
   if (!bullets.length) return "";
   const bulletLines = bullets.map((b) => "- " + b.originalBullet.trim()).filter(Boolean);
   if (sections.length > 0) {
     const sectionNames = sections.map((s) => s.section.toUpperCase());
     const expIdx = sectionNames.findIndex((n) => n.includes("EXPERIENCE") || n.includes("WORK"));
-    if (expIdx >= 0) {
-      const before = sectionNames.slice(0, expIdx + 1).join("\n");
-      const after = sectionNames.slice(expIdx + 1).join("\n");
-      return [before, ...bulletLines, after].filter(Boolean).join("\n");
-    }
-    return [sectionNames[0], ...bulletLines, ...sectionNames.slice(1)].filter(Boolean).join("\n");
+    const heading = expIdx >= 0 ? sectionNames[expIdx] : sectionNames[0];
+    return [heading, ...bulletLines].filter(Boolean).join("\n");
   }
   return bulletLines.join("\n");
 }
