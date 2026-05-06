@@ -15,10 +15,12 @@
 ## After upload
 
 1. **`/api/analyze-upload`** (and related flows) should return **`bulletAnalysis`** and ideally **`extractedText`** (plain text from PDF/TeX). The store **`hydrateFromAnalysis`** resets overrides and stamps bullets.
-2. If **`extractedText`** is missing, the UI falls back to a **synthetic** bullet-only extract.
-3. **Split layout** (`result` + preview open): right column is **presentation-only** (document-style bullets, no numeric chips in-pane).
-4. **Clicking** a bullet in the preview runs **`handleBulletLinkedSelect`** (category sync + pulse).
-5. **Replace line in preview** updates **`lineOverrides`** in the store (session-only; **does not rewrite the uploaded PDF file**).
+2. If **`extractedText`** is missing, the UI falls back to a **synthetic** extract that prefixes bullets with `- ` and interleaves **`sectionFeedback`** names as ALL-CAPS headings when possible (experience/work section anchoring).
+3. If **`extractedText`** is present but looks like a **bare bullet dump** (few “non-bullet” lines), **`fullExtractHasStructure`** forces the synthetic layout so headings still appear.
+4. **`AnalyzeLiveResumeBody`** treats ALL-CAPS / known section titles as **`section`** blocks with a bordered heading row.
+5. **Split layout** (`result` + preview open): right column is **presentation-only** (document-style bullets, no numeric chips in-pane). Bullets with suggestions show **✦**; applied preview overrides show **✓**.
+6. **Clicking** a bullet in the preview runs **`handleBulletLinkedSelect`** (category sync + pulse). In **presentationOnly**, an actionable bullet also opens a **fixed-position popup** (score, issue chips, editable rewrite, Apply / Revert / Copy / Reset; Escape or outside-click closes).
+7. **Replace line in preview** updates **`lineOverrides`** in the store (session-only; **does not rewrite the uploaded PDF file**).
 
 ## Highlight semantics (approximate)
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
@@ -17,8 +17,18 @@ export interface LiveBulletItem {
 
 type Block =
   | { type: "header"; lines: string[] }
+  | { type: "section"; text: string }
   | { type: "paragraph"; lines: string[] }
   | { type: "bullets"; items: Array<{ rawLine: string; bulletIdx: number }> };
+
+/** True if a trimmed line looks like a resume section heading (ALL CAPS or short bold title). */
+function looksLikeSectionHeading(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.length > 48) return false;
+  if (/[A-Z]/.test(t) && t === t.toUpperCase() && !/^\d/.test(t)) return true;
+  if (/^(Experience|Education|Skills|Summary|Profile|Projects|Certifications|Awards|Publications|Languages|Volunteer|Work\s+History|Professional\s+Summary|Technical\s+Skills|Achievements?)$/i.test(t)) return true;
+  return false;
+}
 
 function normalizeForMatch(s: string): string {
   return s
@@ -73,6 +83,7 @@ function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[]
       i++;
       continue;
     }
+    if (header.length === 0 && looksLikeSectionHeading(t)) break;
     header.push(line);
     i++;
   }
@@ -100,11 +111,17 @@ function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[]
         i++;
         continue;
       }
+      if (looksLikeSectionHeading(t)) {
+        blocks.push({ type: "section", text: t });
+        i++;
+        continue;
+      }
       const para: string[] = [];
       while (i < lines.length) {
         const ti = lines[i].trim();
         if (!ti) break;
         if (findBulletIndexForLine(lines[i], bulletAnalysis) >= 0) break;
+        if (looksLikeSectionHeading(ti)) break;
         para.push(lines[i]);
         i++;
       }
@@ -130,6 +147,12 @@ function renderInline(text: string): ReactNode[] {
     }
     return <span key={k}>{p}</span>;
   });
+}
+
+interface PopupState {
+  bulletIdx: number;
+  top: number;
+  left: number;
 }
 
 interface Props {
@@ -162,11 +185,44 @@ export default function AnalyzeLiveResumeBody({
   pulseBulletIndex = null,
 }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [popup, setPopup] = useState<PopupState | null>(null);
+  const [popupDraft, setPopupDraft] = useState<string>("");
+  const popupRef = useRef<HTMLDivElement>(null);
 
   const blocks = useMemo(() => {
     const lines = extractedText.split(/\r?\n/);
     return buildBlocks(lines, bulletAnalysis);
   }, [extractedText, bulletAnalysis]);
+
+  useEffect(() => {
+    if (popup == null) return;
+    const bullet = bulletAnalysis[popup.bulletIdx];
+    if (!bullet) return;
+    setPopupDraft(rewriteEdits[popup.bulletIdx] ?? bullet.improvedBullet ?? "");
+  }, [popup, rewriteEdits, bulletAnalysis]);
+
+  useEffect(() => {
+    if (!popup) return;
+    const handler = (e: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
+        setPopup(null);
+      }
+    };
+    window.addEventListener("mousedown", handler, true);
+    return () => window.removeEventListener("mousedown", handler, true);
+  }, [popup]);
+
+  useEffect(() => {
+    if (!popup) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPopup(null);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [popup]);
+
+  const popupBullet = popup != null ? bulletAnalysis[popup.bulletIdx] : null;
+  const popupPreviewApplied = popup != null ? previewLineOverrides[popup.bulletIdx] !== undefined : false;
 
   return (
     <div style={{
@@ -210,6 +266,24 @@ export default function AnalyzeLiveResumeBody({
             </div>
           );
         }
+        if (blk.type === "section") {
+          return (
+            <div key={bi} style={{
+              marginTop: 14,
+              marginBottom: 4,
+              paddingBottom: 3,
+              borderBottom: "1px solid #c9c4b8",
+              fontSize: 9.5,
+              fontWeight: 800,
+              letterSpacing: 1.1,
+              color: "#1a237e",
+              textTransform: "uppercase",
+              fontFamily: "system-ui, sans-serif",
+            }}>
+              {blk.text}
+            </div>
+          );
+        }
         if (blk.type === "paragraph") {
           return (
             <div key={bi} style={{ marginBottom: 10, fontFamily: "system-ui, sans-serif", fontSize: 10.2, color: "#222" }}>
@@ -239,6 +313,7 @@ export default function AnalyzeLiveResumeBody({
               const isHighlighted = activeCategory ? bulletMatchesAnalysisCategory(bullet, activeCategory) : false;
               const isSelected = selectedBulletIndex === bulletIdx;
               const previewLineApplied = previewLineOverrides[bulletIdx] !== undefined;
+              const hasActionable = !!(bullet.improvedBullet || bullet.issues.length);
 
               let bg = "#fafafa";
               if (activeCategory && isHighlighted) bg = "rgba(255, 227, 222, 0.55)";
@@ -252,7 +327,15 @@ export default function AnalyzeLiveResumeBody({
                   data-bullet-idx={bulletIdx}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!presentationOnly) setExpandedIdx((prev) => (prev === bulletIdx ? null : bulletIdx));
+                    if (presentationOnly && hasActionable) {
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const popupTop = Math.max(8, Math.min(rect.top, window.innerHeight - 340));
+                      const popupLeft = Math.max(8, rect.left - 336);
+                      setPopup({ bulletIdx, top: popupTop, left: popupLeft });
+                      setPopupDraft(rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "");
+                    } else if (!presentationOnly) {
+                      setExpandedIdx((prev) => (prev === bulletIdx ? null : bulletIdx));
+                    }
                     onBulletLinkedSelect?.(bulletIdx);
                   }}
                   style={{
@@ -267,7 +350,7 @@ export default function AnalyzeLiveResumeBody({
                       pulseBulletIndex === bulletIdx
                         ? "az-mirror-pulse 0.85s ease-out 1"
                         : undefined,
-                    cursor: presentationOnly || bullet.improvedBullet || bullet.issues.length ? "pointer" : "default",
+                    cursor: hasActionable ? "pointer" : "default",
                     listStylePosition: "outside",
                   }}
                 >
@@ -287,6 +370,16 @@ export default function AnalyzeLiveResumeBody({
                     {!presentationOnly && previewLineApplied && (
                       <span title="Preview line updated" style={{ marginLeft: 5, color: "#fb8c00", fontWeight: 800 }}>
                         ●
+                      </span>
+                    )}
+                    {presentationOnly && previewLineApplied && (
+                      <span title="Suggestion applied" style={{ marginLeft: 5, color: "#43a047", fontWeight: 800, fontSize: 9 }}>
+                        ✓
+                      </span>
+                    )}
+                    {presentationOnly && hasActionable && !previewLineApplied && (
+                      <span style={{ marginLeft: 6, fontSize: 9, color: "#90a4ae", fontWeight: 600 }}>
+                        ✦
                       </span>
                     )}
                   </span>
@@ -334,6 +427,215 @@ export default function AnalyzeLiveResumeBody({
           </ul>
         );
       })}
+      {popup && popupBullet && (
+        <div
+          ref={popupRef}
+          id="az-bullet-popup"
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            top: popup.top,
+            left: popup.left,
+            zIndex: 9999,
+            width: 320,
+            background: "#fff",
+            borderRadius: 10,
+            boxShadow: "0 8px 40px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10)",
+            border: "1px solid #e2e8f0",
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            fontSize: 12,
+            overflow: "hidden",
+          }}
+        >
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 12px 8px",
+            borderBottom: "1px solid #f0f4f8",
+            background: "#f8fafc",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{
+                fontSize: 10,
+                fontWeight: 800,
+                padding: "2px 8px",
+                borderRadius: 10,
+                background: popupBullet.score >= 70 ? "rgba(52,211,153,0.15)" : popupBullet.score >= 55 ? "rgba(245,158,11,0.15)" : "rgba(248,113,113,0.15)",
+                color: popupBullet.score >= 70 ? "#2e7d32" : popupBullet.score >= 55 ? "#c07000" : "#c62828",
+              }}>
+                {popupBullet.score}
+              </span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>AI Suggestion</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPopup(null)}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "#9ca3af",
+                padding: "2px 4px",
+                borderRadius: 4,
+                fontSize: 15,
+                lineHeight: 1,
+                fontFamily: "inherit",
+              }}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          {popupBullet.issues.length > 0 && (
+            <div style={{
+              padding: "8px 12px 6px",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 4,
+              borderBottom: "1px solid #f0f4f8",
+            }}>
+              {popupBullet.issues.map((issue, j) => (
+                <span key={j} style={{
+                  fontSize: 10,
+                  padding: "2px 7px",
+                  borderRadius: 8,
+                  background: "rgba(248,113,113,0.10)",
+                  color: "#c62828",
+                  fontWeight: 500,
+                }}>
+                  {issue}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {popupBullet.improvedBullet ? (
+            <div style={{ padding: "10px 12px 12px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Suggested rewrite
+              </div>
+              <textarea
+                value={popupDraft}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPopupDraft(v);
+                  patchBulletRewrite(popup.bulletIdx, v);
+                }}
+                rows={4}
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  color: "#1e293b",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 6,
+                  padding: "8px 10px",
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                  background: "#f8fafc",
+                  outline: "none",
+                }}
+                onFocus={(e) => { e.target.style.borderColor = "#6366f1"; e.target.style.background = "#fff"; }}
+                onBlur={(e) => { e.target.style.borderColor = "#e2e8f0"; e.target.style.background = "#f8fafc"; }}
+              />
+              <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
+                {popupDraft !== (popupBullet.improvedBullet ?? "") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPopupDraft(popupBullet.improvedBullet ?? "");
+                      patchBulletRewrite(popup.bulletIdx, null);
+                    }}
+                    style={{
+                      fontSize: 11,
+                      padding: "5px 10px",
+                      borderRadius: 6,
+                      border: "1px solid #e2e8f0",
+                      background: "#fff",
+                      color: "#6b7280",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Reset
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    try { await navigator.clipboard.writeText(popupDraft); } catch { /* ignore */ }
+                  }}
+                  style={{
+                    fontSize: 11,
+                    padding: "5px 10px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(52,211,153,0.4)",
+                    background: "rgba(52,211,153,0.08)",
+                    color: "#2e7d32",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontWeight: 600,
+                  }}
+                >
+                  Copy
+                </button>
+                {popupPreviewApplied ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      patchPreviewLine(popup.bulletIdx, null);
+                      setPopup(null);
+                    }}
+                    style={{
+                      fontSize: 11,
+                      padding: "5px 10px",
+                      borderRadius: 6,
+                      border: "1px solid #fb8c00",
+                      background: "rgba(251,140,0,0.08)",
+                      color: "#e65100",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Revert
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      patchPreviewLine(popup.bulletIdx, popupDraft.trim());
+                      setPopup(null);
+                    }}
+                    style={{
+                      fontSize: 11,
+                      padding: "5px 12px",
+                      borderRadius: 6,
+                      border: "none",
+                      background: "linear-gradient(135deg, #6366f1, #4f46e5)",
+                      color: "#fff",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontWeight: 700,
+                      boxShadow: "0 2px 6px rgba(79,70,229,0.3)",
+                    }}
+                  >
+                    Apply to preview
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div style={{ padding: "12px", color: "#6b7280", fontSize: 11 }}>
+              No rewrite suggestion available for this bullet.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

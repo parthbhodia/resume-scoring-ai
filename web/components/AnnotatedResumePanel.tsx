@@ -86,12 +86,21 @@ function mirrorToneStyles(score: number): { bar: string; bg: string; shadow: str
   };
 }
 
-/** When the API omits `extractedText` (older deploy / cached row), rebuild a minimal “page” from bullets. */
-function syntheticExtractFromBullets(bullets: BulletItem[]): string {
-  return bullets
-    .map((b) => b.originalBullet.trim())
-    .filter(Boolean)
-    .join("\n");
+/** When the API omits `extractedText`, rebuild a minimal "page" from bullets + section headers. */
+function syntheticExtractFromBullets(bullets: BulletItem[], sections: SectionItem[]): string {
+  if (!bullets.length) return "";
+  const bulletLines = bullets.map((b) => "- " + b.originalBullet.trim()).filter(Boolean);
+  if (sections.length > 0) {
+    const sectionNames = sections.map((s) => s.section.toUpperCase());
+    const expIdx = sectionNames.findIndex((n) => n.includes("EXPERIENCE") || n.includes("WORK"));
+    if (expIdx >= 0) {
+      const before = sectionNames.slice(0, expIdx + 1).join("\n");
+      const after = sectionNames.slice(expIdx + 1).join("\n");
+      return [before, ...bulletLines, after].filter(Boolean).join("\n");
+    }
+    return [sectionNames[0], ...bulletLines, ...sectionNames.slice(1)].filter(Boolean).join("\n");
+  }
+  return bulletLines.join("\n");
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -201,16 +210,37 @@ export default function AnnotatedResumePanel({
 
   const fullExtract = (extractedText ?? "").trim();
   const syntheticExtract = useMemo(
-    () => syntheticExtractFromBullets(bulletAnalysis).trim(),
-    [bulletAnalysis],
+    () => syntheticExtractFromBullets(bulletAnalysis, sectionFeedback).trim(),
+    [bulletAnalysis, sectionFeedback],
   );
-  const effectiveExtracted = fullExtract || syntheticExtract;
-  /** `full` = PDF/TeX extract from server; `synthetic` = bullet text only (still uses live doc styling). */
-  const extractKind: "full" | "synthetic" | "none" = fullExtract
+
+  /**
+   * True when the full extract has at least 2 non-bullet lines (name, contact,
+   * section headings, etc.) — meaning it is a real resume document rather than
+   * just a flat list of bullet strings returned by the API.
+   */
+  const fullExtractHasStructure = useMemo(() => {
+    if (!fullExtract) return false;
+    const lines = fullExtract.split("\n").map((l) => l.trim()).filter(Boolean);
+    const nonBulletLines = lines.filter((l) => !/^[-•–—*]/.test(l));
+    return nonBulletLines.length >= 2;
+  }, [fullExtract]);
+
+  /**
+   * Use the full extract when it has real structure; fall back to the synthetic
+   * version (which injects sectionFeedback headings) when it is a bare bullet dump.
+   */
+  const effectiveExtracted = fullExtractHasStructure
+    ? fullExtract
+    : syntheticExtract || fullExtract;
+
+  const extractKind: "full" | "synthetic" | "none" = fullExtractHasStructure
     ? "full"
     : syntheticExtract
       ? "synthetic"
-      : "none";
+      : fullExtract
+        ? "synthetic"
+        : "none";
   const useLiveDoc = extractKind !== "none";
 
   const flaggedCount = activeCategory
