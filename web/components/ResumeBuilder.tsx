@@ -1,5 +1,6 @@
 "use client";
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale } from "@/lib/types";
 import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
 import { upsertResume, getSupabaseClient } from "@/lib/supabase";
@@ -14,7 +15,7 @@ import AtsPanel, { type AtsResult } from "./AtsPanel";
 import ShareButton   from "./ShareButton";
 import type { ParsedResume, ParsedBullet } from "@/lib/types";
 
-type Tab = "analysis" | "ats" | "edit";
+type Tab = "ats" | "edit";
 
 function extractJdKeywords(jdText: string): string[] {
   const STOP = new Set([
@@ -59,15 +60,14 @@ function saveDraft(patch: Record<string, unknown>) {
 }
 
 export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder?: string | null } = {}) {
+  const router = useRouter();
   const draft0 = loadDraft();
   const [company,    setCompanyRaw]    = useState<string>(draft0.company ?? "");
   const [role,       setRoleRaw]       = useState<string>(draft0.role ?? "");
   const [jd,         setJdRaw]         = useState<string>(draft0.jd ?? "");
   const [jobUrl,     setJobUrlRaw]     = useState<string>(draft0.jobUrl ?? "");
   const model = "gemini-2.5-flash";
-  // Pre-load a base when arriving via /?base=<folder> from the library view.
   const [baseFolder, setBaseFolder] = useState<string | null>(initialBaseFolder ?? null);
-
   // Wrap setters to also persist to sessionStorage
   const setCompany = (v: string) => { setCompanyRaw(v); saveDraft({ company: v }); };
   const setRole    = (v: string) => { setRoleRaw(v);    saveDraft({ role: v }); };
@@ -78,7 +78,7 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
   const [statusMsg,  setStatusMsg]  = useState("");
   const [result,     setResult]     = useState<GenerationResult | null>(null);
   const [error,      setError]      = useState<string | null>(null);
-  const [activeTab,  setActiveTab]  = useState<Tab>("analysis");
+  const [activeTab,  setActiveTab]  = useState<Tab>("ats");
   const [preview,    setPreview]    = useState("");
   const [jdKeywords, setJdKeywords] = useState<string[]>([]);
   // Live Google Search activity from Gemini grounding — populated as the
@@ -99,6 +99,29 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
 
   const [extractingJd, setExtractingJd] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
+
+  // Prefill from Analyze Résumé: sessionStorage + optional `fromAnalyze=1` (PDF path).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const fromAnalyze = sp.get("fromAnalyze") === "1";
+    try {
+      const profile = sessionStorage.getItem("rn_builder_profile_prefill");
+      const jdPre = sessionStorage.getItem("rn_builder_jd_prefill");
+      if (fromAnalyze && profile) {
+        setCandidateProfile(profile);
+        setUploadedFileName("From Analyze");
+      }
+      if (jdPre) {
+        setJdRaw(jdPre);
+        saveDraft({ jd: jdPre });
+      }
+      if (fromAnalyze) sessionStorage.removeItem("rn_builder_profile_prefill");
+      sessionStorage.removeItem("rn_builder_jd_prefill");
+      sessionStorage.removeItem("rn_builder_from_analyze");
+    } catch { /* ignore */ }
+    if (fromAnalyze) router.replace("/?view=builder");
+  }, [router]);
 
   // ── Editor state — populated lazily when the user clicks the Edit tab. ──
   // We keep `editorTree` as the freshly-fetched copy from /api/resume/{folder}
@@ -259,6 +282,13 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
     setAtsError(null);
     setDoctorIssues({});
   }, [result?.folder]);
+
+  // Default tab is ATS — kick off the check automatically instead of requiring a tab click.
+  useEffect(() => {
+    if (activeTab !== "ats" || !result?.folder) return;
+    if (atsLoading || atsResult || atsError) return;
+    void runAtsCheck(result.folder);
+  }, [activeTab, result?.folder, atsLoading, atsResult, atsError, runAtsCheck]);
 
   const handlePdfUpload = useCallback(async (file: File) => {
     if (!file.type.includes("pdf")) { setUploadError("Please upload a PDF file."); return; }
@@ -676,7 +706,7 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
           >
             {generating ? (
               <>
-                <Spinner />
+                <Spinner size={16} />
                 {statusMsg || "Tailoring your resume…"}
               </>
             ) : (
@@ -685,6 +715,36 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
           </button>
 
           </>)} {/* end !result && !generating inputs block */}
+
+          {/* During generation, the form above is unmounted — show explicit progress so the page is never blank */}
+          {generating && !result && (
+            <div
+              className="fade-in"
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+              style={{
+                marginBottom: 28,
+                padding: "28px 24px",
+                borderRadius: 16,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 14,
+                textAlign: "center",
+              }}
+            >
+              <Spinner size={28} />
+              <div style={{ fontSize: 17, fontWeight: 600, color: "var(--text)", letterSpacing: -0.3 }}>
+                {statusMsg || "Tailoring your resume…"}
+              </div>
+              <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, maxWidth: 440, margin: 0 }}>
+                Analyzing the job description and drafting your tailored résumé. Live preview and web research will appear below as they stream in.
+              </p>
+            </div>
+          )}
 
           {/* Live Google Search activity (Gemini grounding) */}
           {hasWebResearch && (
@@ -790,6 +850,34 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
           {result && (
             <div className="fade-in">
 
+              {generating && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  aria-busy="true"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    marginBottom: 20,
+                    padding: "14px 18px",
+                    borderRadius: 12,
+                    background: "var(--accent-bg)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <Spinner size={22} />
+                  <div style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2 }}>
+                      Still tailoring…
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.45, marginTop: 2 }}>
+                      {statusMsg || "Saving PDF and finishing your score — almost there."}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Results header row */}
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
                 <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
@@ -834,7 +922,7 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                     <ScoreRing score={score} size={130} />
                   ) : (
                     <div style={{ width: 130, height: 130, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <Spinner />
+                      <Spinner size={28} />
                     </div>
                   )}
 
@@ -890,19 +978,6 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                 </div>
               </div>
 
-              {/* Inline diff — changes highlighted right below the PDF card */}
-              {result.diff.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
-                    Changes to your resume&ensp;
-                    <span style={{ color: "var(--green)", fontWeight: 600 }}>+{result.adds}</span>
-                    <span style={{ color: "var(--dim)" }}> / </span>
-                    <span style={{ color: "var(--red)", fontWeight: 600 }}>−{result.removes}</span>
-                  </div>
-                  <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={result.baseFolder} baseLoaded={result.baseLoaded} jdKeywords={jdKeywords} />
-                </div>
-              )}
-
               {/* Strengths + Gaps */}
               {ratings && (ratings.whats_working?.length > 0 || ratings.gaps?.length > 0) && (
                 <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
@@ -945,6 +1020,29 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                 </div>
               )}
 
+              {/* JD requirement breakdown (was under Analysis tab) */}
+              {ratings && ratings.criteria.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
+                    Match breakdown
+                  </div>
+                  <CriteriaTable criteria={ratings.criteria} />
+                </div>
+              )}
+
+              {/* Inline diff — line-by-line edits below analysis */}
+              {result.diff.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
+                    Changes to your resume&ensp;
+                    <span style={{ color: "var(--green)", fontWeight: 600 }}>+{result.adds}</span>
+                    <span style={{ color: "var(--dim)" }}> / </span>
+                    <span style={{ color: "var(--red)", fontWeight: 600 }}>−{result.removes}</span>
+                  </div>
+                  <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={result.baseFolder} baseLoaded={result.baseLoaded} jdKeywords={jdKeywords} />
+                </div>
+              )}
+
               {/* Sources */}
               {result.sources.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
@@ -983,11 +1081,10 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                 display: "flex", gap: 2, marginBottom: 18,
                 background: "var(--surface2)", borderRadius: 9, padding: 3,
               }}>
-                {(["analysis", "ats", "edit"] as Tab[]).map(t => {
+                {(["ats", "edit"] as Tab[]).map(t => {
                   const labels: Record<Tab, string> = {
-                    analysis: "Analysis",
-                    ats:      atsResult ? `ATS  ${atsResult.score}` : "ATS check",
-                    edit:     "Edit bullets",
+                    ats:  atsResult ? `ATS  ${atsResult.score}` : "ATS check",
+                    edit: "Edit bullets",
                   };
                   return (
                     <button
@@ -1020,9 +1117,6 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                 })}
               </div>
 
-              {activeTab === "analysis" && ratings && (
-                <CriteriaTable criteria={ratings.criteria} />
-              )}
               {activeTab === "ats" && (
                 <>
                   {atsLoading && (
@@ -1165,11 +1259,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Spinner() {
+function Spinner({ size = 18 }: { size?: number }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ animation: "spin 0.8s linear infinite" }}>
-      <circle cx="7" cy="7" r="5.5" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5"/>
-      <path d="M7 1.5A5.5 5.5 0 0 1 12.5 7" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 18 18"
+      fill="none"
+      style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}
+      aria-hidden
+    >
+      <circle cx="9" cy="9" r="7" stroke="var(--border)" strokeWidth="2.5" />
+      <path d="M9 2a7 7 0 017 7" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
   );
 }
