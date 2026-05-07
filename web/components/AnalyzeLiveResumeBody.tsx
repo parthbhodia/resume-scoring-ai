@@ -276,36 +276,6 @@ export default function AnalyzeLiveResumeBody({
   const popupBullet = popup != null ? bulletAnalysis[popup.bulletIdx] : null;
   const popupPreviewApplied = popup != null ? previewLineOverrides[popup.bulletIdx] !== undefined : false;
 
-  useEffect(() => {
-    if (popup == null) return;
-    const bullet = bulletAnalysis[popup.bulletIdx];
-    if (!bullet) return;
-    setPopupDraft(rewriteEdits[popup.bulletIdx] ?? bullet.improvedBullet ?? "");
-  }, [popup, rewriteEdits, bulletAnalysis]);
-
-  useEffect(() => {
-    if (!popup) return;
-    const handler = (e: MouseEvent) => {
-      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        setPopup(null);
-      }
-    };
-    window.addEventListener("mousedown", handler, true);
-    return () => window.removeEventListener("mousedown", handler, true);
-  }, [popup]);
-
-  useEffect(() => {
-    if (!popup) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPopup(null);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [popup]);
-
-  const popupBullet = popup != null ? bulletAnalysis[popup.bulletIdx] : null;
-  const popupPreviewApplied = popup != null ? previewLineOverrides[popup.bulletIdx] !== undefined : false;
-
   return (
     <div style={{
       background: "#fff",
