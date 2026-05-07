@@ -344,7 +344,7 @@ export default function AnalyzeLiveResumeBody({
                     lineHeight: 1.42,
                     padding: presentationOnly ? "5px 7px 6px" : "6px 8px 8px",
                     borderRadius: 4,
-                    background: bg,
+                    background: bg.replace("0.12)", "0.05)").replace("0.1)", "0.04)"),
                     boxShadow: isSelected ? "inset 0 0 0 2px #2196f3" : undefined,
                     animation:
                       pulseBulletIndex === bulletIdx
