@@ -191,8 +191,12 @@ export default function AnalyzeLiveResumeBody({
 
   const blocks = useMemo(() => {
     const lines = extractedText.split(/\r?\n/);
-    return buildBlocks(lines, bulletAnalysis);
-  }, [extractedText, bulletAnalysis]);
+    // When viewing a category, filter bullets to only those matching that category
+    const filteredBullets = activeCategory
+      ? bulletAnalysis.filter(b => bulletMatchesAnalysisCategory(b, activeCategory))
+      : bulletAnalysis;
+    return buildBlocks(lines, filteredBullets);
+  }, [extractedText, bulletAnalysis, activeCategory]);
 
   useEffect(() => {
     if (popup == null) return;
