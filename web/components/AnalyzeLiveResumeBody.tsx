@@ -461,12 +461,16 @@ export default function AnalyzeLiveResumeBody({
                     onBulletLinkedSelect?.(bulletIdx);
                   }}
                   style={{
+                    marginBottom: 4,
+                    marginLeft: 2,
+                    lineHeight: 1.42,
+                    padding: presentationOnly ? "5px 7px 6px 14px" : "6px 8px 8px 14px",
+                    borderRadius: 4,
                     background: bgTint,
                     borderLeft: `3px solid ${isHighlighted || !activeCategory ? borderColor : "transparent"}`,
                     boxShadow: isSelected ? "inset 0 0 0 1.5px #2196f3" : undefined,
                     cursor: hasActionable ? "pointer" : "default",
                     animation: isPulsing ? "az-mirror-pulse 0.85s ease-out 1" : undefined,
-                    paddingLeft: 14,
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
