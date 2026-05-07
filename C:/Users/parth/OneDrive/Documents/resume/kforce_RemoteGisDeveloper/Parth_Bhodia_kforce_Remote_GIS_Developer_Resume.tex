@@ -1,0 +1,151 @@
+%-------------------------
+% Resume - Remote GIS Developer - kforce
+% Parth Bhodia
+% Based on: Rezume template by Nanu Panchamurthy
+%-------------------------
+
+\documentclass[a4paper,11pt]{article}
+
+\usepackage{verbatim}
+\usepackage{titlesec}
+\usepackage{color}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{tabularx}
+\usepackage{latexsym}
+\usepackage{marvosym}
+\usepackage[empty]{fullpage}
+\usepackage[hidelinks]{hyperref}
+\usepackage[normalem]{ulem}
+\usepackage[english]{babel}
+
+\input glyphtounicode
+\pdfgentounicode=1
+
+\usepackage{lmodern}
+\urlstyle{same}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0in}
+\renewcommand{\footrulewidth}{0in}
+\setlength{\tabcolsep}{0in}
+
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\topmargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textheight}{1.5in}
+\addtolength{\footskip}{0in}
+\addtolength{\textwidth}{1in}
+
+\raggedright{}
+
+\usepackage{titlesec}
+\titlespacing{\section}{1pt}{*0}{*1}
+\setlength{\parskip}{2pt}
+\setlength{\parindent}{2pt}
+
+\titleformat{\section}
+  {\scshape\large}{}
+    {0em}{\color{blue}}[\color{black}\titlerule\vspace{0pt}]
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+\renewcommand{\ULdepth}{1pt}
+
+\newcommand{\resumeItem}[1]{\item\small{#1}}
+\newcommand{\resumeItemListStart}{\begin{itemize}[rightmargin=0.3in]}
+\newcommand{\resumeItemListEnd}{\end{itemize}}
+
+\newcommand{\resumeQuadHeading}[4]{
+  \item
+  \begin{tabular*}{0.96\textwidth}[t]{l@{\extracolsep{\fill}}r}
+    \textbf{#1} & #2 \\
+    \textit{\small#3} & \textit{\small #4} \\
+  \end{tabular*}
+}
+
+\newcommand{\resumeTrioHeading}[3]{
+  \item\small{
+    \begin{tabular*}{0.96\textwidth}[t]{
+      l@{\extracolsep{\fill}}c@{\extracolsep{\fill}}r
+    }
+      \textbf{#1} & \textit{#2} & #3
+    \end{tabular*}
+  }
+}
+
+\newcommand{\resumeHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeHeadingListEnd}{\end{itemize}}
+
+\begin{document}
+
+\resumeQuadHeading
+  {\href{https://parthbhodia.com}{Parth Bhodia}} {+1 (443) 929-4371}
+  {\href{mailto:parthbhodia08@gmail.com}{parthbhodia08@gmail.com}}
+  {\href{https://linkedin.com/in/parthbhodia}{linkedin.com/in/parthbhodia}}
+
+\section*{Experience}
+  \resumeHeadingListStart
+    \resumeTrioHeading
+      {Full-Stack Software Engineer, Remote} {Eccalon LLC} {May 2022 – Present}
+      \resumeItemListStart
+        \resumeItem{Engineered and deployed full-stack features for federal/enterprise web applications, impacting 100,000+ users, leveraging \textbf{React}, \textbf{Node.js}, and \textbf{TypeScript} in an Agile, remote environment.}
+        \resumeItem{Designed and implemented secure authentication and API services using \textbf{AWS Cognito}, Lambda, and API Gateway.}
+        \resumeItem{Ensured WCAG 2.1 compliance (ARIA) for a CMMC vendor certification platform, including comprehensive documentation and end-user training materials.}
+        \resumeItem{Optimized frontend performance through page hydration and API batching, adhering to modern web application best practices.}
+      \resumeItemListEnd
+
+    \resumeTrioHeading
+      {Research Software Engineer} {UMBC} {Jan 2022 – Dec 2022}
+      \resumeItemListStart
+        \resumeItem{Designed, built, and deployed a distributed backend for \textbf{real-time geospatial synchronization} using Java Spring Boot and \textbf{gRPC}, demonstrating expertise in web-based geospatial applications.}
+        \resumeItem{Developed and implemented \textbf{GIS anomaly detection} capabilities utilizing \textbf{Elasticsearch} and Kibana.}
+        \resumeItem{Gained experience with modern \textbf{DevSecOps} processes through Kubernetes deployment and implemented automated testing routines.}
+      \resumeItemListEnd
+
+    \resumeTrioHeading
+      {Software Engineer} {Tata Communications Ltd.} {July 2018 – May 2021}
+      \resumeItemListStart
+        \resumeItem{Developed and customized an analytics dashboard using \textbf{React} and Django/Python, serving 10,000+ users and contributing to a 36\% APAC revenue increase.}
+        \resumeItem{Implemented and maintained \textbf{CI/CD} pipelines with \textbf{Jenkins}, fostering modern \textbf{DevSecOps} practices and automated testing.}
+        \resumeItem{Mentored junior engineers and contributed to documentation and training efforts.}
+      \resumeItemListEnd
+  \resumeHeadingListEnd
+
+\section*{Projects}
+  \resumeHeadingListStart
+    \resumeTrioHeading
+      {VibeIMG: AI Image Generation SaaS} {} {2024}
+      \resumeItemListStart
+        \resumeItem{Developed a profitable AI image generation SaaS using \textbf{React} and Redux for the frontend and FastAPI for the backend, integrating dual LLM pipelines (xAI primary, Groq fallback) for 60\% latency improvement (25s to 10s).}
+      \resumeItemListEnd
+    \resumeTrioHeading
+      {Real-Time Tweet Sentiment Pipeline} {} {Jan-Mar 2026}
+      \resumeItemListStart
+        \resumeItem{Engineered a real-time data pipeline on \textbf{GCP} (Twitter/X API $\rightarrow$ Pub/Sub $\rightarrow$ Dataflow $\rightarrow$ Spanner $\rightarrow$ Cloud Functions $\rightarrow$ NL API) for sentiment analysis, achieving $\sim$2-5s latency.}
+      \resumeItemListEnd
+  \resumeHeadingListStart
+
+\section*{Education}
+  \resumeHeadingListStart
+    \resumeTrioHeading
+      {MS Computer Science} {UMBC} {Aug 2021 – May 2023}
+      \resumeItemListStart
+        \resumeItem{Baltimore, MD}
+      \resumeItemListEnd
+    \resumeTrioHeading
+      {BE Information Technology} {University of Mumbai} {Aug 2014 – May 2018}
+      \resumeItemListStart
+        \resumeItem{Mumbai, IN}
+      \resumeItemListEnd
+  \resumeHeadingListStart
+
+\section*{Skills}
+  \resumeItemListStart
+    \resumeItem{\textbf{Frontend}: \textbf{React}, Redux, Vue.js, \textbf{JavaScript/TypeScript (ES6+)}, HTML5, CSS3, WCAG 2.1/ARIA}
+    \resumeItem{\textbf{Geospatial \& Data}: \textbf{GIS Anomaly Detection}, \textbf{Real-time Geospatial Synchronization}, \textbf{Elasticsearch}, PostgreSQL, MySQL, MongoDB, RabbitMQ}
+    \resumeItem{\textbf{Backend \& APIs}: \textbf{Node.js}, \textbf{REST APIs}, GraphQL, Django, Spring Boot, \textbf{gRPC}, FastAPI}
+    \resumeItem{\textbf{Cloud \& DevOps}: \textbf{AWS} (Bedrock, Lambda, Cognito, API Gateway), \textbf{GCP} (Pub/Sub, Dataflow, Spanner, Cloud Functions), \textbf{Jenkins}, \textbf{Git}, \textbf{CI/CD}, \textbf{Docker}, Kubernetes, Unit Testing, Integration Testing}
+    \resumeItem{\textbf{Languages}: Python, \textbf{JavaScript/TypeScript}, Java, SQL}
+  \resumeItemListEnd
+\end{document}

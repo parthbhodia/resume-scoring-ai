@@ -30,7 +30,7 @@
 
 ## PDF output
 
-**No.** The right column is an **HTML preview** of extracted text and analysis metadata. It does **not** generate or download a new PDF. Use **Résumé Builder** / export paths elsewhere if you need a file.
+The preview is primarily **HTML**. The panel header includes **Save as PDF**, which snapshots the preview “paper” card (including session line overrides) to a **multi-page US Letter PDF** via `html2canvas` + `jsPDF`. That export is approximate (rasterized), not identical to print typography. Your **uploaded résumé file** is unchanged; use **Résumé Builder** for structured source edits.
 
 ## Manual push (example)
 

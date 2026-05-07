@@ -157,7 +157,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const initial = (user?.email || "?").charAt(0).toUpperCase();
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column" }}>
 
       {/* ── Persistent top navbar ──────────────────────────── */}
       <header style={{
@@ -300,7 +300,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       {/* ── Main content ─────────────────────────────────── */}
-      <main style={{ minWidth: 0 }}>
+      <main style={{ minWidth: 0, flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {children}
       </main>
 
