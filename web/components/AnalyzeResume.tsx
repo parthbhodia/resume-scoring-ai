@@ -216,8 +216,15 @@ export default function AnalyzeResume() {
   /** Accordion for category-detail flagged bullets (`bulletAnalysis` index, or null = all collapsed). */
   const [expandedFlaggedBulletIdx, setExpandedFlaggedBulletIdx] = useState<number | null>(null);
   const [previewOpen, setPreviewOpen]       = useState(true);
-  /** Desktop: hide/show the inline improvement plan sidebar. Always starts visible. */
-  const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
+  /** Desktop: hide left improvement plan sidebar for more reading space (mobile overlay unchanged). */
+  const [improvementPlanVisible, setImprovementPlanVisible] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const v = sessionStorage.getItem(SIDEBAR_VISIBLE_KEY);
+      if (v === "0") return false;
+    } catch { /* ignore */ }
+    return true;
+  });
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
   /** Library folder when last run used analyze-folder; PDF file via lastPdfRef otherwise */
   const [linkedFolder, setLinkedFolder]               = useState<string | null>(null);
@@ -569,7 +576,6 @@ export default function AnalyzeResume() {
               {scoreLabel(result.overallScore)}
             </div>
           </div>
-
 
           {/* Hint */}
           <div style={{
