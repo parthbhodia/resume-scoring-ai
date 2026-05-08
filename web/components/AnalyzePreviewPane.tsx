@@ -44,6 +44,7 @@ export default function AnalyzePreviewPane({
   builderOpening,
 }: Props) {
   const extractedText = useResumeAnalyzeStore((s) => s.extractedText);
+  const resumeHeader = useResumeAnalyzeStore((s) => s.resumeHeader);
   const analysisBullets = useResumeAnalyzeStore((s) => s.analysisBullets);
   const lineOverrides = useResumeAnalyzeStore((s) => s.lineOverrides);
   const pulseToken = useResumeAnalyzeStore((s) => s.pulseToken);
@@ -66,6 +67,7 @@ export default function AnalyzePreviewPane({
       previewLineOverrides={lineOverrides}
       patchPreviewLine={patchPreviewLine}
       extractedText={extractedText || null}
+      resumeHeader={resumeHeader}
       selectedBulletIndex={selectedBulletIndex}
       onBulletLinkedSelect={onBulletLinkedSelect}
       presentationOnly={presentationOnly}

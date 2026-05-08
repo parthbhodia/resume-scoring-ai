@@ -1010,6 +1010,33 @@ def _merge_split_word_tokens(tokens: list[str]) -> list[str]:
     return out
 
 
+_SECTION_KW = re.compile(
+    r"^(EXPERIENCE|EDUCATION|SKILLS|SUMMARY|PROFILE|PROJECTS|CERTIFICATIONS|"
+    r"AWARDS|PUBLICATIONS|LANGUAGES|VOLUNTEER|WORK\s+HISTORY|PROFESSIONAL\s+SUMMARY|"
+    r"TECHNICAL\s+SKILLS|ACHIEVEMENTS?|REFERENCES|OBJECTIVE|ACTIVITIES|HONORS|"
+    r"LEADERSHIP|INTERESTS|EXTRACURRICULAR)",
+    re.IGNORECASE,
+)
+
+def _extract_resume_header(text: str) -> list[str]:
+    """Return the name + contact lines that appear before the first section heading."""
+    header: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            if len(header) >= 2:
+                break
+            continue
+        if _SECTION_KW.match(line):
+            break
+        if re.match(r"^[-•*·–—]", line):
+            break
+        header.append(line)
+        if len(header) >= 6:
+            break
+    return header
+
+
 def _post_clean_resume_text(text: str) -> str:
     """Normalize PDF placeholder glyphs; keep line breaks for section structure."""
     text = re.sub(r"\(\s*cid\s*:\s*\d+\)", " • ", text, flags=re.IGNORECASE)
@@ -1705,6 +1732,7 @@ async def api_analyze_upload(request: Request):
         result = await loop.run_in_executor(None, _analyze_resume_comprehensive, text, jd)
         if isinstance(result, dict):
             result["extractedText"] = text[:25000]
+            result["resumeHeader"] = _extract_resume_header(text)
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("analyze_upload failed")
@@ -1751,6 +1779,7 @@ async def api_analyze_folder(request: Request):
     result = await loop.run_in_executor(None, _analyze_resume_comprehensive, plain, jd)
     if isinstance(result, dict):
         result["extractedText"] = (plain or "")[:25000]
+        result["resumeHeader"] = _extract_resume_header(plain or "")
     return JSONResponse(result)
 
 

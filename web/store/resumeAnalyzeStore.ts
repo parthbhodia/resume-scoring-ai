@@ -16,6 +16,7 @@ export type AnnotationTone = "weak" | "fair" | "strong";
 export interface ResumeAnalyzeHydratePayload {
   extractedText?: string | null;
   bulletAnalysis: AnalyzeBulletSnapshot[];
+  resumeHeader?: string[];
 }
 
 function tierFromScore(score: number): AnnotationTone {
@@ -27,6 +28,8 @@ function tierFromScore(score: number): AnnotationTone {
 export interface ResumeAnalyzeStore {
   /** Plain extract for live doc layout */
   extractedText: string;
+  /** Name + contact lines from backend extraction, used as header fallback. */
+  resumeHeader: string[];
   analysisBullets: AnalyzeBulletSnapshot[];
   /** Session-only preview replacements (Analyze column, not PDF). */
   lineOverrides: Record<number, string>;
@@ -48,6 +51,7 @@ export interface ResumeAnalyzeStore {
 const initial = (): Pick<
   ResumeAnalyzeStore,
   | "extractedText"
+  | "resumeHeader"
   | "analysisBullets"
   | "lineOverrides"
   | "annotationByIndex"
@@ -55,6 +59,7 @@ const initial = (): Pick<
   | "pulseToken"
 > => ({
   extractedText: "",
+  resumeHeader: [],
   analysisBullets: [],
   lineOverrides: {},
   annotationByIndex: {},
@@ -73,6 +78,7 @@ export const useResumeAnalyzeStore = create<ResumeAnalyzeStore>((set) => ({
     });
     set({
       extractedText: (payload.extractedText ?? "").trim().slice(0, 50000),
+      resumeHeader: payload.resumeHeader ?? [],
       analysisBullets: bullets,
       lineOverrides: {},
       annotationByIndex,
