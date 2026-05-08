@@ -213,6 +213,7 @@ interface PopupState {
 
 interface Props {
   extractedText: string;
+  resumeHeader?: string[];
   bulletAnalysis: LiveBulletItem[];
   activeCategory: string | null;
   rewriteEdits: Record<number, string>;
@@ -227,6 +228,7 @@ interface Props {
 
 export default function AnalyzeLiveResumeBody({
   extractedText,
+  resumeHeader,
   bulletAnalysis,
   activeCategory,
   rewriteEdits,
@@ -246,12 +248,13 @@ export default function AnalyzeLiveResumeBody({
   const blocks = useMemo(() => {
     const lines = extractedText.split(/\r?\n/);
     const result = buildBlocks(lines, bulletAnalysis);
-    if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
-      console.log("[ResumePreview] first 8 lines:", lines.slice(0, 8));
-      console.log("[ResumePreview] blocks[0]:", result[0]);
+    // If buildBlocks didn't find a header (name/contact) but the backend sent one,
+    // prepend it so the name always appears at the top of the preview.
+    if (result[0]?.type !== "header" && resumeHeader && resumeHeader.length > 0) {
+      result.unshift({ type: "header", lines: resumeHeader });
     }
     return result;
-  }, [extractedText, bulletAnalysis]);
+  }, [extractedText, bulletAnalysis, resumeHeader]);
 
   useEffect(() => {
     if (popup == null) return;

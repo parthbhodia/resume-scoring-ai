@@ -55,6 +55,8 @@ interface AnalysisResult {
   }>;
   /** Plain text from PDF/LaTeX extraction — drives live preview when present. */
   extractedText?: string;
+  /** Name + contact lines extracted before the first section heading. */
+  resumeHeader?: string[];
   sectionFeedback: Array<{ section: string; score: number; feedback: string }>;
   rewriteSuggestions: Array<{ before: string; after: string; reason: string }>;
   finalRecommendations: string[];
@@ -264,6 +266,7 @@ export default function AnalyzeResume() {
     useResumeAnalyzeStore.getState().hydrateFromAnalysis({
       extractedText: result.extractedText,
       bulletAnalysis: result.bulletAnalysis,
+      resumeHeader: result.resumeHeader,
     });
   }, [result]);
 

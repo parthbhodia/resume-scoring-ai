@@ -46,6 +46,8 @@ interface Props {
   builderOpening?: boolean;
   /** Full plain text from the PDF / TeX — same extract the analyzer used. */
   extractedText?: string | null;
+  /** Name + contact lines from backend — guaranteed header fallback. */
+  resumeHeader?: string[];
   /** Right column: résumé tint only; edits and rewrites stay in the work column. */
   presentationOnly?: boolean;
   /** Brief highlight on the mirrored bullet after an override syncs from the left. */
@@ -180,6 +182,7 @@ export default function AnnotatedResumePanel({
   selectedBulletIndex = null,
   onBulletLinkedSelect,
   extractedText,
+  resumeHeader,
   onOpenBuilder,
   builderReady = false,
   builderOpening = false,
@@ -665,6 +668,7 @@ export default function AnnotatedResumePanel({
           {useLiveDoc ? (
               <AnalyzeLiveResumeBody
                 extractedText={effectiveExtracted}
+                resumeHeader={resumeHeader}
                 bulletAnalysis={bulletAnalysis}
                 activeCategory={activeCategory}
                 rewriteEdits={rewriteEdits}
