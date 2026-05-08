@@ -245,10 +245,12 @@ export default function AnalyzeLiveResumeBody({
 
   const blocks = useMemo(() => {
     const lines = extractedText.split(/\r?\n/);
-    // Always use the full bulletAnalysis so bulletIdx values are full-array indices,
-    // keeping them consistent with the previewLineOverrides keys (set by middle-column
-    // "Replace in preview" which also uses full-array indices via indexOf).
-    return buildBlocks(lines, bulletAnalysis);
+    const result = buildBlocks(lines, bulletAnalysis);
+    if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+      console.log("[ResumePreview] first 8 lines:", lines.slice(0, 8));
+      console.log("[ResumePreview] blocks[0]:", result[0]);
+    }
+    return result;
   }, [extractedText, bulletAnalysis]);
 
   useEffect(() => {
