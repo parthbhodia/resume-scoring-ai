@@ -211,16 +211,11 @@ export default function AnalyzeResume() {
   const [expandedBullets, setExpandedBullets] = useState<Record<number, boolean>>({});
   const [historyOpen, setHistoryOpen]   = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  /** Accordion for category-detail flagged bullets (`bulletAnalysis` index, or null = all collapsed). */
+  const [expandedFlaggedBulletIdx, setExpandedFlaggedBulletIdx] = useState<number | null>(null);
   const [previewOpen, setPreviewOpen]       = useState(true);
-  /** Desktop: hide left score/history rail for more reading space (mobile overlay unchanged). */
-  const [overallSidebarVisible, setOverallSidebarVisible] = useState(() => {
-    if (typeof window === "undefined") return true;
-    try {
-      const v = sessionStorage.getItem(SIDEBAR_VISIBLE_KEY);
-      if (v === "0") return false;
-    } catch { /* ignore */ }
-    return true;
-  });
+  /** Desktop: hide/show the inline improvement plan sidebar. Always starts visible. */
+  const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
   /** Library folder when last run used analyze-folder; PDF file via lastPdfRef otherwise */
   const [linkedFolder, setLinkedFolder]               = useState<string | null>(null);
@@ -274,9 +269,9 @@ export default function AnalyzeResume() {
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(SIDEBAR_VISIBLE_KEY, overallSidebarVisible ? "1" : "0");
+      sessionStorage.setItem(SIDEBAR_VISIBLE_KEY, improvementPlanVisible ? "1" : "0");
     } catch { /* quota / private mode */ }
-  }, [overallSidebarVisible]);
+  }, [improvementPlanVisible]);
 
   // Persist result to Supabase + localStorage
   const persistResult = useCallback(async (label: string, res: AnalysisResult) => {
@@ -309,6 +304,7 @@ export default function AnalyzeResume() {
     setExpandedBullets({});
     setActiveCategory(null);
     setPreviewOpen(true);
+    setImprovementPlanVisible(true);
     setSelectedBulletIndex(null);
     setBuilderLinkReady(false);
     setLinkedFolder(null);
@@ -341,6 +337,7 @@ export default function AnalyzeResume() {
     setActiveCategory(null);
     setSelectedBulletIndex(null);
     setPreviewOpen(true);
+    setImprovementPlanVisible(true);
     setBuilderLinkReady(false);
     setLinkedFolder(null);
     lastPdfRef.current = null;
@@ -479,6 +476,10 @@ export default function AnalyzeResume() {
     [],
   );
 
+  useEffect(() => {
+    setExpandedFlaggedBulletIdx(null);
+  }, [activeCategory]);
+
   const onFile = (f: File | null | undefined) => {
     if (!f || !f.name.endsWith(".pdf")) { setError("Please upload a PDF file."); return; }
     run(f);
@@ -558,7 +559,7 @@ export default function AnalyzeResume() {
           {/* Score ring */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 800, color: "#78909c", textTransform: "uppercase", letterSpacing: 1.15, marginBottom: 10, fontFamily: "system-ui, -apple-system, sans-serif" }}>
-              Overall
+              Improvement Plan
             </div>
             <ScoreRing score={result.overallScore} size={96} label="" />
             <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8, color: scoreColor(result.overallScore) }}>
@@ -566,25 +567,6 @@ export default function AnalyzeResume() {
             </div>
           </div>
 
-          {/* Analyze another button */}
-          <button
-            onClick={() => {
-              setResult(null); setError(null); setExpandedBullets({}); setHistoryOpen(false);
-              setActiveCategory(null); setSelectedBulletIndex(null);
-              setBuilderLinkReady(false); setLinkedFolder(null); lastPdfRef.current = null;
-              setRewriteEdits({});
-            }}
-            style={{
-              width: "100%", padding: "9px 14px", borderRadius: 8,
-              background: "var(--amber)", border: "none", color: "#fff",
-              fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginBottom: 20,
-              transition: "opacity var(--transition)",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; }}
-            onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
-          >
-            ↑ Analyze another
-          </button>
 
           {/* Hint */}
           <div style={{
@@ -806,8 +788,16 @@ export default function AnalyzeResume() {
 
   return (
     <div
-      className={`az-shell${overallSidebarVisible ? "" : " az-desktop-sidebar-hidden"}`}
-      style={{ display: "flex", minHeight: "100vh", background: "var(--bg)", position: "relative" }}
+      className={`az-shell${improvementPlanVisible ? "" : " az-desktop-sidebar-hidden"}`}
+      style={{
+        display: "flex",
+        width: "100%",
+        ...(workspaceSplit
+          ? { flex: 1, minHeight: 0, overflow: "hidden" as const }
+          : { minHeight: "100vh", overflow: "visible" as const }),
+        background: "var(--bg)",
+        position: "relative",
+      }}
     >
 
       {/* ── Mobile backdrop (close history drawer) ─── */}
@@ -820,24 +810,27 @@ export default function AnalyzeResume() {
         />
       )}
 
-      {/* ── Desktop: dim page behind sliding index — opacity transition (no layout shift) ─── */}
+      {/* ── Desktop: dim page behind sliding improvement plan — opacity transition (no layout shift) ─── */}
       <button
         type="button"
-        className={`az-sidebar-scrim-desktop${overallSidebarVisible ? " is-on" : ""}`}
-        aria-label={overallSidebarVisible ? "Close sidebar" : undefined}
-        aria-hidden={!overallSidebarVisible}
-        tabIndex={overallSidebarVisible ? 0 : -1}
-        onClick={() => setOverallSidebarVisible(false)}
+        className={`az-sidebar-scrim-desktop${improvementPlanVisible ? " is-on" : ""}`}
+        aria-label={improvementPlanVisible ? "Close improvement plan" : undefined}
+        aria-hidden={!improvementPlanVisible}
+        tabIndex={improvementPlanVisible ? 0 : -1}
+        onClick={() => setImprovementPlanVisible(false)}
       />
 
-      {/* ── Sidebar: fixed overlay — never reserves horizontal space; smooth slide ── */}
+      {/* ── Sidebar: inline sticky column on desktop; mobile keeps slide-over overlay ── */}
       <style>{`
         @keyframes az-scrim-in {
           from { opacity: 0; }
           to { opacity: 1; }
         }
+
+        /* ── Desktop: inline sticky sidebar (never overlays content) ── */
         .az-sidebar {
-          width: 296px;
+          width: 272px;
+          flex-shrink: 0;
           border-right: 1px solid var(--border);
           overflow-y: auto;
           display: flex;
@@ -845,21 +838,38 @@ export default function AnalyzeResume() {
           background: var(--surface);
           padding: 20px 14px;
           box-sizing: border-box;
-          transition: transform 0.34s cubic-bezier(0.4, 0, 0.2, 1);
-          will-change: transform;
+          position: sticky;
+          top: 0;
+          height: 100vh;
+          transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                      opacity 0.22s,
+                      padding 0.28s,
+                      border-color 0.28s;
         }
-        .az-sidebar-scrim-mobile {
-          display: none;
+        .az-shell.az-desktop-sidebar-hidden .az-sidebar {
+          width: 0;
+          padding-left: 0;
+          padding-right: 0;
+          opacity: 0;
+          overflow: hidden;
+          border-right-color: transparent;
+          pointer-events: none;
         }
+
+        /* Desktop scrim never shows — sidebar is inline, not overlaying */
+        .az-sidebar-scrim-desktop { display: none !important; }
+        /* Restore FAB not needed — toggle button in header serves this */
+        .az-sidebar-restore-fab { display: none !important; }
+
+        /* Mobile: keep slide-over overlay (screen too narrow for inline) */
+        .az-sidebar-scrim-mobile { display: none; }
         @media (max-width: 767px) {
           .az-sidebar-scrim-mobile {
             display: block;
             position: fixed;
             inset: 0;
             z-index: 999;
-            margin: 0;
-            padding: 0;
-            border: none;
+            margin: 0; padding: 0; border: none;
             background: rgba(15, 23, 42, 0.32);
             cursor: pointer;
             animation: az-scrim-in 0.28s cubic-bezier(0.4, 0, 0.2, 1) forwards;
@@ -870,97 +880,46 @@ export default function AnalyzeResume() {
             top: 0; left: 0; bottom: 0;
             z-index: 1000;
             width: min(296px, 92vw);
+            height: auto;
             box-shadow: 8px 0 32px rgba(15, 23, 42, 0.14);
             transform: translateX(-100%);
             pointer-events: none;
+            transition: transform 0.34s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 1;
+            border-right: 1px solid var(--border);
           }
           .az-sidebar.open {
             transform: translateX(0);
             pointer-events: auto;
           }
+          .az-shell.az-desktop-sidebar-hidden .az-sidebar {
+            width: min(296px, 92vw);
+            padding: 20px 14px;
+            opacity: 1;
+            overflow-y: auto;
+            border-right-color: var(--border);
+          }
           .az-main { padding: 20px 16px 60px !important; }
         }
-        .az-sidebar-scrim-desktop {
-          display: none;
-        }
-        @media (min-width: 768px) {
-          .az-sidebar-scrim-desktop {
-            display: block;
-            position: fixed;
-            inset: 0;
-            z-index: 999;
-            margin: 0;
-            padding: 0;
-            border: none;
-            background: rgba(15, 23, 42, 0.42);
-            cursor: pointer;
-            opacity: 0;
-            pointer-events: none;
-            visibility: hidden;
-            transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.3s;
-          }
-          .az-sidebar-scrim-desktop.is-on {
-            opacity: 1;
-            pointer-events: auto;
-            visibility: visible;
-            transition: opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s;
-          }
-          .az-sidebar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            z-index: 1000;
-            transform: translateX(0);
-            pointer-events: auto;
-            box-shadow: 8px 0 32px rgba(15, 23, 42, 0.14);
-          }
-          .az-shell.az-desktop-sidebar-hidden .az-sidebar {
-            transform: translateX(-100%);
-            pointer-events: none;
-            box-shadow: none;
-          }
-        }
-        .az-resume-panel {
-          display: flex;
-        }
-        .az-resume-panel.hidden {
-          display: none !important;
-        }
+
+        .az-resume-panel { display: flex; }
+        .az-resume-panel.hidden { display: none !important; }
+
         .az-desktop-sidebar-toggle {
           display: none;
           align-items: center;
           justify-content: center;
         }
         @media (min-width: 768px) {
-          .az-desktop-sidebar-toggle {
-            display: inline-flex;
-          }
+          .az-desktop-sidebar-toggle { display: inline-flex; }
         }
-        .az-sidebar-restore-fab {
-          display: none;
-          z-index: 1001;
-        }
-        @media (min-width: 768px) {
-          .az-shell.az-desktop-sidebar-hidden .az-sidebar-restore-fab {
-            display: flex;
-          }
-        }
+
         @media (prefers-reduced-motion: reduce) {
-          .az-sidebar {
-            transition-duration: 0.01ms !important;
-          }
-          .az-sidebar-scrim-mobile {
-            animation: none !important;
-            opacity: 1;
-          }
-          .az-sidebar-scrim-desktop {
-            transition: none !important;
-          }
+          .az-sidebar { transition-duration: 0.01ms !important; }
+          .az-sidebar-scrim-mobile { animation: none !important; opacity: 1; }
         }
-        .az-analyze-sidebar-toggle-row {
-          display: none;
-        }
+
+        .az-analyze-sidebar-toggle-row { display: none; }
         @media (min-width: 768px) {
           .az-analyze-sidebar-toggle-row {
             display: flex;
@@ -969,19 +928,21 @@ export default function AnalyzeResume() {
             margin-bottom: 16px;
           }
         }
+        .az-mobile-only { display: flex; }
+        @media (min-width: 768px) { .az-mobile-only { display: none !important; } }
       `}</style>
       <aside className={`az-sidebar${historyOpen ? " open" : ""}`}>
         {/* Sidebar header with close button */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 8 }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.8 }}>
-            History
+            Improvement Plan
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <button
               type="button"
               className="az-desktop-sidebar-toggle"
-              onClick={() => setOverallSidebarVisible(false)}
-              title="Hide sidebar — more space to read"
+              onClick={() => setImprovementPlanVisible(false)}
+              title="Hide improvement plan — more space to read"
               style={{
                 width: 24, height: 24, borderRadius: 6,
                 border: "none", background: "var(--surface2)",
@@ -995,9 +956,11 @@ export default function AnalyzeResume() {
                 <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
+            {/* Mobile: close overlay */}
             <button
               onClick={() => setHistoryOpen(false)}
               title="Close panel"
+              className="az-mobile-only"
               style={{
                 width: 24, height: 24, borderRadius: 6,
                 border: "none", background: "var(--surface2)",
@@ -1016,12 +979,12 @@ export default function AnalyzeResume() {
         {sidebarContent}
       </aside>
 
-      {/* Desktop: bring back score / history rail */}
+      {/* Desktop: bring back improvement plan */}
       <button
         type="button"
         className="az-sidebar-restore-fab"
-        onClick={() => setOverallSidebarVisible(true)}
-        title="Show score sidebar"
+        onClick={() => setImprovementPlanVisible(true)}
+        title="Show improvement plan"
         style={{
           position: "fixed",
           left: 0,
@@ -1076,9 +1039,11 @@ export default function AnalyzeResume() {
           ...(workspaceSplit ? {
             display: "grid",
             gridTemplateColumns: "minmax(300px,min(472px, 44vw)) 1fr",
-            gridTemplateRows: "1fr",
+            gridTemplateRows: "minmax(0, 1fr)",
             overflow: "hidden",
             padding: 0,
+            minHeight: 0,
+            width: "100%",
           } : {
             overflowY: "auto",
             padding: "28px 36px",
@@ -1208,23 +1173,23 @@ export default function AnalyzeResume() {
           <div className="az-analyze-sidebar-toggle-row">
             <button
               type="button"
-              onClick={() => setOverallSidebarVisible(o => !o)}
-              title={overallSidebarVisible ? "Hide score sidebar" : "Show score sidebar"}
+              onClick={() => setImprovementPlanVisible(o => !o)}
+              title={improvementPlanVisible ? "Hide score sidebar" : "Show score sidebar"}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 6,
                 padding: "6px 12px", borderRadius: 8,
                 border: "1px solid var(--border)",
-                background: overallSidebarVisible ? "var(--surface2)" : "var(--accent-bg)",
+                background: improvementPlanVisible ? "var(--surface2)" : "var(--accent-bg)",
                 cursor: "pointer", fontFamily: "inherit",
                 fontSize: 12, fontWeight: 600,
-                color: overallSidebarVisible ? "var(--muted)" : "var(--accent)",
+                color: improvementPlanVisible ? "var(--muted)" : "var(--accent)",
               }}
             >
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
                 <rect x="2" y="3" width="4" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" />
-                <rect x="7" y="3" width="7" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" opacity={overallSidebarVisible ? 1 : 0.4} />
+                <rect x="7" y="3" width="7" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" opacity={improvementPlanVisible ? 1 : 0.4} />
               </svg>
-              {overallSidebarVisible ? "Hide sidebar" : "Show sidebar"}
+              {improvementPlanVisible ? "Hide sidebar" : "Show sidebar"}
             </button>
           </div>
         )}
@@ -1307,6 +1272,8 @@ export default function AnalyzeResume() {
               gridColumn: 2,
               gridRow: 1,
               minWidth: 0,
+              minHeight: 0,
+              height: "100%",
               overflow: "hidden",
               display: "flex",
               flexDirection: "column",
@@ -1339,6 +1306,8 @@ export default function AnalyzeResume() {
                     gridRow: 1,
                     overflowY: "auto",
                     minWidth: 0,
+                    minHeight: 0,
+                    height: "100%",
                     padding: "28px 28px 32px 36px",
                     borderRight: "1px solid var(--border)",
                   }
@@ -1410,17 +1379,17 @@ export default function AnalyzeResume() {
               )}
             </div>
             <button
-              onClick={() => setOverallSidebarVisible(o => !o)}
+              onClick={() => setImprovementPlanVisible(o => !o)}
               className="az-desktop-sidebar-toggle"
-              title={overallSidebarVisible ? "Hide score sidebar" : "Show score sidebar"}
+              title={improvementPlanVisible ? "Hide score sidebar" : "Show score sidebar"}
               style={{
                 alignItems: "center", gap: 6,
                 padding: "7px 13px", borderRadius: 8,
                 border: "1px solid var(--border)",
-                background: overallSidebarVisible ? "var(--surface2)" : "var(--accent-bg)",
+                background: improvementPlanVisible ? "var(--surface2)" : "var(--accent-bg)",
                 cursor: "pointer", fontFamily: "inherit",
                 fontSize: 12, fontWeight: 600,
-                color: overallSidebarVisible ? "var(--muted)" : "var(--accent)",
+                color: improvementPlanVisible ? "var(--muted)" : "var(--accent)",
                 transition: "all 0.15s",
               }}
               onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; }}
@@ -1428,9 +1397,9 @@ export default function AnalyzeResume() {
             >
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
                 <rect x="2" y="3" width="4" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" />
-                <rect x="7" y="3" width="7" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" opacity={overallSidebarVisible ? 1 : 0.4} />
+                <rect x="7" y="3" width="7" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" opacity={improvementPlanVisible ? 1 : 0.4} />
               </svg>
-              {overallSidebarVisible ? "Hide sidebar" : "Show sidebar"}
+              {improvementPlanVisible ? "Hide sidebar" : "Show sidebar"}
             </button>
             <button
               onClick={() => setPreviewOpen(o => !o)}
@@ -1664,6 +1633,21 @@ export default function AnalyzeResume() {
                     const draft = rewriteEdits[safeIdx] ?? baseImproved;
                     const previewMain = previewLineOverrides[safeIdx] ?? bullet.originalBullet;
                     const previewLineAppliedHere = previewLineOverrides[safeIdx] !== undefined;
+                    const isFlaggedAccordionOpen = expandedFlaggedBulletIdx === safeIdx;
+                    const bColor = bullet.score < 50
+                      ? "var(--red)"
+                      : bullet.score < 70
+                        ? "#f59e0b"
+                        : "var(--green)";
+                    const bBg = bullet.score < 50
+                      ? "rgba(248,113,113,0.14)"
+                      : bullet.score < 70
+                        ? "rgba(245,158,11,0.14)"
+                        : "rgba(52,211,153,0.12)";
+                    const onFlaggedAccordionToggle = () => {
+                      handleBulletLinkedSelect(safeIdx);
+                      setExpandedFlaggedBulletIdx((prev) => (prev === safeIdx ? null : safeIdx));
+                    };
                     return (
                     <div
                       key={safeIdx}
@@ -1672,15 +1656,73 @@ export default function AnalyzeResume() {
                       border: "1px solid rgba(245,158,11,0.25)",
                       borderLeft: "4px solid #f59e0b",
                       borderRadius: 10,
-                      padding: "14px 16px",
-                      background: "rgba(245,158,11,0.04)",
+                      overflow: "hidden",
+                      background: isFlaggedAccordionOpen ? "rgba(245,158,11,0.06)" : "rgba(245,158,11,0.03)",
                     }}>
-                      <div style={{ fontSize: 13.5, color: "var(--text)", lineHeight: 1.6, marginBottom: 8 }}>
-                        {previewMain}
-                        {previewLineAppliedHere && (
-                          <span title="Replaced for this Analyze session’s preview." style={{ marginLeft: 6, color: "#fbbf24", fontSize: 11, fontWeight: 700 }}>●</span>
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={onFlaggedAccordionToggle}
+                        aria-expanded={isFlaggedAccordionOpen}
+                        style={{
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "12px 14px",
+                          border: "none",
+                          background: isFlaggedAccordionOpen ? "rgba(245,158,11,0.06)" : "transparent",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          textAlign: "left",
+                          transition: "background 0.12s",
+                        }}
+                      >
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 800,
+                          padding: "3px 9px",
+                          borderRadius: 20,
+                          background: bBg,
+                          color: bColor,
+                          flexShrink: 0,
+                        }}>
+                          {bullet.score}
+                        </span>
+                        <span style={{
+                          flex: 1,
+                          minWidth: 0,
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: "var(--text)",
+                          lineHeight: 1.45,
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical" as const,
+                          overflow: "hidden",
+                        }} title={previewMain}>
+                          {previewMain}
+                          {previewLineAppliedHere && (
+                            <span title="Replaced for this Analyze session’s preview." style={{ marginLeft: 6, color: "#fbbf24", fontSize: 11, fontWeight: 700 }}>●</span>
+                          )}
+                        </span>
+                        <svg
+                          width="18"
+                          height="18"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          aria-hidden
+                          style={{
+                            flexShrink: 0,
+                            color: "var(--dim)",
+                            transform: isFlaggedAccordionOpen ? "rotate(180deg)" : "none",
+                            transition: "transform 0.2s ease",
+                          }}
+                        >
+                          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                      {isFlaggedAccordionOpen && (
+                        <div style={{ padding: "0 14px 14px 14px" }}>
                       {bullet.issues.length > 0 && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
                           {bullet.issues.map((iss, j) => (
@@ -1742,6 +1784,8 @@ export default function AnalyzeResume() {
                             </button>
                           )}
                         />
+                      )}
+                        </div>
                       )}
                     </div>
                     );
