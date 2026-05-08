@@ -244,11 +244,11 @@ export default function AnalyzeLiveResumeBody({
 
   const blocks = useMemo(() => {
     const lines = extractedText.split(/\r?\n/);
-    const filteredBullets = activeCategory
-      ? bulletAnalysis.filter(b => bulletMatchesAnalysisCategory(b, activeCategory))
-      : bulletAnalysis;
-    return buildBlocks(lines, filteredBullets);
-  }, [extractedText, bulletAnalysis, activeCategory]);
+    // Always use the full bulletAnalysis so bulletIdx values are full-array indices,
+    // keeping them consistent with the previewLineOverrides keys (set by middle-column
+    // "Replace in preview" which also uses full-array indices via indexOf).
+    return buildBlocks(lines, bulletAnalysis);
+  }, [extractedText, bulletAnalysis]);
 
   useEffect(() => {
     if (popup == null) return;
