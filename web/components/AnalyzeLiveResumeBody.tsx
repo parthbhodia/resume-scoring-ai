@@ -21,11 +21,17 @@ type Block =
   | { type: "paragraph"; lines: string[] }
   | { type: "bullets"; items: Array<{ rawLine: string; bulletIdx: number }> };
 
-function looksLikeSectionHeading(line: string): boolean {
+/** Known resume section keywords — used to distinguish section headings from ALL-CAPS names. */
+const KNOWN_SECTIONS = /^(EXPERIENCE|EDUCATION|SKILLS|SUMMARY|PROFILE|PROJECTS|CERTIFICATIONS|AWARDS|PUBLICATIONS|LANGUAGES|VOLUNTEER|WORK\s+HISTORY|PROFESSIONAL\s+SUMMARY|TECHNICAL\s+SKILLS|ACHIEVEMENTS?|REFERENCES|OBJECTIVE|ACTIVITIES|HONORS|LEADERSHIP|INTERESTS|EXTRACURRICULAR)/i;
+
+function looksLikeSectionHeading(line: string, strict = false): boolean {
   const t = line.trim();
-  if (!t || t.length > 48) return false;
+  if (!t || t.length > 60) return false;
+  // In strict mode (used for first-line header detection), only match known section keywords.
+  // This prevents "JOHN DOE" or "PARTH BHODIA" from being misidentified as section headings.
+  if (strict) return KNOWN_SECTIONS.test(t);
   if (/[A-Z]/.test(t) && t === t.toUpperCase() && !/^\d/.test(t)) return true;
-  if (/^(Experience|Education|Skills|Summary|Profile|Projects|Certifications|Awards|Publications|Languages|Volunteer|Work\s+History|Professional\s+Summary|Technical\s+Skills|Achievements?)$/i.test(t)) return true;
+  if (KNOWN_SECTIONS.test(t)) return true;
   return false;
 }
 
@@ -78,7 +84,7 @@ function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[]
       i++;
       continue;
     }
-    if (header.length === 0 && looksLikeSectionHeading(t)) break;
+    if (header.length === 0 && looksLikeSectionHeading(t, true)) break;
     header.push(line);
     i++;
   }
