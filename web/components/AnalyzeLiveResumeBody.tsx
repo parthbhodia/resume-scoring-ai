@@ -253,6 +253,16 @@ export default function AnalyzeLiveResumeBody({
     if (result[0]?.type !== "header" && resumeHeader && resumeHeader.length > 0) {
       result.unshift({ type: "header", lines: resumeHeader });
     }
+    if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+      const trimmed8 = lines.slice(0, 8).map((l) => l.trim());
+      const firstNonEmpty = lines.map((l) => l.trim()).find((t) => t.length > 0) ?? "";
+      const firstLineBulletIdx = firstNonEmpty
+        ? findBulletIndexForLine(firstNonEmpty, bulletAnalysis)
+        : -1;
+      console.log("[ResumePreview] first 8 lines (trimmed):", trimmed8);
+      console.log("[ResumePreview] first non-empty line bullet match index:", firstLineBulletIdx);
+      console.log("[ResumePreview] blocks[0] (after header fallback):", result[0] ?? null);
+    }
     return result;
   }, [extractedText, bulletAnalysis, resumeHeader]);
 
