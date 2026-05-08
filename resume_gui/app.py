@@ -1018,6 +1018,7 @@ _SECTION_KW = re.compile(
     re.IGNORECASE,
 )
 
+
 def _strip_header_candidates(lines: list[str], start: int, end: int) -> list[str]:
     """Pull short non-bullet, non-section lines from a slice (original spacing preserved-ish)."""
     out: list[str] = []
