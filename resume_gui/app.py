@@ -1018,11 +1018,135 @@ _SECTION_KW = re.compile(
     re.IGNORECASE,
 )
 
-def _extract_resume_header(text: str) -> list[str]:
-    """Return the name + contact lines that appear before the first section heading."""
-    header: list[str] = []
-    for raw in text.splitlines():
+def _strip_header_candidates(lines: list[str], start: int, end: int) -> list[str]:
+    """Pull short non-bullet, non-section lines from a slice (original spacing preserved-ish)."""
+    out: list[str] = []
+    for j in range(start, min(end, len(lines))):
+        raw = lines[j]
         line = raw.strip()
+        if not line:
+            if len(out) >= 2:
+                break
+            continue
+        if _SECTION_KW.match(line):
+            continue
+        if re.match(r"^[-•*·–—]", line):
+            continue
+        if len(line) > 180:
+            continue
+        # Skip obvious bullets / KPI lines dumped into contact block
+        if re.search(r"%|↑|€|\$\d+", line):
+            continue
+        out.append(line)
+        if len(out) >= 8:
+            break
+    return out[:8]
+
+
+_CONTACT_ANCHOR = re.compile(
+    r"(@"  # email
+    r"|\blinkedin\.com/\b|\bwww\.linkedin\.com/\b|\bgithub\.com/\b|\bwww\.github\.com/\b"
+    r"|\bportfolio\b|\bsite\b|\bmobile\b|\bphone\b|[\[\(]?\d{3}[\]\)]?[\s.-]?\d{3}[\s.-]?\d{4}",
+    re.IGNORECASE,
+)
+
+
+def _slice_header_window(
+    lines_stripped: list[str], center_idx: int, *, before: int, after: int
+) -> list[str]:
+    start = max(0, center_idx - before)
+    end = min(len(lines_stripped), center_idx + after)
+    return _strip_header_candidates(lines_stripped, start, end)
+
+
+def _header_cluster_anchored_contact(lines_stripped: list[str], anchor_idx: int) -> list[str]:
+    """Recover name + links when anchor line is somewhere after a mis-read section header."""
+    return _slice_header_window(lines_stripped, anchor_idx, before=8, after=5)
+
+
+def _header_cluster_anchored_name(lines_stripped: list[str], name_idx: int) -> list[str]:
+    """Keep window tight so EXPERIENCE / junk above ALL CAPS name are not sucked in."""
+    return _slice_header_window(lines_stripped, name_idx, before=2, after=6)
+
+
+def _looks_like_all_caps_person_name(line: str) -> bool:
+    """e.g. PARTH BHODIA — avoid matching EXPERIENCE (single token is section word)."""
+    t = line.strip()
+    words = [w.strip("'-") for w in t.split() if w.strip("'-")]
+    if len(words) < 2 or len(words) > 5:
+        return False
+    if len(t) > 48:
+        return False
+    if not words[0].isalpha():
+        return False
+    caps = sum(1 for w in words if len(w) > 1 and w.isupper())
+    if caps < 2:
+        return False
+    return not _SECTION_KW.match(line)
+
+
+_JOB_ROLE_WORD = re.compile(
+    r"\b(Engineer|Developer|Architect|Scientist|Analyst|Designer|Consultant|"
+    r"Specialist|Manager|Director|Lead|Intern|Associate|Executive)\b",
+    re.I,
+)
+
+
+def _looks_like_title_person_name(line: str) -> bool:
+    """Title Case full name — avoids common job titles via role-word filter."""
+    t = line.strip()
+    if len(t) < 5 or len(t) > 44:
+        return False
+    words = [w.strip("'-.,") for w in t.split() if w.strip("'-.,")]
+    if len(words) < 2 or len(words) > 4:
+        return False
+    if _JOB_ROLE_WORD.search(t):
+        return False
+    if not words[0] or not words[0][0].isupper():
+        return False
+    for w in words:
+        if len(w) < 2 or not (w[0].isupper() and w[1:].replace("-", "").islower()):
+            return False
+    return not _SECTION_KW.match(line)
+
+
+def _extract_resume_header_fallback(lines_stripped: list[str]) -> list[str]:
+    """When PDF reading order puts a section heading first, infer header from contacts or name."""
+    limit = min(180, len(lines_stripped))
+
+    best: list[str] = []
+    for i in range(limit):
+        line = lines_stripped[i]
+        if not line:
+            continue
+        if len(line) > 200:
+            continue
+        if _CONTACT_ANCHOR.search(line):
+            chunk = _header_cluster_anchored_contact(lines_stripped, i)
+            if len(chunk) > len(best):
+                best = chunk
+
+    # No social/contact found — hunt for ALL CAPS or Title Case multi-word name rows (common in PDF titles)
+    if not best:
+        for i in range(min(80, len(lines_stripped))):
+            line = lines_stripped[i]
+            if _looks_like_all_caps_person_name(line) or _looks_like_title_person_name(line):
+                best = _header_cluster_anchored_name(lines_stripped, i)
+                break
+
+    return best[:8] if best else []
+
+
+def _extract_resume_header(text: str) -> list[str]:
+    """Return the name + contact lines that appear before the first section heading.
+
+    When extraction order drops the header (common with two-column PDFs), fall back to
+    contact/web anchors or an ALL CAPS multi-word name line anywhere in early lines.
+    """
+    stripped = [ln.strip() for ln in text.splitlines()]
+
+    header: list[str] = []
+    for line in stripped:
         if not line:
             if len(header) >= 2:
                 break
@@ -1034,7 +1158,15 @@ def _extract_resume_header(text: str) -> list[str]:
         header.append(line)
         if len(header) >= 6:
             break
-    return header
+
+    if header:
+        return header
+
+    fb = _extract_resume_header_fallback(stripped)
+    if fb:
+        return fb[:6]
+
+    return []
 
 
 def _post_clean_resume_text(text: str) -> str:
