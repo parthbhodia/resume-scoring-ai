@@ -902,7 +902,17 @@ export default function AnalyzeResume() {
           .az-main { padding: 20px 16px 60px !important; }
         }
 
-        .az-resume-panel { display: flex; }
+        .az-resume-panel {
+          display: flex;
+          flex-direction: column;
+          flex-shrink: 0;
+          width: min(420px, 38vw);
+          position: sticky;
+          top: 0;
+          height: 100vh;
+          overflow: hidden;
+          border-left: 1px solid var(--border);
+        }
         .az-resume-panel.hidden { display: none !important; }
 
         .az-desktop-sidebar-toggle {

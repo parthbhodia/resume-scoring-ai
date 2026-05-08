@@ -84,7 +84,8 @@ function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[]
       i++;
       continue;
     }
-    if (header.length === 0 && looksLikeSectionHeading(t, true)) break;
+    // Stop at any known section keyword — strict so names like "PARTH BHODIA" aren't mistaken.
+    if (looksLikeSectionHeading(t, true)) break;
     header.push(line);
     i++;
   }
