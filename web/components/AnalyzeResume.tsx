@@ -14,7 +14,6 @@ import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
 import type { AnalyzeRecord } from "@/lib/supabase";
 import AnalyzePreviewPane from "@/components/AnalyzePreviewPane";
-import { exportResumePreviewPdf } from "@/lib/exportResumePreviewPdf";
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 // Full strongly-typed shape of the AI analysis response.
@@ -568,33 +567,6 @@ export default function AnalyzeResume() {
             </div>
           </div>
 
-
-          {/* Download PDF button */}
-          <button
-            onClick={() => {
-              if (!lastPdfRef.current || !result) return;
-              const filename = lastPdfRef.current.name.replace(/\.pdf$/i, "") + "-tailored.pdf";
-              exportResumePreviewPdf({
-                extractedText: useResumeAnalyzeStore.getState().extractedText,
-                bulletAnalysis: result.bulletAnalysis,
-                lineOverrides: useResumeAnalyzeStore.getState().lineOverrides,
-                filename,
-              }).catch(err => console.error("PDF export failed:", err));
-            }}
-            style={{
-              width: "100%", padding: "9px 14px", borderRadius: 8,
-              background: "var(--accent)", border: "none", color: "#fff",
-              fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginBottom: 16,
-              transition: "opacity var(--transition)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            }}
-            onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; }}
-            onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-              <path d="M8 1v8M3.5 7.5L8 12l4.5-4.5M2 13h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            Download PDF
-          </button>
 
           {/* Hint */}
           <div style={{
