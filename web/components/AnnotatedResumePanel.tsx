@@ -282,50 +282,22 @@ export default function AnnotatedResumePanel({
   const totalCount = bulletAnalysis.length;
 
   const onSavePreviewPdf = useCallback(async () => {
-    const node = paperRef.current;
-    if (!node || !useLiveDoc || pdfExporting) return;
+    if (!useLiveDoc || pdfExporting) return;
     setPdfExporting(true);
-
-    // ── Strip all annotation chrome before capture ───────────────────────────
-    type SavedStyle = { el: HTMLElement; borderLeft: string; background: string; boxShadow: string; animation: string };
-    const saved: SavedStyle[] = [];
-
-    // 1. Remove colored bullet borders and backgrounds (set via inline style)
-    node.querySelectorAll<HTMLElement>(".az-resume-bullet").forEach(el => {
-      saved.push({ el, borderLeft: el.style.borderLeft, background: el.style.background, boxShadow: el.style.boxShadow, animation: el.style.animation });
-      el.style.borderLeft = "none";
-      el.style.background = "transparent";
-      el.style.boxShadow = "none";
-      el.style.animation = "none";
-    });
-
-    // 2. Hide score badges, applied markers, sparkle icons, buttons, metric highlights
-    const hidden: Array<{ el: HTMLElement; display: string }> = [];
-    const hide = (sel: string) => node.querySelectorAll<HTMLElement>(sel).forEach(el => {
-      hidden.push({ el, display: el.style.display });
-      el.style.display = "none";
-    });
-    hide(".az-score-badge");
-    hide(".az-preview-applied-mark");
-    hide("button");
-    hide("mark"); // metric number highlights (green backgrounds)
-
     try {
-      await exportResumePreviewPdf(node, `resume-preview-clean-${new Date().toISOString().slice(0, 10)}.pdf`);
+      await exportResumeAsPdf(
+        effectiveExtracted,
+        bulletAnalysis,
+        previewLineOverrides,
+        resumeHeader ?? [],
+        `resume-${new Date().toISOString().slice(0, 10)}.pdf`,
+      );
     } catch (err) {
       console.error(err);
     } finally {
-      // Restore everything
-      saved.forEach(({ el, borderLeft, background, boxShadow, animation }) => {
-        el.style.borderLeft = borderLeft;
-        el.style.background = background;
-        el.style.boxShadow = boxShadow;
-        el.style.animation = animation;
-      });
-      hidden.forEach(({ el, display }) => { el.style.display = display; });
       setPdfExporting(false);
     }
-  }, [pdfExporting, useLiveDoc]);
+  }, [pdfExporting, useLiveDoc, effectiveExtracted, bulletAnalysis, previewLineOverrides, resumeHeader]);
 
   /** Maps `data-bullet-idx` on the preview page to a thick, score-colored frame (split / presentation column). */
   const updateMirrorPosition = useCallback(() => {
