@@ -254,11 +254,14 @@ export default function AnnotatedResumePanel({
     const node = paperRef.current;
     if (!node || !useLiveDoc || pdfExporting) return;
     setPdfExporting(true);
+    // Temporarily strip annotation styling so the downloaded PDF looks like a clean resume
+    node.classList.add("az-clean-export");
     try {
-      await exportResumePreviewPdf(node, `resume-preview-${new Date().toISOString().slice(0, 10)}.pdf`);
+      await exportResumePreviewPdf(node, `resume-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (err) {
       console.error(err);
     } finally {
+      node.classList.remove("az-clean-export");
       setPdfExporting(false);
     }
   }, [pdfExporting, useLiveDoc]);
@@ -515,23 +518,24 @@ export default function AnnotatedResumePanel({
               type="button"
               onClick={onSavePreviewPdf}
               disabled={pdfExporting}
-              title="Download the current preview (with session overrides) as a PDF"
+              title="Download resume with your applied changes as a clean PDF"
               style={{
                 fontSize: 10.5,
                 fontWeight: 700,
                 letterSpacing: 0.12,
                 padding: "6px 12px",
                 borderRadius: 8,
-                border: "1px solid #c5cee0",
-                background: "#fff",
-                color: pdfExporting ? "#b0bec5" : "#3949ab",
+                border: "none",
+                background: pdfExporting ? "#c5cee0" : "linear-gradient(135deg,#3949ab,#1a237e)",
+                color: "#fff",
                 cursor: pdfExporting ? "wait" : "pointer",
                 fontFamily: "inherit",
                 flexShrink: 0,
                 whiteSpace: "nowrap",
+                boxShadow: pdfExporting ? "none" : "0 2px 6px rgba(26,35,126,0.25)",
               }}
             >
-              {pdfExporting ? "Saving PDF…" : "Save as PDF"}
+              {pdfExporting ? "Saving…" : "⬇ Download edited resume"}
             </button>
           )}
           </div>

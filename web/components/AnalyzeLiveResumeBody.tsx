@@ -314,6 +314,17 @@ export default function AnalyzeLiveResumeBody({
           font-size: 10px;
           line-height: 1.45;
         }
+        /* Clean PDF export — strip all annotation chrome */
+        .az-clean-export .az-resume-bullet {
+          border-left-color: transparent !important;
+          background: transparent !important;
+          box-shadow: none !important;
+          animation: none !important;
+        }
+        .az-clean-export .az-score-badge,
+        .az-clean-export .az-preview-applied-mark {
+          display: none !important;
+        }
       `}</style>
 
       {blocks.length === 0 && (
@@ -472,7 +483,7 @@ export default function AnalyzeLiveResumeBody({
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
                     {/* Score badge — visible in non-presentation mode only */}
                     {!presentationOnly && (
-                      <span style={{
+                      <span className="az-score-badge" style={{
                         flexShrink: 0,
                         marginTop: 1,
                         fontSize: 9,
@@ -490,7 +501,7 @@ export default function AnalyzeLiveResumeBody({
                     <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "#1f2937" }}>
                       {highlightMetricSpans(showText)}
                       {previewLineApplied && (
-                        <span
+                        <span className="az-preview-applied-mark"
                           title={presentationOnly ? "Suggestion applied" : "Preview updated"}
                           style={{ marginLeft: 5, fontSize: 9, fontWeight: 800, color: presentationOnly ? "#43a047" : "#fb8c00" }}
                         >
