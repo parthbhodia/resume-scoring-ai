@@ -10,7 +10,7 @@ import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
   bulletMatchesAnalysisCategory,
 } from "@/lib/analysisCategoryMatch";
-import { exportResumePreviewPdf } from "@/lib/exportResumePreviewPdf";
+import { exportResumeAsPdf } from "@/lib/exportResumeAsPdf";
 
 // Re-export for legacy imports from this file path
 export { CATEGORY_ISSUE_KEYWORDS } from "@/lib/analysisCategoryMatch";
@@ -578,7 +578,7 @@ export default function AnnotatedResumePanel({
               onClick={onSavePreviewPdf}
               disabled={pdfExporting}
               title="Exports what you see here as a plain PDF (highlights removed). Uses preview text—including session line swaps—not your untouched upload. For full-structure edits export from Résumé Builder."
-              aria-label="Export clean PDF from annotated preview content"
+              aria-label="Download Resume from annotated preview content"
               style={{
                 fontSize: 10.5,
                 fontWeight: 700,
@@ -595,7 +595,7 @@ export default function AnnotatedResumePanel({
                 boxShadow: pdfExporting ? "none" : "0 2px 6px rgba(26,35,126,0.25)",
               }}
             >
-              {pdfExporting ? "Exporting…" : "Export clean PDF"}
+              {pdfExporting ? "Downloading…" : "Download Resume"}
             </button>
           )}
           </div>

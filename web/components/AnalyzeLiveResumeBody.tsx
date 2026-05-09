@@ -263,7 +263,7 @@ export function mergeResumeHeaderSources(apiHeader: string[] | undefined, inferB
   if (api.length === 1 && KNOWN_SECTIONS.test(api[0])) {
     api = [];
   }
-  if (api.length >= 2) return api.slice(0, 8);
+  if (api.length >= 1) return api.slice(0, 8);
   const inferred = inferResumeHeaderFromExtract(inferBasisFull);
   if (inferred.length) return inferred.slice(0, 8);
   if (api.length) return api.slice(0, 8);
