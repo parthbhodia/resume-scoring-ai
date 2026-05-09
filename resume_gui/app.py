@@ -132,11 +132,13 @@ async def api_generate_stream(request: Request):
     if model.startswith("gemini") and os.environ.get("LLM_PROVIDER", "").lower() == "grok":
         model = "grok-4-fast-non-reasoning"
     base_folder       = (body.get("base_folder") or "").strip() or None
+    reference_folder  = (body.get("reference_folder") or "").strip() or None
     candidate_profile = (body.get("candidate_profile") or "").strip() or None
     user_id           = (body.get("user_id") or "").strip() or "local"
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
+        f"|  reference_folder={reference_folder}  "
         f"|  custom_profile={bool(candidate_profile)}  |  user={user_id or 'anon'}"
     )
 
@@ -156,6 +158,7 @@ async def api_generate_stream(request: Request):
 
         for event in stream_latex_resume(
             company, role, jd,
+            reference_folder=reference_folder,
             model=model, base_folder=base_folder, candidate_profile=candidate_profile, user_id=user_id,
         ):
             ev_name = event.get("event")
@@ -1217,9 +1220,34 @@ def _extract_pdf_text(pdf) -> str:
     return _post_clean_resume_text("\n".join(pages_text))
 
 _WEAK_VERBS = re.compile(
-    r"\b(helped|assisted|worked on|was responsible for|participated in|"
-    r"involved in|contributed to|supported|utilized|leveraged|liaised|"
-    r"managed|handled|did|made|got|went|used|had|tried|attempted)\b",
+    r"\b(helped|assisted|worked on|worked with|was responsible for|participated in|"
+    r"involved in|contributed to|duties included|tasked with|"
+    r"did|made|got|went|had to|tried to)\b",
+    re.IGNORECASE,
+)
+_ACTION_VERB_START_RE = re.compile(
+    r"^[•\-–*▪▸]\s*(?:"
+    # Management
+    r"administered|analyzed|assigned|attained|chaired|consolidated|contracted|coordinated|delegated|developed|directed|evaluated|executed|improved|increased|organized|oversaw|planned|prioritized|produced|recommended|reviewed|scheduled|strengthened|supervised|"
+    # Communication
+    r"addressed|arbitrated|arranged|authored|collaborated|convinced|corresponded|drafted|edited|enlisted|formulated|influenced|interpreted|lectured|mediated|moderated|negotiated|persuaded|promoted|publicized|reconciled|recruited|spoke|translated|wrote|"
+    # Research
+    r"clarified|collected|critiqued|diagnosed|examined|extracted|identified|inspected|interviewed|investigated|summarized|surveyed|systematized|"
+    # Technical
+    r"assembled|built|calculated|computed|designed|devised|engineered|fabricated|maintained|operated|overhauled|programmed|remodeled|repaired|solved|upgraded|"
+    # Teaching
+    r"adapted|advised|coached|communicated|demystified|enabled|encouraged|explained|facilitated|guided|informed|instructed|set\s+goals|stimulated|trained|"
+    # Financial / creative accomplishments
+    r"acted|conceptualized|created|customized|established|fashioned|founded|illustrated|initiated|instituted|integrated|introduced|invented|originated|performed|revitalized|shaped|"
+    # Helping
+    r"assessed|assisted|counseled|demonstrated|educated|expedited|familiarized|motivated|referred|rehabilitated|represented|"
+    # Clerical / detail
+    r"approved|cataloged|classified|compiled|dispatched|generated|implemented|monitored|prepared|processed|purchased|recorded|retrieved|screened|specified|tabulated|validated|"
+    # More accomplishment verbs
+    r"achieved|expanded|pioneered|reduced|resolved|restored|spearheaded|transformed|"
+    # Existing in-product high-signal verbs
+    r"architected|automated|launched|drove|delivered|optimized"
+    r")\b",
     re.IGNORECASE,
 )
 _PRONOUN_RE  = re.compile(r"\b(I|[Mm]e|[Mm]y|[Ww]e|[Oo]ur|[Uu]s)\b")
@@ -1236,9 +1264,24 @@ _EMAIL_RE    = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 _PHONE_RE    = re.compile(r"(\+?\d[\d\s\-().]{7,}\d)")
 _LINKEDIN_RE = re.compile(r"linkedin\.com/in/", re.IGNORECASE)
 _UNNECESSARY = re.compile(
-    r"\b(references available|references furnished|responsible for|"
+    r"\b(references available|references furnished|references upon|"
+    r"list of references|responsible for|"
     r"duties included|objective:|career objective|to obtain a|"
     r"seeking a position)\b",
+    re.IGNORECASE,
+)
+# Passive / weak copula patterns in bullets (career-center “active not passive” guidance).
+_PASSIVE_BULLET_RE = re.compile(
+    r"\b(?:was|were|is|are|been|being)\s+[a-z]{2,22}(?:ed|en)\b",
+    re.IGNORECASE,
+)
+# Experience bullets should not *start* with a date range — dates belong on role headers.
+_BULLET_DATE_LEAD_RE = re.compile(
+    r"^[•\-–*▪▸]\s*(?:"
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[,. ]+\d{4}\b"
+    r"|(?:19|20)\d{2}\s*[-–/]\s*(?:(?:19|20)\d{2}|[Pp]resent|[Cc]urrent)"
+    r"|(?:19|20)\d{2}\b\s*[,–-]\s*(?:19|20)\d{2}\b"
+    r")",
     re.IGNORECASE,
 )
 
@@ -1330,21 +1373,22 @@ def _recruiter_checks(text: str) -> dict:
         "score": wv_score, "passed": wv_score >= 7,
         "detail": (
             "Passive or generic verbs ('helped', 'assisted', 'was responsible for') "
-            "dilute impact. Replace them with strong, specific verbs that show ownership: "
-            "Led, Architected, Reduced, Drove, Launched, Automated."
+            "dilute impact. Replace them with strong, specific verbs from action-verb families "
+            "(e.g., Managed: coordinated/oversaw; Communication: negotiated/presented; "
+            "Technical: designed/engineered/programmed; Results: achieved/reduced/transformed)."
         ),
         "items": weak_hits[:8],
     })
 
     # 3. Action verb at start — only check explicit bullet lines
-    no_action = [b for b in explicit_bullets if not re.match(r"^[•\-–*▪▸]\s*[A-Z][a-z]", b)]
+    no_action = [b for b in explicit_bullets if not _ACTION_VERB_START_RE.match(b)]
     av_score  = max(0, round(10 - len(no_action) * 1.5))
     checks.append({
         "id": "action", "name": "Action Verb Start",
         "score": av_score, "passed": av_score >= 7,
         "detail": (
-            "Every bullet should start with a strong action verb. This signals "
-            "initiative and makes your resume easier to skim."
+            "Every bullet should start with a strong action verb (UMBC-style action list), "
+            "not a noun phrase or weak helper verb. This signals initiative and makes bullets skimmable."
         ),
         "items": no_action[:6],
     })
@@ -1458,7 +1502,34 @@ def _recruiter_checks(text: str) -> dict:
         "items": short_bullets[:6],
     })
 
-    # 11. Role depth — detect under-described work experience entries
+    # 11. Passive / copula-heavy wording in bullets (active voice & ownership)
+    passive_hits = [b for b in bullets if _PASSIVE_BULLET_RE.search(b)]
+    pv_score = max(0, round(10 - len(passive_hits) * 2))
+    checks.append({
+        "id": "passive_voice", "name": "Active Voice & Ownership",
+        "score": pv_score, "passed": pv_score >= 7,
+        "detail": (
+            "Use strong action verbs and active phrasing recruiters can skim in seconds. "
+            "Reword passive 'was/were … done' lines and vague 'responsible for' duty dumps "
+            "into owned outcomes."
+        ),
+        "items": passive_hits[:6],
+    })
+
+    # 12. Dates leading bullet lines (keep dates on headers; open bullets with verbs)
+    date_led = [b for b in explicit_bullets if _BULLET_DATE_LEAD_RE.match(b)]
+    dl_score = max(0, round(10 - len(date_led) * 2.5))
+    checks.append({
+        "id": "date_led_bullet", "name": "Skimmable Bullet Openings",
+        "score": dl_score, "passed": dl_score >= 7,
+        "detail": (
+            "Start bullets with an accomplishment or action, not a calendar. "
+            "Put date ranges on the role or education header line."
+        ),
+        "items": date_led[:6],
+    })
+
+    # 13. Role depth — detect under-described work experience entries
     # Match realistic years (1960-2029) or month+year — avoids phone-number false positives
     _ROLE_HEADER_RE = re.compile(
         r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* (?:19|20)\d{2}"
@@ -1564,34 +1635,76 @@ You are an expert resume reviewer and career coach. Analyze the following resume
 using the principles below and return ONLY a valid JSON object — no markdown, no \
 code fences, no prose outside the JSON.
 
-ANALYSIS PRINCIPLES:
-1. READABILITY: Are bullets short, skimmable, and concise? Penalize bullets longer \
-than 2-3 lines or paragraphs. Does the resume survive a 30-second skim? Detect \
-clutter, inconsistent spacing, poor section organization.
-2. ATS COMPATIBILITY: Detect ATS risks: tables, multi-column layouts, text boxes, \
-headers/footers embedded in content, images, icons, excessive styling. Check \
-whether section headings are standard (Experience, Education, Skills, etc.). \
-Verify contact info (email, phone, LinkedIn) is easy to extract.
-3. JOB MATCH: If a JD is provided, extract key keywords, skills, tools, \
-responsibilities, and qualifications. Measure overlap. Identify missing important \
-keywords. Suggest where to add them naturally without keyword stuffing.
-4. ACHIEVEMENT QUALITY: Are bullets responsibility-oriented or achievement-oriented? \
-Reward bullets that show impact, ownership, outcomes, and business value. Penalize \
-vague duties like "Responsible for managing..." or "Worked on...".
-5. QUANTIFICATION: Detect numbers, percentages, dollar values, time saved, users \
-served, performance improvements, revenue impact, cost savings, scale, rankings. \
-Reward quantified bullets. Flag those that could use metrics.
-6. SECTION STRUCTURE: Detect common sections (Summary, Experience, Education, \
-Skills, Projects, Certifications, Links). Warn if Objective section exists. \
-Recommend Summary only when it adds unique value (e.g., career transition). \
-Check whether the strongest/most relevant sections appear higher.
-7. LANGUAGE QUALITY: Check spelling/grammar/punctuation. Detect passive voice. \
-Detect buzzwords, filler, vague phrases, unnecessary jargon, acronyms. Check \
-tense consistency (past roles = past tense, current role may use present, \
-achievements = past tense).
-8. TECHNICAL BRANDING: GitHub/portfolio/project links present? Clear technical \
-skills section? Programming languages, frameworks, databases, cloud tools, \
-testing tools listed?
+Career-center rubric (score and write `issues[]` strings consistent with this — \
+prioritize what blocks interviews and ATS passes). Primary format reference: UMBC Career Center \
+\"Resume Guidelines\" (https://careers.umbc.edu/wp-content/uploads/sites/221/2015/06/Resume-Guidelines.pdf).
+• UMBC section-by-section checklist (when each appears in RESUME TEXT): HEADER — name; address, city, state, zip, \
+email, and phone as available for a quick contact block. OBJECTIVE — optional; one concise statement tying \
+relevant skills and/or education and career goals to the target position. SUMMARY — optional; \
+two to five bullets highlighting greatest strengths and skills consistent with the rest of the document; \
+UMBC notes Objective and Summary are often optional when space is tight and it may be unnecessary to include both. \
+EDUCATION — university (or main school): name, city, state; degree and major; graduation date; minor and/or \
+certifications line when used; GPA only when explicitly stated and above 3.00; community college line if present \
+with degree or dates attended pattern. CERTIFICATIONS/LICENSES — credential title and date received. \
+RESEARCH, PUBLICATIONS AND PRESENTATIONS — each item: title; place or organization presented; type \
+(poster, paper, oral presentation, etc.); date. RELEVANT PROJECTS — title (class/course project without course number), \
+semester and year; one to two bullets on role, actions, and results; tools or techniques gained; learning \
+outcomes when present. RELEVANT COURSEWORK — optional; bulleted; most applicable major/minor courses for the role; \
+no more than about three lines total. SKILLS — may use subcategories (e.g. Laboratory, Computer, \
+Quantitative/Analytic, Interpersonal) or technical clusters (Programming; Operating Systems; Software; Design skills \
+with proficiency tiers such as Advanced/Proficient/Novice; LANGUAGES with level, e.g. conversational/fluent). \
+PROFESSIONAL EXPERIENCE (or role-focused Experience) — position title, organization, city, state, start–end dates on the \
+header line; two to five action bullets emphasizing achievements, contributions, and tangible outcomes. ADDITIONAL \
+EXPERIENCE — other paid roles: one to three similar bullets each; achievements not only duties. Activities tied to \
+the target role may belong under Professional/Relevant Experience per UMBC. HONORS AND AWARDS — organization, award, \
+date. ACTIVITIES/INTERESTS — role, organization/club, dates; one to three achievement-oriented bullets with action \
+verbs. SERVICE EXPERIENCE/COMMUNITY ENGAGEMENT — organization, role, dates involved. \
+• Undergraduate recency rule (only flag when resume text clearly indicates class year or high-school-era items): \
+first-year students may still list high school work/activities; after second year, work and activities should be \
+college-level only — mention as a sectionStructure issue only when there is explicit tension, not by guessing.
+• Top problem patterns to catch: spelling/grammar/punctuation slips; missing or hard-to-parse \
+contact (email, phone); passive or duty-only wording instead of owned achievements; walls of \
+text or disorganized sections that fail a fast skim; bullets that never show scale, results, \
+or proof of impact.
+• Resume language should be: specific rather than generic; active rather than passive; \
+written to express (clear facts) not to impress with fluff; fact-based — quantify and qualify \
+when truthful; formatted so humans and parsers can scan headings and bullets quickly.
+• Avoid: personal pronouns (I, we, my, our); unexplained heavy abbreviation; long narrative \
+paragraphs where bullets are expected; slang or overly casual phrasing; “references available” \
+or reference lists; opening bullets with a date or date range (dates belong on role headers).
+• Encourage: consistent formatting and emphasis (spacing, bold/italics/caps); strong \
+section headings in sensible order; reverse chronological experience where applicable; \
+no unexplained timeline gaps when the résumé shows them; bullets that lead with strong \
+action verbs and end with outcomes/scale when possible.
+• Improved bullets should use precise action verbs from proven families. Prefer verbs like: \
+Management (administered, coordinated, oversaw, prioritized), Communication (authored, \
+negotiated, promoted, translated), Research (examined, investigated, summarized), \
+Technical (engineered, programmed, upgraded), Teaching (coached, facilitated, trained), \
+Financial/Creative (conceptualized, initiated, integrated), Helping (assessed, counseled, \
+expedited), Clerical/Detail (implemented, monitored, validated), and Accomplishment verbs \
+(achieved, reduced, spearheaded, transformed). Keep tense sensible (prior roles past tense; \
+present role may mix present for ongoing scope and past for shipped wins).
+
+ANALYSIS PRINCIPLES (map to categoryScores and bulletAnalysis):
+1. READABILITY: Short, skimmable bullets; survives a ~30-second skim; white space balance; \
+avoid paragraph-long bullet blobs and cluttered layout signals in text.
+2. ATS COMPATIBILITY: Tables, columns, text boxes, headers/footers, images/icons, odd \
+headings; standard sections (Experience, Education, Skills); contact lines machine-readable.
+3. JOB MATCH: If a JD is provided — keywords, tools, responsibilities overlap; natural \
+keyword placement (no stuffing). If no JD: null scores as specified below.
+4. ACHIEVEMENT QUALITY: Outcomes and ownership vs. vague duties (“responsible for”, \
+“worked on”, task lists without impact). Align with results-focused bullet craft.
+5. QUANTIFICATION: %, $, scale, time saved, users, rankings, before/after — reward \
+truthful metrics; flag truthful opportunities to add numbers.
+6. SECTION STRUCTURE: Sections and order aligned with the UMBC checklist above (header, optional Objective/Summary, \
+education, optional certs/research/projects/coursework, skills, professional vs additional experience, honors, activities, \
+service); enforce bullet-count norms where visible (Summary 2–5; Professional 2–5; Additional 1–3; Activities 1–3; \
+Projects 1–2); flag redundant Objective + Summary when space is tight; coursework over ~3 lines; GPA not per UMBC \
+(only if ≥3.0 and stated); research/pubs missing venue or presentation type when items are listed.
+7. LANGUAGE QUALITY: Spelling/grammar; passive voice and buzzwords; tense; clarity over \
+flowery phrasing; minimal unexplained jargon/acronyms.
+8. TECHNICAL BRANDING: Links (GitHub, portfolio), skills depth, stack clarity for technical \
+profiles.
 
 SCORING GUIDANCE:
 90-100 = Excellent, highly recruiter-friendly and ATS-safe.
@@ -1612,6 +1725,9 @@ CRITICAL RULES:
   keywordScore to null, leave matchedKeywords/missingKeywords empty.
 - Prioritize improvements that increase interview chances most.
 {jd_section}
+
+STRUCTURAL SIGNALS (deterministic pre-scan — verify against RESUME TEXT; do not invent problems):
+{structural_signals}
 
 RESUME TEXT:
 {resume_text}
@@ -1732,7 +1848,7 @@ def _normalize_analysis(raw: dict) -> dict:
         if k not in cs:
             cs[k] = v
     scores = [v for v in cs.values() if isinstance(v, (int, float))]
-    raw.setdefault("overallScore", round(sum(scores) / len(scores)) if scores else 50)
+    base_overall = round(sum(scores) / len(scores)) if scores else 50
     raw.setdefault("summary", "Analysis complete.")
     raw.setdefault("topStrengths", [])
     raw.setdefault("topIssues", [])
@@ -1751,6 +1867,42 @@ def _normalize_analysis(raw: dict) -> dict:
             if isinstance(ba, dict):
                 ba["originalBullet"] = _sanitize_bullet_display(ba.get("originalBullet", ""))
                 ba["improvedBullet"] = _sanitize_bullet_display(ba.get("improvedBullet", ""))
+
+    # Calibrate overall score so it reflects visible weaknesses.
+    # This prevents inflated "90+" overall when there are many weak bullets/issues.
+    weak_bullets = 0
+    if isinstance(bullets, list):
+        weak_bullets = sum(
+            1 for ba in bullets
+            if isinstance(ba, dict) and isinstance(ba.get("score"), (int, float)) and ba.get("score", 0) < 55
+        )
+
+    issues = raw.get("topIssues") or []
+    high_issues = 0
+    medium_issues = 0
+    if isinstance(issues, list):
+        for it in issues:
+            if not isinstance(it, dict):
+                continue
+            sev = str(it.get("severity", "")).lower()
+            if sev == "high":
+                high_issues += 1
+            elif sev == "medium":
+                medium_issues += 1
+
+    min_cat = min(scores) if scores else 50
+    weak_penalty = min(20, weak_bullets * 3)
+    issue_penalty = min(15, high_issues * 4 + medium_issues * 2)
+    # If any category is weak, overall should drop noticeably.
+    floor_penalty = round(max(0, 70 - min_cat) * 0.35)
+    calibrated = max(0, min(100, round(base_overall - weak_penalty - issue_penalty - floor_penalty)))
+
+    # Keep the LLM's intent but avoid implausibly high overall given concrete weaknesses.
+    llm_overall = raw.get("overallScore")
+    if isinstance(llm_overall, (int, float)):
+        raw["overallScore"] = int(min(llm_overall, calibrated))
+    else:
+        raw["overallScore"] = int(calibrated)
     return raw
 
 
@@ -1773,6 +1925,8 @@ def _regex_to_comprehensive(struct: dict, jd: str) -> dict:
     leng   = _s("length")
     rdepth = _s("role_depth")
     unnec  = _s("unnecessary")
+    passive = _s("passive_voice")
+    dlead = _s("date_led_bullet")
 
     overall = struct.get("overall", 60)
     issues = []
@@ -1795,8 +1949,8 @@ def _regex_to_comprehensive(struct: dict, jd: str) -> dict:
             "jobMatch":          None,
             "achievementQuality": round((weak + action + rdepth) / 3),
             "quantification":    quant,
-            "sectionStructure":  round((dates + unnec) / 2),
-            "languageQuality":   round((pron + rep) / 2),
+            "sectionStructure":  round((dates + unnec + dlead) / 3),
+            "languageQuality":   round((pron + rep + passive) / 3),
             "technicalBranding": 50,
         },
         "summary": (
@@ -1817,6 +1971,12 @@ def _regex_to_comprehensive(struct: dict, jd: str) -> dict:
             "Replace weak verbs (helped, assisted, worked on) with strong action verbs.",
             "Ensure every job entry has at least 3 achievement-focused bullets.",
             "Verify contact section includes email, phone, and LinkedIn URL.",
+            "Make sure the resume is formatted correctly with the correct spacing and alignment.",
+            "Use a professional font like Arial, Times New Roman, or Calibri for the resume.",
+            "Fix spelling/grammar and verify email + phone (and LinkedIn) are obvious in the header.",
+            "Replace passive or duty-only lines with action-verb openings and measurable outcomes where truthful.",
+            "Tighten layout for a 30-second skim: short bullets, dates on role lines, verbs first.",
+            "Drop references blurb, unexplained abbreviations, and narrative blobs — use crisp bullets.",
         ],
     }
 
@@ -1826,6 +1986,20 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
     # Structural checks (fast, always run)
     struct = _recruiter_checks(text)
 
+    # Summarize failed structural checks for the LLM (align narrative with deterministic scan)
+    sig_lines: list[str] = []
+    for c in struct.get("checks", []):
+        if c.get("passed"):
+            continue
+        samp = "; ".join(str(x) for x in (c.get("items") or [])[:2])
+        title = c.get("name", "Check")
+        sig_lines.append(f"- {title}: {samp}" if samp else f"- {title}")
+    struct_summary = (
+        "\n".join(sig_lines[:14])
+        if sig_lines
+        else "(All automated structural checks passed.)"
+    )
+
     # Build LLM prompt
     jd_section = (
         f"\nJOB DESCRIPTION (analyze keyword match against this):\n{jd[:3000]}"
@@ -1834,6 +2008,7 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
     )
     prompt = _ANALYSIS_PROMPT.format(
         jd_section=jd_section,
+        structural_signals=struct_summary,
         resume_text=text[:6000],
     )
 
@@ -1940,7 +2115,9 @@ async def api_rewrite_role(request: Request):
         f"Current bullets:\n{bullets_text}\n\n"
         f"Instructions:\n"
         f"- Write exactly 3-4 strong bullet points\n"
-        f"- Each bullet MUST start with a powerful past-tense action verb\n"
+        f"- Each bullet MUST start with a powerful past-tense action verb "
+        f"(e.g., administered, coordinated, authored, negotiated, investigated, engineered, "
+        f"programmed, coached, trained, initiated, implemented, monitored, achieved, reduced, spearheaded)\n"
         f"- Each bullet MUST include a quantified result (%, $, time saved, team size, etc.) "
         f"— if the original has no numbers, invent plausible but conservative estimates\n"
         f"- Remove weak verbs (helped, assisted, worked on, was responsible for)\n"

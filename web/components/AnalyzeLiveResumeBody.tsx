@@ -55,7 +55,7 @@ function looksLikeSectionHeading(line: string, strict = false): boolean {
   return false;
 }
 
-function normalizeForMatch(s: string): string {
+export function normalizeForMatch(s: string): string {
   return s
     .replace(/•/g, "•")
     .replace(/^\s*[•*·\-–—]+\s*/u, "")

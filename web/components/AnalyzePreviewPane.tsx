@@ -30,9 +30,12 @@ interface Props {
   selectedBulletIndex?: number | null;
   onBulletLinkedSelect?: (index: number) => void;
   presentationOnly?: boolean;
-  onOpenBuilder?: () => void;
+  onOpenBuilder?: (opts?: { referenceFolder?: string }) => void;
   builderReady?: boolean;
   builderOpening?: boolean;
+  /** Original upload as blob URL (PDF upload flow). */
+  sourcePdfUrl?: string | null;
+  sourcePdfFileName?: string | null;
 }
 
 /**
@@ -52,6 +55,8 @@ export default function AnalyzePreviewPane({
   onOpenBuilder,
   builderReady,
   builderOpening,
+  sourcePdfUrl = null,
+  sourcePdfFileName = null,
 }: Props) {
   const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
   const resumeHeaderStore = useResumeAnalyzeStore((s) => s.resumeHeader);
@@ -96,6 +101,8 @@ export default function AnalyzePreviewPane({
       builderReady={builderReady}
       builderOpening={builderOpening}
       pulseBulletIndex={pulseBulletIndex}
+      sourcePdfUrl={sourcePdfUrl}
+      sourcePdfFileName={sourcePdfFileName}
     />
   );
 }

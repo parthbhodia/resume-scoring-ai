@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import AnalyzeLiveResumeBody, {
   lineLooksLikeStandaloneSectionHeading,
@@ -11,6 +12,19 @@ import {
   bulletMatchesAnalysisCategory,
 } from "@/lib/analysisCategoryMatch";
 import { exportResumeAsPdf } from "@/lib/exportResumeAsPdf";
+import { distinctStyleTemplates } from "@/lib/resumeTemplates";
+
+const PdfViewerWithHighlights = dynamic(
+  () => import("@/components/PdfViewerWithHighlights"),
+  {
+    ssr: false,
+    loading: () => (
+      <div style={{ padding: 32, textAlign: "center", color: "#78909c", fontSize: 13 }}>
+        Loading PDF viewer…
+      </div>
+    ),
+  },
+);
 
 // Re-export for legacy imports from this file path
 export { CATEGORY_ISSUE_KEYWORDS } from "@/lib/analysisCategoryMatch";
@@ -43,8 +57,8 @@ interface Props {
   selectedBulletIndex?: number | null;
   /** Clicking a bullet syncs sidebar category */
   onBulletLinkedSelect?: (index: number) => void;
-  /** Open full editor / builder (Résumé Builder path from Analyze). */
-  onOpenBuilder?: () => void;
+  /** Open Résumé Builder; optional `referenceFolder` selects LaTeX layout (see resumeTemplates). */
+  onOpenBuilder?: (opts?: { referenceFolder?: string }) => void;
   builderReady?: boolean;
   builderOpening?: boolean;
   /** Full plain text from the PDF / TeX — same extract the analyzer used. */
@@ -55,6 +69,9 @@ interface Props {
   presentationOnly?: boolean;
   /** Brief highlight on the mirrored bullet after an override syncs from the left. */
   pulseBulletIndex?: number | null;
+  /** Present after a successful Analyze PDF upload — original file as blob URL. */
+  sourcePdfUrl?: string | null;
+  sourcePdfFileName?: string | null;
 }
 
 function scoreColor(score: number): string {
@@ -191,10 +208,17 @@ export default function AnnotatedResumePanel({
   builderOpening = false,
   presentationOnly = false,
   pulseBulletIndex = null,
+  sourcePdfUrl = null,
+  sourcePdfFileName = null,
 }: Props) {
+  const styleTemplates = useMemo(() => distinctStyleTemplates(), []);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [pdfExporting, setPdfExporting] = useState(false);
+  const [viewMode, setViewMode] = useState<"pdf" | "live">("live");
+  const [selectedReferenceFolder, setSelectedReferenceFolder] = useState<string>(
+    styleTemplates[0]?.referenceFolder ?? "Adobe_FullStack",
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
   const [mirrorBox, setMirrorBox] = useState<{
@@ -276,6 +300,11 @@ export default function AnnotatedResumePanel({
         : "none";
   const useLiveDoc = extractKind !== "none";
 
+  useEffect(() => {
+    if (sourcePdfUrl) setViewMode("pdf");
+    else setViewMode("live");
+  }, [sourcePdfUrl]);
+
   const flaggedCount = activeCategory
     ? bulletAnalysis.filter(b => bulletMatchesAnalysisCategory(b, activeCategory)).length
     : 0;
@@ -299,10 +328,19 @@ export default function AnnotatedResumePanel({
     }
   }, [pdfExporting, useLiveDoc, effectiveExtracted, bulletAnalysis, previewLineOverrides, resumeHeader]);
 
+  const openBuilderForAtsPdf = useCallback(() => {
+    if (!builderReady || !onOpenBuilder || builderOpening) return;
+    onOpenBuilder({ referenceFolder: selectedReferenceFolder });
+  }, [builderReady, onOpenBuilder, builderOpening, selectedReferenceFolder]);
+
   /** Maps `data-bullet-idx` on the preview page to a thick, score-colored frame (split / presentation column). */
   const updateMirrorPosition = useCallback(() => {
     if (!presentationOnly) {
       setMirrorBox((b) => (b.opacity === 0 ? b : { ...b, opacity: 0 }));
+      return;
+    }
+    if (sourcePdfUrl && viewMode === "pdf") {
+      setMirrorBox((b) => ({ ...b, opacity: 0 }));
       return;
     }
     const idx = selectedBulletIndex;
@@ -325,7 +363,7 @@ export default function AnnotatedResumePanel({
     const score = bullet?.score ?? 60;
     const tone = mirrorToneStyles(score);
     setMirrorBox({ top, height, opacity: 1, ...tone });
-  }, [presentationOnly, selectedBulletIndex, bulletAnalysis, effectiveExtracted, previewLineOverrides]);
+  }, [presentationOnly, selectedBulletIndex, bulletAnalysis, effectiveExtracted, previewLineOverrides, sourcePdfUrl, viewMode]);
 
   useLayoutEffect(() => {
     updateMirrorPosition();
@@ -357,7 +395,7 @@ export default function AnnotatedResumePanel({
 
   // Scroll first highlighted bullet when category changes (sidebar drives preview).
   useEffect(() => {
-    if (!activeCategory) return;
+    if (!activeCategory || (sourcePdfUrl && viewMode === "pdf")) return;
     const idx = bulletAnalysis.findIndex(b =>
       bulletMatchesAnalysisCategory(b, activeCategory)
     );
@@ -368,11 +406,11 @@ export default function AnnotatedResumePanel({
         ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 60);
     return () => window.clearTimeout(id);
-  }, [activeCategory, bulletAnalysis]);
+  }, [activeCategory, bulletAnalysis, sourcePdfUrl, viewMode]);
 
   // Scroll selected bullet into view (preview drives sidebar).
   useEffect(() => {
-    if (selectedBulletIndex == null) return;
+    if (selectedBulletIndex == null || (sourcePdfUrl && viewMode === "pdf")) return;
     const idx = selectedBulletIndex;
     const id = window.setTimeout(() => {
       scrollRef.current
@@ -380,7 +418,7 @@ export default function AnnotatedResumePanel({
         ?.scrollIntoView({ behavior: "smooth", block: presentationOnly ? "center" : "nearest" });
     }, 40);
     return () => window.clearTimeout(id);
-  }, [selectedBulletIndex, presentationOnly]);
+  }, [selectedBulletIndex, presentationOnly, sourcePdfUrl, viewMode]);
 
   return (
     <div
@@ -420,12 +458,13 @@ export default function AnnotatedResumePanel({
         alignItems: "center",
         justifyContent: "space-between",
       }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "1 1 260px", minWidth: 0 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
           <button
             type="button"
             disabled={!builderReady || builderOpening || !onOpenBuilder}
             onClick={e => { e.preventDefault(); onOpenBuilder?.(); }}
-            title="Open Résumé Builder to edit structured bullets"
+            title="Open Résumé Builder — pick a LaTeX layout and tailor to a job"
             style={{
               fontSize: 11,
               fontWeight: 700,
@@ -441,7 +480,7 @@ export default function AnnotatedResumePanel({
               boxShadow: builderReady ? "0 2px 0 rgba(214,93,41,0.35)" : "none",
             }}
           >
-            {builderOpening ? "Opening…" : "Résumé rewriter"}
+            {builderOpening ? "Opening…" : "Résumé builder"}
           </button>
           <button
             type="button"
@@ -466,6 +505,47 @@ export default function AnnotatedResumePanel({
             <span style={{ fontSize: 12 }}>✨</span>
             Magic write
           </button>
+          </div>
+          {builderReady && onOpenBuilder ? (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+              <span style={{
+                fontSize: 9.5,
+                fontWeight: 800,
+                color: "#78909c",
+                textTransform: "uppercase",
+                letterSpacing: 0.06,
+                marginRight: 2,
+              }}>
+                LaTeX layout
+              </span>
+              {styleTemplates.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  disabled={builderOpening}
+                  title={t.description}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setSelectedReferenceFolder(t.referenceFolder);
+                    onOpenBuilder({ referenceFolder: t.referenceFolder });
+                  }}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    border: "1px solid #c5d0e0",
+                    background: "var(--surface)",
+                    color: "#455a64",
+                    cursor: builderOpening ? "wait" : "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <button
           type="button"
@@ -509,20 +589,50 @@ export default function AnnotatedResumePanel({
           gap: 10,
           flexWrap: "wrap",
         }}>
-          <div style={{
-            fontSize: 10,
-            fontWeight: 800,
-            color: "#546e7a",
-            letterSpacing: 0.56,
-            textTransform: "uppercase",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <path d="M3 14V3a1 1 0 011-1h8a1 1 0 011 1v11l-2.5-1.5L8 14l-2.5-1.5L3 14z" stroke="#546e7a" strokeWidth="1.35" strokeLinejoin="round"/>
-            </svg>
-            {presentationOnly ? "Résumé preview" : useLiveDoc ? "Live résumé" : "Analyzed lines"}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {sourcePdfUrl ? (
+              <div style={{ display: "flex", gap: 2, background: "#eef2f7", borderRadius: 8, padding: 2 }}>
+                {(["pdf", "live"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setViewMode(mode)}
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: 0.2,
+                      padding: "4px 12px",
+                      borderRadius: 6,
+                      border: "none",
+                      background: viewMode === mode ? "#fff" : "transparent",
+                      color: viewMode === mode ? "#1a237e" : "#78909c",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      boxShadow: viewMode === mode ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {mode === "pdf" ? "PDF" : "Edit"}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: "#546e7a",
+                letterSpacing: 0.56,
+                textTransform: "uppercase",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path d="M3 14V3a1 1 0 011-1h8a1 1 0 011 1v11l-2.5-1.5L8 14l-2.5-1.5L3 14z" stroke="#546e7a" strokeWidth="1.35" strokeLinejoin="round"/>
+                </svg>
+                {presentationOnly ? "Résumé" : useLiveDoc ? "Live résumé" : "Analyzed lines"}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginLeft: "auto" }}>
           {activeCategory ? (
@@ -544,34 +654,193 @@ export default function AnnotatedResumePanel({
               {totalCount} lines scored
             </div>
           )}
-          {useLiveDoc && (
-            <button
-              type="button"
-              onClick={onSavePreviewPdf}
-              disabled={pdfExporting}
-              title="Exports what you see here as a plain PDF (highlights removed). Uses preview text—including session line swaps—not your untouched upload. For full-structure edits export from Résumé Builder."
-              aria-label="Download Resume from annotated preview content"
+          {useLiveDoc && (!sourcePdfUrl || viewMode === "live") ? (
+            <div
               style={{
-                fontSize: 10.5,
-                fontWeight: 700,
-                letterSpacing: 0.12,
-                padding: "6px 12px",
-                borderRadius: 8,
-                border: "none",
-                background: pdfExporting ? "#c5cee0" : "linear-gradient(135deg,#3949ab,#1a237e)",
-                color: "#fff",
-                cursor: pdfExporting ? "wait" : "pointer",
-                fontFamily: "inherit",
-                flexShrink: 0,
-                whiteSpace: "nowrap",
-                boxShadow: pdfExporting ? "none" : "0 2px 6px rgba(26,35,126,0.25)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                justifyContent: "flex-end",
               }}
             >
-              {pdfExporting ? "Downloading…" : "Download Resume"}
-            </button>
-          )}
+              {sourcePdfUrl ? (
+                <a
+                  href={sourcePdfUrl}
+                  download={sourcePdfFileName ?? "resume.pdf"}
+                  title="Your uploaded file — identical formatting to what you analyzed."
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    letterSpacing: 0.08,
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #c5cee0",
+                    background: "var(--surface)",
+                    color: "#3949ab",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                    textDecoration: "none",
+                  }}
+                >
+                  Original PDF
+                </a>
+              ) : null}
+              {builderReady && onOpenBuilder ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={openBuilderForAtsPdf}
+                    disabled={builderOpening}
+                    title="Open Résumé Builder to generate and download ATS PDF with your selected LaTeX template."
+                    aria-label="Open resume builder for template-based ATS PDF download"
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: 0.12,
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: builderOpening ? "#c5cee0" : "linear-gradient(135deg,#3949ab,#1a237e)",
+                      color: "#fff",
+                      cursor: builderOpening ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
+                      boxShadow: builderOpening ? "none" : "0 2px 6px rgba(26,35,126,0.25)",
+                    }}
+                  >
+                    {builderOpening ? "Opening Builder…" : "Download ATS PDF"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSavePreviewPdf}
+                    disabled={pdfExporting}
+                    title="Quick export from this preview text. Useful for drafts; formatting may differ from LaTeX template output."
+                    aria-label="Quick export preview PDF"
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: 0.08,
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c5cee0",
+                      background: "var(--surface)",
+                      color: "#3949ab",
+                      cursor: pdfExporting ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {pdfExporting ? "Exporting…" : "Quick export"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onSavePreviewPdf}
+                  disabled={pdfExporting}
+                  title="Builds a new PDF from the text in this panel (and your line edits). Layout and fonts differ from a scan or designer PDF."
+                  aria-label="Export a newly formatted PDF from edited résumé text"
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    letterSpacing: 0.12,
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: pdfExporting ? "#c5cee0" : "linear-gradient(135deg,#3949ab,#1a237e)",
+                    color: "#fff",
+                    cursor: pdfExporting ? "wait" : "pointer",
+                    fontFamily: "inherit",
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                    boxShadow: pdfExporting ? "none" : "0 2px 6px rgba(26,35,126,0.25)",
+                  }}
+                >
+                  {pdfExporting ? "Exporting…" : "Export PDF"}
+                </button>
+              )}
+            </div>
+          ) : null}
           </div>
         </div>
+        {presentationOnly && builderReady && onOpenBuilder ? (
+          <div
+            style={{
+              padding: "8px 16px 10px",
+              borderTop: "1px solid var(--border)",
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 8,
+              background: "var(--surface2)",
+            }}
+          >
+            <span style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "#546e7a",
+              textTransform: "uppercase",
+              letterSpacing: 0.06,
+              flexShrink: 0,
+            }}>
+              Use different template
+            </span>
+            {styleTemplates.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                disabled={builderOpening}
+                title={t.description}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setSelectedReferenceFolder(t.referenceFolder);
+                  onOpenBuilder({ referenceFolder: t.referenceFolder });
+                }}
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                  padding: "5px 11px",
+                  borderRadius: 999,
+                  border: "1px solid #c5cee0",
+                  background: "var(--surface)",
+                  color: "#3949ab",
+                  cursor: builderOpening ? "wait" : "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              disabled={builderOpening}
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenBuilder();
+              }}
+              title="Open Résumé Builder — change template, tailor to a job, get LaTeX PDF"
+              style={{
+                marginLeft: "auto",
+                fontSize: 10.5,
+                fontWeight: 700,
+                padding: "5px 12px",
+                borderRadius: 8,
+                border: "none",
+                background: builderOpening ? "#ccc" : "linear-gradient(180deg, #ff9966 0%, #fb7c44 100%)",
+                color: "#fff",
+                cursor: builderOpening ? "wait" : "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {builderOpening ? "Opening…" : "Résumé builder"}
+            </button>
+          </div>
+        ) : null}
         {extractKind === "synthetic" && !presentationOnly ? (
           <div
             style={{
@@ -621,8 +890,8 @@ export default function AnnotatedResumePanel({
         </div>
       )}
 
-      {/* Legend */}
-      {!activeCategory && (
+      {/* Legend — hidden on PDF tab (viewer has its own legend + download) */}
+      {!activeCategory && !(sourcePdfUrl && viewMode === "pdf") && (
         <div style={{
           padding: "7px 14px",
           borderBottom: "1px solid var(--border)",
@@ -665,8 +934,30 @@ export default function AnnotatedResumePanel({
         </div>
       )}
 
-      {/* Document card + bullets */}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "14px 16px 20px" }}>
+      {/* PDF viewer — shown when in "pdf" mode and a blob URL is available */}
+      {sourcePdfUrl && viewMode === "pdf" && (
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <PdfViewerWithHighlights
+            pdfBlobUrl={sourcePdfUrl}
+            bulletAnalysis={bulletAnalysis}
+            filename={sourcePdfFileName ?? "resume.pdf"}
+          />
+        </div>
+      )}
+
+      {/* Document card + bullets — shown in "live" mode or when no PDF available */}
+      {(!sourcePdfUrl || viewMode === "live") && (
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          padding: "14px 16px 20px",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         <div
           ref={paperRef}
           className="az-resume-paper"
@@ -886,6 +1177,7 @@ export default function AnnotatedResumePanel({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

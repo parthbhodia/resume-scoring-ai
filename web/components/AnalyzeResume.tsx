@@ -205,6 +205,9 @@ export default function AnalyzeResume() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const lastPdfRef = useRef<File | null>(null);
+  const sourcePdfBlobUrlRef = useRef<string | null>(null);
+  const [sourcePdfUrl, setSourcePdfUrl] = useState<string | null>(null);
+  const [sourcePdfFileName, setSourcePdfFileName] = useState<string | null>(null);
   const [dragging, setDragging]         = useState(false);
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState<string | null>(null);
@@ -243,6 +246,28 @@ export default function AnalyzeResume() {
         : null,
     [result],
   );
+
+  const bindSourcePdf = useCallback((file: File | null) => {
+    if (sourcePdfBlobUrlRef.current) {
+      URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
+      sourcePdfBlobUrlRef.current = null;
+    }
+    if (!file) {
+      setSourcePdfUrl(null);
+      setSourcePdfFileName(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    sourcePdfBlobUrlRef.current = url;
+    setSourcePdfUrl(url);
+    setSourcePdfFileName(file.name);
+  }, []);
+
+  useEffect(() => () => {
+    if (sourcePdfBlobUrlRef.current) {
+      URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
+    }
+  }, []);
 
   // Load user + history on mount: Supabase first, localStorage fallback
   useEffect(() => {
@@ -325,6 +350,7 @@ export default function AnalyzeResume() {
     setBuilderLinkReady(false);
     setLinkedFolder(null);
     lastPdfRef.current = file;
+    bindSourcePdf(null);
     const fd = new FormData();
     fd.append("file", file);
     if (jd.trim()) fd.append("jd", jd);
@@ -335,14 +361,16 @@ export default function AnalyzeResume() {
       const res = mergeAnalyzeApiJson(json as Record<string, unknown>) as unknown as AnalysisResult;
       setResult(res);
       setBuilderLinkReady(true);
+      bindSourcePdf(file);
       persistResult(file.name.replace(/\.pdf$/i, ""), res);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
       lastPdfRef.current = null;
+      bindSourcePdf(null);
     } finally {
       setLoading(false);
     }
-  }, [jd, persistResult]);
+  }, [jd, persistResult, bindSourcePdf]);
 
   const runFolder = useCallback(async (folder: string) => {
     setLoading(true);
@@ -357,6 +385,7 @@ export default function AnalyzeResume() {
     setBuilderLinkReady(false);
     setLinkedFolder(null);
     lastPdfRef.current = null;
+    bindSourcePdf(null);
     try {
       const supabase = getSupabaseClient();
       const { data: { user } } = await supabase.auth.getUser();
@@ -377,7 +406,7 @@ export default function AnalyzeResume() {
     } finally {
       setLoading(false);
     }
-  }, [jd, persistResult]);
+  }, [jd, persistResult, bindSourcePdf]);
 
   // Restore a cached result instantly — no re-analysis needed
   const restoreRecord = useCallback((rec: AnalyzeRecord) => {
@@ -390,7 +419,8 @@ export default function AnalyzeResume() {
     setBuilderLinkReady(false);
     setLinkedFolder(null);
     lastPdfRef.current = null;
-  }, []);
+    bindSourcePdf(null);
+  }, [bindSourcePdf]);
 
   const deleteRecord = useCallback(async (id: string) => {
     // Optimistic remove
@@ -403,17 +433,29 @@ export default function AnalyzeResume() {
     }
   }, [userId, azHistory]);
 
-  const continueInBuilder = useCallback(async () => {
+  const continueInBuilder = useCallback(async (opts?: { referenceFolder?: string }) => {
     if (!builderLinkReady) return;
     setBuilderOpening(true);
     setError(null);
     try {
+      try {
+        if (opts?.referenceFolder) {
+          sessionStorage.setItem("rn_builder_style_ref", opts.referenceFolder);
+        } else {
+          sessionStorage.removeItem("rn_builder_style_ref");
+        }
+      } catch { /* quota */ }
+
+      const styleQ = opts?.referenceFolder
+        ? `&styleRef=${encodeURIComponent(opts.referenceFolder)}`
+        : "";
+
       if (linkedFolder) {
         try {
           if (jd.trim()) sessionStorage.setItem("rn_builder_jd_prefill", jd.trim());
           else sessionStorage.removeItem("rn_builder_jd_prefill");
         } catch { /* quota */ }
-        router.push(`/?view=builder&base=${encodeURIComponent(linkedFolder)}`);
+        router.push(`/?view=builder&base=${encodeURIComponent(linkedFolder)}${styleQ}`);
         return;
       }
       const file = lastPdfRef.current;
@@ -432,7 +474,7 @@ export default function AnalyzeResume() {
         else sessionStorage.removeItem("rn_builder_jd_prefill");
         sessionStorage.setItem("rn_builder_from_analyze", "1");
       } catch { /* quota */ }
-      router.push("/?view=builder&fromAnalyze=1");
+      router.push(`/?view=builder&fromAnalyze=1${styleQ}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not open Résumé Builder.");
     } finally {
@@ -1181,6 +1223,7 @@ export default function AnalyzeResume() {
                     setResult(null); setError(null); setExpandedBullets({});
                     setActiveCategory(null); setSelectedBulletIndex(null);
                     setBuilderLinkReady(false); setLinkedFolder(null);                     lastPdfRef.current = null;
+                    bindSourcePdf(null);
                     setRewriteEdits({});
                   }}
                   style={{
@@ -1378,6 +1421,8 @@ export default function AnalyzeResume() {
               onOpenBuilder={continueInBuilder}
               builderReady={builderLinkReady}
               builderOpening={builderOpening}
+              sourcePdfUrl={sourcePdfUrl}
+              sourcePdfFileName={sourcePdfFileName}
             />
             </div>
           </div>
@@ -2366,6 +2411,7 @@ export default function AnalyzeResume() {
                       setResult(null); setError(null); setExpandedBullets({}); setJd(""); setHistoryOpen(false);
                       setActiveCategory(null); setSelectedBulletIndex(null);
                       setBuilderLinkReady(false); setLinkedFolder(null);                       lastPdfRef.current = null;
+                      bindSourcePdf(null);
                       setRewriteEdits({});
                     }}
                     style={{
@@ -2408,6 +2454,8 @@ export default function AnalyzeResume() {
             onOpenBuilder={continueInBuilder}
             builderReady={builderLinkReady}
             builderOpening={builderOpening}
+            sourcePdfUrl={sourcePdfUrl}
+            sourcePdfFileName={sourcePdfFileName}
           />
         </div>
       )}

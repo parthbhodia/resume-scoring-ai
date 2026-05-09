@@ -1825,18 +1825,18 @@ def generate_latex_resume(
         company:          Target company name
         role:             Target role title
         job_description:  Full JD text
-        reference_folder: Style reference folder (overridden by base_folder if set)
+        reference_folder: LaTeX style reference folder under LIBRARY_ROOT (wins over base_folder for macros/layout)
         compile_pdf:      Whether to run pdflatex
         model:            Gemini model ID
-        base_folder:      Existing resume folder to diff against and use as content base
+        base_folder:      Existing resume folder — content body to tailor; style comes from reference_folder when set
     """
     t_start = time.time()
     logger.info("=" * 60)
     logger.info(f"START  |  {role} @ {company}")
     logger.info(f"Model  |  {model}")
 
-    # Style reference: prefer base_folder, then explicit reference_folder, then auto-match by company, then fallback
-    ref_folder = base_folder or reference_folder or _find_company_reference(company) or "Adobe_FullStack"
+    # Style reference: explicit template first, then reuse base resume's .tex, then company heuristic, then default
+    ref_folder = reference_folder or base_folder or _find_company_reference(company) or "Adobe_FullStack"
     logger.info(f"Style reference  |  {ref_folder}")
     reference_tex = get_resume_tex(ref_folder) or ""
 
@@ -1860,20 +1860,42 @@ def generate_latex_resume(
         "3. FACTS ONLY: You may rephrase and reorder existing bullet points to match job keywords, but every single claim must trace back to an explicit fact in the CANDIDATE PROFILE. "
         "Do not add achievements, tools, or responsibilities that are not in the profile.\n"
         "4. VERIFICATION: Before writing each bullet point, ask yourself: 'Is this employer name / metric / claim verbatim in the CANDIDATE PROFILE?' If no, omit it.\n"
-        "5. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
-        "   \\resumeItemListStart, \\resumeItem, \\resumeHeadingListStart, etc.\n"
+        "5. Use the exact LaTeX macro vocabulary from the REFERENCE only. Examples: "
+        "\\resumeSubheading, \\resumeProjectHeading, \\resumeItem, \\resumeSubHeadingListStart, \\resumeItemListStart "
+        "OR (other templates) \\resumeQuadHeading, \\resumeTrioHeading — use whichever commands actually appear in the "
+        "reference snippet. Never mix incompatible macro sets.\n"
         "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
         "7. To bold the most relevant skills and technologies for this job, use the LaTeX command \\textbf{...} ONLY. "
         "Never use Markdown bold syntax like **word** — pdflatex prints those asterisks literally instead of rendering bold text.\n"
         "8. EDUCATION SECTION LOCK: Reproduce the EDUCATION section EXACTLY as it appears in the CANDIDATE PROFILE. "
         "Do NOT rephrase, reorder, abbreviate, change degree names, university names, dates, or locations. "
         "Same institutions, same degree names, same dates, same order — verbatim copy.\n"
-        "9. PROFESSIONAL SUMMARY: Begin the body with a \\section{Summary} containing a tailored 2-3 sentence "
-        "professional summary that pitches the candidate for THIS specific role. Write it in resume voice "
-        "(no 'I' pronouns — start with 'Full-stack engineer with…' or '6+ years building…' style). "
-        "Highlight the strongest credentials from the CANDIDATE PROFILE that map to the JD's top requirements. "
-        "Place this BEFORE the EXPERIENCE section.\n"
-        "10. Keep to 1 page — summary + all experience entries + 2 most relevant projects + education + skills"
+        "GPA in education: include only if explicitly stated in the CANDIDATE PROFILE and the profile is consistent "
+        "with UMBC guidance (typically list GPA when 3.00 or above).\n"
+        "9. FORMAT (UMBC Career Center Resume Guidelines — "
+        "https://careers.umbc.edu/wp-content/uploads/sites/221/2015/06/Resume-Guidelines.pdf): "
+        "Mirror section titles and content shape when profile facts exist. Header/contact per REFERENCE (name; "
+        "address, city, state, zip, email, phone as in profile). Optional \\section{Objective} — one concise "
+        "statement linking skills/education/career goals to the target role. Optional \\section{Summary} — "
+        "two to five \\resumeItem bullets of greatest strengths from the profile (UMBC: Objective and Summary "
+        "are optional when space is tight; do not require both; avoid redundant long Objective plus long Summary). "
+        "\\section{Education} verbatim per rule 8; GPA line only if explicitly in profile and above 3.00; "
+        "community-college line only if in profile. Certifications/Licenses section or lines only from profile "
+        "(title + date). Research, Publications and Presentations: for each item include title; venue or organization; "
+        "type (poster, paper, oral, etc.); date — profile facts only. Relevant Projects: heading with project/class title "
+        "without course number plus semester/year; one to two \\resumeItem bullets per project (role, actions, results; "
+        "tools/techniques; learning) from profile only. Relevant Coursework: optional; bullets; at most about three lines; "
+        "courses relevant to this role. Skills: \\section{Skills} with subcategories — e.g. Laboratory / Computer / "
+        "Quantitative/Analytic / Interpersonal, OR Technical Skills with Programming / Operating Systems / Software / "
+        "Design (Advanced/Proficient/Novice tiers when appropriate) and LANGUAGES with proficiency level. "
+        "Professional Experience (or job-focused Experience): each role — position, organization, city, state, dates on "
+        "header; two to five achievement bullets; never start bullets with a date range. Additional Experience: "
+        "one to three bullets per role for less-targeted paid work when profile distinguishes it; role-aligned activities "
+        "may stay under Professional Experience. Honors and Awards; Activities/Interests (one to three achievement bullets "
+        "per activity); Service/Community Engagement — only if in profile.\n"
+        "10. PLACEMENT: Put \\section{Objective} or \\section{Summary} immediately after the contact block and before "
+        "experience sections when used. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
+        "11. Keep to 1 page when possible — optional lead section + professional + additional (if any) + projects + education + skills + optional tails"
     )
 
     base_section = ""
@@ -1890,7 +1912,7 @@ def generate_latex_resume(
         f"---\nCANDIDATE PROFILE (USE ONLY THESE FACTS):\n\n"
         f"{_get_candidate_profile_block()}"
         f"{base_section}"
-        f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:2500]}\n\n"
+        f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:6500]}\n\n"
         f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
         f" Tailor bullet points to emphasize what matters most for {role} at {company}."
     )
@@ -2020,20 +2042,42 @@ def _build_prompts(company, role, job_description, base_body, reference_tex, can
         "3. FACTS ONLY: You may rephrase and reorder existing bullet points to match job keywords, but every single claim must trace back to an explicit fact in the CANDIDATE PROFILE. "
         "Do not add achievements, tools, or responsibilities that are not in the profile.\n"
         "4. VERIFICATION: Before writing each bullet point, ask yourself: 'Is this employer name / metric / claim verbatim in the CANDIDATE PROFILE?' If no, omit it.\n"
-        "5. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
-        "   \\resumeItemListStart, \\resumeItem, \\resumeHeadingListStart, etc.\n"
+        "5. Use the exact LaTeX macro vocabulary from the REFERENCE only. Examples: "
+        "\\resumeSubheading, \\resumeProjectHeading, \\resumeItem, \\resumeSubHeadingListStart, \\resumeItemListStart "
+        "OR (other templates) \\resumeQuadHeading, \\resumeTrioHeading — use whichever commands actually appear in the "
+        "reference snippet. Never mix incompatible macro sets.\n"
         "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
         "7. To bold the most relevant skills and technologies for this job, use the LaTeX command \\textbf{...} ONLY. "
         "Never use Markdown bold syntax like **word** — pdflatex prints those asterisks literally instead of rendering bold text.\n"
         "8. EDUCATION SECTION LOCK: Reproduce the EDUCATION section EXACTLY as it appears in the CANDIDATE PROFILE. "
         "Do NOT rephrase, reorder, abbreviate, change degree names, university names, dates, or locations. "
         "Same institutions, same degree names, same dates, same order — verbatim copy.\n"
-        "9. PROFESSIONAL SUMMARY: Begin the body with a \\section{Summary} containing a tailored 2-3 sentence "
-        "professional summary that pitches the candidate for THIS specific role. Write it in resume voice "
-        "(no 'I' pronouns — start with 'Full-stack engineer with…' or '6+ years building…' style). "
-        "Highlight the strongest credentials from the CANDIDATE PROFILE that map to the JD's top requirements. "
-        "Place this BEFORE the EXPERIENCE section.\n"
-        "10. Keep to 1 page — summary + all experience entries + 2 most relevant projects + education + skills"
+        "GPA in education: include only if explicitly stated in the CANDIDATE PROFILE and the profile is consistent "
+        "with UMBC guidance (typically list GPA when 3.00 or above).\n"
+        "9. FORMAT (UMBC Career Center Resume Guidelines — "
+        "https://careers.umbc.edu/wp-content/uploads/sites/221/2015/06/Resume-Guidelines.pdf): "
+        "Mirror section titles and content shape when profile facts exist. Header/contact per REFERENCE (name; "
+        "address, city, state, zip, email, phone as in profile). Optional \\section{Objective} — one concise "
+        "statement linking skills/education/career goals to the target role. Optional \\section{Summary} — "
+        "two to five \\resumeItem bullets of greatest strengths from the profile (UMBC: Objective and Summary "
+        "are optional when space is tight; do not require both; avoid redundant long Objective plus long Summary). "
+        "\\section{Education} verbatim per rule 8; GPA line only if explicitly in profile and above 3.00; "
+        "community-college line only if in profile. Certifications/Licenses section or lines only from profile "
+        "(title + date). Research, Publications and Presentations: for each item include title; venue or organization; "
+        "type (poster, paper, oral, etc.); date — profile facts only. Relevant Projects: heading with project/class title "
+        "without course number plus semester/year; one to two \\resumeItem bullets per project (role, actions, results; "
+        "tools/techniques; learning) from profile only. Relevant Coursework: optional; bullets; at most about three lines; "
+        "courses relevant to this role. Skills: \\section{Skills} with subcategories — e.g. Laboratory / Computer / "
+        "Quantitative/Analytic / Interpersonal, OR Technical Skills with Programming / Operating Systems / Software / "
+        "Design (Advanced/Proficient/Novice tiers when appropriate) and LANGUAGES with proficiency level. "
+        "Professional Experience (or job-focused Experience): each role — position, organization, city, state, dates on "
+        "header; two to five achievement bullets; never start bullets with a date range. Additional Experience: "
+        "one to three bullets per role for less-targeted paid work when profile distinguishes it; role-aligned activities "
+        "may stay under Professional Experience. Honors and Awards; Activities/Interests (one to three achievement bullets "
+        "per activity); Service/Community Engagement — only if in profile.\n"
+        "10. PLACEMENT: Put \\section{Objective} or \\section{Summary} immediately after the contact block and before "
+        "experience sections when used. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
+        "11. Keep to 1 page when possible — optional lead section + professional + additional (if any) + projects + education + skills + optional tails"
     )
     base_section = ""
     if base_body:
@@ -2062,7 +2106,7 @@ def _build_prompts(company, role, job_description, base_body, reference_tex, can
         f"---\nCANDIDATE PROFILE (USE ONLY THESE FACTS):\n\n"
         f"{profile_section}"
         f"{base_section}"
-        f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:2500]}\n\n"
+        f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:6500]}\n\n"
         f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
         f" Tailor bullet points to emphasize what matters most for {role} at {company}."
     )
@@ -2221,7 +2265,7 @@ def stream_latex_resume(
         logger.info("=" * 60)
         logger.info(f"STREAM  |  {role} @ {company}  |  model={model}")
 
-        ref_folder = base_folder or reference_folder or _find_company_reference(company) or "Adobe_FullStack"
+        ref_folder = reference_folder or base_folder or _find_company_reference(company) or "Adobe_FullStack"
         yield {"event": "status", "msg": f"Loading style reference ({ref_folder})…"}
         reference_tex = get_resume_tex(ref_folder) or ""
 

@@ -5,6 +5,11 @@ import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeR
 import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
 import { upsertResume, getSupabaseClient } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
+import {
+  DEFAULT_REFERENCE_FOLDER,
+  distinctStyleTemplates,
+  isValidResumeStyleFolder,
+} from "@/lib/resumeTemplates";
 
 import ScoreRing    from "./ScoreRing";
 import CriteriaTable from "./CriteriaTable";
@@ -170,6 +175,36 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
   }, [jobUrl]);
 
   const [user, setUser] = useState<User | null>(null);
+  const [styleReferenceFolder, setStyleReferenceFolderState] = useState(DEFAULT_REFERENCE_FOLDER);
+
+  const setStyleReferenceFolder = useCallback((folder: string) => {
+    const next = isValidResumeStyleFolder(folder) ? folder : DEFAULT_REFERENCE_FOLDER;
+    setStyleReferenceFolderState(next);
+    saveDraft({ styleReferenceFolder: next });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let next: string | null = null;
+    const q = new URLSearchParams(window.location.search).get("styleRef");
+    if (q && isValidResumeStyleFolder(q)) next = q;
+    if (!next) {
+      try {
+        const s = sessionStorage.getItem("rn_builder_style_ref");
+        if (s && isValidResumeStyleFolder(s)) next = s;
+      } catch { /* ignore */ }
+    }
+    if (!next) {
+      try {
+        const d = loadDraft();
+        if (typeof d.styleReferenceFolder === "string" && isValidResumeStyleFolder(d.styleReferenceFolder)) {
+          next = d.styleReferenceFolder;
+        }
+      } catch { /* ignore */ }
+    }
+    if (next) setStyleReferenceFolderState(next);
+  }, []);
+
   useEffect(() => {
     const supabase = getSupabaseClient();
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -366,6 +401,7 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
         body: JSON.stringify({
           company: effCompany, role: effRole, job_description: effJd,
           model, base_folder: baseFolder,
+          reference_folder: styleReferenceFolder,
           candidate_profile: candidateProfile,
           user_id: user?.id ?? null,
         }),
@@ -443,7 +479,7 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
       setGenerating(false);
       setStatusMsg("");
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -485,17 +521,18 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                 fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
                 marginBottom: 28, maxWidth: 520, letterSpacing: -0.1,
               }}>
-                Upload your current résumé, paste the job posting, and receive
-                an AI-tailored version with match score, gap analysis, and
+                Upload your current résumé, pick a template, paste the job posting, and receive
+                an AI-tailored LaTeX résumé with match score, gap analysis, and
                 ATS-safe PDF — in under 60 seconds.
               </p>
 
               {/* 3-step process pills */}
               <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[
-                  { n: 1, label: "Upload résumé" },
-                  { n: 2, label: "Paste job posting" },
-                  { n: 3, label: "Get tailored result" },
+                  { n: 1, label: "Pick LaTeX layout" },
+                  { n: 2, label: "Upload résumé" },
+                  { n: 3, label: "Paste job posting" },
+                  { n: 4, label: "Tailor & download PDF" },
                 ].map(({ n, label }) => (
                   <div key={n} style={{
                     display: "flex", alignItems: "center", gap: 8,
@@ -520,8 +557,55 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
           {/* ── Inputs (hidden once results are shown) ── */}
           {!result && !generating && (<>
 
-          {/* ── Step 1: Resume ── */}
-          <StepCard step={1} title="Your resume" subtitle="Upload your current resume as a PDF">
+          {/* ── Step 1: LaTeX layout (reference .tex on server) ── */}
+          <StepCard
+            step={1}
+            title="Layout template"
+            subtitle="LaTeX style the AI copies (macros + structure). Final PDF is compiled with pdflatex."
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {distinctStyleTemplates().map((t) => {
+                  const selected = styleReferenceFolder === t.referenceFolder;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setStyleReferenceFolder(t.referenceFolder)}
+                      style={{
+                        flex: "1 1 200px",
+                        textAlign: "left",
+                        padding: "12px 14px",
+                        borderRadius: 10,
+                        border: selected ? "2px solid var(--accent)" : "1px solid var(--border)",
+                        background: selected ? "var(--accent-bg)" : "var(--surface2)",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
+                        {t.label}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45 }}>
+                        {t.description}
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--dim)", marginTop: 6, fontFamily: "ui-monospace, monospace" }}>
+                        {t.referenceFolder}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.5 }}>
+                More layouts: add a folder with <code style={{ fontSize: 10 }}>resume.tex</code> under the server{" "}
+                <code style={{ fontSize: 10 }}>LIBRARY_ROOT</code>, then register it in{" "}
+                <code style={{ fontSize: 10 }}>web/lib/resumeTemplates.ts</code>.
+              </div>
+            </div>
+          </StepCard>
+
+          {/* ── Step 2: Resume ── */}
+          <StepCard step={2} title="Your resume" subtitle="Upload your current resume as a PDF">
             <input
               ref={fileInputRef} type="file" accept=".pdf,application/pdf"
               style={{ display: "none" }}
@@ -610,8 +694,8 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
             )}
           </StepCard>
 
-          {/* ── Step 2: Job target ── */}
-          <StepCard step={2} title="Target job" subtitle="Tell us what you're applying for">
+          {/* ── Step 3: Job target ── */}
+          <StepCard step={3} title="Target job" subtitle="Tell us what you're applying for">
             {/* URL import — auto-fills company/role/JD */}
             <Field label="Job posting link (optional)">
               <div style={{ display: "flex", gap: 8 }}>
