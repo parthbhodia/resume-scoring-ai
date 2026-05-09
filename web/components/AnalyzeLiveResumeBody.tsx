@@ -90,7 +90,7 @@ export function findBulletIndexForLine(
   return bestScore >= 55 ? best : -1;
 }
 
-export export function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[] {
+export function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[] {
   const blocks: Block[] = [];
   let i = 0;
 
