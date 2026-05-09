@@ -254,14 +254,44 @@ export default function AnnotatedResumePanel({
     const node = paperRef.current;
     if (!node || !useLiveDoc || pdfExporting) return;
     setPdfExporting(true);
-    // Temporarily strip annotation styling so the downloaded PDF looks like a clean resume
-    node.classList.add("az-clean-export");
+
+    // ── Strip all annotation chrome before capture ───────────────────────────
+    type SavedStyle = { el: HTMLElement; borderLeft: string; background: string; boxShadow: string; animation: string };
+    const saved: SavedStyle[] = [];
+
+    // 1. Remove colored bullet borders and backgrounds (set via inline style)
+    node.querySelectorAll<HTMLElement>(".az-resume-bullet").forEach(el => {
+      saved.push({ el, borderLeft: el.style.borderLeft, background: el.style.background, boxShadow: el.style.boxShadow, animation: el.style.animation });
+      el.style.borderLeft = "none";
+      el.style.background = "transparent";
+      el.style.boxShadow = "none";
+      el.style.animation = "none";
+    });
+
+    // 2. Hide score badges, applied markers, sparkle icons, buttons, metric highlights
+    const hidden: Array<{ el: HTMLElement; display: string }> = [];
+    const hide = (sel: string) => node.querySelectorAll<HTMLElement>(sel).forEach(el => {
+      hidden.push({ el, display: el.style.display });
+      el.style.display = "none";
+    });
+    hide(".az-score-badge");
+    hide(".az-preview-applied-mark");
+    hide("button");
+    hide("mark"); // metric number highlights (green backgrounds)
+
     try {
       await exportResumePreviewPdf(node, `resume-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (err) {
       console.error(err);
     } finally {
-      node.classList.remove("az-clean-export");
+      // Restore everything
+      saved.forEach(({ el, borderLeft, background, boxShadow, animation }) => {
+        el.style.borderLeft = borderLeft;
+        el.style.background = background;
+        el.style.boxShadow = boxShadow;
+        el.style.animation = animation;
+      });
+      hidden.forEach(({ el, display }) => { el.style.display = display; });
       setPdfExporting(false);
     }
   }, [pdfExporting, useLiveDoc]);
