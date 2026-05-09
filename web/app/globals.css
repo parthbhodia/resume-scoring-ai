@@ -212,3 +212,8 @@ select option { background: var(--surface); }
   .lp-h2       { font-size: 22px !important; }
 }
 
+
+/* Resume paper: dark-mode inversion */
+[data-theme="dark"] .az-resume-paper {
+  filter: invert(1) hue-rotate(180deg);
+}

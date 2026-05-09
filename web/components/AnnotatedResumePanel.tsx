@@ -669,6 +669,7 @@ export default function AnnotatedResumePanel({
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "14px 16px 20px" }}>
         <div
           ref={paperRef}
+          className="az-resume-paper"
           style={{
             position: "relative",
             background: "var(--surface)",
