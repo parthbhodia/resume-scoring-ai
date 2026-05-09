@@ -15,7 +15,7 @@ export interface LiveBulletItem {
   improvedBullet: string;
 }
 
-export export type Block =
+export type Block =
   | { type: "header"; lines: string[] }
   | { type: "section"; text: string }
   | { type: "paragraph"; lines: string[] }
