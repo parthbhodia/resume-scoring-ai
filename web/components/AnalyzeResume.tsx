@@ -185,7 +185,6 @@ function Spinner({ size = 18 }: { size?: number }) {
 
 const LS_KEY  = (uid: string) => `rn_az_history_${uid}`;
 const LS_MAX  = 20;
-const SIDEBAR_VISIBLE_KEY = "rn_az_overall_sidebar_visible";
 
 function lsLoad(uid: string): AnalyzeRecord[] {
   try { const r = localStorage.getItem(LS_KEY(uid)); return r ? JSON.parse(r) : []; }
@@ -220,7 +219,7 @@ export default function AnalyzeResume() {
   /** Accordion for category-detail flagged bullets (`bulletAnalysis` index, or null = all collapsed). */
   const [expandedFlaggedBulletIdx, setExpandedFlaggedBulletIdx] = useState<number | null>(null);
   const [previewOpen, setPreviewOpen]       = useState(true);
-  /** Desktop: hide/show the inline improvement plan sidebar. Always starts visible. */
+  /** Desktop: hide left improvement plan sidebar for more reading space (mobile overlay unchanged). Always starts open — not persisted across visits. */
   const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
   /** Library folder when last run used analyze-folder; PDF file via lastPdfRef otherwise */
@@ -307,12 +306,6 @@ export default function AnalyzeResume() {
       resumeHeader: result.resumeHeader,
     });
   }, [result]);
-
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(SIDEBAR_VISIBLE_KEY, improvementPlanVisible ? "1" : "0");
-    } catch { /* quota / private mode */ }
-  }, [improvementPlanVisible]);
 
   // Persist result to Supabase + localStorage
   const persistResult = useCallback(async (label: string, res: AnalysisResult) => {
@@ -616,11 +609,82 @@ export default function AnalyzeResume() {
     setTimeout(() => setCopiedBullet(null), 2000);
   }, []);
 
+  const startOverAnalyze = useCallback(() => {
+    setResult(null);
+    setError(null);
+    setExpandedBullets({});
+    setJd("");
+    setHistoryOpen(false);
+    setActiveCategory(null);
+    setSelectedBulletIndex(null);
+    setBuilderLinkReady(false);
+    setLinkedFolder(null);
+    lastPdfRef.current = null;
+    bindSourcePdf(null);
+    setRewriteEdits({});
+  }, [bindSourcePdf]);
+
   /* ── Shared sidebar content ─────────────────── */
   const sidebarContent = (
     <>
       {result ? (
         <>
+          {/* Analyze another — top of sidebar (same actions as main CTA) */}
+          <div style={{
+            marginBottom: 16,
+            paddingBottom: 16,
+            borderBottom: "1px solid var(--border)",
+          }}>
+            <div style={{
+              fontFamily: "'Cormorant Garant', Georgia, serif",
+              fontSize: 17, fontWeight: 600, letterSpacing: -0.35,
+              color: "var(--text)", marginBottom: 6, lineHeight: 1.25,
+            }}>
+              Ready to analyze another?
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>
+              Upload a new résumé PDF or paste a different job description to get a fresh score and set of recommendations.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  width: "100%", padding: "10px 14px", borderRadius: 9,
+                  background: "var(--amber)", border: "none", color: "#fff",
+                  fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                  transition: "opacity var(--transition)",
+                  letterSpacing: -0.15, fontFamily: "inherit", boxSizing: "border-box",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = "0.9"; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path d="M8 2v9M4 6l4-4 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                </svg>
+                Upload new résumé
+              </button>
+              <button
+                type="button"
+                onClick={startOverAnalyze}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  width: "100%", padding: "9px 14px", borderRadius: 9,
+                  background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--muted)",
+                  fontSize: 12.5, fontWeight: 500, cursor: "pointer",
+                  transition: "background var(--transition), border-color var(--transition)",
+                  letterSpacing: -0.15, fontFamily: "inherit", boxSizing: "border-box",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.borderColor = "var(--border-h)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+              >
+                ← Start over
+              </button>
+            </div>
+          </div>
+
           {/* Score ring */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 800, color: "#78909c", textTransform: "uppercase", letterSpacing: 1.15, marginBottom: 10, fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -631,7 +695,6 @@ export default function AnalyzeResume() {
               {scoreLabel(result.overallScore)}
             </div>
           </div>
-
 
           {/* Hint */}
           <div style={{
@@ -2386,6 +2449,7 @@ export default function AnalyzeResume() {
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
                   {/* Primary — upload new file */}
                   <button
+                    type="button"
                     onClick={() => fileRef.current?.click()}
                     style={{
                       display: "flex", alignItems: "center", gap: 8,
@@ -2407,13 +2471,8 @@ export default function AnalyzeResume() {
 
                   {/* Secondary — clear and start over */}
                   <button
-                    onClick={() => {
-                      setResult(null); setError(null); setExpandedBullets({}); setJd(""); setHistoryOpen(false);
-                      setActiveCategory(null); setSelectedBulletIndex(null);
-                      setBuilderLinkReady(false); setLinkedFolder(null);                       lastPdfRef.current = null;
-                      bindSourcePdf(null);
-                      setRewriteEdits({});
-                    }}
+                    type="button"
+                    onClick={startOverAnalyze}
                     style={{
                       display: "flex", alignItems: "center", gap: 8,
                       padding: "11px 20px", borderRadius: 10,
