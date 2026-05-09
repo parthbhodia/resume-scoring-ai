@@ -217,3 +217,8 @@ select option { background: var(--surface); }
 [data-theme="dark"] .az-resume-paper {
   filter: invert(1) hue-rotate(180deg);
 }
+
+/* Resume paper: dark-mode inversion */
+[data-theme="dark"] .az-resume-paper {
+  filter: invert(1) hue-rotate(180deg);
+}
