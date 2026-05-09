@@ -7,7 +7,7 @@ import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
   bulletMatchesAnalysisCategory,
 } from "@/lib/analysisCategoryMatch";
-import { exportResumePreviewPdf } from "@/lib/exportResumePreviewPdf";
+import { exportResumeAsPdf } from "@/lib/exportResumeAsPdf";
 
 // Re-export for legacy imports from this file path
 export { CATEGORY_ISSUE_KEYWORDS } from "@/lib/analysisCategoryMatch";
@@ -251,17 +251,22 @@ export default function AnnotatedResumePanel({
   const totalCount = bulletAnalysis.length;
 
   const onSavePreviewPdf = useCallback(async () => {
-    const node = paperRef.current;
-    if (!node || !useLiveDoc || pdfExporting) return;
+    if (!useLiveDoc || pdfExporting) return;
     setPdfExporting(true);
     try {
-      await exportResumePreviewPdf(node, `resume-preview-${new Date().toISOString().slice(0, 10)}.pdf`);
+      await exportResumeAsPdf(
+        effectiveExtracted,
+        bulletAnalysis,
+        previewLineOverrides,
+        resumeHeader ?? [],
+        `resume-${new Date().toISOString().slice(0, 10)}.pdf`,
+      );
     } catch (err) {
       console.error(err);
     } finally {
       setPdfExporting(false);
     }
-  }, [pdfExporting, useLiveDoc]);
+  }, [pdfExporting, useLiveDoc, effectiveExtracted, bulletAnalysis, previewLineOverrides, resumeHeader]);
 
   /** Maps `data-bullet-idx` on the preview page to a thick, score-colored frame (split / presentation column). */
   const updateMirrorPosition = useCallback(() => {

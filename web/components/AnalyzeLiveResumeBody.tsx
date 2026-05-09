@@ -15,7 +15,7 @@ export interface LiveBulletItem {
   improvedBullet: string;
 }
 
-type Block =
+export type Block =
   | { type: "header"; lines: string[] }
   | { type: "section"; text: string }
   | { type: "paragraph"; lines: string[] }
@@ -70,7 +70,7 @@ export function findBulletIndexForLine(
   return bestScore >= 55 ? best : -1;
 }
 
-function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[] {
+export function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[] {
   const blocks: Block[] = [];
   let i = 0;
 
