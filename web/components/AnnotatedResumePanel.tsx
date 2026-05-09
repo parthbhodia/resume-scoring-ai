@@ -497,8 +497,8 @@ export default function AnnotatedResumePanel({
 
       {/* Panel sub-header */}
       <div style={{
-        borderBottom: "1px solid #d5dde8",
-        background: "#fff",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--surface)",
         flexShrink: 0,
       }}>
         <div style={{
@@ -590,12 +590,12 @@ export default function AnnotatedResumePanel({
       {!presentationOnly && sectionFeedback.length > 0 && (
         <div style={{
           padding: "8px 14px 10px",
-          borderBottom: "1px solid #d5dde8",
+          borderBottom: "1px solid var(--border)",
           display: "flex",
           flexWrap: "wrap",
           gap: 6,
           flexShrink: 0,
-          background: "#fff",
+          background: "var(--surface)",
         }}>
           {sectionFeedback.map((sf) => (
             <div
@@ -625,7 +625,7 @@ export default function AnnotatedResumePanel({
       {!activeCategory && (
         <div style={{
           padding: "7px 14px",
-          borderBottom: "1px solid #d5dde8",
+          borderBottom: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
           gap: 14,
@@ -650,7 +650,7 @@ export default function AnnotatedResumePanel({
       {activeCategory && !presentationOnly && (
         <div style={{
           padding: "8px 14px",
-          borderBottom: "1px solid #d5dde8",
+          borderBottom: "1px solid var(--border)",
           fontSize: 11,
           color: "#b71c1c",
           fontWeight: 600,
@@ -671,10 +671,10 @@ export default function AnnotatedResumePanel({
           ref={paperRef}
           style={{
             position: "relative",
-            background: "#fefefe",
+            background: "var(--surface)",
             borderRadius: 3,
             boxShadow: "0 1px 3px rgba(45,55,72,0.06), 0 16px 48px rgba(45,55,72,0.08)",
-            border: "1px solid #e2e8f0",
+            border: "1px solid var(--border)",
             maxWidth: "100%",
             margin: "0 auto",
           }}
