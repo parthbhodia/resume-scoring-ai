@@ -32,6 +32,39 @@ export default function HomePageClient() {
   );
 }
 
+/** Fills AppShell main (flex) without growing the document — children handle their own scroll areas. */
+function ViewFill({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        flex: "1 1 0%",
+        minHeight: 0,
+        width: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ScrollPane({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function RouterView() {
   const view = useAppView();
   const params = useSearchParams();
@@ -39,14 +72,54 @@ function RouterView() {
   const base = (params?.get("base") || "").trim();
 
   if (view === "library") {
-    if (resume) return <ResumeView folder={resume} />;
-    return <ResumeLibrary />;
+    if (resume) {
+      return (
+        <ViewFill>
+          <ScrollPane>
+            <ResumeView folder={resume} />
+          </ScrollPane>
+        </ViewFill>
+      );
+    }
+    return (
+      <ViewFill>
+        <ScrollPane>
+          <ResumeLibrary />
+        </ScrollPane>
+      </ViewFill>
+    );
   }
-  if (view === "profile") return <PlaceholderPanel title="Profile" subtitle="Coming next — your Personal, Education, Work Experience, Skills, EEO, and Resume defaults all in one place." />;
-  if (view === "jobs") return <PlaceholderPanel title="Jobs" subtitle="Coming soon — autoapply will live here once your profile is set up." />;
-  if (view === "analyze") return <AnalyzeResume />;
+  if (view === "profile") {
+    return (
+      <ViewFill>
+        <ScrollPane>
+          <PlaceholderPanel title="Profile" subtitle="Coming next — your Personal, Education, Work Experience, Skills, EEO, and Resume defaults all in one place." />
+        </ScrollPane>
+      </ViewFill>
+    );
+  }
+  if (view === "jobs") {
+    return (
+      <ViewFill>
+        <ScrollPane>
+          <PlaceholderPanel title="Jobs" subtitle="Coming soon — autoapply will live here once your profile is set up." />
+        </ScrollPane>
+      </ViewFill>
+    );
+  }
+  if (view === "analyze") {
+    return (
+      <ViewFill>
+        <AnalyzeResume />
+      </ViewFill>
+    );
+  }
   // key=base ensures remount when switching from a library-loaded resume to fresh builder
-  return <ResumeBuilder key={`builder-${base}`} initialBaseFolder={base || null} />;
+  return (
+    <ViewFill>
+      <ResumeBuilder key={`builder-${base}`} initialBaseFolder={base || null} />
+    </ViewFill>
+  );
 }
 
 function ShellSkeleton() {

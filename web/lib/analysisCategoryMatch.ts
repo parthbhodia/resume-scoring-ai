@@ -7,11 +7,12 @@
 
 export const CATEGORY_ISSUE_KEYWORDS: Record<string, string[]> = {
   quantification: [
-    "quantif", "metric", "measur", "number", "percent", "%", "data",
-    "scale", "figure", "statistic", "numeric", "lack of data", "no numbers",
+    "quantif", "metric", "measur", "percent", "%",
+    "scale", "figure", "statistic", "numeric",
+    "lack of data", "no numbers", "add numbers", "no metrics",
   ],
   achievementQuality: [
-    "weak action", "weak verb", "passive", "responsible for", "no achievement",
+    "weak action", "weak verb", "responsible for", "no achievement",
     "duty", "task", "vague outcome", "responsibilit", "collaborat", "unclear impact",
   ],
   languageQuality: [
@@ -72,7 +73,7 @@ export function bulletMatchesAnalysisCategory(
         issueBlob,
       );
     case "languageQuality":
-      return /\b(grammar|spelling|punctuation|tense|pronoun|passive|unclear|buzzword|wordy)\b/i.test(
+      return /\b(?:grammar|spelling|punctuation|tense|pronoun|passive|unclear|buzzword|wordy|weak\s+language|sentence|fluency|clarity|capitali[sz]ation|hyphen|word\s+choice|tone)\b|passive\s+voice/i.test(
         issueBlob,
       );
     case "readability":
@@ -91,29 +92,34 @@ export function inferPrimaryCategoryFromBullet(bullet: {
   originalBullet: string;
   score: number;
 }): string {
-  const ordered = [
-    "quantification",
-    "achievementQuality",
+  /* Match issue-text keywords — language / structure before quantification so
+   * words like “data” in “consumer data” do not classify as Quantification. */
+  const keywordOrder = [
     "languageQuality",
     "readability",
+    "achievementQuality",
     "atsCompatibility",
     "sectionStructure",
     "technicalBranding",
     "jobMatch",
+    "quantification",
   ] as const;
 
   const issueBlob = bullet.issues.join(" ").toLowerCase();
-  for (const cat of ordered) {
+  for (const cat of keywordOrder) {
     const kws = CATEGORY_ISSUE_KEYWORDS[cat] ?? [];
     if (kws.some((kw) => issueBlob.includes(kw))) return cat;
   }
 
-  if (!hasStrongQuantification(bullet.originalBullet)) return "quantification";
-  if (ACHIEVEMENT_DUTY_PATTERNS.test(bullet.originalBullet)) return "achievementQuality";
-
+  /* Issue heuristics (no keyword hit) — still before blanket “needs metrics”. */
+  if (bulletMatchesAnalysisCategory(bullet, "languageQuality")) return "languageQuality";
   const text = bullet.originalBullet;
   const wc = text.trim().split(/\s+/).length;
   if (wc > 45 || text.length > 320) return "readability";
+  if (ACHIEVEMENT_DUTY_PATTERNS.test(text)) return "achievementQuality";
+  if (bulletMatchesAnalysisCategory(bullet, "achievementQuality")) return "achievementQuality";
+
+  if (!hasStrongQuantification(text)) return "quantification";
 
   if (bullet.score < 52) return "achievementQuality";
 

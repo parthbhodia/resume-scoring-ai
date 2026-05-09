@@ -449,10 +449,20 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
   const score   = ratings?.match_score ?? 0;
 
   return (
-    <div className="rb-root" style={{ minHeight: "100vh", background: "var(--bg)" }}>
+    <div
+      className="rb-root"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--bg)",
+        overflow: "hidden",
+      }}
+    >
 
       {/* ── Main ── */}
-      <main style={{ overflowY: "auto", display: "flex", flexDirection: "column" }}>
+      <main style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
 
         {/* Page content */}
         <div className="rb-page" style={{ padding: "44px 48px 80px", maxWidth: 820, margin: "0 auto", width: "100%" }}>

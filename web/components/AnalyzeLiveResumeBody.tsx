@@ -21,8 +21,28 @@ type Block =
   | { type: "paragraph"; lines: string[] }
   | { type: "bullets"; items: Array<{ rawLine: string; bulletIdx: number }> };
 
-/** Known resume section keywords — used to distinguish section headings from ALL-CAPS names. */
-const KNOWN_SECTIONS = /^(EXPERIENCE|EDUCATION|SKILLS|SUMMARY|PROFILE|PROJECTS|CERTIFICATIONS|AWARDS|PUBLICATIONS|LANGUAGES|VOLUNTEER|WORK\s+HISTORY|PROFESSIONAL\s+SUMMARY|TECHNICAL\s+SKILLS|ACHIEVEMENTS?|REFERENCES|OBJECTIVE|ACTIVITIES|HONORS|LEADERSHIP|INTERESTS|EXTRACURRICULAR)/i;
+/** Known resume section titles (full trimmed line). Strict mode avoids mistaking ALL-CAPS names for sections. */
+const KNOWN_SECTIONS =
+  /^(?:EXPERIENCE|WORK\s+HISTORY|WORK\s+EXPERIENCE|PROFESSIONAL\s+EXPERIENCE|PROFESSIONAL\s+HISTORY|EMPLOYMENT(?:\s+HISTORY)?|CAREER(?:\s+HISTORY|\s+OVERVIEW|\s+SUMMARY)?|EDUCATION|SKILLS|SUMMARY|PROFILE|PROJECTS|CERTIFICATIONS|AWARDS|PUBLICATIONS|LANGUAGES|VOLUNTEER|PROFESSIONAL\s+SUMMARY|TECHNICAL\s+SKILLS|ACHIEVEMENTS?|REFERENCES|OBJECTIVE|ACTIVITIES|HONORS|LEADERSHIP|INTERESTS|EXTRACURRICULAR)\s*$/iu;
+
+/** Exported for AnnotatedResumePanel extract heuristics (identity line vs lone section heading). */
+export function lineLooksLikeStandaloneSectionHeading(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.length > 72) return false;
+  return KNOWN_SECTIONS.test(t);
+}
+
+/** PDF / editor noise + unicode bullets that should end the name block. */
+function normalizeExtractLine(raw: string): string {
+  return raw.replace(/\ufeff/g, "").trim();
+}
+
+const BULLET_LINE_START =
+  /^[\s\uFEFF]*(?:[-*•●◦‧·・‣⁃▪►➤○⚫—–‑]|\d{1,2}[\).\]])/u;
+
+function lineLooksLikeBulletLead(line: string): boolean {
+  return BULLET_LINE_START.test(normalizeExtractLine(line));
+}
 
 function looksLikeSectionHeading(line: string, strict = false): boolean {
   const t = line.trim();
@@ -86,6 +106,7 @@ function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[]
     }
     // Stop at any known section keyword — strict so names like "PARTH BHODIA" aren't mistaken.
     if (looksLikeSectionHeading(t, true)) break;
+    if (lineLooksLikeBulletLead(line)) break;
     header.push(line);
     i++;
   }
@@ -130,6 +151,138 @@ function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[]
     if (nonempty.length) blocks.push({ type: "paragraph", lines: nonempty });
   }
   return blocks;
+}
+
+/** Mirrors backend `_CONTACT_ANCHOR` — find identity block when PDF line order is wrong. */
+const HEADER_CONTACT_ANCHOR =
+  /@|linkedin\.com\/|www\.linkedin\.com\/|github\.com\/|www\.github\.com\/|\bportfolio\b|\bsite\b|\bmobile\b|\bphone\b|[\[(]?\d{3}[\])]?[\s.-]?\d{3}[\s.-]?\d{4}/i;
+
+const HEADER_JOB_ROLE =
+  /\b(Engineer|Developer|Architect|Scientist|Analyst|Designer|Consultant|Specialist|Manager|Director|Lead|Intern|Associate|Executive)\b/i;
+
+function stripHeaderCandidateLines(lines: string[], start: number, end: number): string[] {
+  const out: string[] = [];
+  const lo = Math.max(0, start);
+  const hi = Math.min(lines.length, end);
+  for (let j = lo; j < hi; j++) {
+    const line = normalizeExtractLine(lines[j]);
+    if (!line) {
+      if (out.length >= 2) break;
+      continue;
+    }
+    if (KNOWN_SECTIONS.test(line)) continue;
+    if (lineLooksLikeBulletLead(line)) continue;
+    if (line.length > 180) continue;
+    if (/%|↑|€|\$\d/.test(line)) continue;
+    out.push(line);
+    if (out.length >= 8) break;
+  }
+  return out.slice(0, 8);
+}
+
+function headerWindow(lines: string[], centerIdx: number, before: number, after: number): string[] {
+  return stripHeaderCandidateLines(lines, centerIdx - before, centerIdx + after);
+}
+
+function looksLikeAllCapsPersonName(line: string): boolean {
+  const t = line.trim();
+  const words = t.split(/\s+/).filter(Boolean).map((w) => w.replace(/[''-]/g, ""));
+  if (words.length < 2 || words.length > 5 || t.length > 48) return false;
+  if (!/^[A-Za-z]/.test(words[0])) return false;
+  const capsWords = words.filter((w) => w.length > 1 && w === w.toUpperCase());
+  if (capsWords.length < 2) return false;
+  return !KNOWN_SECTIONS.test(t);
+}
+
+function looksLikeTitlePersonName(line: string): boolean {
+  const t = line.trim();
+  if (t.length < 5 || t.length > 44) return false;
+  if (HEADER_JOB_ROLE.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 4) return false;
+  const tokenOk = (w: string) => /^[A-Z][a-z]+(?:-[A-Z][a-z]+)*$/.test(w.replace(/[''.,]/g, ""));
+  if (!words.every(tokenOk)) return false;
+  return !KNOWN_SECTIONS.test(t);
+}
+
+
+/** Client replay of `_extract_resume_header` when API `resumeHeader` is missing or stale. */
+function inferResumeHeaderFromExtract(text: string): string[] {
+  if (!text?.trim()) return [];
+  const lines = text.split(/\r?\n/).map(normalizeExtractLine);
+
+  const primary: string[] = [];
+  for (const line of lines) {
+    if (!line) {
+      if (primary.length >= 2) break;
+      continue;
+    }
+    if (KNOWN_SECTIONS.test(line)) break;
+    if (lineLooksLikeBulletLead(line)) break;
+    primary.push(line);
+    if (primary.length >= 6) break;
+  }
+  if (primary.length > 0) return primary.slice(0, 6);
+
+  const limit = Math.min(220, lines.length);
+  let best: string[] = [];
+  for (let i = 0; i < limit; i++) {
+    const line = lines[i];
+    if (!line || line.length > 200) continue;
+    if (HEADER_CONTACT_ANCHOR.test(line)) {
+      const chunk = headerWindow(lines, i, 10, 6);
+      if (chunk.length > best.length) best = chunk;
+    }
+  }
+  if (!best.length) {
+    for (let i = 0; i < Math.min(360, lines.length); i++) {
+      const line = lines[i];
+      if (looksLikeAllCapsPersonName(line) || looksLikeTitlePersonName(line)) {
+        best = headerWindow(lines, i, 2, 6);
+        break;
+      }
+    }
+  }
+  if (!best.length) {
+    const emailRe = /\S+@\S+\.\S+/;
+    for (let i = 0; i < Math.min(400, lines.length); i++) {
+      const line = lines[i];
+      if (line && emailRe.test(line)) {
+        best = headerWindow(lines, i, 10, 6);
+        break;
+      }
+    }
+  }
+  return best.slice(0, 6);
+}
+
+/** Shared with AnnotatedResumePanel to prepend identity onto synthetic extracts. */
+export function mergeResumeHeaderSources(apiHeader: string[] | undefined, inferBasisFull: string): string[] {
+  let api = (apiHeader ?? []).map((s) => normalizeExtractLine(s)).filter(Boolean);
+  /* One line exactly matching a résumé section is not identity (mis-parsed extracts). */
+  if (api.length === 1 && KNOWN_SECTIONS.test(api[0])) {
+    api = [];
+  }
+  if (api.length >= 2) return api.slice(0, 8);
+  const inferred = inferResumeHeaderFromExtract(inferBasisFull);
+  if (inferred.length) return inferred.slice(0, 8);
+  if (api.length) return api.slice(0, 8);
+  return [];
+}
+
+/** Inject centered name/contact when blocks start with EXPERIENCE (or bogus header missing API lines). */
+function shouldPrependIdentityHeader(blocks: Block[], headerLines: string[]): boolean {
+  if (!headerLines.length) return false;
+  const first = blocks[0];
+  if (!first) return true;
+  if (first.type === "section" || first.type === "bullets" || first.type === "paragraph") return true;
+  if (first.type === "header") {
+    const blob = first.lines.join(" ").toLowerCase();
+    return !headerLines.some(
+      (h) => h.trim().length >= 3 && blob.includes(h.trim().toLowerCase()),
+    );
+  }
+  return false;
 }
 
 function renderInline(text: string): ReactNode[] {
@@ -213,6 +366,8 @@ interface PopupState {
 
 interface Props {
   extractedText: string;
+  /** Prefer full PDF/plain extract for guessing name/contact when the visible doc uses synthetic bullets. */
+  headerInferenceText?: string | null;
   resumeHeader?: string[];
   bulletAnalysis: LiveBulletItem[];
   activeCategory: string | null;
@@ -228,6 +383,7 @@ interface Props {
 
 export default function AnalyzeLiveResumeBody({
   extractedText,
+  headerInferenceText = null,
   resumeHeader,
   bulletAnalysis,
   activeCategory,
@@ -246,15 +402,15 @@ export default function AnalyzeLiveResumeBody({
   const popupRef = useRef<HTMLDivElement>(null);
 
   const blocks = useMemo(() => {
-    const lines = extractedText.split(/\r?\n/);
+    const lines = extractedText.split(/\r?\n/).map(normalizeExtractLine);
     const result = buildBlocks(lines, bulletAnalysis);
-    // If buildBlocks didn't find a header (name/contact) but the backend sent one,
-    // prepend it so the name always appears at the top of the preview.
-    if (result[0]?.type !== "header" && resumeHeader && resumeHeader.length > 0) {
-      result.unshift({ type: "header", lines: resumeHeader });
+    const inferBasis = (headerInferenceText ?? "").trim() || extractedText.trim();
+    const headerLines = mergeResumeHeaderSources(resumeHeader, inferBasis);
+    if (shouldPrependIdentityHeader(result, headerLines)) {
+      result.unshift({ type: "header", lines: [...headerLines] });
     }
     return result;
-  }, [extractedText, bulletAnalysis, resumeHeader]);
+  }, [extractedText, bulletAnalysis, resumeHeader, headerInferenceText]);
 
   useEffect(() => {
     if (popup == null) return;

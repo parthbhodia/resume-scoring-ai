@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import AnnotatedResumePanel from "@/components/AnnotatedResumePanel";
-import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
+import { useResumeAnalyzeStore, type AnalyzeBulletSnapshot } from "@/store/resumeAnalyzeStore";
 
 const PULSE_MS = 850;
 
@@ -12,8 +12,17 @@ interface SectionFeedbackItem {
   feedback: string;
 }
 
+/** Snapshot from POST /analyze (same render as API — avoids stale Zustand before layout-effect hydrate). */
+export interface AnalyzePreviewSnapshot {
+  extractedText?: string | null;
+  resumeHeader?: string[] | null;
+  bulletAnalysis?: AnalyzeBulletSnapshot[] | null;
+}
+
 interface Props {
   sectionFeedback: SectionFeedbackItem[];
+  /** Prefer over store for `extractedText` / `resumeHeader` on the painting pass right after POST /analyze. */
+  analyzeSnapshot?: AnalyzePreviewSnapshot | null;
   activeCategory: string | null;
   rewriteEdits: Record<number, string>;
   patchBulletRewrite: (bulletIndex: number, value: string | null) => void;
@@ -31,6 +40,7 @@ interface Props {
  * so the document stays in sync with session overrides without prop-drilling extracted text + bullets everywhere.
  */
 export default function AnalyzePreviewPane({
+  analyzeSnapshot = null,
   sectionFeedback,
   activeCategory,
   rewriteEdits,
@@ -43,9 +53,20 @@ export default function AnalyzePreviewPane({
   builderReady,
   builderOpening,
 }: Props) {
-  const extractedText = useResumeAnalyzeStore((s) => s.extractedText);
-  const resumeHeader = useResumeAnalyzeStore((s) => s.resumeHeader);
-  const analysisBullets = useResumeAnalyzeStore((s) => s.analysisBullets);
+  const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
+  const resumeHeaderStore = useResumeAnalyzeStore((s) => s.resumeHeader);
+  const bulletsStore = useResumeAnalyzeStore((s) => s.analysisBullets);
+  const snapExtract = analyzeSnapshot?.extractedText ?? "";
+  const snapHeader = analyzeSnapshot?.resumeHeader ?? null;
+  const snapBullets = analyzeSnapshot?.bulletAnalysis ?? null;
+  const extractedText =
+    typeof snapExtract === "string" && snapExtract.trim() !== ""
+      ? snapExtract.trim()
+      : extractedTextStore;
+  const resumeHeader =
+    snapHeader != null && snapHeader.length > 0 ? snapHeader : resumeHeaderStore;
+  const analysisBullets =
+    snapBullets != null && snapBullets.length > 0 ? snapBullets : bulletsStore;
   const lineOverrides = useResumeAnalyzeStore((s) => s.lineOverrides);
   const pulseToken = useResumeAnalyzeStore((s) => s.pulseToken);
   const pulseBulletIndex = useResumeAnalyzeStore((s) => s.pulseBulletIndex);
@@ -66,7 +87,7 @@ export default function AnalyzePreviewPane({
       patchBulletRewrite={patchBulletRewrite}
       previewLineOverrides={lineOverrides}
       patchPreviewLine={patchPreviewLine}
-      extractedText={extractedText || null}
+      extractedText={extractedText ? extractedText : null}
       resumeHeader={resumeHeader}
       selectedBulletIndex={selectedBulletIndex}
       onBulletLinkedSelect={onBulletLinkedSelect}

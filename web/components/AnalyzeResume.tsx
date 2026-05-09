@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FocusEvent } from "react";
 import { useRouter } from "next/navigation";
 import ScoreRing from "./ScoreRing";
@@ -10,6 +10,7 @@ import {
   inferPrimaryCategoryFromBullet,
 } from "@/lib/analysisCategoryMatch";
 import { apiUrl } from "@/lib/utils";
+import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
 import type { AnalyzeRecord } from "@/lib/supabase";
@@ -231,6 +232,18 @@ export default function AnalyzeResume() {
   const [rewriteEdits, setRewriteEdits] = useState<Record<number, string>>({});
   const previewLineOverrides = useResumeAnalyzeStore((s) => s.lineOverrides);
 
+  const analyzePreviewSnapshot = useMemo(
+    () =>
+      result
+        ? {
+            extractedText: result.extractedText ?? null,
+            resumeHeader: Array.isArray(result.resumeHeader) ? result.resumeHeader : null,
+            bulletAnalysis: Array.isArray(result.bulletAnalysis) ? result.bulletAnalysis : null,
+          }
+        : null,
+    [result],
+  );
+
   // Load user + history on mount: Supabase first, localStorage fallback
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -258,7 +271,7 @@ export default function AnalyzeResume() {
     return () => clearInterval(iv);
   }, [loading]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!result) {
       useResumeAnalyzeStore.getState().reset();
       return;
@@ -319,7 +332,7 @@ export default function AnalyzeResume() {
       const resp = await fetch(apiUrl("/api/analyze-upload"), { method: "POST", body: fd });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
-      const res = json as AnalysisResult;
+      const res = mergeAnalyzeApiJson(json as Record<string, unknown>) as unknown as AnalysisResult;
       setResult(res);
       setBuilderLinkReady(true);
       persistResult(file.name.replace(/\.pdf$/i, ""), res);
@@ -354,7 +367,7 @@ export default function AnalyzeResume() {
       });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
-      const res = json as AnalysisResult;
+      const res = mergeAnalyzeApiJson(json as Record<string, unknown>) as unknown as AnalysisResult;
       setResult(res);
       setLinkedFolder(folder);
       setBuilderLinkReady(true);
@@ -431,12 +444,19 @@ export default function AnalyzeResume() {
     (index: number) => {
       useResumeAnalyzeStore.getState().pulseBullet(index);
       setSelectedBulletIndex(index);
-      if (!result?.bulletAnalysis[index]) return;
+      const b = result?.bulletAnalysis[index];
+      if (!b) return;
+      if (
+        activeCategory
+        && bulletMatchesAnalysisCategory(b, activeCategory)
+      ) {
+        return;
+      }
       setActiveCategory(
-        inferPrimaryCategoryFromBullet(result.bulletAnalysis[index]) as keyof AnalysisResult["categoryScores"],
+        inferPrimaryCategoryFromBullet(b) as keyof AnalysisResult["categoryScores"],
       );
     },
-    [result],
+    [result, activeCategory],
   );
 
   const bulletBlurClearRef = useRef<number | null>(null);
@@ -791,13 +811,24 @@ export default function AnalyzeResume() {
 
   return (
     <div
-      className={`az-shell${improvementPlanVisible ? "" : " az-desktop-sidebar-hidden"}`}
+      className={`az-shell${improvementPlanVisible ? "" : " az-desktop-sidebar-hidden"}${workspaceSplit ? " az-shell-workspace-split" : ""}`}
       style={{
         display: "flex",
         width: "100%",
         ...(workspaceSplit
-          ? { flex: 1, minHeight: 0, overflow: "hidden" as const }
-          : { minHeight: "100vh", overflow: "visible" as const }),
+          ? {
+            flex: "1 1 0%",
+            minHeight: 0,
+            overflow: "hidden",
+            alignItems: "stretch",
+          }
+          : {
+            flex: "1 1 0%",
+            minHeight: 0,
+            overflowX: "hidden" as const,
+            overflowY: "auto" as const,
+            alignItems: "stretch",
+          }),
         background: "var(--bg)",
         position: "relative",
       }}
@@ -830,20 +861,23 @@ export default function AnalyzeResume() {
           to { opacity: 1; }
         }
 
-        /* ── Desktop: inline sticky sidebar (never overlays content) ── */
+        /* ── Desktop: inline sidebar — stretches with shell height (no fixed 100vh) ── */
         .az-sidebar {
           width: 272px;
           flex-shrink: 0;
           border-right: 1px solid var(--border);
           overflow-y: auto;
+          overflow-x: hidden;
           display: flex;
           flex-direction: column;
           background: var(--surface);
           padding: 20px 14px;
           box-sizing: border-box;
-          position: sticky;
-          top: 0;
-          height: 100vh;
+          align-self: stretch;
+          height: auto;
+          min-height: 0;
+          flex-grow: 0;
+          position: relative;
           transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
                       opacity 0.22s,
                       padding 0.28s,
@@ -932,7 +966,15 @@ export default function AnalyzeResume() {
           .az-sidebar-scrim-mobile { animation: none !important; opacity: 1; }
         }
 
-        .az-analyze-sidebar-toggle-row { display: none; }
+        /* Desktop workspace: main area height-bounded so only the work column scrolls */
+        @media (min-width: 768px) {
+          .az-shell.az-shell-workspace-split {
+            flex: 1 1 0%;
+            min-height: 0;
+            overflow: hidden;
+            align-items: stretch;
+          }
+        }
         @media (min-width: 768px) {
           .az-analyze-sidebar-toggle-row {
             display: flex;
@@ -1048,20 +1090,27 @@ export default function AnalyzeResume() {
       <main
         className={`az-main${workspaceSplit ? " az-main-workspace-split" : ""}`}
         style={{
-          flex: 1,
-          ...(workspaceSplit ? {
-            display: "grid",
-            gridTemplateColumns: "minmax(300px,min(472px, 44vw)) 1fr",
-            gridTemplateRows: "minmax(0, 1fr)",
-            overflow: "hidden",
-            padding: 0,
-            minHeight: 0,
-            width: "100%",
-          } : {
-            overflowY: "auto",
-            padding: "28px 36px",
-          }),
-          minWidth: 0,
+          ...(workspaceSplit
+            ? {
+              flex: "1 1 0%",
+              minWidth: 0,
+              display: "grid",
+              gridTemplateColumns: "minmax(300px,min(472px, 44vw)) 1fr",
+              gridTemplateRows: "minmax(0, 1fr)",
+              overflow: "hidden",
+              padding: 0,
+              minHeight: 0,
+              height: "100%",
+              alignSelf: "stretch",
+              width: "100%",
+            }
+            : {
+              flex: 1,
+              overflowY: "auto",
+              padding: "28px 36px",
+              minHeight: 0,
+              minWidth: 0,
+            }),
         }}
       >
 
@@ -1071,6 +1120,19 @@ export default function AnalyzeResume() {
             .az-mobile-score    { display: block !important; }
             .az-main:not(.az-main-workspace-split) {
               padding: 16px 14px 60px !important;
+            }
+          }
+          @media (min-width: 768px) {
+            .az-main.az-main-workspace-split {
+              height: 100%;
+              max-height: 100%;
+              min-height: 0 !important;
+            }
+            .az-split-work-slot {
+              min-height: 0 !important;
+            }
+            .az-split-resume-slot {
+              min-height: 0 !important;
             }
           }
           @media (max-width: 767px) {
@@ -1293,7 +1355,18 @@ export default function AnalyzeResume() {
               background: "var(--bg)",
             }}
           >
-            <AnalyzePreviewPane
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                minWidth: 0,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              }}
+            >
+              <AnalyzePreviewPane
+              analyzeSnapshot={analyzePreviewSnapshot}
               sectionFeedback={result.sectionFeedback}
               activeCategory={activeCategory}
               rewriteEdits={rewriteEdits}
@@ -1306,6 +1379,7 @@ export default function AnalyzeResume() {
               builderReady={builderLinkReady}
               builderOpening={builderOpening}
             />
+            </div>
           </div>
         ) : null}
 
@@ -2323,6 +2397,7 @@ export default function AnalyzeResume() {
       {result && !workspaceSplit && (
         <div className={`az-resume-panel${previewOpen ? "" : " hidden"}`}>
           <AnalyzePreviewPane
+            analyzeSnapshot={analyzePreviewSnapshot}
             sectionFeedback={result.sectionFeedback}
             activeCategory={activeCategory}
             rewriteEdits={rewriteEdits}

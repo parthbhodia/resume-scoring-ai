@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
-import AnalyzeLiveResumeBody from "@/components/AnalyzeLiveResumeBody";
+import AnalyzeLiveResumeBody, {
+  lineLooksLikeStandaloneSectionHeading,
+  mergeResumeHeaderSources,
+} from "@/components/AnalyzeLiveResumeBody";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
   bulletMatchesAnalysisCategory,
@@ -217,24 +220,52 @@ export default function AnnotatedResumePanel({
   );
 
   /**
-   * True when the full extract has at least 2 non-bullet lines (name, contact,
-   * section headings, etc.) — meaning it is a real resume document rather than
-   * just a flat list of bullet strings returned by the API.
+   * True when `fullExtract` is document-like (two+ non-bullet rows, or one row that is
+   * not only a known section title — e.g. a name line before bullets). Keeps real extract
+   * so identity is not dropped in favor of bullet-only synthetic glue.
    */
   const fullExtractHasStructure = useMemo(() => {
     if (!fullExtract) return false;
     const lines = fullExtract.split("\n").map((l) => l.trim()).filter(Boolean);
-    const nonBulletLines = lines.filter((l) => !/^[-•–—*]/.test(l));
-    return nonBulletLines.length >= 2;
+    const nonBulletLines = lines.filter((l) => !/^[\s]*[-•–—*\u2022]/.test(l));
+    if (nonBulletLines.length >= 2) return true;
+    if (
+      nonBulletLines.length === 1
+      && !lineLooksLikeStandaloneSectionHeading(nonBulletLines[0])
+    ) return true;
+    return false;
   }, [fullExtract]);
+
+  const previewIdentityLines = useMemo(
+    () => mergeResumeHeaderSources(resumeHeader, fullExtract),
+    [resumeHeader, fullExtract],
+  );
 
   /**
    * Use the full extract when it has real structure; fall back to the synthetic
    * version (which injects sectionFeedback headings) when it is a bare bullet dump.
+   * When synthetic, still prepend name/contact from the API or full extract so the
+   * mirror does not start at PROFESSIONAL EXPERIENCE only.
    */
-  const effectiveExtracted = fullExtractHasStructure
-    ? fullExtract
-    : syntheticExtract || fullExtract;
+  const effectiveExtracted = useMemo(() => {
+    const shell = fullExtractHasStructure
+      ? fullExtract
+      : (syntheticExtract || fullExtract);
+    const body = shell.trim();
+    if (
+      !fullExtractHasStructure
+      && previewIdentityLines.length > 0
+      && body !== ""
+    ) {
+      return [...previewIdentityLines, body].join("\n");
+    }
+    return shell;
+  }, [
+    fullExtractHasStructure,
+    fullExtract,
+    syntheticExtract,
+    previewIdentityLines,
+  ]);
 
   const extractKind: "full" | "synthetic" | "none" = fullExtractHasStructure
     ? "full"
@@ -280,7 +311,7 @@ export default function AnnotatedResumePanel({
     hide("mark"); // metric number highlights (green backgrounds)
 
     try {
-      await exportResumePreviewPdf(node, `resume-${new Date().toISOString().slice(0, 10)}.pdf`);
+      await exportResumePreviewPdf(node, `resume-preview-clean-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (err) {
       console.error(err);
     } finally {
@@ -393,13 +424,11 @@ export default function AnnotatedResumePanel({
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        position: "sticky",
-        top: 0,
+        position: "relative",
         ...(presentationOnly
           ? {
               flex: 1,
               minHeight: 0,
-              height: "100%",
               maxHeight: "100%",
               alignSelf: "stretch",
             }
@@ -548,7 +577,8 @@ export default function AnnotatedResumePanel({
               type="button"
               onClick={onSavePreviewPdf}
               disabled={pdfExporting}
-              title="Download resume with your applied changes as a clean PDF"
+              title="Exports what you see here as a plain PDF (highlights removed). Uses preview text—including session line swaps—not your untouched upload. For full-structure edits export from Résumé Builder."
+              aria-label="Export clean PDF from annotated preview content"
               style={{
                 fontSize: 10.5,
                 fontWeight: 700,
@@ -565,7 +595,7 @@ export default function AnnotatedResumePanel({
                 boxShadow: pdfExporting ? "none" : "0 2px 6px rgba(26,35,126,0.25)",
               }}
             >
-              {pdfExporting ? "Saving…" : "⬇ Download edited resume"}
+              {pdfExporting ? "Exporting…" : "Export clean PDF"}
             </button>
           )}
           </div>
@@ -702,6 +732,7 @@ export default function AnnotatedResumePanel({
           {useLiveDoc ? (
               <AnalyzeLiveResumeBody
                 extractedText={effectiveExtracted}
+                headerInferenceText={fullExtract}
                 resumeHeader={resumeHeader}
                 bulletAnalysis={bulletAnalysis}
                 activeCategory={activeCategory}

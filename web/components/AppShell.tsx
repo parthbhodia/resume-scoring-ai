@@ -157,11 +157,22 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const initial = (user?.email || "?").charAt(0).toUpperCase();
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column" }}>
+    <div
+      style={{
+        height: "100dvh",
+        maxHeight: "100dvh",
+        minHeight: 0,
+        background: "var(--bg)",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
 
       {/* ── Persistent top navbar ──────────────────────────── */}
       <header style={{
         position: "sticky", top: 0, zIndex: 50,
+        flexShrink: 0,
         height: HEADER_H, padding: "0 20px",
         display: "flex", alignItems: "center", gap: 4,
         background: "var(--glass-bg)",
@@ -300,12 +311,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       {/* ── Main content ─────────────────────────────────── */}
-      <main style={{ minWidth: 0, flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <main style={{ minWidth: 0, flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {children}
       </main>
 
       {/* ── Footer — legal + contact (signed-in app) ─────── */}
       <footer style={{
+        flexShrink: 0,
         borderTop: "1px solid var(--border)",
         padding: "12px 20px",
         display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between",
