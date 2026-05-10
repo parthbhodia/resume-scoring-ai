@@ -294,7 +294,12 @@ function TemplateCard({
 
 /* ── Formatted resume preview ────────────────────────────────────── */
 
-function FormattedResumePreview({ text, lineHeight }: { text: string; lineHeight: number }) {
+function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: string; lineHeight: number; styleFolder: string }) {
+  const isHarshibar = styleFolder === "Harshibar_Template1";
+  const font = isHarshibar
+    ? "'Inter', 'Helvetica Neue', Arial, sans-serif"
+    : "'Georgia', 'Times New Roman', serif";
+
   const lines = text.split("\n");
 
   const isHeader = (line: string) => {
@@ -308,46 +313,65 @@ function FormattedResumePreview({ text, lineHeight }: { text: string; lineHeight
     return idx <= 3 && !isHeader(t) && (t.includes("@") || t.includes("·") || t.includes("|") || /^\(?\d/.test(t));
   };
 
-  // First non-empty line is the name
   const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
 
   return (
-    <div style={{ fontFamily: "'Georgia', 'Times New Roman', serif", fontSize: 11, lineHeight, color: "#0f172a" }}>
+    <div style={{ fontFamily: font, fontSize: 11, lineHeight, color: "#0f172a" }}>
       {lines.map((line, i) => {
         const t = line.trim();
-        if (!t) return <div key={i} style={{ height: lineHeight * 6 }} />;
+        if (!t) return <div key={i} style={{ height: lineHeight * 5 }} />;
+
+        // Name line
         if (i === firstNonEmpty) {
-          return (
-            <div key={i} style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.3, marginBottom: 2, lineHeight: 1.2 }}>
+          return isHarshibar ? (
+            <div key={i} style={{ fontSize: 19, fontWeight: 700, letterSpacing: -0.5, marginBottom: 2, lineHeight: 1.15, color: "#0f172a" }}>
+              {t}
+            </div>
+          ) : (
+            <div key={i} style={{ fontSize: 17, fontWeight: 700, letterSpacing: 1.5, textAlign: "center", marginBottom: 2, lineHeight: 1.2, textTransform: "uppercase", color: "#0f172a" }}>
               {t}
             </div>
           );
         }
+
+        // Contact line
         if (isContactLine(line, i - firstNonEmpty)) {
           return (
-            <div key={i} style={{ fontSize: 10, color: "#475569", marginBottom: 2, letterSpacing: 0.1 }}>
+            <div key={i} style={{ fontSize: 9.5, color: "#475569", marginBottom: 2, letterSpacing: 0.1, textAlign: isHarshibar ? "left" : "center" }}>
               {t}
             </div>
           );
         }
+
+        // Section header
         if (isHeader(t)) {
-          return (
-            <div key={i} style={{ marginTop: lineHeight * 7, marginBottom: 3 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: "#0f172a" }}>{t}</div>
-              <div style={{ height: 1, background: "#0f172a", marginTop: 3 }} />
+          return isHarshibar ? (
+            <div key={i} style={{ marginTop: lineHeight * 8, marginBottom: 4 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 1.4, color: "#0f172a" }}>{t}</div>
+              <div style={{ height: 0.75, background: "#0f172a", marginTop: 3 }} />
+            </div>
+          ) : (
+            <div key={i} style={{ marginTop: lineHeight * 8, marginBottom: 4 }}>
+              <div style={{ height: 1.5, background: "#0f172a", marginBottom: 3 }} />
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8, color: "#0f172a", textAlign: "center" }}>{t}</div>
+              <div style={{ height: 0.75, background: "#0f172a", marginTop: 3 }} />
             </div>
           );
         }
+
+        // Bullet
         if (t.startsWith("•") || t.startsWith("-")) {
           return (
-            <div key={i} style={{ fontSize: 10.5, paddingLeft: 14, position: "relative", marginBottom: 1.5, color: "#1e293b" }}>
-              <span style={{ position: "absolute", left: 4 }}>•</span>
+            <div key={i} style={{ fontSize: 10, paddingLeft: 13, position: "relative", marginBottom: 2, color: "#1e293b" }}>
+              <span style={{ position: "absolute", left: 3 }}>•</span>
               {t.replace(/^[•\-]\s*/, "")}
             </div>
           );
         }
+
+        // Body line
         return (
-          <div key={i} style={{ fontSize: 10.5, marginBottom: 1.5, color: "#1e293b" }}>
+          <div key={i} style={{ fontSize: 10, marginBottom: 2, color: "#1e293b", fontStyle: !isHarshibar && t.includes("|") ? "italic" : "normal" }}>
             {t}
           </div>
         );
@@ -679,7 +703,7 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
                 padding: pad,
               }}
             >
-              <FormattedResumePreview text={previewBody} lineHeight={lh} />
+              <FormattedResumePreview text={previewBody} lineHeight={lh} styleFolder={styleFolder} />
             </div>
           </div>
         </section>
