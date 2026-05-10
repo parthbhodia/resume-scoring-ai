@@ -20,6 +20,8 @@ import { useSearchParams } from "next/navigation";
 import AppShell, { useAppView } from "@/components/AppShell";
 import ResumeBuilder from "@/components/ResumeBuilder";
 import ResumeTemplateStudio from "@/components/ResumeTemplateStudio";
+import ContentSourcePicker from "@/components/ContentSourcePicker";
+import ManualResumeForm from "@/components/ManualResumeForm";
 import ResumeLibrary from "@/components/ResumeLibrary";
 import ResumeView from "@/components/ResumeView";
 import AnalyzeResume from "@/components/AnalyzeResume";
@@ -125,6 +127,20 @@ function RouterView() {
     return (
       <ViewFill>
         <ResumeTemplateStudio initialBaseFolder={base || null} />
+      </ViewFill>
+    );
+  }
+  if (view === “content-source”) {
+    return (
+      <ViewFill>
+        <ContentSourcePicker />
+      </ViewFill>
+    );
+  }
+  if (view === “manual-form”) {
+    return (
+      <ViewFill>
+        <ManualResumeForm />
       </ViewFill>
     );
   }

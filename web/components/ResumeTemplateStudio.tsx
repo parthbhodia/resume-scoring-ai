@@ -402,19 +402,17 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
   }, [router]);
 
   const onContinue = useCallback(() => {
+    // Store style prefs — profile text is collected on the next screen
     try {
       sessionStorage.setItem(STYLE_REF_KEY, styleFolder);
       sessionStorage.setItem(RN_LINE_SPACING_KEY, lineSpacing);
       sessionStorage.setItem(RN_MARGIN_IN_KEY, marginIn);
-      sessionStorage.setItem(PROFILE_KEY, previewBody.trim());
     } catch { /* quota */ }
     const q = new URLSearchParams();
-    q.set("view", "builder");
-    q.set("flow", "tailor");
-    q.set("fromTemplateStudio", "1");
+    q.set("view", "content-source");
     if (base) q.set("base", base);
     router.push(`/?${q.toString()}`);
-  }, [router, styleFolder, lineSpacing, marginIn, previewBody, base]);
+  }, [router, styleFolder, lineSpacing, marginIn, base]);
 
   return (
     <div
