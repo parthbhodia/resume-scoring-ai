@@ -17,10 +17,13 @@ import ShareButton from "./ShareButton";
 import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 
-function scoreBand(score: number): "strong" | "mid" | "weak" {
-  if (score >= 70) return "strong";
-  if (score >= 55) return "mid";
-  return "weak";
+type Tab = "pdf" | "edit" | "ats" | "analysis";
+
+interface ResumeAnalysisResult {
+  overall: { score: number; summary: string };
+  sections: Array<{ name: string; score: number; summary: string }>;
+  tips: Array<{ severity: "urgent" | "critical" | "optional"; title: string; detail: string }>;
+  counts: { urgent: number; critical: number; optional: number };
 }
 
 export default function ResumeView({ folder }: { folder: string }) {
@@ -31,6 +34,18 @@ export default function ResumeView({ folder }: { folder: string }) {
   const [error, setError] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
+  const [activeTab,  setActiveTab]  = useState<Tab>("pdf");
+  const [atsJd,      setAtsJd]      = useState("");
+  const [atsResult,  setAtsResult]  = useState<AtsResult | null>(null);
+  const [atsLoading, setAtsLoading] = useState(false);
+  const [atsError,   setAtsError]   = useState<string | null>(null);
+  const [doctorIssues, setDoctorIssues] = useState<Record<string, { id: string; severity: "warn" | "info"; msg: string }[]>>({});
+  const [analysis, setAnalysis] = useState<ResumeAnalysisResult | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisAt, setAnalysisAt] = useState<number | null>(null);
+
+  // Pull current user
   useEffect(() => {
     const supabase = getSupabaseClient();
     supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
@@ -89,45 +104,20 @@ export default function ResumeView({ folder }: { folder: string }) {
   const sc = meta?.score;
 
   return (
-    <div
-      className="rv-library-detail"
-      style={{
-        flex: "1 1 0%",
-        width: "100%",
-        minHeight: 0,
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        background: "var(--bg)",
-      }}
-    >
-      <style>{`
-        .rv-grid {
-          flex: 1 1 0%;
-          min-height: 0;
-          display: grid;
-          grid-template-columns: minmax(280px, 380px) 1fr;
-          gap: 0;
-          align-items: stretch;
-        }
-        @media (max-width: 900px) {
-          .rv-grid { grid-template-columns: 1fr; }
-          .rv-pdf-wrap { min-height: 62vh !important; border-left: none !important; border-top: 1px solid var(--border); }
-        }
-      `}</style>
-
+    <div style={{
+      display: "flex", flexDirection: "column",
+      height: "100%",
+      minHeight: 0,
+      overflow: "hidden",
+    }}>
       {/* Top bar */}
-      <div
-        style={{
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          padding: "14px 20px",
-          borderBottom: "1px solid var(--border)",
-          background: "var(--surface)",
-        }}
-      >
+      <div style={{
+        padding: "16px 28px",
+        display: "flex", alignItems: "center", gap: 14,
+        borderBottom: "1px solid var(--border)",
+        background: "var(--surface)",
+        flexShrink: 0,
+      }}>
         <button
           type="button"
           onClick={() => router.push("/?view=library")}
@@ -151,40 +141,100 @@ export default function ResumeView({ folder }: { folder: string }) {
           Library
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 10,
-              color: "var(--dim)",
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              fontWeight: 700,
-            }}
-          >
-            Saved résumé
+          <div style={{ fontSize: 11, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 600 }}>
+            Resume
           </div>
-          <div
-            style={{
-              fontSize: 17,
-              fontWeight: 700,
-              letterSpacing: "-0.03em",
-              color: "var(--text)",
-              marginTop: 2,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {meta?.company ?? (loading ? "…" : "—")}
-            {meta?.role ? (
-              <span style={{ color: "var(--muted)", fontWeight: 500 }}> · {meta.role}</span>
-            ) : null}
+          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.5, color: "var(--text)", marginTop: 2 }}>
+            {meta?.company ?? "—"}{meta?.role ? <span style={{ color: "var(--dim)", fontWeight: 400 }}> · {meta.role}</span> : null}
           </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+          <button
+            onClick={runAnalysis}
+            disabled={analysisLoading || !tree}
+            style={{
+              fontSize: 12, padding: "8px 14px",
+              background: "var(--surface2)", border: "1px solid var(--border)",
+              borderRadius: 8, color: "var(--text)", cursor: analysisLoading ? "wait" : "pointer", fontFamily: "inherit",
+              fontWeight: 500, opacity: analysisLoading || !tree ? 0.65 : 1,
+            }}
+          >{analysisLoading ? "Analyzing..." : "Analyze"}</button>
+          <button
+            onClick={useAsBase}
+            title="Start a new generation using this resume as the base"
+            style={{
+              fontSize: 12, padding: "8px 14px",
+              background: "var(--surface2)", border: "1px solid var(--border)",
+              borderRadius: 8, color: "var(--text)", cursor: "pointer", fontFamily: "inherit",
+              fontWeight: 500, letterSpacing: -0.1,
+            }}
+          >Use as base</button>
+          {meta?.folder && <ShareButton folder={meta.folder} pdfUrl={pdfUrl} userId={user?.id ?? null} />}
+          {pdfUrl && (
+            <a
+              href={pdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                fontSize: 12, padding: "8px 14px",
+                background: "var(--accent)", color: "#fff",
+                borderRadius: 8, textDecoration: "none", letterSpacing: -0.1,
+                fontWeight: 600,
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
+                <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M2 11h9" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+              Download PDF
+            </a>
+          )}
         </div>
       </div>
 
+      {/* Tabs */}
+      <div style={{
+        padding: "8px 28px 0",
+        background: "var(--surface)",
+        borderBottom: "1px solid var(--border)",
+        flexShrink: 0,
+        display: "flex", gap: 0,
+      }}>
+        {([...(pdfUrl ? ["pdf"] : []), "edit", "ats", "analysis"] as Tab[]).map(t => (
+          <button
+            key={t}
+            onClick={() => {
+              setActiveTab(t);
+              if (t === "ats" && !atsResult && !atsLoading) runAts();
+            }}
+            style={{
+              padding: "9px 20px", fontSize: 12,
+              fontWeight: activeTab === t ? 600 : 400,
+              background: "transparent",
+              border: "none",
+              borderBottom: activeTab === t ? "2px solid var(--accent)" : "2px solid transparent",
+              color: activeTab === t ? "var(--accent)" : "var(--dim)",
+              cursor: "pointer", fontFamily: "inherit",
+              letterSpacing: -0.2,
+              transition: "color 0.15s, border-color 0.15s",
+              marginBottom: -1,
+            }}
+          >
+            {t === "pdf"
+              ? "PDF"
+              : t === "edit"
+                ? "Edit"
+                : t === "ats"
+                  ? (atsResult ? `ATS  ${atsResult.score}` : "ATS check")
+                  : (analysis ? `Analysis  ${analysis.overall.score}/10` : "Analysis")}
+          </button>
+        ))}
+      </div>
+
       {loading && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--dim)" }}>
-          <div className="skeleton" style={{ width: "min(400px, 90%)", height: 200, borderRadius: "var(--radius-lg)" }} />
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--dim)", fontSize: 13 }}>
+          Loading resume…
         </div>
       )}
 
@@ -192,68 +242,107 @@ export default function ResumeView({ folder }: { folder: string }) {
         <div style={{ padding: 32, textAlign: "center", color: "var(--red)", fontSize: 14 }}>{error}</div>
       )}
 
-      {!loading && !error && meta && (
-        <div className="rv-grid" style={{ flex: "1 1 0%", minHeight: 0, overflow: "hidden" }}>
-          {/* Left: metadata (mockup) */}
-          <aside
-            style={{
-              padding: "24px 22px 28px",
-              borderRight: "1px solid var(--border)",
-              background: "var(--surface)",
-              overflowY: "auto",
-              WebkitOverflowScrolling: "touch",
-            }}
-          >
-            {dateStr && (
-              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, letterSpacing: "-0.02em" }}>
-                Generated{" "}
-                <time dateTime={meta.created_at} style={{ color: "var(--text)", fontWeight: 600 }}>
-                  {dateStr}
-                </time>
-              </div>
-            )}
+      {/* PDF tab — full-height iframe preview */}
+      {activeTab === "pdf" && pdfUrl && (
+        <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
+          <iframe
+            src={pdfUrl}
+            title="Resume PDF"
+            style={{ flex: 1, border: "none", background: "#f5f5f5", minHeight: "70vh" }}
+          />
+        </div>
+      )}
 
-            {sc != null && (
-              <div style={{ marginBottom: 20 }}>
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: "var(--dim)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    marginBottom: 8,
-                  }}
-                >
-                  Match score
-                </div>
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "baseline",
-                    gap: 6,
-                    padding: "10px 14px",
-                    borderRadius: "var(--radius-lg, 12px)",
-                    background: "var(--surface2)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 28,
-                      fontWeight: 800,
-                      letterSpacing: "-0.04em",
-                      color:
-                        scoreBand(sc) === "strong"
-                          ? "var(--green)"
-                          : scoreBand(sc) === "mid"
-                            ? "var(--amber)"
-                            : "var(--red)",
-                    }}
-                  >
-                    {sc}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--muted)" }}>/100</span>
+      {!loading && !error && tree && activeTab === "edit" && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 28px 48px" }}>
+          <ResumeEditor
+            initial={tree}
+            folder={folder}
+            saving={saving}
+            saveError={saveErr}
+            onSave={onSave}
+            onAIEdit={onAIEdit}
+            doctorIssues={doctorIssues}
+            pdfUrl={pdfUrl}
+          />
+        </div>
+      )}
+
+      {!loading && !error && tree && activeTab === "ats" && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 28px 48px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{
+            background: "var(--surface)", border: "1px solid var(--border)",
+            borderRadius: 12, padding: 14,
+          }}>
+            <div style={{ fontSize: 11, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>
+              Job description (optional)
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8, letterSpacing: -0.1 }}>
+              Paste the JD to get keyword-coverage analysis on top of the structural ATS checks.
+            </div>
+            <textarea
+              value={atsJd}
+              onChange={e => setAtsJd(e.target.value)}
+              placeholder="Paste the job description here to score keyword coverage…"
+              rows={4}
+              style={{
+                width: "100%", fontSize: 12, padding: "8px 10px",
+                background: "var(--surface2)", border: "1px solid var(--border)",
+                borderRadius: 7, color: "var(--text)", fontFamily: "inherit",
+                resize: "vertical",
+              }}
+            />
+            <button
+              onClick={runAts}
+              disabled={atsLoading}
+              style={{
+                marginTop: 8, fontSize: 12, padding: "7px 14px",
+                background: "var(--accent)", color: "#fff",
+                border: "none", borderRadius: 7,
+                cursor: atsLoading ? "wait" : "pointer", fontFamily: "inherit",
+                fontWeight: 600, letterSpacing: -0.1,
+              }}
+            >{atsLoading ? "Re-checking…" : atsResult ? "Re-run ATS check" : "Run ATS check"}</button>
+          </div>
+
+          {atsLoading && (
+            <div style={{ padding: 28, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
+              Running ATS check…
+            </div>
+          )}
+          {atsError && !atsLoading && (
+            <div style={{ padding: 16, color: "var(--red)", fontSize: 12 }}>{atsError}</div>
+          )}
+          {atsResult && !atsLoading && (
+            <AtsPanel result={atsResult} rechecking={atsLoading} onRecheck={runAts} />
+          )}
+        </div>
+        </div>
+      )}
+
+      {!loading && !error && tree && activeTab === "analysis" && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 28px 48px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {!analysis && !analysisLoading && !analysisError && (
+            <div style={{ padding: 18, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", color: "var(--dim)", fontSize: 13 }}>
+              Click <strong style={{ color: "var(--text)" }}>Analyze resume</strong> to generate section scores and prioritized fixes.
+            </div>
+          )}
+          {analysisError && (
+            <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 10, color: "var(--red)", fontSize: 12, background: "var(--surface)" }}>
+              Couldn&apos;t analyze resume: {analysisError}
+            </div>
+          )}
+          {analysis && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)" }}>
+                <div style={{ fontSize: 11, color: "var(--dim)", textTransform: "uppercase", marginBottom: 5 }}>Overall</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>{analysis.overall.score}/10</div>
+                <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>{analysis.overall.summary}</div>
+                <div style={{ marginTop: 8, fontSize: 11, color: "var(--dim)" }}>
+                  {analysis.counts.urgent} urgent · {analysis.counts.critical} critical · {analysis.counts.optional} optional fixes
+                  {analysisAt ? ` · analyzed ${new Date(analysisAt).toLocaleTimeString()}` : ""}
                 </div>
               </div>
             )}
@@ -383,6 +472,7 @@ export default function ResumeView({ folder }: { folder: string }) {
               </div>
             )}
           </section>
+        </div>
         </div>
       )}
     </div>

@@ -87,6 +87,13 @@ function RouterView() {
   }, [view, flow, router, searchQs]);
 
   if (view === "library") {
+    if (resume) {
+      return (
+        <ViewFill>
+          <ResumeView folder={resume} />
+        </ViewFill>
+      );
+    }
     return (
       <ViewFill>
         <ResumeLibrary />
