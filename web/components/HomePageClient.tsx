@@ -130,14 +130,14 @@ function RouterView() {
       </ViewFill>
     );
   }
-  if (view === “content-source”) {
+  if (view === "content-source") {
     return (
       <ViewFill>
         <ContentSourcePicker />
       </ViewFill>
     );
   }
-  if (view === “manual-form”) {
+  if (view === "manual-form") {
     return (
       <ViewFill>
         <ManualResumeForm />
