@@ -215,8 +215,8 @@ function ProfileDraftFromAnalyze({ prefill }: { prefill: boolean }) {
       ) : (
         <p style={{ fontSize: 13, color: "var(--dim)", fontStyle: "italic", marginBottom: 24 }}>
           {prefill
-            ? "No draft text was found — open it again from Analyze → Résumé builder → "Use as profile starter.""
-            : "Use "Use as profile starter" from the template builder to send your extract here."}
+            ? 'No draft text was found — open it again from Analyze → Résumé builder → "Use as profile starter."'
+            : 'Use "Use as profile starter" from the template builder to send your extract here.'}
         </p>
       )}
     </div>
