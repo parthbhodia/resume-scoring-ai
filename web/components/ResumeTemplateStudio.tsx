@@ -319,9 +319,8 @@ function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: strin
             </div>
           ) : (
             <div key={i} style={{ marginTop: lineHeight * 8, marginBottom: 4 }}>
-              <div style={{ height: 1.5, background: "#0f172a", marginBottom: 3 }} />
-              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8, color: "#0f172a", textAlign: "center" }}>{t}</div>
-              <div style={{ height: 0.75, background: "#0f172a", marginTop: 3 }} />
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8, color: "#0f172a" }}>{t}</div>
+              <div style={{ height: 0.9, background: "#0f172a", marginTop: 3 }} />
             </div>
           );
         }
