@@ -116,7 +116,23 @@ function RouterView() {
       </ViewFill>
     );
   }
-  if (view === "analyze") {
+  // These views are not in useAppView()'s allowlist so must be checked against
+  // rawView before the view === “analyze” fallback swallows them.
+  if (rawView === “content-source”) {
+    return (
+      <ViewFill>
+        <ContentSourcePicker />
+      </ViewFill>
+    );
+  }
+  if (rawView === “manual-form”) {
+    return (
+      <ViewFill>
+        <ManualResumeForm />
+      </ViewFill>
+    );
+  }
+  if (view === “analyze”) {
     return (
       <ViewFill>
         <AnalyzeResume />
@@ -128,20 +144,6 @@ function RouterView() {
     return (
       <ViewFill>
         <ResumeTemplateStudio initialBaseFolder={base || null} />
-      </ViewFill>
-    );
-  }
-  if (rawView === "content-source") {
-    return (
-      <ViewFill>
-        <ContentSourcePicker />
-      </ViewFill>
-    );
-  }
-  if (rawView === "manual-form") {
-    return (
-      <ViewFill>
-        <ManualResumeForm />
       </ViewFill>
     );
   }
