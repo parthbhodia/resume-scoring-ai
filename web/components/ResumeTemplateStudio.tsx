@@ -58,54 +58,34 @@ function HarshibarPreviewSvg() {
   return (
     <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg" style={{ display: "block" }}>
       <rect width="200" height="260" fill="#ffffff" />
-      {/* Name */}
-      <text x="12" y="21" fontSize="10.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">John A. Smith</text>
-      {/* Contact row */}
-      <text x="12" y="31" fontSize="5.5" fill="#475569" fontFamily="Arial, sans-serif">john@email.com  ·  (555) 123-4567  ·  github.com/jsmith  ·  linkedin.com/in/jsmith</text>
-      {/* Rule */}
+      <text x="12" y="21" fontSize="10.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Jennifer Jobscan</text>
+      <text x="12" y="31" fontSize="5.5" fill="#475569" fontFamily="Arial, sans-serif">jennifer@example.com  ·  (555) 010-2030  ·  San Francisco, CA</text>
       <line x1="12" y1="36" x2="188" y2="36" stroke="#0f172a" strokeWidth="0.8" />
 
-      {/* EXPERIENCE */}
-      <text x="12" y="47" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif" letterSpacing="1">EXPERIENCE</text>
+      <text x="12" y="47" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif" letterSpacing="1">WORK EXPERIENCE</text>
       <line x1="12" y1="50" x2="188" y2="50" stroke="#cbd5e1" strokeWidth="0.4" />
-      {/* Job 1 */}
-      <text x="12" y="59" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Software Engineer</text>
-      <text x="188" y="59" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif" textAnchor="end">Jan 2022 – Present</text>
-      <text x="12" y="67" fontSize="6" fill="#475569" fontFamily="Arial, sans-serif">Google, Inc. · Mountain View, CA</text>
+      <text x="12" y="59" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Senior Product Designer</text>
+      <text x="188" y="59" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif" textAnchor="end">2021 – Present</text>
+      <text x="12" y="67" fontSize="6" fill="#475569" fontFamily="Arial, sans-serif">Acme Labs · San Francisco, CA</text>
       <rect x="16" y="72" width="164" height="3" rx="1" fill="#e2e8f0" />
       <rect x="16" y="77" width="148" height="3" rx="1" fill="#e2e8f0" />
       <rect x="16" y="82" width="156" height="3" rx="1" fill="#e2e8f0" />
-      {/* Job 2 */}
-      <text x="12" y="94" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Software Engineer Intern</text>
-      <text x="188" y="94" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif" textAnchor="end">May 2021 – Aug 2021</text>
-      <text x="12" y="102" fontSize="6" fill="#475569" fontFamily="Arial, sans-serif">Meta Platforms · Menlo Park, CA</text>
+      <text x="12" y="94" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Product Designer</text>
+      <text x="188" y="94" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif" textAnchor="end">2018 – 2021</text>
+      <text x="12" y="102" fontSize="6" fill="#475569" fontFamily="Arial, sans-serif">Northwind · New York, NY</text>
       <rect x="16" y="107" width="150" height="3" rx="1" fill="#e2e8f0" />
       <rect x="16" y="112" width="130" height="3" rx="1" fill="#e2e8f0" />
 
-      {/* EDUCATION */}
-      <text x="12" y="124" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif" letterSpacing="1">EDUCATION</text>
+      <text x="12" y="124" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif" letterSpacing="1">CORE SKILLS</text>
       <line x1="12" y1="127" x2="188" y2="127" stroke="#cbd5e1" strokeWidth="0.4" />
-      <text x="12" y="136" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">B.S. Computer Science</text>
-      <text x="188" y="136" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif" textAnchor="end">Sep 2018 – May 2022</text>
-      <text x="12" y="144" fontSize="6" fill="#475569" fontFamily="Arial, sans-serif">Stanford University · GPA: 3.92 / 4.0</text>
+      <rect x="12" y="132" width="176" height="3" rx="1" fill="#e2e8f0" />
+      <rect x="12" y="137" width="140" height="3" rx="1" fill="#e2e8f0" />
 
-      {/* PROJECTS */}
-      <text x="12" y="156" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif" letterSpacing="1">PROJECTS</text>
-      <line x1="12" y1="159" x2="188" y2="159" stroke="#cbd5e1" strokeWidth="0.4" />
-      <text x="12" y="168" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">ResumAI  |  </text>
-      <text x="52" y="168" fontSize="6" fill="#2f81f7" fontFamily="Arial, sans-serif">github.com/jsmith/resumai</text>
-      <rect x="16" y="173" width="145" height="3" rx="1" fill="#e2e8f0" />
-      <rect x="16" y="178" width="120" height="3" rx="1" fill="#e2e8f0" />
-
-      {/* SKILLS */}
-      <text x="12" y="190" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif" letterSpacing="1">TECHNICAL SKILLS</text>
-      <line x1="12" y1="193" x2="188" y2="193" stroke="#cbd5e1" strokeWidth="0.4" />
-      <text x="12" y="202" fontSize="6" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Languages:</text>
-      <rect x="52" y="198" width="120" height="3" rx="1" fill="#e2e8f0" />
-      <text x="12" y="210" fontSize="6" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Frameworks:</text>
-      <rect x="55" y="206" width="100" height="3" rx="1" fill="#e2e8f0" />
-      <text x="12" y="218" fontSize="6" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Tools:</text>
-      <rect x="33" y="214" width="80" height="3" rx="1" fill="#e2e8f0" />
+      <text x="12" y="149" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif" letterSpacing="1">EDUCATION</text>
+      <line x1="12" y1="152" x2="188" y2="152" stroke="#cbd5e1" strokeWidth="0.4" />
+      <text x="12" y="161" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">BFA, Graphic Design</text>
+      <text x="188" y="161" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif" textAnchor="end">2014 – 2018</text>
+      <text x="12" y="169" fontSize="6" fill="#475569" fontFamily="Arial, sans-serif">State University</text>
     </svg>
   );
 }
@@ -114,20 +94,15 @@ function ClassicProPreviewSvg() {
   return (
     <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg" style={{ display: "block" }}>
       <rect width="200" height="260" fill="#ffffff" />
-      {/* Name centered */}
-      <text x="100" y="20" fontSize="11" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif" textAnchor="middle" letterSpacing="1">JENNIFER SMITH</text>
-      {/* Contact centered */}
-      <text x="100" y="29" fontSize="5.5" fill="#475569" fontFamily="Georgia, serif" textAnchor="middle">jennifer@email.com  ·  (555) 010-2030  ·  New York, NY</text>
-      {/* Thick rule */}
+      <text x="100" y="20" fontSize="11" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif" textAnchor="middle" letterSpacing="1">JENNIFER JOBSCAN</text>
+      <text x="100" y="29" fontSize="5.5" fill="#475569" fontFamily="Georgia, serif" textAnchor="middle">jennifer@example.com  ·  (555) 010-2030  ·  San Francisco, CA</text>
       <rect x="12" y="34" width="176" height="1.2" fill="#0f172a" />
 
-      {/* PROFESSIONAL SUMMARY */}
       <text x="100" y="45" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif" textAnchor="middle" letterSpacing="0.8">PROFESSIONAL SUMMARY</text>
       <rect x="12" y="49" width="176" height="3" rx="0.5" fill="#e2e8f0" />
       <rect x="12" y="54" width="160" height="3" rx="0.5" fill="#e2e8f0" />
       <rect x="12" y="59" width="170" height="3" rx="0.5" fill="#e2e8f0" />
 
-      {/* WORK EXPERIENCE */}
       <text x="12" y="72" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif" letterSpacing="0.8">WORK EXPERIENCE</text>
       <rect x="12" y="75" width="176" height="0.8" fill="#0f172a" />
       <text x="12" y="84" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif">Senior Product Designer</text>
@@ -136,30 +111,22 @@ function ClassicProPreviewSvg() {
       <rect x="16" y="97" width="160" height="2.8" rx="0.5" fill="#e2e8f0" />
       <rect x="16" y="102" width="148" height="2.8" rx="0.5" fill="#e2e8f0" />
       <rect x="16" y="107" width="154" height="2.8" rx="0.5" fill="#e2e8f0" />
-
       <text x="12" y="118" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif">Product Designer</text>
       <text x="188" y="118" fontSize="5.5" fill="#64748b" fontFamily="Georgia, serif" textAnchor="end">2018 – 2021</text>
       <text x="12" y="126" fontSize="6" fill="#475569" fontFamily="Georgia, serif" fontStyle="italic">Northwind, New York, NY</text>
       <rect x="16" y="131" width="155" height="2.8" rx="0.5" fill="#e2e8f0" />
       <rect x="16" y="136" width="140" height="2.8" rx="0.5" fill="#e2e8f0" />
 
-      {/* CORE SKILLS */}
       <text x="12" y="149" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif" letterSpacing="0.8">CORE SKILLS</text>
       <rect x="12" y="152" width="176" height="0.8" fill="#0f172a" />
       <rect x="12" y="158" width="176" height="3" rx="0.5" fill="#e2e8f0" />
       <rect x="12" y="163" width="140" height="3" rx="0.5" fill="#e2e8f0" />
 
-      {/* EDUCATION */}
       <text x="12" y="176" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif" letterSpacing="0.8">EDUCATION</text>
       <rect x="12" y="179" width="176" height="0.8" fill="#0f172a" />
       <text x="12" y="188" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif">BFA, Graphic Design</text>
       <text x="188" y="188" fontSize="5.5" fill="#64748b" fontFamily="Georgia, serif" textAnchor="end">2014 – 2018</text>
       <text x="12" y="196" fontSize="6" fill="#475569" fontFamily="Georgia, serif" fontStyle="italic">State University, Boston, MA</text>
-
-      {/* LANGUAGES */}
-      <text x="12" y="208" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia, serif" letterSpacing="0.8">LANGUAGES</text>
-      <rect x="12" y="211" width="176" height="0.8" fill="#0f172a" />
-      <text x="12" y="220" fontSize="6" fill="#475569" fontFamily="Georgia, serif">English (Native)  ·  French (Professional)</text>
     </svg>
   );
 }
@@ -196,64 +163,43 @@ function TemplateCard({
       onMouseLeave={() => setHovered(false)}
       style={{
         display: "flex",
-        flexDirection: "column",
+        flexDirection: "row",
         alignItems: "stretch",
         padding: 0,
         borderRadius: 12,
         border: selected
           ? "2.5px solid var(--accent)"
           : hovered
-          ? "2px solid var(--border-h)"
+          ? "2px solid var(--border-h, var(--border))"
           : "1.5px solid var(--border)",
         background: "var(--surface)",
         cursor: "pointer",
         fontFamily: "inherit",
         textAlign: "left",
-        transition: "border-color 0.15s, box-shadow 0.15s, transform 0.15s",
+        transition: "border-color 0.15s, box-shadow 0.15s",
         boxShadow: selected
           ? "0 0 0 3px rgba(47,129,247,0.15), var(--shadow-sm)"
           : hovered
           ? "var(--shadow)"
           : "var(--shadow-sm)",
-        transform: hovered && !selected ? "translateY(-1px)" : "none",
         overflow: "hidden",
         position: "relative",
+        width: "100%",
       }}
     >
-      {/* Badges */}
-      <div style={{ position: "absolute", top: 8, left: 8, display: "flex", gap: 5, zIndex: 2 }}>
-        {meta.isNew && (
-          <span style={{
-            padding: "2px 7px", borderRadius: 99,
-            background: "#f59e0b", color: "#fff",
-            fontSize: 9, fontWeight: 700, letterSpacing: 0.3,
-          }}>New</span>
-        )}
-      </div>
-
-      {/* Selected checkmark */}
-      {selected && (
-        <div style={{
-          position: "absolute", top: 8, right: 8, zIndex: 2,
-          width: 20, height: 20, borderRadius: "50%",
-          background: "var(--accent)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-            <path d="M2 5l2.5 2.5L8 3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-      )}
-
-      {/* Preview area */}
+      {/* Thumbnail — left column */}
       <div style={{
+        flex: "0 0 110px",
         background: "#f8fafc",
-        borderBottom: "1px solid var(--border)",
-        padding: "10px 10px 0",
+        borderRight: "1px solid var(--border)",
+        padding: "8px 8px 0",
         overflow: "hidden",
+        display: "flex",
+        alignItems: "flex-start",
       }}>
         <div style={{
-          boxShadow: "0 2px 8px rgba(15,23,42,0.10), 0 1px 2px rgba(15,23,42,0.08)",
+          width: "100%",
+          boxShadow: "0 2px 6px rgba(15,23,42,0.10)",
           borderRadius: "2px 2px 0 0",
           overflow: "hidden",
         }}>
@@ -261,33 +207,54 @@ function TemplateCard({
         </div>
       </div>
 
-      {/* Footer */}
-      <div style={{ padding: "10px 12px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontSize: 12, fontWeight: 600, color: "var(--text)",
-            letterSpacing: -0.2, lineHeight: 1.3,
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>
+      {/* Info — right column */}
+      <div style={{ flex: 1, padding: "14px 14px 14px 16px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2 }}>
             {template.label}
-          </div>
-          {meta.tag && (
-            <div style={{ fontSize: 10, color: "var(--dim)", marginTop: 2 }}>{meta.tag}</div>
+          </span>
+          {meta.isNew && (
+            <span style={{
+              padding: "2px 7px", borderRadius: 99,
+              background: "#f59e0b", color: "#fff",
+              fontSize: 9, fontWeight: 700, letterSpacing: 0.3,
+            }}>New</span>
           )}
         </div>
-        {meta.isAts && (
-          <span style={{
-            flexShrink: 0,
-            padding: "2px 7px", borderRadius: 99,
-            border: "1px solid rgba(52,211,153,0.35)",
-            background: "rgba(52,211,153,0.08)",
-            color: "var(--green)",
-            fontSize: 9.5, fontWeight: 700, letterSpacing: 0.2,
-          }}>
-            ATS
-          </span>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {meta.tag && (
+            <span style={{ fontSize: 11, color: "var(--dim)" }}>{meta.tag}</span>
+          )}
+          {meta.isAts && (
+            <span style={{
+              padding: "2px 7px", borderRadius: 99,
+              border: "1px solid rgba(52,211,153,0.35)",
+              background: "rgba(52,211,153,0.08)",
+              color: "var(--green)",
+              fontSize: 9.5, fontWeight: 700, letterSpacing: 0.2,
+            }}>ATS</span>
+          )}
+        </div>
+        <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+          {template.id === "harshibar-ats"
+            ? "Sans-serif, modern layout. Great for tech and design roles."
+            : "Serif, traditional layout. Ideal for business and academic roles."}
+        </p>
       </div>
+
+      {/* Selected checkmark */}
+      {selected && (
+        <div style={{
+          position: "absolute", top: 10, right: 10, zIndex: 2,
+          width: 22, height: 22, borderRadius: "50%",
+          background: "var(--accent)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+            <path d="M2 5.5l2.5 2.5L9 3" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+      )}
     </button>
   );
 }
@@ -607,30 +574,24 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
             </p>
           </div>
 
-          {/* Template grid */}
+          {/* Template list — single column, stacked */}
           <div
             style={{
               flex: 1, minHeight: 0, overflowY: "auto",
               padding: "0 24px 32px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
             }}
           >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-                gap: 16,
-              }}
-            >
-              {templates.map((t) => (
-                <TemplateCard
-                  key={t.id}
-                  template={t}
-                  selected={styleFolder === t.referenceFolder}
-                  onClick={() => setStyleFolder(t.referenceFolder)}
-                />
-              ))}
-            </div>
-
+            {templates.map((t) => (
+              <TemplateCard
+                key={t.id}
+                template={t}
+                selected={styleFolder === t.referenceFolder}
+                onClick={() => setStyleFolder(t.referenceFolder)}
+              />
+            ))}
           </div>
         </div>
 
