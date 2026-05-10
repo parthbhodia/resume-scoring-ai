@@ -70,8 +70,9 @@ function ScrollPane({ children }: { children: React.ReactNode }) {
 }
 
 function RouterView() {
-  const view = useAppView();
   const params = useSearchParams();
+  const rawView = (params?.get("view") || "analyze").toLowerCase();
+  const view = useAppView();
   const resume = (params?.get("resume") || "").trim();
   const base = (params?.get("base") || "").trim();
   const flow = (params?.get("flow") || "tailor").toLowerCase();
@@ -130,14 +131,14 @@ function RouterView() {
       </ViewFill>
     );
   }
-  if (view === "content-source") {
+  if (rawView === "content-source") {
     return (
       <ViewFill>
         <ContentSourcePicker />
       </ViewFill>
     );
   }
-  if (view === "manual-form") {
+  if (rawView === "manual-form") {
     return (
       <ViewFill>
         <ManualResumeForm />
