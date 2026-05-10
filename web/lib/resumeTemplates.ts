@@ -15,7 +15,7 @@ export interface ResumeStyleTemplate {
 export const RESUME_STYLE_TEMPLATES: ResumeStyleTemplate[] = [
   {
     id: "harshibar-ats",
-    label: "Template 1 — Harshibar (sans-serif)",
+    label: "Harshibar",
     description:
       "MIT-style ATS layout: \\resumeSubheading, \\resumeProjectHeading, fontawesome5 icons, sans-serif (tgheros). Requires pdflatex + texlive-fontawesome5 + Fira Mono.",
     referenceFolder: "Harshibar_Template1",

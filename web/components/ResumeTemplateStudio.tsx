@@ -292,6 +292,70 @@ function TemplateCard({
   );
 }
 
+/* ── Formatted resume preview ────────────────────────────────────── */
+
+function FormattedResumePreview({ text, lineHeight }: { text: string; lineHeight: number }) {
+  const lines = text.split("\n");
+
+  const isHeader = (line: string) => {
+    const t = line.trim();
+    return t.length > 2 && t === t.toUpperCase() && /[A-Z]/.test(t) && !t.startsWith("•") && !t.startsWith("-");
+  };
+
+  const isContactLine = (line: string, idx: number) => {
+    if (idx === 0) return false;
+    const t = line.trim();
+    return idx <= 3 && !isHeader(t) && (t.includes("@") || t.includes("·") || t.includes("|") || /^\(?\d/.test(t));
+  };
+
+  // First non-empty line is the name
+  const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
+
+  return (
+    <div style={{ fontFamily: "'Georgia', 'Times New Roman', serif", fontSize: 11, lineHeight, color: "#0f172a" }}>
+      {lines.map((line, i) => {
+        const t = line.trim();
+        if (!t) return <div key={i} style={{ height: lineHeight * 6 }} />;
+        if (i === firstNonEmpty) {
+          return (
+            <div key={i} style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.3, marginBottom: 2, lineHeight: 1.2 }}>
+              {t}
+            </div>
+          );
+        }
+        if (isContactLine(line, i - firstNonEmpty)) {
+          return (
+            <div key={i} style={{ fontSize: 10, color: "#475569", marginBottom: 2, letterSpacing: 0.1 }}>
+              {t}
+            </div>
+          );
+        }
+        if (isHeader(t)) {
+          return (
+            <div key={i} style={{ marginTop: lineHeight * 7, marginBottom: 3 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: "#0f172a" }}>{t}</div>
+              <div style={{ height: 1, background: "#0f172a", marginTop: 3 }} />
+            </div>
+          );
+        }
+        if (t.startsWith("•") || t.startsWith("-")) {
+          return (
+            <div key={i} style={{ fontSize: 10.5, paddingLeft: 14, position: "relative", marginBottom: 1.5, color: "#1e293b" }}>
+              <span style={{ position: "absolute", left: 4 }}>•</span>
+              {t.replace(/^[•\-]\s*/, "")}
+            </div>
+          );
+        }
+        return (
+          <div key={i} style={{ fontSize: 10.5, marginBottom: 1.5, color: "#1e293b" }}>
+            {t}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ── Segmented control ───────────────────────────────────────────── */
 
 function Segmented<T extends string>({
@@ -543,10 +607,6 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
               ))}
             </div>
 
-            <p style={{ fontSize: 10.5, color: "var(--dim)", lineHeight: 1.5, marginTop: 20 }}>
-              Final PDF uses your LaTeX reference on the server ({styleFolder}). More layouts can be registered in{" "}
-              <code style={{ fontSize: 10 }}>web/lib/resumeTemplates.ts</code>.
-            </p>
           </div>
         </div>
 
@@ -617,14 +677,9 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
                 borderRadius: 2,
                 border: "1px solid rgba(15,23,42,0.08)",
                 padding: pad,
-                fontFamily: "'Georgia', 'Times New Roman', serif",
-                fontSize: 11,
-                lineHeight: lh,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
               }}
             >
-              {previewBody}
+              <FormattedResumePreview text={previewBody} lineHeight={lh} />
             </div>
           </div>
         </section>
