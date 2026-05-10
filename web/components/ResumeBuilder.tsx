@@ -620,44 +620,128 @@ export default function ResumeBuilder({
           <StepCard
             step={1}
             title="Layout template"
-            subtitle="LaTeX style the AI copies (macros + structure). Final PDF is compiled with pdflatex."
+            subtitle="Pick the LaTeX style the AI will copy. Final PDF is compiled with pdflatex."
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
                 {distinctStyleTemplates().map((t) => {
                   const selected = styleReferenceFolder === t.referenceFolder;
+                  const isAts = true; // all current templates are ATS-safe
+                  const isModern = t.id === "harshibar-ats";
                   return (
                     <button
                       key={t.id}
                       type="button"
                       onClick={() => setStyleReferenceFolder(t.referenceFolder)}
                       style={{
-                        flex: "1 1 200px",
+                        flex: "1 1 160px",
                         textAlign: "left",
-                        padding: "12px 14px",
+                        padding: 0,
                         borderRadius: 10,
-                        border: selected ? "2px solid var(--accent)" : "1px solid var(--border)",
-                        background: selected ? "var(--accent-bg)" : "var(--surface2)",
+                        border: selected ? "2.5px solid var(--accent)" : "1.5px solid var(--border)",
+                        background: "var(--surface2)",
                         cursor: "pointer",
                         fontFamily: "inherit",
+                        overflow: "hidden",
+                        boxShadow: selected ? "0 0 0 3px rgba(47,129,247,0.15)" : "none",
+                        transition: "border-color 0.15s, box-shadow 0.15s",
                       }}
                     >
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
-                        {t.label}
+                      {/* Mini resume thumbnail */}
+                      <div style={{
+                        background: "#f8fafc",
+                        borderBottom: "1px solid var(--border)",
+                        padding: "8px 8px 0",
+                      }}>
+                        <div style={{
+                          background: "#fff",
+                          borderRadius: "2px 2px 0 0",
+                          boxShadow: "0 1px 4px rgba(15,23,42,0.10)",
+                          overflow: "hidden",
+                          aspectRatio: "8.5 / 11",
+                        }}>
+                          {isModern ? (
+                            <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
+                              <rect width="200" height="260" fill="#fff" />
+                              <text x="12" y="21" fontSize="10.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">John A. Smith</text>
+                              <text x="12" y="31" fontSize="5.5" fill="#475569" fontFamily="Arial,sans-serif">john@email.com · (555) 123-4567 · San Francisco</text>
+                              <line x1="12" y1="36" x2="188" y2="36" stroke="#0f172a" strokeWidth="0.8" />
+                              <text x="12" y="47" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EXPERIENCE</text>
+                              <line x1="12" y1="50" x2="188" y2="50" stroke="#cbd5e1" strokeWidth="0.4" />
+                              <text x="12" y="59" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">Software Engineer</text>
+                              <text x="188" y="59" fontSize="5.5" fill="#64748b" fontFamily="Arial,sans-serif" textAnchor="end">2022–Present</text>
+                              <text x="12" y="67" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Google, Inc. · Mountain View, CA</text>
+                              <rect x="16" y="72" width="164" height="3" rx="1" fill="#e2e8f0" />
+                              <rect x="16" y="77" width="148" height="3" rx="1" fill="#e2e8f0" />
+                              <text x="12" y="90" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EDUCATION</text>
+                              <line x1="12" y1="93" x2="188" y2="93" stroke="#cbd5e1" strokeWidth="0.4" />
+                              <text x="12" y="102" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">B.S. Computer Science</text>
+                              <text x="12" y="110" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Stanford University</text>
+                              <text x="12" y="123" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">SKILLS</text>
+                              <line x1="12" y1="126" x2="188" y2="126" stroke="#cbd5e1" strokeWidth="0.4" />
+                              <rect x="12" y="132" width="40" height="7" rx="2" fill="#dbeafe" />
+                              <rect x="56" y="132" width="35" height="7" rx="2" fill="#dbeafe" />
+                              <rect x="95" y="132" width="45" height="7" rx="2" fill="#dbeafe" />
+                            </svg>
+                          ) : (
+                            <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
+                              <rect width="200" height="260" fill="#fff" />
+                              <text x="100" y="20" fontSize="11" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="1">JENNIFER SMITH</text>
+                              <text x="100" y="29" fontSize="5.5" fill="#475569" fontFamily="Georgia,serif" textAnchor="middle">jennifer@email.com · (555) 010-2030 · New York</text>
+                              <rect x="12" y="34" width="176" height="1.2" fill="#0f172a" />
+                              <text x="100" y="45" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="0.8">PROFESSIONAL SUMMARY</text>
+                              <rect x="12" y="49" width="176" height="3" rx="0.5" fill="#e2e8f0" />
+                              <rect x="12" y="54" width="160" height="3" rx="0.5" fill="#e2e8f0" />
+                              <text x="12" y="67" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">WORK EXPERIENCE</text>
+                              <rect x="12" y="70" width="176" height="0.8" fill="#0f172a" />
+                              <text x="12" y="79" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">Senior Product Designer</text>
+                              <text x="188" y="79" fontSize="5.5" fill="#64748b" fontFamily="Georgia,serif" textAnchor="end">2021–Present</text>
+                              <text x="12" y="87" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">Acme Labs, San Francisco, CA</text>
+                              <rect x="16" y="92" width="160" height="2.8" rx="0.5" fill="#e2e8f0" />
+                              <rect x="16" y="97" width="148" height="2.8" rx="0.5" fill="#e2e8f0" />
+                              <text x="12" y="110" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">EDUCATION</text>
+                              <rect x="12" y="113" width="176" height="0.8" fill="#0f172a" />
+                              <text x="12" y="122" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">BFA, Graphic Design</text>
+                              <text x="12" y="130" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">State University, Boston</text>
+                            </svg>
+                          )}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45 }}>
-                        {t.description}
-                      </div>
-                      <div style={{ fontSize: 10, color: "var(--dim)", marginTop: 6, fontFamily: "ui-monospace, monospace" }}>
-                        {t.referenceFolder}
+                      {/* Card footer */}
+                      <div style={{ padding: "9px 12px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {t.label}
+                          </div>
+                        </div>
+                        {isAts && (
+                          <span style={{
+                            flexShrink: 0,
+                            padding: "2px 6px", borderRadius: 99,
+                            border: "1px solid rgba(52,211,153,0.35)",
+                            background: "rgba(52,211,153,0.08)",
+                            color: "var(--green)",
+                            fontSize: 9, fontWeight: 700, letterSpacing: 0.2,
+                          }}>ATS</span>
+                        )}
+                        {selected && (
+                          <div style={{
+                            width: 16, height: 16, borderRadius: "50%",
+                            background: "var(--accent)", flexShrink: 0,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>
+                            <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                              <path d="M1.5 4l1.8 1.8L6.5 2.5" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </div>
+                        )}
                       </div>
                     </button>
                   );
                 })}
               </div>
               <div style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.5 }}>
-                More layouts: add a folder with <code style={{ fontSize: 10 }}>resume.tex</code> under the server{" "}
-                <code style={{ fontSize: 10 }}>LIBRARY_ROOT</code>, then register it in{" "}
+                More layouts: register a folder in{" "}
                 <code style={{ fontSize: 10 }}>web/lib/resumeTemplates.ts</code>.
               </div>
             </div>
@@ -1343,6 +1427,13 @@ export default function ResumeBuilder({
                       onAIEdit={aiEditBullet}
                       doctorIssues={doctorIssues}
                       pdfUrl={result.pdfUrl}
+                      shareButton={result.folder && result.pdfUrl ? (
+                        <ShareButton
+                          folder={result.folder}
+                          pdfUrl={result.pdfUrl}
+                          userId={user?.id ?? null}
+                        />
+                      ) : undefined}
                     />
                   )}
                 </>

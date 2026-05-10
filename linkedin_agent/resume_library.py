@@ -1169,6 +1169,52 @@ def ai_rewrite_bullet(bullet_text: str, instruction: str, jd_snippet: str = "") 
     raise RuntimeError(f"All models failed for bullet rewrite: {last_err}")
 
 
+def ai_generate_skills(role: str, existing_skills: Optional[List[str]] = None) -> List[str]:
+    """Generate a list of relevant skills for a job role.
+
+    Returns a flat list of skill strings. Avoids duplicating anything in
+    `existing_skills`. Raises on hard failure.
+    """
+    existing = ", ".join(existing_skills or []) or "none"
+    prompt = (
+        "You are a professional resume writer. Generate 12-15 relevant professional "
+        f"skills for a candidate applying for this role: {role}\n\n"
+        f"Existing skills already on the resume (do not duplicate): {existing}\n\n"
+        "Return ONLY a valid JSON array of concise skill strings — no preamble, "
+        "no markdown, no code fences, just the raw array. "
+        "Mix technical skills with domain-relevant soft skills. "
+        'Example: ["Python", "SQL", "Data Analysis", "Machine Learning", "Communication"]'
+    )
+
+    import json as _json
+    last_err: Optional[BaseException] = None
+    for model in _model_chain("gemini-2.5-flash"):
+        try:
+            if _is_grok(model):
+                pieces: List[str] = []
+                for ev in _stream_grok(model, "You generate resume skills lists.", prompt, temperature=0.4):
+                    if isinstance(ev, dict) and ev.get("type") == "text":
+                        pieces.append(ev.get("text", ""))
+                raw = "".join(pieces).strip()
+            else:
+                from google import genai  # type: ignore
+                client = genai.Client()
+                resp = client.models.generate_content(model=model, contents=prompt)
+                raw = (getattr(resp, "text", "") or "").strip()
+
+            # Strip markdown fences if the model ignored instructions
+            if raw.startswith("```"):
+                raw = raw.split("```")[1].lstrip("json").strip()
+            skills = _json.loads(raw)
+            if isinstance(skills, list):
+                return [str(s).strip() for s in skills if str(s).strip()]
+        except BaseException as exc:
+            last_err = exc
+            _backoff_if_rate_limited(exc)
+            continue
+    raise RuntimeError(f"All models failed for skills generation: {last_err}")
+
+
 # ============================================================================
 # ATS CHECK — structural + keyword-coverage scoring against a JD
 # ============================================================================

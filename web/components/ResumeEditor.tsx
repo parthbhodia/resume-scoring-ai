@@ -50,6 +50,8 @@ interface Props {
   /** Optional: URL of the most recently compiled PDF. Enables the "PDF" toggle
    *  in the preview pane (vs the live HTML mock). */
   pdfUrl?: string | null;
+  /** Optional: rendered Share button node injected by the parent. */
+  shareButton?: React.ReactNode;
 }
 
 // Cap the per-folder localStorage version log. 5 is plenty for "oh no, undo".
@@ -65,7 +67,7 @@ const DEFAULT_PDF_LAYOUT: NonNullable<ParsedResume["pdfLayout"]> = {
   fontScale: 0,
 };
 
-export default function ResumeEditor({ initial, saving, saveError, folder, onSave, onAIEdit, doctorIssues, pdfUrl }: Props) {
+export default function ResumeEditor({ initial, saving, saveError, folder, onSave, onAIEdit, doctorIssues, pdfUrl, shareButton }: Props) {
   // We work on a draft copy so cancel/reset is one setState away.
   const [draft, setDraft] = useState<ParsedResume>(initial);
   // Drag-and-drop state — which bullet is being dragged, and which slot is hovered.
@@ -320,6 +322,7 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
                   History ({history.length})
                 </button>
               )}
+              {shareButton}
             </div>
           </div>
         </div>
@@ -420,25 +423,55 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
             </div>
           </div>
 
-          {draft.sections.map((section, si) => (
-            <SectionBlock
-              key={si}
-              section={section}
-              sIdx={si}
-              open={openSections[section.name] ?? defaultOpenSections[section.name] ?? false}
-              onToggle={() => setOpenSections(prev => ({ ...prev, [section.name]: !(prev[section.name] ?? false) }))}
-              onBulletChange={(ei, bi, text) => updateBullet(si, ei, bi, text)}
-              onBulletAdd={(ei) => addBullet(si, ei)}
-              onBulletDelete={(ei, bi) => deleteBullet(si, ei, bi)}
-              onBulletReorder={(ei, from, to) => reorderBullets(si, ei, from, to)}
-              onSectionRewrite={onAIEdit ? (instruction) => rewriteSection(si, instruction) : undefined}
-              onAIEdit={onAIEdit}
-              doctorIssues={doctorIssues}
-              dragRef={dragRef}
-              dropHover={dropHover}
-              setDropHover={setDropHover}
-            />
-          ))}
+          {draft.sections.map((section, si) => {
+            const isSkillsSection = /skill/i.test(section.name);
+            const existingSkillsFlat = isSkillsSection
+              ? section.entries.flatMap(e => e.bullets.map(b => b.text.trim())).filter(Boolean)
+              : [];
+            return (
+              <SectionBlock
+                key={si}
+                section={section}
+                sIdx={si}
+                open={openSections[section.name] ?? defaultOpenSections[section.name] ?? false}
+                onToggle={() => setOpenSections(prev => ({ ...prev, [section.name]: !(prev[section.name] ?? false) }))}
+                onBulletChange={(ei, bi, text) => updateBullet(si, ei, bi, text)}
+                onBulletAdd={(ei) => addBullet(si, ei)}
+                onBulletDelete={(ei, bi) => deleteBullet(si, ei, bi)}
+                onBulletReorder={(ei, from, to) => reorderBullets(si, ei, from, to)}
+                onSectionRewrite={onAIEdit ? (instruction) => rewriteSection(si, instruction) : undefined}
+                onAIEdit={onAIEdit}
+                doctorIssues={doctorIssues}
+                dragRef={dragRef}
+                dropHover={dropHover}
+                setDropHover={setDropHover}
+                isSkillsSection={isSkillsSection}
+                existingSkills={existingSkillsFlat}
+                onSkillsAdd={(newSkills) => {
+                  // Append each skill as a new bullet in the first entry, or create one.
+                  setDraft(d => {
+                    const sections = d.sections.map((s, i) => {
+                      if (i !== si) return s;
+                      let entries = s.entries;
+                      if (entries.length === 0) {
+                        entries = [{ header: "", bullets: [] }];
+                      }
+                      const lastEi = entries.length - 1;
+                      const updatedEntry = {
+                        ...entries[lastEi],
+                        bullets: [
+                          ...entries[lastEi].bullets,
+                          ...newSkills.map(skill => ({ id: _newId(), text: skill, texLine: -1 })),
+                        ],
+                      };
+                      return { ...s, entries: entries.map((e, i) => i === lastEi ? updatedEntry : e) };
+                    });
+                    return { ...d, sections };
+                  });
+                }}
+              />
+            );
+          })}
 
           {/* Save bar — sticky at the bottom of the editor pane */}
           <div style={{
@@ -717,6 +750,7 @@ function SectionBlock({
   onBulletChange, onBulletAdd, onBulletDelete, onBulletReorder,
   onSectionRewrite, onAIEdit, doctorIssues,
   dragRef, dropHover, setDropHover,
+  isSkillsSection, existingSkills, onSkillsAdd,
 }: {
   section: ParsedSection;
   sIdx: number;
@@ -732,9 +766,13 @@ function SectionBlock({
   dragRef:    DragHandle;
   dropHover:  string | null;
   setDropHover: (v: string | null) => void;
+  isSkillsSection?: boolean;
+  existingSkills?: string[];
+  onSkillsAdd?: (skills: string[]) => void;
 }) {
   const [sectionAIBusy, setSectionAIBusy] = useState(false);
   const [sectionAIOpen, setSectionAIOpen] = useState(false);
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
 
   const runSectionAI = async (instr: string) => {
     if (!onSectionRewrite) return;
@@ -810,6 +848,34 @@ function SectionBlock({
               border: "1px solid var(--border)",
             }}>LOCKED</span>
           )}
+          {section.editable && isSkillsSection && onSkillsAdd && (
+            <span
+              onClick={ev => { ev.stopPropagation(); setSkillsModalOpen(true); }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={ev => {
+                if (ev.key === "Enter" || ev.key === " ") {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  setSkillsModalOpen(true);
+                }
+              }}
+              title="Generate skills with AI"
+              style={{
+                fontSize: 9, padding: "4px 8px",
+                background: "var(--accent)", color: "#fff",
+                border: "none", borderRadius: 999,
+                cursor: "pointer", fontFamily: "inherit",
+                letterSpacing: 0.3, fontWeight: 700, textTransform: "uppercase",
+                display: "inline-flex", alignItems: "center", gap: 4,
+              }}
+            >
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                <path d="M4 1v6M1 4h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              Generate
+            </span>
+          )}
           {section.editable && onSectionRewrite && (
             <span
               onClick={ev => { ev.stopPropagation(); setSectionAIOpen(o => !o); }}
@@ -837,6 +903,14 @@ function SectionBlock({
           )}
         </span>
       </div>
+
+      {skillsModalOpen && onSkillsAdd && (
+        <GenerateSkillsModal
+          existingSkills={existingSkills ?? []}
+          onAdd={onSkillsAdd}
+          onClose={() => setSkillsModalOpen(false)}
+        />
+      )}
 
       {open && (
         <div style={{ padding: "12px 12px 14px" }}>
@@ -1297,6 +1371,236 @@ function BulletRow({
         </div>
       )}
     </div>
+  );
+}
+
+/* ── AI Skills Generator modal ───────────────────────────── */
+
+const ROLE_SUGGESTIONS = [
+  "Software Engineer", "Product Manager", "Data Scientist", "UX Designer",
+  "Marketing Manager", "Financial Analyst", "DevOps Engineer", "Sales Executive",
+  "Business Analyst", "Machine Learning Engineer", "Frontend Developer",
+  "Backend Developer", "Full Stack Developer", "Project Manager",
+];
+
+function GenerateSkillsModal({
+  existingSkills,
+  onAdd,
+  onClose,
+}: {
+  existingSkills: string[];
+  onAdd: (skills: string[]) => void;
+  onClose: () => void;
+}) {
+  const [role, setRole] = useState("");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const [generated, setGenerated] = useState<string[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const filteredSuggestions = role.trim()
+    ? ROLE_SUGGESTIONS.filter(s => s.toLowerCase().includes(role.toLowerCase()) && s.toLowerCase() !== role.toLowerCase())
+    : [];
+
+  const generate = async (roleToUse = role) => {
+    if (!roleToUse.trim()) return;
+    setGenerating(true); setError(null); setGenerated(null); setSelected(new Set()); setSuggestions([]);
+    try {
+      const { apiUrl } = await import("@/lib/utils");
+      const resp = await fetch(apiUrl("/api/generate-skills"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: roleToUse.trim(), existing_skills: existingSkills }),
+      });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(json.error ?? "Generation failed");
+      const skills: string[] = json.skills ?? [];
+      setGenerated(skills);
+      setSelected(new Set(skills)); // pre-select all
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const toggleSkill = (skill: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(skill)) next.delete(skill); else next.add(skill);
+      return next;
+    });
+  };
+
+  const handleAdd = () => {
+    if (selected.size === 0) return;
+    onAdd([...selected]);
+    onClose();
+  };
+
+  return (
+    <>
+      {/* Overlay */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, zIndex: 50,
+          background: "rgba(0,0,0,0.55)", backdropFilter: "blur(2px)",
+        }}
+      />
+      {/* Modal */}
+      <div style={{
+        position: "fixed", top: "50%", left: "50%", zIndex: 51,
+        transform: "translate(-50%, -50%)",
+        width: "min(520px, 92vw)",
+        background: "#fff", color: "#0f172a",
+        borderRadius: 16, padding: "28px 28px 24px",
+        boxShadow: "0 24px 80px rgba(0,0,0,0.36)",
+      }}>
+        {/* Close */}
+        <button
+          onClick={onClose}
+          style={{
+            position: "absolute", top: 16, right: 16,
+            background: "none", border: "none", fontSize: 20, lineHeight: 1,
+            color: "#64748b", cursor: "pointer", padding: "2px 6px", borderRadius: 6,
+          }}
+        >×</button>
+
+        <div style={{ fontSize: 20, fontWeight: 700, color: "#0f172a", marginBottom: 8, letterSpacing: -0.4 }}>
+          Generate skills
+        </div>
+        <p style={{ margin: "0 0 20px", fontSize: 13, color: "#475569", lineHeight: 1.55 }}>
+          Enter the role you&apos;re applying for and AI will generate skills for that role based on industry expectations.
+        </p>
+
+        {/* Role input with autocomplete */}
+        <div style={{ position: "relative", marginBottom: 16 }}>
+          <input
+            ref={inputRef}
+            value={role}
+            onChange={e => { setRole(e.target.value); setSuggestions([]); }}
+            onKeyDown={e => { if (e.key === "Enter" && !generating) generate(); }}
+            placeholder="Job you're applying for"
+            style={{
+              width: "100%", fontSize: 14, padding: "12px 14px",
+              border: "2px solid #2f81f7", borderRadius: 10,
+              color: "#0f172a", background: "#fff",
+              outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+            }}
+          />
+          {/* Autocomplete dropdown */}
+          {filteredSuggestions.length > 0 && (
+            <div style={{
+              position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 10,
+              background: "#1e293b", borderRadius: 8, overflow: "hidden",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.28)",
+            }}>
+              {filteredSuggestions.slice(0, 4).map(s => (
+                <button
+                  key={s}
+                  onClick={() => { setRole(s); setSuggestions([]); generate(s); }}
+                  style={{
+                    display: "block", width: "100%", textAlign: "left",
+                    padding: "10px 14px", fontSize: 13, color: "#e2e8f0",
+                    background: "none", border: "none", cursor: "pointer",
+                    fontFamily: "inherit", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(47,129,247,0.2)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div style={{ marginBottom: 12, fontSize: 12, color: "#ef4444" }}>{error}</div>
+        )}
+
+        {/* Generated skills chips */}
+        {generated && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 10, letterSpacing: 0.3, textTransform: "uppercase" }}>
+              Select skills to add ({selected.size} of {generated.length} selected)
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {generated.map(skill => {
+                const on = selected.has(skill);
+                return (
+                  <button
+                    key={skill}
+                    onClick={() => toggleSkill(skill)}
+                    style={{
+                      padding: "6px 12px", borderRadius: 99,
+                      border: on ? "1.5px solid #2f81f7" : "1.5px solid #cbd5e1",
+                      background: on ? "#dbeafe" : "#f8fafc",
+                      color: on ? "#1d4ed8" : "#475569",
+                      fontSize: 12.5, fontWeight: on ? 600 : 400,
+                      cursor: "pointer", fontFamily: "inherit",
+                      transition: "all 0.12s",
+                    }}
+                  >
+                    {on && <span style={{ marginRight: 4 }}>✓</span>}
+                    {skill}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setSelected(new Set(generated))}
+                style={{ fontSize: 11, color: "#2f81f7", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+              >
+                Select all
+              </button>
+              <span style={{ color: "#cbd5e1" }}>·</span>
+              <button
+                onClick={() => setSelected(new Set())}
+                style={{ fontSize: 11, color: "#94a3b8", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* CTA */}
+        <button
+          onClick={generated ? handleAdd : () => generate()}
+          disabled={generating || (!!generated && selected.size === 0)}
+          style={{
+            width: "100%", padding: "13px 20px",
+            background: generating ? "#94a3b8" : "#2f81f7",
+            color: "#fff", border: "none", borderRadius: 10,
+            fontSize: 14, fontWeight: 700, cursor: generating || (!!generated && selected.size === 0) ? "not-allowed" : "pointer",
+            fontFamily: "inherit", letterSpacing: -0.2,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            transition: "background 0.15s",
+          }}
+        >
+          {generating ? (
+            <>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ animation: "spin 0.8s linear infinite" }}>
+                <circle cx="7" cy="7" r="5.5" stroke="rgba(255,255,255,0.35)" strokeWidth="2" />
+                <path d="M7 1.5a5.5 5.5 0 015.5 5.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              Generating…
+            </>
+          ) : generated ? (
+            `Add ${selected.size} skill${selected.size === 1 ? "" : "s"} to resume`
+          ) : (
+            "Generate with AI"
+          )}
+        </button>
+      </div>
+    </>
   );
 }
 

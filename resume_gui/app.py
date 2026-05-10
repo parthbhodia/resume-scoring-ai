@@ -54,6 +54,7 @@ from resume_library import (
     splice_bullets_into_tex,
     recompile_resume_from_tex,
     ai_rewrite_bullet,
+    ai_generate_skills,
     ats_check,
     doctor_check_resume,
 )
@@ -387,6 +388,33 @@ async def api_ai_edit_bullet(request: Request):
         logger.exception("ai_rewrite_bullet failed")
         return JSONResponse({"error": str(exc)}, status_code=500)
     return JSONResponse({"text": new_text})
+
+
+async def api_generate_skills(request: Request):
+    """POST /api/generate-skills — generate a list of skills for a job role.
+
+    Body: {"role": "Software Engineer", "existing_skills": ["Python", ...]}
+    Returns: {"skills": ["Skill 1", "Skill 2", ...]}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+    role = (body.get("role") or "").strip()
+    if not role:
+        return JSONResponse({"error": "role required"}, status_code=400)
+    existing = body.get("existing_skills") or []
+    if not isinstance(existing, list):
+        existing = []
+
+    loop = asyncio.get_event_loop()
+    try:
+        skills = await loop.run_in_executor(None, ai_generate_skills, role, existing)
+    except Exception as exc:
+        logger.exception("ai_generate_skills failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    return JSONResponse({"skills": skills})
 
 
 async def api_ats_check(request: Request):
@@ -2181,6 +2209,7 @@ routes = [
     Route("/api/resume/{folder}",          api_resume_parsed,  methods=["GET"]),
     Route("/api/resume/{folder}",          api_resume_save,    methods=["POST"]),
     Route("/api/ai-edit-bullet",           api_ai_edit_bullet,methods=["POST"]),
+    Route("/api/generate-skills",          api_generate_skills, methods=["POST"]),
     Route("/api/ats-check/{folder}",     api_ats_check,     methods=["POST"]),
     Route("/api/doctor-check",             api_doctor_check,   methods=["POST"]),
     Route("/api/resume-analysis/{folder}", api_resume_analysis, methods=["POST"]),
