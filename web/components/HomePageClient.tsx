@@ -117,29 +117,29 @@ function RouterView() {
     );
   }
   // These views are not in useAppView()'s allowlist so must be checked against
-  // rawView before the view === “analyze” fallback swallows them.
-  if (rawView === “content-source”) {
+  // rawView before the view === "analyze" fallback swallows them.
+  if (rawView === "content-source") {
     return (
       <ViewFill>
         <ContentSourcePicker />
       </ViewFill>
     );
   }
-  if (rawView === “manual-form”) {
+  if (rawView === "manual-form") {
     return (
       <ViewFill>
         <ManualResumeForm />
       </ViewFill>
     );
   }
-  if (view === “analyze”) {
+  if (view === "analyze") {
     return (
       <ViewFill>
         <AnalyzeResume />
       </ViewFill>
     );
   }
-  /** Dedicated layout gallery — not the JD “tailor” wizard (see Continue → compact compile step). */
+  /** Dedicated layout gallery — not the JD "tailor" wizard (see Continue → compact compile step). */
   if (templateResumeStart) {
     return (
       <ViewFill>
@@ -215,8 +215,8 @@ function ProfileDraftFromAnalyze({ prefill }: { prefill: boolean }) {
       ) : (
         <p style={{ fontSize: 13, color: "var(--dim)", fontStyle: "italic", marginBottom: 24 }}>
           {prefill
-            ? "No draft text was found — open it again from Analyze → Résumé builder → “Use as profile starter.”"
-            : "Use “Use as profile starter” from the template builder to send your extract here."}
+            ? "No draft text was found — open it again from Analyze → Résumé builder → "Use as profile starter.""
+            : "Use "Use as profile starter" from the template builder to send your extract here."}
         </p>
       )}
     </div>
