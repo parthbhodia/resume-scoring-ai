@@ -223,7 +223,8 @@ export default function PdfViewerWithHighlights({
           flex: 1,
           overflowY: "auto",
           overflowX: "hidden",
-          background: "var(--surface2)",
+          /* Always bright canvas behind PDF pages (matches Edit preview paper). */
+          background: "#ffffff",
           padding: "16px 0",
           display: "flex",
           flexDirection: "column",

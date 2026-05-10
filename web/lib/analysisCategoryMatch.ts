@@ -44,7 +44,12 @@ export const CATEGORY_ISSUE_KEYWORDS: Record<string, string[]> = {
     "certification", "publication", "presentation", "poster", "honors", "activities", "service",
   ],
   technicalBranding: [
-    "technical", "skill", "technology", "stack", "tool", "github", "link",
+    "github", "gitlab", "portfolio",
+    "tech stack", "technology stack", "full stack", "technical stack",
+    "stack depth", "technical branding", "developer portfolio",
+    "writing sample", "work sample", "teaching portfolio",
+    "clinical credential", "licensure", "board certified",
+    "creative reel", "publications section", "domain expertise", "field-specific",
   ],
   jobMatch: [
     "keyword", "match", "missing term", "requirement", "job description", "jd",
@@ -125,9 +130,9 @@ export function inferPrimaryCategoryFromBullet(bullet: {
     "achievementQuality",
     "atsCompatibility",
     "sectionStructure",
+    "quantification",
     "technicalBranding",
     "jobMatch",
-    "quantification",
   ] as const;
   for (const cat of keywordOrder) {
     const kws = CATEGORY_ISSUE_KEYWORDS[cat] ?? [];

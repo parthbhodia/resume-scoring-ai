@@ -3,21 +3,23 @@
 /**
  * Root page — routes between top-level views via query params.
  *
- *   /                            -> builder (default)
+ *   /                            -> analyze (default)
+ *   /?view=builder&flow=tailor|scratch|template -> résumé builder workflows
  *   /?view=library               -> library grid
  *   /?view=library&resume=<f>    -> ResumeView for folder <f>
- *   /?view=profile               -> profile (placeholder for now)
+ *   /?view=profile&prefill=1     -> profile draft viewer (from Analyze / template flow)
  *   /?view=jobs                  -> jobs (placeholder for now)
- *   /?base=<folder>              -> builder, with folder pre-loaded as base
+ *   /?view=builder&flow=tailor&base=<folder> -> builder with folder pre-loaded
  *
  * Query params instead of dynamic routes because GH Pages serves the
  * `output: "export"` build, which can't enumerate runtime-minted IDs.
  */
 
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AppShell, { useAppView } from "@/components/AppShell";
 import ResumeBuilder from "@/components/ResumeBuilder";
+import ResumeTemplateStudio from "@/components/ResumeTemplateStudio";
 import ResumeLibrary from "@/components/ResumeLibrary";
 import ResumeView from "@/components/ResumeView";
 import AnalyzeResume from "@/components/AnalyzeResume";
@@ -70,6 +72,9 @@ function RouterView() {
   const params = useSearchParams();
   const resume = (params?.get("resume") || "").trim();
   const base = (params?.get("base") || "").trim();
+  const flow = (params?.get("flow") || "tailor").toLowerCase();
+  const scratchStart = view === "builder" && flow === "scratch";
+  const templateResumeStart = view === "builder" && flow === "template";
 
   if (view === "library") {
     if (resume) {
@@ -90,10 +95,11 @@ function RouterView() {
     );
   }
   if (view === "profile") {
+    const prefill = (params?.get("prefill") || "").trim() === "1";
     return (
       <ViewFill>
         <ScrollPane>
-          <PlaceholderPanel title="Profile" subtitle="Coming next — your Personal, Education, Work Experience, Skills, EEO, and Resume defaults all in one place." />
+          <ProfileDraftFromAnalyze prefill={prefill} />
         </ScrollPane>
       </ViewFill>
     );
@@ -114,11 +120,87 @@ function RouterView() {
       </ViewFill>
     );
   }
-  // key=base ensures remount when switching from a library-loaded resume to fresh builder
+  /** Dedicated layout gallery — not the JD “tailor” wizard (see Continue → compact compile step). */
+  if (templateResumeStart) {
+    return (
+      <ViewFill>
+        <ResumeTemplateStudio initialBaseFolder={base || null} />
+      </ViewFill>
+    );
+  }
+  // key ensures remount when base folder or builder workflow changes
   return (
     <ViewFill>
-      <ResumeBuilder key={`builder-${base}`} initialBaseFolder={base || null} />
+      <ResumeBuilder
+        key={`builder-${base}-${scratchStart ? "scratch" : flow}`}
+        initialBaseFolder={scratchStart ? null : (base || null)}
+        scratchStart={scratchStart}
+      />
     </ViewFill>
+  );
+}
+
+const PROFILE_PREFILL_KEY = "rn_profile_prefill";
+
+function ProfileDraftFromAnalyze({ prefill }: { prefill: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  useEffect(() => {
+    if (!prefill || typeof window === "undefined") return;
+    try {
+      const t = sessionStorage.getItem(PROFILE_PREFILL_KEY);
+      if (t) setDraft(t);
+      sessionStorage.removeItem(PROFILE_PREFILL_KEY);
+    } catch {
+      setDraft(null);
+    }
+  }, [prefill]);
+
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto", padding: "48px 28px 80px" }}>
+      <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: -0.5, marginBottom: 10, color: "var(--text)" }}>
+        Profile
+      </h1>
+      <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.65, marginBottom: 28 }}>
+        Full profile editing (education, work history blocks, EEO, defaults) is still in progress. If you arrived here from
+        Analyze or the template flow, you can keep the text below as a personal reference until we wire structured fields.
+      </p>
+      {draft ? (
+        <div
+          style={{
+            borderRadius: 12,
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            padding: "16px 18px",
+            marginBottom: 20,
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.06, marginBottom: 10 }}>
+            Text saved from your last action
+          </div>
+          <pre
+            style={{
+              margin: 0,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              fontSize: 12,
+              lineHeight: 1.55,
+              color: "var(--text)",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+              maxHeight: 360,
+              overflowY: "auto",
+            }}
+          >
+            {draft}
+          </pre>
+        </div>
+      ) : (
+        <p style={{ fontSize: 13, color: "var(--dim)", fontStyle: "italic", marginBottom: 24 }}>
+          {prefill
+            ? "No draft text was found — open it again from Analyze → Résumé builder → “Use as profile starter.”"
+            : "Use “Use as profile starter” from the template builder to send your extract here."}
+        </p>
+      )}
+    </div>
   );
 }
 

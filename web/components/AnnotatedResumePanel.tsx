@@ -19,7 +19,7 @@ const PdfViewerWithHighlights = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div style={{ padding: 32, textAlign: "center", color: "#78909c", fontSize: 13 }}>
+      <div style={{ padding: 32, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
         Loading PDF viewer…
       </div>
     ),
@@ -72,6 +72,8 @@ interface Props {
   /** Present after a successful Analyze PDF upload — original file as blob URL. */
   sourcePdfUrl?: string | null;
   sourcePdfFileName?: string | null;
+  /** Explain why PDF / Original download toggles are missing after opening a saved analysis. */
+  restoredResumeNoPdfHint?: boolean;
 }
 
 function scoreColor(score: number): string {
@@ -210,6 +212,7 @@ export default function AnnotatedResumePanel({
   pulseBulletIndex = null,
   sourcePdfUrl = null,
   sourcePdfFileName = null,
+  restoredResumeNoPdfHint = false,
 }: Props) {
   const styleTemplates = useMemo(() => distinctStyleTemplates(), []);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -427,10 +430,10 @@ export default function AnnotatedResumePanel({
         width: presentationOnly ? "100%" : 460,
         minWidth: presentationOnly ? 0 : undefined,
         flexShrink: 0,
-        borderLeft: presentationOnly ? "1px solid var(--border)" : "1px solid #dfe3ea",
+        borderLeft: presentationOnly ? "1px solid var(--border)" : "1px solid var(--border)",
         background: presentationOnly
-          ? "var(--bg, #f4f5f7)"
-          : "linear-gradient(180deg, #e8ecf2 0%, #e4e8ef 40%, #dfe4ec 100%)",
+          ? "#ffffff"
+          : "linear-gradient(180deg, var(--surface2) 0%, var(--surface) 55%, var(--surface2) 100%)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -449,8 +452,8 @@ export default function AnnotatedResumePanel({
       {!presentationOnly && (
       <div style={{
         padding: "10px 14px",
-        borderBottom: "1px solid #cfd8e6",
-        background: "#f6f8fc",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--surface2)",
         flexShrink: 0,
         display: "flex",
         flexWrap: "wrap",
@@ -473,7 +476,7 @@ export default function AnnotatedResumePanel({
               padding: "7px 12px",
               borderRadius: 8,
               border: "none",
-              background: builderReady ? "linear-gradient(180deg, #ff9966 0%, #fb7c44 100%)" : "#ccc",
+              background: builderReady ? "linear-gradient(180deg, #ff9966 0%, #fb7c44 100%)" : "var(--surface3)",
               color: "#fff",
               cursor: builderReady ? "pointer" : "not-allowed",
               fontFamily: "inherit",
@@ -492,9 +495,9 @@ export default function AnnotatedResumePanel({
               fontWeight: 600,
               padding: "7px 12px",
               borderRadius: 8,
-              border: "1px solid #c5d0e0",
+              border: "1px solid var(--border-h)",
               background: "var(--surface)",
-              color: "#3d4f6e",
+              color: "var(--text)",
               cursor: builderReady ? "pointer" : "not-allowed",
               fontFamily: "inherit",
               display: "inline-flex",
@@ -511,7 +514,7 @@ export default function AnnotatedResumePanel({
               <span style={{
                 fontSize: 9.5,
                 fontWeight: 800,
-                color: "#78909c",
+                color: "var(--muted)",
                 textTransform: "uppercase",
                 letterSpacing: 0.06,
                 marginRight: 2,
@@ -534,9 +537,9 @@ export default function AnnotatedResumePanel({
                     fontWeight: 600,
                     padding: "4px 10px",
                     borderRadius: 999,
-                    border: "1px solid #c5d0e0",
+                    border: "1px solid var(--border-h)",
                     background: "var(--surface)",
-                    color: "#455a64",
+                    color: "var(--text)",
                     cursor: builderOpening ? "wait" : "pointer",
                     fontFamily: "inherit",
                   }}
@@ -556,9 +559,9 @@ export default function AnnotatedResumePanel({
             fontWeight: 600,
             padding: "6px 10px",
             borderRadius: 8,
-            border: "1px dashed #b0bec5",
+            border: "1px dashed var(--border-h)",
             background: "var(--surface)",
-            color: "#90a4ae",
+            color: "var(--dim)",
             cursor: "not-allowed",
             fontFamily: "inherit",
             display: "inline-flex",
@@ -591,7 +594,15 @@ export default function AnnotatedResumePanel({
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {sourcePdfUrl ? (
-              <div style={{ display: "flex", gap: 2, background: "#eef2f7", borderRadius: 8, padding: 2 }}>
+              <div style={{
+                display: "flex",
+                gap: 2,
+                background: "var(--surface2)",
+                borderRadius: 8,
+                padding: 2,
+                border: "1px solid var(--border)",
+              }}
+              >
                 {(["pdf", "live"] as const).map((mode) => (
                   <button
                     key={mode}
@@ -604,11 +615,11 @@ export default function AnnotatedResumePanel({
                       padding: "4px 12px",
                       borderRadius: 6,
                       border: "none",
-                      background: viewMode === mode ? "#fff" : "transparent",
-                      color: viewMode === mode ? "#1a237e" : "#78909c",
+                      background: viewMode === mode ? "var(--surface3)" : "transparent",
+                      color: viewMode === mode ? "var(--text)" : "var(--muted)",
                       cursor: "pointer",
                       fontFamily: "inherit",
-                      boxShadow: viewMode === mode ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
+                      boxShadow: viewMode === mode ? "var(--shadow-sm)" : "none",
                       transition: "all 0.15s",
                     }}
                   >
@@ -620,7 +631,7 @@ export default function AnnotatedResumePanel({
               <div style={{
                 fontSize: 10,
                 fontWeight: 800,
-                color: "#546e7a",
+                color: "var(--muted)",
                 letterSpacing: 0.56,
                 textTransform: "uppercase",
                 display: "flex",
@@ -628,7 +639,7 @@ export default function AnnotatedResumePanel({
                 gap: 6,
               }}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <path d="M3 14V3a1 1 0 011-1h8a1 1 0 011 1v11l-2.5-1.5L8 14l-2.5-1.5L3 14z" stroke="#546e7a" strokeWidth="1.35" strokeLinejoin="round"/>
+                  <path d="M3 14V3a1 1 0 011-1h8a1 1 0 011 1v11l-2.5-1.5L8 14l-2.5-1.5L3 14z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"/>
                 </svg>
                 {presentationOnly ? "Résumé" : useLiveDoc ? "Live résumé" : "Analyzed lines"}
               </div>
@@ -639,8 +650,9 @@ export default function AnnotatedResumePanel({
             <div style={{
               fontSize: 11,
               fontWeight: 700,
-              color: flaggedCount > 0 ? "#c62828" : "#2e7d32",
-              background: flaggedCount > 0 ? "#ffebee" : "#e8f5e9",
+              color: flaggedCount > 0 ? "var(--red)" : "var(--green)",
+              background: flaggedCount > 0 ? "var(--red-bg)" : "var(--green-bg)",
+              border: `1px solid ${flaggedCount > 0 ? "rgba(248,81,73,0.35)" : "rgba(63,185,80,0.35)"}`,
               padding: "3px 10px",
               borderRadius: 20,
             }}>
@@ -649,7 +661,8 @@ export default function AnnotatedResumePanel({
           ) : (
             <div style={{
               fontSize: 11,
-              color: "#78909c",
+              fontWeight: 500,
+              color: "var(--muted)",
             }}>
               {totalCount} lines scored
             </div>
@@ -675,9 +688,9 @@ export default function AnnotatedResumePanel({
                     letterSpacing: 0.08,
                     padding: "6px 12px",
                     borderRadius: 8,
-                    border: "1px solid #c5cee0",
-                    background: "var(--surface)",
-                    color: "#3949ab",
+                    border: "1px solid var(--border-h)",
+                    background: "var(--surface3)",
+                    color: "var(--text)",
                     cursor: "pointer",
                     fontFamily: "inherit",
                     flexShrink: 0,
@@ -703,13 +716,13 @@ export default function AnnotatedResumePanel({
                       padding: "6px 12px",
                       borderRadius: 8,
                       border: "none",
-                      background: builderOpening ? "#c5cee0" : "linear-gradient(135deg,#3949ab,#1a237e)",
+                      background: builderOpening ? "var(--surface3)" : "var(--accent)",
                       color: "#fff",
                       cursor: builderOpening ? "wait" : "pointer",
                       fontFamily: "inherit",
                       flexShrink: 0,
                       whiteSpace: "nowrap",
-                      boxShadow: builderOpening ? "none" : "0 2px 6px rgba(26,35,126,0.25)",
+                      boxShadow: builderOpening ? "none" : "var(--shadow-sm)",
                     }}
                   >
                     {builderOpening ? "Opening Builder…" : "Download ATS PDF"}
@@ -726,9 +739,9 @@ export default function AnnotatedResumePanel({
                       letterSpacing: 0.08,
                       padding: "6px 12px",
                       borderRadius: 8,
-                      border: "1px solid #c5cee0",
-                      background: "var(--surface)",
-                      color: "#3949ab",
+                      border: "1px solid var(--border-h)",
+                      background: "var(--surface3)",
+                      color: "var(--text)",
                       cursor: pdfExporting ? "wait" : "pointer",
                       fontFamily: "inherit",
                       flexShrink: 0,
@@ -752,13 +765,13 @@ export default function AnnotatedResumePanel({
                     padding: "6px 12px",
                     borderRadius: 8,
                     border: "none",
-                    background: pdfExporting ? "#c5cee0" : "linear-gradient(135deg,#3949ab,#1a237e)",
+                    background: pdfExporting ? "var(--surface3)" : "var(--accent)",
                     color: "#fff",
                     cursor: pdfExporting ? "wait" : "pointer",
                     fontFamily: "inherit",
                     flexShrink: 0,
                     whiteSpace: "nowrap",
-                    boxShadow: pdfExporting ? "none" : "0 2px 6px rgba(26,35,126,0.25)",
+                    boxShadow: pdfExporting ? "none" : "var(--shadow-sm)",
                   }}
                 >
                   {pdfExporting ? "Exporting…" : "Export PDF"}
@@ -768,6 +781,22 @@ export default function AnnotatedResumePanel({
           ) : null}
           </div>
         </div>
+        {restoredResumeNoPdfHint ? (
+          <div
+            role="note"
+            style={{
+              padding: "8px 16px",
+              borderTop: "1px solid var(--border)",
+              fontSize: 11,
+              lineHeight: 1.45,
+              color: "var(--muted)",
+              background: "var(--surface2)",
+            }}
+          >
+            Opened from saved analysis — the original PDF is not stored. Edit the text below and use Quick export;
+            re-upload your PDF to enable the PDF tab and original download.
+          </div>
+        ) : null}
         {presentationOnly && builderReady && onOpenBuilder ? (
           <div
             style={{
@@ -783,7 +812,7 @@ export default function AnnotatedResumePanel({
             <span style={{
               fontSize: 10,
               fontWeight: 800,
-              color: "#546e7a",
+              color: "var(--muted)",
               textTransform: "uppercase",
               letterSpacing: 0.06,
               flexShrink: 0,
@@ -806,9 +835,9 @@ export default function AnnotatedResumePanel({
                   fontWeight: 600,
                   padding: "5px 11px",
                   borderRadius: 999,
-                  border: "1px solid #c5cee0",
+                  border: "1px solid var(--border-h)",
                   background: "var(--surface)",
-                  color: "#3949ab",
+                  color: "var(--text)",
                   cursor: builderOpening ? "wait" : "pointer",
                   fontFamily: "inherit",
                 }}
@@ -831,7 +860,7 @@ export default function AnnotatedResumePanel({
                 padding: "5px 12px",
                 borderRadius: 8,
                 border: "none",
-                background: builderOpening ? "#ccc" : "linear-gradient(180deg, #ff9966 0%, #fb7c44 100%)",
+                background: builderOpening ? "var(--surface3)" : "linear-gradient(180deg, #ff9966 0%, #fb7c44 100%)",
                 color: "#fff",
                 cursor: builderOpening ? "wait" : "pointer",
                 fontFamily: "inherit",
@@ -846,7 +875,7 @@ export default function AnnotatedResumePanel({
             style={{
               padding: "0 16px 10px",
               fontSize: 10,
-              color: "#78909c",
+              color: "var(--muted)",
               lineHeight: 1.45,
             }}
           >
@@ -899,9 +928,9 @@ export default function AnnotatedResumePanel({
           alignItems: "center",
           gap: 14,
           flexShrink: 0,
-          background: "#fdfdfe",
+          background: "var(--surface2)",
           fontSize: 10,
-          color: "#607d8b",
+          color: "var(--muted)",
         }}>
           {[
             { bg: "#ffcdd2", label: "Weak line", border: "#ef5350" },
@@ -921,10 +950,10 @@ export default function AnnotatedResumePanel({
           padding: "8px 14px",
           borderBottom: "1px solid var(--border)",
           fontSize: 11,
-          color: "#b71c1c",
+          color: "var(--red)",
           fontWeight: 600,
           flexShrink: 0,
-          background: "#ffebee",
+          background: "var(--red-bg)",
         }}>
           <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ marginRight: 5, verticalAlign: "middle" }}>
             <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
@@ -963,10 +992,10 @@ export default function AnnotatedResumePanel({
           className="az-resume-paper"
           style={{
             position: "relative",
-            background: "var(--surface)",
+            background: "var(--resume-paper-bg)",
             borderRadius: 3,
-            boxShadow: "0 1px 3px rgba(45,55,72,0.06), 0 16px 48px rgba(45,55,72,0.08)",
-            border: "1px solid var(--border)",
+            boxShadow: "0 1px 2px rgba(15,23,42,0.06), 0 14px 42px rgba(15,23,42,0.14)",
+            border: "1px solid var(--resume-paper-border)",
             maxWidth: "100%",
             margin: "0 auto",
           }}
@@ -1013,10 +1042,10 @@ export default function AnnotatedResumePanel({
           <>
           <div style={{
             padding: "18px 22px 14px",
-            borderBottom: "1px solid #eef2f7",
+            borderBottom: "1px solid var(--resume-paper-border)",
             fontSize: 17,
             fontWeight: 700,
-            color: "#1a237e",
+            color: "var(--resume-paper-ink)",
             letterSpacing: -0.3,
           }}>
             Résumé lines (no full extract)
@@ -1025,7 +1054,7 @@ export default function AnnotatedResumePanel({
           <div style={{
             padding: "40px 20px",
             textAlign: "center",
-            color: "#90a4ae",
+            color: "var(--resume-paper-muted)",
             fontSize: 13,
           }}>
             <div style={{ fontSize: 28, marginBottom: 10 }}>📄</div>
@@ -1045,16 +1074,16 @@ export default function AnnotatedResumePanel({
             const previewLine = previewLineOverrides[i] ?? bullet.originalBullet;
             const previewLineApplied = previewLineOverrides[i] !== undefined;
 
-            let bgColor = "#fafbfc";
+            let bgColor = "var(--surface2)";
 
             if (activeCategory && isHighlighted) {
-              bgColor = "rgba(255, 227, 222, 0.65)";
+              bgColor = "var(--red-bg)";
             } else if (!activeCategory && hasIssues) {
               bgColor = bullet.score < 50
-                ? "rgba(255, 205, 210, 0.35)"
+                ? "var(--red-bg)"
                 : bullet.score < 70
-                ? "rgba(255, 249, 196, 0.5)"
-                : "rgba(232, 245, 233, 0.4)";
+                ? "var(--yellow-bg)"
+                : "var(--green-bg)";
             }
 
             const showDetail = presentationOnly ? false : (isExpanded || isHovered);
@@ -1075,12 +1104,12 @@ export default function AnnotatedResumePanel({
                   padding: "11px 18px 11px 16px",
                   margin: 0,
                   borderRadius: 0,
-                  boxShadow: isSelected ? "inset 0 0 0 2px #2196f3" : undefined,
+                  boxShadow: isSelected ? "inset 0 0 0 2px var(--resume-paper-accent)" : undefined,
                   borderLeft: "none",
-                  background: isExpanded ? "#f5f7fa" : isHovered ? "#f0f4f8" : bgColor,
+                  background: isExpanded ? "var(--resume-paper-row-hover)" : isHovered ? "var(--resume-paper-row-hover)" : bgColor,
                   transition: "background 0.15s, box-shadow 0.15s",
                   cursor: hasIssues || hasImproved ? "pointer" : "default",
-                  borderBottom: i < bulletAnalysis.length - 1 ? "1px solid #eceff1" : "none",
+                  borderBottom: i < bulletAnalysis.length - 1 ? "1px solid var(--resume-paper-border)" : "none",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "flex-start", gap: presentationOnly ? 0 : 10 }}>
@@ -1102,7 +1131,7 @@ export default function AnnotatedResumePanel({
                   )}
                   <span style={{
                     fontSize: 13,
-                    color: "#263238",
+                    color: "var(--resume-paper-ink)",
                     lineHeight: 1.65,
                     fontWeight: isHighlighted || isExpanded ? 500 : 400,
                     flex: 1,
@@ -1110,7 +1139,7 @@ export default function AnnotatedResumePanel({
                   }}>
                     {highlightMetricSpans(previewLine)}
                     {!presentationOnly && previewLineApplied && (
-                      <span title="Preview line updated for this session." style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, verticalAlign: "super", color: "#fb8c00", letterSpacing: 0.2 }}>
+                      <span title="Preview line updated for this session." style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, verticalAlign: "super", color: "var(--amber)", letterSpacing: 0.2 }}>
                         ●
                       </span>
                     )}
@@ -1121,7 +1150,7 @@ export default function AnnotatedResumePanel({
                     style={{
                       flexShrink: 0,
                       marginTop: 4,
-                      color: "#78909c",
+                      color: "var(--resume-paper-muted)",
                       transition: "transform 0.2s",
                       transform: isExpanded ? "rotate(180deg)" : "none",
                     }}

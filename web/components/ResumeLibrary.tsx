@@ -64,7 +64,7 @@ export default function ResumeLibrary({ onUseAsBase }: {
 
   const useAsBase = (folder: string) => {
     if (onUseAsBase) onUseAsBase(folder);
-    router.push(`/?base=${encodeURIComponent(folder)}`);
+    router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}`);
   };
 
   return (
@@ -137,7 +137,7 @@ export default function ResumeLibrary({ onUseAsBase }: {
           </div>
           <div style={{ fontSize: 12, color: "var(--dim)" }}>
             {resumes.length === 0
-              ? <>Head to the <button onClick={() => router.push("/")} style={linkBtnStyle}>Resume Builder</button> to create one.</>
+              ? <>Head to the <button type="button" onClick={() => router.push("/?view=builder&flow=tailor")} style={linkBtnStyle}>Résumé Builder</button> to create one.</>
               : "Try a different search."}
           </div>
         </div>

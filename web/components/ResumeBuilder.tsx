@@ -64,15 +64,22 @@ function saveDraft(patch: Record<string, unknown>) {
   } catch { /* quota / SSR */ }
 }
 
-export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder?: string | null } = {}) {
+export default function ResumeBuilder({
+  initialBaseFolder,
+  scratchStart = false,
+}: {
+  initialBaseFolder?: string | null;
+  /** When true, start a clean builder session (no draft carry-over, no base resume). */
+  scratchStart?: boolean;
+} = {}) {
   const router = useRouter();
-  const draft0 = loadDraft();
-  const [company,    setCompanyRaw]    = useState<string>(draft0.company ?? "");
-  const [role,       setRoleRaw]       = useState<string>(draft0.role ?? "");
-  const [jd,         setJdRaw]         = useState<string>(draft0.jd ?? "");
-  const [jobUrl,     setJobUrlRaw]     = useState<string>(draft0.jobUrl ?? "");
+  const draft0: Record<string, unknown> = scratchStart ? {} : loadDraft();
+  const [company,    setCompanyRaw]    = useState<string>(String(draft0.company ?? ""));
+  const [role,       setRoleRaw]       = useState<string>(String(draft0.role ?? ""));
+  const [jd,         setJdRaw]         = useState<string>(String(draft0.jd ?? ""));
+  const [jobUrl,     setJobUrlRaw]     = useState<string>(String(draft0.jobUrl ?? ""));
   const model = "gemini-2.5-flash";
-  const [baseFolder, setBaseFolder] = useState<string | null>(initialBaseFolder ?? null);
+  const [baseFolder, setBaseFolder] = useState<string | null>(scratchStart ? null : (initialBaseFolder ?? null));
   // Wrap setters to also persist to sessionStorage
   const setCompany = (v: string) => { setCompanyRaw(v); saveDraft({ company: v }); };
   const setRole    = (v: string) => { setRoleRaw(v);    saveDraft({ role: v }); };
@@ -95,6 +102,8 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
   // resume" in the UI instead of swallowing it as a console.warn.
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
+  /** After Résumé Template Studio — hide JD wizard chrome; optional job + generate only. */
+  const [studioHandoff, setStudioHandoff] = useState(false);
 
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(null);
   const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(null);
@@ -105,17 +114,26 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
   const [extractingJd, setExtractingJd] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
 
-  // Prefill from Analyze Résumé: sessionStorage + optional `fromAnalyze=1` (PDF path).
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!scratchStart) return;
+    try {
+      sessionStorage.removeItem(SS_KEY);
+    } catch { /* ignore */ }
+  }, [scratchStart]);
+
+  // Prefill from Analyze (`fromAnalyze=1`) or Template Studio (`fromTemplateStudio=1`).
+  useEffect(() => {
+    if (typeof window === "undefined" || scratchStart) return;
     const sp = new URLSearchParams(window.location.search);
     const fromAnalyze = sp.get("fromAnalyze") === "1";
+    const fromTemplateStudio = sp.get("fromTemplateStudio") === "1";
+    const flow = (sp.get("flow") || "tailor").toLowerCase();
     try {
       const profile = sessionStorage.getItem("rn_builder_profile_prefill");
       const jdPre = sessionStorage.getItem("rn_builder_jd_prefill");
-      if (fromAnalyze && profile) {
+      if ((fromAnalyze || fromTemplateStudio) && profile) {
         setCandidateProfile(profile);
-        setUploadedFileName("From Analyze");
+        setUploadedFileName(fromTemplateStudio ? "From template studio" : "From Analyze");
       }
       if (jdPre) {
         setJdRaw(jdPre);
@@ -124,9 +142,23 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
       if (fromAnalyze) sessionStorage.removeItem("rn_builder_profile_prefill");
       sessionStorage.removeItem("rn_builder_jd_prefill");
       sessionStorage.removeItem("rn_builder_from_analyze");
+      if (fromTemplateStudio) sessionStorage.removeItem("rn_builder_profile_prefill");
     } catch { /* ignore */ }
-    if (fromAnalyze) router.replace("/?view=builder");
-  }, [router]);
+
+    if (fromAnalyze && flow === "tailor") {
+      const baseQ = sp.get("base");
+      const styleRef = sp.get("styleRef");
+      let next = "/?view=builder&flow=tailor";
+      if (baseQ) next += `&base=${encodeURIComponent(baseQ)}`;
+      if (styleRef) next += `&styleRef=${encodeURIComponent(styleRef)}`;
+      router.replace(next);
+    } else if (fromTemplateStudio) {
+      setStudioHandoff(true);
+      sp.delete("fromTemplateStudio");
+      const qs = sp.toString();
+      router.replace(qs ? `/?${qs}` : "/?view=builder&flow=tailor");
+    }
+  }, [router, scratchStart]);
 
   // ── Editor state — populated lazily when the user clicks the Edit tab. ──
   // We keep `editorTree` as the freshly-fetched copy from /api/resume/{folder}
@@ -349,6 +381,17 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
     let effRole    = role.trim();
     let effJd      = jd.trim();
 
+    if (studioHandoff) {
+      if (!effCompany) effCompany = "General application";
+      if (!effRole) effRole = "Open role";
+      if (!effJd) {
+        const cp = (candidateProfile ?? "").trim();
+        effJd = cp
+          ? `No specific job posting yet—optimize structure, ATS safety, and measurable impact using this candidate profile only.\n\n---\n${cp.slice(0, 6000)}`
+          : "No specific job posting yet—produce a polished ATS-safe résumé from the uploaded profile text.";
+      }
+    }
+
     // If the user pasted a URL but any of the fields is empty, auto-import first.
     if (jobUrl.trim() && (!effCompany || !effRole || !effJd)) {
       setError(null);
@@ -479,7 +522,7 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
       setGenerating(false);
       setStatusMsg("");
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -501,62 +544,78 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
       <main style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
 
         {/* Page content */}
-        <div className="rb-page" style={{ padding: "44px 48px 80px", maxWidth: 820, margin: "0 auto", width: "100%" }}>
+        <div className="rb-page" style={{ padding: "44px 48px 80px", maxWidth: studioHandoff ? 920 : 820, margin: "0 auto", width: "100%" }}>
 
           {/* ── Hero (pre-generation) ── */}
           {!result && !generating && (
-            <div style={{ marginBottom: 40 }} className="rb-hero">
-
-              {/* Bold heading */}
-              <div className="fade-in rb-hero-title" style={{
-                fontSize: 52, fontWeight: 800, lineHeight: 1.05,
-                letterSpacing: -2, marginBottom: 14, color: "var(--text)",
-              }}>
-                Tailor your résumé to{" "}
-                <span style={{ color: "var(--accent)" }}>any</span>
-                <br />job description.
+            studioHandoff ? (
+              <div
+                style={{
+                  marginBottom: 22,
+                  padding: "14px 18px",
+                  borderRadius: 12,
+                  border: "1px solid var(--border)",
+                  background: "var(--surface2)",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 6, letterSpacing: -0.2 }}>
+                  Layout &amp; extract ready
+                </div>
+                <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
+                  You picked a template in the layout gallery. Optionally add a job posting below to sharpen keywords—then
+                  generate your PDF. To change layout or spacing, go back via the app menu:{" "}
+                  <strong style={{ color: "var(--text)" }}>Résumé Builder → Template &amp; PDF</strong>.
+                </p>
               </div>
-
-              <p className="fade-in stagger-1" style={{
-                fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
-                marginBottom: 28, maxWidth: 520, letterSpacing: -0.1,
-              }}>
-                Upload your current résumé, pick a template, paste the job posting, and receive
-                an AI-tailored LaTeX résumé with match score, gap analysis, and
-                ATS-safe PDF — in under 60 seconds.
-              </p>
-
-              {/* 3-step process pills */}
-              <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {[
-                  { n: 1, label: "Pick LaTeX layout" },
-                  { n: 2, label: "Upload résumé" },
-                  { n: 3, label: "Paste job posting" },
-                  { n: 4, label: "Tailor & download PDF" },
-                ].map(({ n, label }) => (
-                  <div key={n} style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "6px 12px 6px 8px",
-                    background: "var(--surface)", border: "1px solid var(--border)",
-                    borderRadius: 24, fontSize: 12.5, color: "var(--muted)",
-                    letterSpacing: -0.1,
-                  }}>
-                    <span style={{
-                      width: 20, height: 20, borderRadius: "50%",
-                      background: "var(--accent)",
-                      display: "inline-flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0,
-                    }}>{n}</span>
-                    {label}
-                  </div>
-                ))}
+            ) : (
+              <div style={{ marginBottom: 40 }} className="rb-hero">
+                <div className="fade-in rb-hero-title" style={{
+                  fontSize: 52, fontWeight: 800, lineHeight: 1.05,
+                  letterSpacing: -2, marginBottom: 14, color: "var(--text)",
+                }}>
+                  Tailor your résumé to{" "}
+                  <span style={{ color: "var(--accent)" }}>any</span>
+                  <br />job description.
+                </div>
+                <p className="fade-in stagger-1" style={{
+                  fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
+                  marginBottom: 28, maxWidth: 520, letterSpacing: -0.1,
+                }}>
+                  Upload your current résumé, pick a template, paste the job posting, and receive an AI-tailored LaTeX résumé with match score, gap analysis, and ATS-safe PDF — in under 60 seconds.
+                </p>
+                <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {[
+                    { n: 1, label: "Pick LaTeX layout" },
+                    { n: 2, label: "Upload résumé" },
+                    { n: 3, label: "Paste job posting" },
+                    { n: 4, label: "Tailor & download PDF" },
+                  ].map(({ n, label }) => (
+                    <div key={n} style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "6px 12px 6px 8px",
+                      background: "var(--surface)", border: "1px solid var(--border)",
+                      borderRadius: 24, fontSize: 12.5, color: "var(--muted)",
+                      letterSpacing: -0.1,
+                    }}>
+                      <span style={{
+                        width: 20, height: 20, borderRadius: "50%",
+                        background: "var(--accent)",
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0,
+                      }}>{n}</span>
+                      {label}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )
           )}
 
           {/* ── Inputs (hidden once results are shown) ── */}
           {!result && !generating && (<>
 
+          {!studioHandoff && (
+          <>
           {/* ── Step 1: LaTeX layout (reference .tex on server) ── */}
           <StepCard
             step={1}
@@ -693,9 +752,17 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
               </div>
             )}
           </StepCard>
+          </>
+          )}
 
           {/* ── Step 3: Job target ── */}
-          <StepCard step={3} title="Target job" subtitle="Tell us what you're applying for">
+          <StepCard
+            step={studioHandoff ? 1 : 3}
+            title={studioHandoff ? "Target job (optional)" : "Target job"}
+            subtitle={studioHandoff
+              ? "Paste a posting to sharpen keywords—or leave everything blank and we’ll compile from your extract with safe defaults."
+              : "Tell us what you're applying for"}
+          >
             {/* URL import — auto-fills company/role/JD */}
             <Field label="Job posting link (optional)">
               <div style={{ display: "flex", gap: 8 }}>
@@ -804,7 +871,7 @@ export default function ResumeBuilder({ initialBaseFolder }: { initialBaseFolder
                 {statusMsg || "Tailoring your resume…"}
               </>
             ) : (
-              "Tailor my resume →"
+              studioHandoff ? "Generate résumé PDF →" : "Tailor my resume →"
             )}
           </button>
 

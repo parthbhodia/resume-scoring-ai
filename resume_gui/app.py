@@ -1650,9 +1650,10 @@ RESEARCH, PUBLICATIONS AND PRESENTATIONS — each item: title; place or organiza
 (poster, paper, oral presentation, etc.); date. RELEVANT PROJECTS — title (class/course project without course number), \
 semester and year; one to two bullets on role, actions, and results; tools or techniques gained; learning \
 outcomes when present. RELEVANT COURSEWORK — optional; bulleted; most applicable major/minor courses for the role; \
-no more than about three lines total. SKILLS — may use subcategories (e.g. Laboratory, Computer, \
-Quantitative/Analytic, Interpersonal) or technical clusters (Programming; Operating Systems; Software; Design skills \
-with proficiency tiers such as Advanced/Proficient/Novice; LANGUAGES with level, e.g. conversational/fluent). \
+no more than about three lines total. SKILLS — subcategories should match the candidate's field (e.g. Laboratory / \
+Quantitative / Interpersonal; clinical systems or charting for healthcare; legal research or languages for law; \
+creative software for design; Programming / Software only when computing is the focus) with proficiency tiers \
+(Advanced/Proficient/Novice) when used; LANGUAGES with level (conversational/fluent) when relevant. \
 PROFESSIONAL EXPERIENCE (or role-focused Experience) — position title, organization, city, state, start–end dates on the \
 header line; two to five action bullets emphasizing achievements, contributions, and tangible outcomes. ADDITIONAL \
 EXPERIENCE — other paid roles: one to three similar bullets each; achievements not only duties. Activities tied to \
@@ -1703,8 +1704,13 @@ Projects 1–2); flag redundant Objective + Summary when space is tight; coursew
 (only if ≥3.0 and stated); research/pubs missing venue or presentation type when items are listed.
 7. LANGUAGE QUALITY: Spelling/grammar; passive voice and buzzwords; tense; clarity over \
 flowery phrasing; minimal unexplained jargon/acronyms.
-8. TECHNICAL BRANDING: Links (GitHub, portfolio), skills depth, stack clarity for technical \
-profiles.
+8. FIELD SIGNALS & PROFESSIONAL DEPTH (JSON key MUST stay `technicalBranding` for compatibility): How clearly the \
+résumé signals fit for the candidate's discipline — skills and tools grouped sensibly; field-appropriate evidence \
+(e.g. portfolio or code samples for computing/design; writing or teaching clips for communications/education; \
+licenses and certifications for regulated professions; publications or posters for research; patient volume or \
+outcomes only when already stated). Score high when domain-relevant depth is obvious without hollow buzzwords. Do \
+NOT penalize non-STEM résumés for lacking \"tech stack\" or GitHub; judge instead on clarity of training, tools, \
+credentials, and outcomes that employers in THAT field expect.
 
 SCORING GUIDANCE:
 90-100 = Excellent, highly recruiter-friendly and ATS-safe.
@@ -1714,6 +1720,8 @@ SCORING GUIDANCE:
 <40    = Poor; likely to fail ATS and recruiter screens.
 
 CRITICAL RULES:
+- The candidate may be in any discipline (STEM, healthcare, business, arts, education, trades, public service, etc.). \
+Infer the field from the résumé text and score against that field's expectations — never assume a software-only audience.
 - Be SPECIFIC, not generic. Tell exactly WHERE and HOW to fix each issue.
 - When rewriting bullets, PRESERVE TRUTHFULNESS. Mark invented metrics \
   as "[X%]", "[$Y]", or "[~N]".

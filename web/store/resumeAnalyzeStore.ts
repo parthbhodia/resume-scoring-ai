@@ -43,6 +43,8 @@ export interface ResumeAnalyzeStore {
   reset: () => void;
   setLineOverride: (index: number, text: string) => void;
   clearLineOverride: (index: number) => void;
+  /** Replace preview line overrides (e.g. after loading a local draft). */
+  replaceLineOverrides: (map: Record<number, string>) => void;
   /** Call when user focuses a bullet on the left to nudge preview focus. */
   pulseBullet: (index: number) => void;
   clearPulse: () => void;
@@ -113,6 +115,17 @@ export const useResumeAnalyzeStore = create<ResumeAnalyzeStore>((set) => ({
         pulseToken: s.pulseToken + 1,
       };
     });
+  },
+
+  replaceLineOverrides: (map) => {
+    const next: Record<number, string> = {};
+    for (const [k, v] of Object.entries(map)) {
+      const idx = Number(k);
+      if (!Number.isFinite(idx) || typeof v !== "string") continue;
+      const t = v.trim();
+      if (t) next[idx] = v;
+    }
+    set({ lineOverrides: next, pulseBulletIndex: null });
   },
 
   pulseBullet: (index) =>

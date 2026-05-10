@@ -69,6 +69,20 @@
   --transition:  0.18s cubic-bezier(0.4,0,0.2,1);
 }
 
+/* Analyze “Edit” preview: always print-white paper + dark ink (independent of app chrome theme). */
+:root,
+[data-theme="dark"],
+[data-theme="light"] {
+  --resume-paper-bg:       #ffffff;
+  --resume-paper-ink:      #0f172a;
+  --resume-paper-muted:    #475569;
+  --resume-paper-dim:      #64748b;
+  --resume-paper-border:   rgba(15, 23, 42, 0.1);
+  --resume-paper-accent:   #0969da;
+  --resume-paper-row:      #f8fafc;
+  --resume-paper-row-hover:#eef2f7;
+}
+
 @theme inline {
   --color-bg:       var(--bg);
   --color-surface:  var(--surface);
@@ -193,11 +207,11 @@ select option { background: var(--surface); }
   .rb-page       { padding: 18px 12px 50px !important; }
 }
 
-/* Landing page mobile */
+/* Landing page mobile — hide in-page section links only; keep theme + Sign in */
 @media (max-width: 768px) {
   .lp-header   { padding: 0 16px !important; }
   .lp-nav      { gap: 14px !important; }
-  .lp-nav button:not(:last-child) { display: none; }
+  .lp-nav .lp-nav-section { display: none !important; }
   .lp-hero-h1  { font-size: 36px !important; letter-spacing: -1.4px !important; }
   .lp-h2       { font-size: 26px !important; letter-spacing: -1px !important; }
   .lp-h2 br    { display: none; }
@@ -213,12 +227,3 @@ select option { background: var(--surface); }
 }
 
 
-/* Resume paper: dark-mode inversion */
-[data-theme="dark"] .az-resume-paper {
-  filter: invert(1) hue-rotate(180deg);
-}
-
-/* Resume paper: dark-mode inversion */
-[data-theme="dark"] .az-resume-paper {
-  filter: invert(1) hue-rotate(180deg);
-}

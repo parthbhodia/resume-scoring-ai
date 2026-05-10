@@ -17,7 +17,8 @@
  *   Slides in from the left as an overlay, closes on backdrop click.
  *
  * Routing:
- *   ?view=builder|library|analyze|profile|jobs  (defaults: builder)
+ *   ?view=builder|library|analyze|profile|jobs  (defaults: analyze)
+ *   ?view=builder&flow=tailor|scratch|template (builder sub-modes)
  *   ?view=library&resume=<folder>               (specific resume)
  */
 
@@ -110,9 +111,9 @@ const BADGES: Partial<Record<AppView, string>> = {
 
 export function useAppView(): AppView {
   const params = useSearchParams();
-  const raw = (params?.get("view") || "builder").toLowerCase();
+  const raw = (params?.get("view") || "analyze").toLowerCase();
   const valid: AppView[] = ["builder", "library", "analyze", "profile", "jobs"];
-  return valid.includes(raw as AppView) ? (raw as AppView) : "builder";
+  return valid.includes(raw as AppView) ? (raw as AppView) : "analyze";
 }
 
 const HEADER_H = 56;
@@ -125,6 +126,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [theme, toggleTheme]        = useTheme();
   const [navOpen, setNavOpen]       = useState(false);     // left nav drawer
   const [historyOpen, setHistoryOpen] = useState(false);   // right history drawer
+  const [builderMenuOpen, setBuilderMenuOpen] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -143,8 +145,29 @@ export default function AppShell({ children }: { children: ReactNode }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!builderMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest("[data-builder-nav]")) setBuilderMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [builderMenuOpen]);
+
+  useEffect(() => {
+    setBuilderMenuOpen(false);
+  }, [active]);
+
   const switchView = (next: AppView) => {
+    setBuilderMenuOpen(false);
     router.push(`/?view=${next}`);
+    setNavOpen(false);
+    setHistoryOpen(false);
+  };
+
+  const goBuilderFlow = (flow: "tailor" | "scratch" | "template") => {
+    setBuilderMenuOpen(false);
+    router.push(`/?view=builder&flow=${flow}`);
     setNavOpen(false);
     setHistoryOpen(false);
   };
@@ -184,8 +207,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
         {/* Logo — SVG mark + wordmark (shared with marketing + legal) */}
         <button
           type="button"
-          onClick={() => switchView("builder")}
-          aria-label="Resunova — go to resume builder"
+          onClick={() => switchView("analyze")}
+          aria-label="Resunova — go to analyze résumé"
           style={{
             display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none", flexShrink: 0,
             background: "none", border: "none", padding: 0, fontFamily: "inherit",
@@ -199,11 +222,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
         {/* Inline nav links (hidden on mobile via .app-nav-links) */}
         <nav className="app-nav-links" style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          {(["builder", "library", "analyze"] as AppView[]).map(v => {
+          {(["analyze", "library"] as AppView[]).map(v => {
             const isActive = v === active;
             return (
               <button
                 key={v}
+                type="button"
                 onClick={() => switchView(v)}
                 style={{
                   fontSize: 13, fontWeight: isActive ? 600 : 500,
@@ -222,6 +246,91 @@ export default function AppShell({ children }: { children: ReactNode }) {
               </button>
             );
           })}
+          <div data-builder-nav style={{ position: "relative" }}>
+            <button
+              type="button"
+              onClick={() => setBuilderMenuOpen(o => !o)}
+              aria-expanded={builderMenuOpen}
+              aria-haspopup="menu"
+              aria-label="Resume Builder — choose a workflow"
+              style={{
+                fontSize: 13, fontWeight: active === "builder" ? 600 : 500,
+                padding: "5px 9px 5px 11px", borderRadius: 7,
+                border: "none", fontFamily: "inherit",
+                background: active === "builder" ? "var(--accent-bg)" : "transparent",
+                color: active === "builder" ? "var(--accent)" : "var(--muted)",
+                cursor: "pointer",
+                transition: "background var(--transition), color var(--transition)",
+                letterSpacing: -0.1,
+                display: "inline-flex", alignItems: "center", gap: 4,
+              }}
+              onMouseEnter={e => { if (active !== "builder") e.currentTarget.style.background = "var(--surface2)"; }}
+              onMouseLeave={e => { if (active !== "builder") e.currentTarget.style.background = "transparent"; }}
+            >
+              {VIEW_LABELS.builder}
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden style={{ opacity: 0.75 }}>
+                <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            {builderMenuOpen && (
+              <div
+                role="menu"
+                style={{
+                  position: "absolute", top: "calc(100% + 6px)", left: 0,
+                  minWidth: 280, background: "var(--surface)",
+                  border: "1px solid var(--border)", borderRadius: 10,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+                  padding: 6, zIndex: 60,
+                }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => goBuilderFlow("tailor")}
+                  style={{
+                    display: "block", width: "100%", textAlign: "left",
+                    padding: "10px 12px", borderRadius: 8, border: "none", fontFamily: "inherit",
+                    background: "transparent", color: "var(--text)", cursor: "pointer",
+                    fontSize: 13, fontWeight: 500, letterSpacing: -0.15, lineHeight: 1.35,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  Tailor my résumé to a job description
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => goBuilderFlow("template")}
+                  style={{
+                    display: "block", width: "100%", textAlign: "left",
+                    padding: "10px 12px", borderRadius: 8, border: "none", fontFamily: "inherit",
+                    background: "transparent", color: "var(--text)", cursor: "pointer",
+                    fontSize: 13, fontWeight: 500, letterSpacing: -0.15, lineHeight: 1.35,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  Template &amp; PDF (layout first)
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => goBuilderFlow("scratch")}
+                  style={{
+                    display: "block", width: "100%", textAlign: "left",
+                    padding: "10px 12px", borderRadius: 8, border: "none", fontFamily: "inherit",
+                    background: "transparent", color: "var(--text)", cursor: "pointer",
+                    fontSize: 13, fontWeight: 500, letterSpacing: -0.15, lineHeight: 1.35,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  Build my résumé from a new template (from scratch)
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
 
         {/* Spacer */}
@@ -359,13 +468,85 @@ export default function AppShell({ children }: { children: ReactNode }) {
       }}>
         {/* Nav items */}
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 1, overflowY: "auto" }}>
-          {(Object.keys(VIEW_LABELS) as AppView[]).map(v => {
+          {(["analyze", "library", "builder", "profile", "jobs"] as AppView[]).map(v => {
+            if (v === "builder") {
+              const builderActive = active === "builder";
+              return (
+                <div key="builder-group" style={{ marginBottom: 4 }}>
+                  <div style={{
+                    fontSize: 10, fontWeight: 700, color: "var(--dim)",
+                    textTransform: "uppercase", letterSpacing: 0.6,
+                    padding: "6px 11px 4px",
+                  }}>
+                    Resume Builder
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { goBuilderFlow("tailor"); setNavOpen(false); }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "8px 11px 8px 18px", borderRadius: 8,
+                      background: builderActive ? "var(--accent-bg)" : "transparent",
+                      border: builderActive ? "1px solid rgba(0,113,227,0.2)" : "1px solid transparent",
+                      cursor: "pointer", fontFamily: "inherit",
+                      color: builderActive ? "var(--accent)" : "var(--muted)",
+                      fontSize: 12.5, fontWeight: 500, letterSpacing: -0.12,
+                      textAlign: "left", width: "100%",
+                      transition: "background var(--transition), color var(--transition), border-color var(--transition)",
+                    }}
+                    onMouseEnter={e => { if (!builderActive) { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; } }}
+                    onMouseLeave={e => { if (!builderActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; } }}
+                  >
+                    Tailor my résumé to a job description
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { goBuilderFlow("template"); setNavOpen(false); }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "8px 11px 8px 18px", borderRadius: 8,
+                      background: "transparent",
+                      border: "1px solid transparent",
+                      cursor: "pointer", fontFamily: "inherit",
+                      color: "var(--muted)",
+                      fontSize: 12.5, fontWeight: 500, letterSpacing: -0.12,
+                      textAlign: "left", width: "100%",
+                      transition: "background var(--transition), color var(--transition)",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
+                  >
+                    Template &amp; PDF (layout first)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { goBuilderFlow("scratch"); setNavOpen(false); }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "8px 11px 8px 18px", borderRadius: 8,
+                      background: "transparent",
+                      border: "1px solid transparent",
+                      cursor: "pointer", fontFamily: "inherit",
+                      color: "var(--muted)",
+                      fontSize: 12.5, fontWeight: 500, letterSpacing: -0.12,
+                      textAlign: "left", width: "100%",
+                      transition: "background var(--transition), color var(--transition)",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
+                  >
+                    Build from a new template (from scratch)
+                  </button>
+                </div>
+              );
+            }
             const isActive = v === active;
             const badge    = BADGES[v];
             return (
               <button
                 key={v}
-                onClick={() => switchView(v)}
+                type="button"
+                onClick={() => { switchView(v); setNavOpen(false); }}
                 style={{
                   display: "flex", alignItems: "center", gap: 10,
                   padding: "8px 11px", borderRadius: 8,
@@ -416,7 +597,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <ResumeSidebar
           activeFolder={null}
           onSelect={folder => {
-            router.push(`/?base=${encodeURIComponent(folder)}`);
+            router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}`);
             setHistoryOpen(false);
           }}
         />

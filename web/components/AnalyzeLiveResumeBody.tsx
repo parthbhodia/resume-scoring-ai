@@ -107,7 +107,7 @@ export function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): 
     // Stop at any known section keyword — strict so names like "PARTH BHODIA" aren't mistaken.
     if (looksLikeSectionHeading(t, true)) break;
     if (lineLooksLikeBulletLead(line)) break;
-    header.push(line);
+    if (!isPlaceholderIdentityLine(line)) header.push(line);
     i++;
   }
   if (header.length) blocks.push({ type: "header", lines: header });
@@ -121,6 +121,10 @@ export function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): 
         if (ti === "") { i++; continue; }
         const j = findBulletIndexForLine(lines[i], bulletAnalysis);
         if (j < 0) break;
+        if (isPlaceholderIdentityLine(lines[i])) {
+          i++;
+          continue;
+        }
         items.push({ rawLine: lines[i], bulletIdx: j });
         i++;
       }
@@ -129,7 +133,9 @@ export function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): 
       const t = lines[i].trim();
       if (!t) { i++; continue; }
       if (looksLikeSectionHeading(t)) {
-        blocks.push({ type: "section", text: t });
+        if (!isPlaceholderIdentityLine(lines[i])) {
+          blocks.push({ type: "section", text: t });
+        }
         i++;
         continue;
       }
@@ -139,6 +145,10 @@ export function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): 
         if (!ti) break;
         if (findBulletIndexForLine(lines[i], bulletAnalysis) >= 0) break;
         if (looksLikeSectionHeading(ti)) break;
+        if (isPlaceholderIdentityLine(lines[i])) {
+          i++;
+          continue;
+        }
         para.push(lines[i]);
         i++;
       }
@@ -205,6 +215,51 @@ function looksLikeTitlePersonName(line: string): boolean {
   return !KNOWN_SECTIONS.test(t);
 }
 
+/** Collapse odd spaces / unicode so “N ⁄ A” and NBSP variants match N/A heuristics. */
+function collapseForPlaceholderMatch(raw: string): string {
+  const s = (raw.normalize?.("NFKC") ?? raw)
+    .replace(/\ufeff/g, "")
+    .replace(/[\u00a0\u2000-\u200b\u202f\u2060]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return s;
+}
+
+/** PDF / model sometimes emits a bogus first “name” line — never treat as display title. */
+export function isPlaceholderIdentityLine(line: string): boolean {
+  const t = collapseForPlaceholderMatch(normalizeExtractLine(line));
+  if (!t) return true;
+  // N/A with ASCII slash, fraction slash (U+2044), division slash, thin spaces, etc.
+  if (/^(?:n[\s./\u2044\u2215\u2013-]*a\.?|not\s+applicable|tbd|none|null|—|--|\.\.\.|unknown|undefined|\?)$/i.test(t)) return true;
+  // Lines that are only punctuation / separators (common PDF junk)
+  if (/^[\s\-–—_.\/\\|]+$/i.test(t)) return true;
+  return false;
+}
+
+/** Drop placeholder tokens anywhere in API/inferred header arrays (not only first line). */
+function sanitizeHeaderLineArray(lines: string[]): string[] {
+  return lines
+    .map((s) => normalizeExtractLine(s))
+    .filter((l) => l.length > 0 && !isPlaceholderIdentityLine(l));
+}
+
+/** PDF extract often wraps one logical bullet across lines; keep a single row per bullet index. */
+function collapseAdjacentSameBulletRows(
+  items: Array<{ rawLine: string; bulletIdx: number }>,
+  bullets: LiveBulletItem[],
+): Array<{ rawLine: string; bulletIdx: number }> {
+  const out: Array<{ rawLine: string; bulletIdx: number }> = [];
+  for (const it of items) {
+    const prev = out[out.length - 1];
+    if (prev && prev.bulletIdx === it.bulletIdx) {
+      const canon = bullets[it.bulletIdx]?.originalBullet?.trim();
+      prev.rawLine = canon && canon.length > 0 ? canon : `${prev.rawLine} ${it.rawLine}`.replace(/\s+/g, " ").trim();
+      continue;
+    }
+    out.push({ rawLine: it.rawLine, bulletIdx: it.bulletIdx });
+  }
+  return out;
+}
 
 /** Client replay of `_extract_resume_header` when API `resumeHeader` is missing or stale. */
 function inferResumeHeaderFromExtract(text: string): string[] {
@@ -219,10 +274,11 @@ function inferResumeHeaderFromExtract(text: string): string[] {
     }
     if (KNOWN_SECTIONS.test(line)) break;
     if (lineLooksLikeBulletLead(line)) break;
-    primary.push(line);
+    if (primary.length === 0 && isPlaceholderIdentityLine(line)) continue;
+    if (!isPlaceholderIdentityLine(line)) primary.push(line);
     if (primary.length >= 6) break;
   }
-  if (primary.length > 0) return primary.slice(0, 6);
+  if (primary.length > 0) return sanitizeHeaderLineArray(primary).slice(0, 6);
 
   const limit = Math.min(220, lines.length);
   let best: string[] = [];
@@ -253,12 +309,12 @@ function inferResumeHeaderFromExtract(text: string): string[] {
       }
     }
   }
-  return best.slice(0, 6);
+  return sanitizeHeaderLineArray(best).slice(0, 6);
 }
 
 /** Shared with AnnotatedResumePanel to prepend identity onto synthetic extracts. */
 export function mergeResumeHeaderSources(apiHeader: string[] | undefined, inferBasisFull: string): string[] {
-  let api = (apiHeader ?? []).map((s) => normalizeExtractLine(s)).filter(Boolean);
+  let api = sanitizeHeaderLineArray(apiHeader ?? []);
   /* One line exactly matching a résumé section is not identity (mis-parsed extracts). */
   if (api.length === 1 && KNOWN_SECTIONS.test(api[0])) {
     api = [];
@@ -266,7 +322,6 @@ export function mergeResumeHeaderSources(apiHeader: string[] | undefined, inferB
   if (api.length >= 1) return api.slice(0, 8);
   const inferred = inferResumeHeaderFromExtract(inferBasisFull);
   if (inferred.length) return inferred.slice(0, 8);
-  if (api.length) return api.slice(0, 8);
   return [];
 }
 
@@ -317,17 +372,17 @@ function EntryHeaderLine({ line }: { line: string }) {
     return (
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "0 8px" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-          <span style={{ fontWeight: 700, color: "#111827", fontSize: 10.8, fontFamily: "system-ui, sans-serif" }}>
+          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: "system-ui, sans-serif" }}>
             {mains[0]}
           </span>
           {mains.slice(1).map((p, i) => (
-            <span key={i} style={{ color: "#546e7a", fontSize: 10, fontStyle: "italic", fontFamily: "system-ui, sans-serif" }}>
+            <span key={i} style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: "system-ui, sans-serif" }}>
               · {p}
             </span>
           ))}
         </div>
         {datePart && (
-          <span style={{ color: "#78909c", fontSize: 9.5, fontFamily: "system-ui, sans-serif", flexShrink: 0 }}>
+          <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: "system-ui, sans-serif", flexShrink: 0 }}>
             {datePart}
           </span>
         )}
@@ -338,7 +393,7 @@ function EntryHeaderLine({ line }: { line: string }) {
   // Year-range line without pipe — treat as date/location
   return (
     <div style={{ display: "flex", justifyContent: "flex-end" }}>
-      <span style={{ color: "#78909c", fontSize: 9.5, fontStyle: "italic", fontFamily: "system-ui, sans-serif" }}>
+      <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontStyle: "italic", fontFamily: "system-ui, sans-serif" }}>
         {renderInline(t)}
       </span>
     </div>
@@ -450,8 +505,8 @@ export default function AnalyzeLiveResumeBody({
 
   return (
     <div style={{
-      background: "#fff",
-      color: "#111",
+      background: "var(--resume-paper-bg)",
+      color: "var(--resume-paper-ink)",
       padding: "32px 36px 52px",
       fontFamily: "'Georgia', 'Times New Roman', serif",
       fontSize: 10.8,
@@ -476,7 +531,7 @@ export default function AnalyzeLiveResumeBody({
           position: absolute;
           left: 1px;
           top: 4px;
-          color: #9e9e9e;
+          color: var(--resume-paper-dim);
           font-size: 10px;
           line-height: 1.45;
         }
@@ -494,7 +549,7 @@ export default function AnalyzeLiveResumeBody({
       `}</style>
 
       {blocks.length === 0 && (
-        <div style={{ color: "#9e9e9e", fontStyle: "italic", textAlign: "center", padding: "32px 0" }}>
+        <div style={{ color: "var(--resume-paper-muted)", fontStyle: "italic", textAlign: "center", padding: "32px 0" }}>
           No extractable résumé text.
         </div>
       )}
@@ -503,23 +558,31 @@ export default function AnalyzeLiveResumeBody({
 
         /* ── Name / contact header ── */
         if (blk.type === "header") {
-          const nameLine = blk.lines[0]?.trim() || "";
-          const contactLines = blk.lines.slice(1).map(l => l.trim()).filter(Boolean);
+          const rest = [...blk.lines];
+          while (rest.length > 0 && isPlaceholderIdentityLine(rest[0])) {
+            rest.shift();
+          }
+          const nameLine = rest[0]?.trim() || "";
+          const contactLines = rest.slice(1).map((l) => l.trim()).filter(Boolean);
           // Flatten contact info — split on common separators into individual items
           const contactItems: string[] = [];
           for (const ln of contactLines) {
+            if (isPlaceholderIdentityLine(ln)) continue;
             const parts = ln.split(/[|•·,]\s*|\s{2,}/).map(p => p.trim()).filter(Boolean);
-            contactItems.push(...(parts.length > 1 ? parts : [ln]));
+            const chunk = parts.length > 1 ? parts : [ln];
+            for (const p of chunk) {
+              if (!isPlaceholderIdentityLine(p)) contactItems.push(p);
+            }
           }
 
           return (
-            <div key={bi} style={{ textAlign: "center", marginBottom: 18, paddingBottom: 14, borderBottom: "1.5px solid #1a237e" }}>
+            <div key={bi} style={{ textAlign: "center", marginBottom: 18, paddingBottom: 14, borderBottom: "1.5px solid var(--resume-paper-accent)" }}>
               {nameLine && (
                 <div style={{
                   fontSize: 22,
                   fontWeight: 700,
                   letterSpacing: 0.4,
-                  color: "#0d1b2a",
+                  color: "var(--resume-paper-ink)",
                   marginBottom: 7,
                   fontFamily: "'Georgia', serif",
                 }}>
@@ -534,13 +597,13 @@ export default function AnalyzeLiveResumeBody({
                   alignItems: "center",
                   gap: "0 4px",
                   fontSize: 9.4,
-                  color: "#455a64",
+                  color: "var(--resume-paper-muted)",
                   fontFamily: "system-ui, sans-serif",
                   lineHeight: 1.7,
                 }}>
                   {contactItems.map((item, ci) => (
                     <span key={ci} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                      {ci > 0 && <span style={{ color: "#b0bec5", fontSize: 8 }}>◆</span>}
+                      {ci > 0 && <span style={{ color: "var(--resume-paper-dim)", fontSize: 8 }}>◆</span>}
                       {renderInline(item)}
                     </span>
                   ))}
@@ -557,11 +620,11 @@ export default function AnalyzeLiveResumeBody({
               marginTop: 18,
               marginBottom: 7,
               paddingBottom: 3,
-              borderBottom: "1.5px solid #1a237e",
+              borderBottom: "1.5px solid var(--resume-paper-accent)",
               fontSize: 9,
               fontWeight: 800,
               letterSpacing: 1.6,
-              color: "#1a237e",
+              color: "var(--resume-paper-accent)",
               textTransform: "uppercase",
               fontFamily: "system-ui, sans-serif",
             }}>
@@ -576,7 +639,7 @@ export default function AnalyzeLiveResumeBody({
             <div key={bi} style={{ marginBottom: 6 }}>
               {blk.lines.map((ln, li) => {
                 const t = ln.trim();
-                if (!t) return null;
+                if (!t || isPlaceholderIdentityLine(ln)) return null;
                 if (looksLikeEntryHeader(t)) {
                   return (
                     <div key={li} style={{ marginBottom: li === 0 ? 2 : 1 }}>
@@ -588,7 +651,7 @@ export default function AnalyzeLiveResumeBody({
                 return (
                   <div key={li} style={{
                     fontSize: 10.4,
-                    color: "#374151",
+                    color: "var(--resume-paper-ink)",
                     lineHeight: 1.55,
                     marginBottom: 2,
                     fontFamily: li === 0 ? "'Georgia', serif" : "system-ui, sans-serif",
@@ -602,9 +665,10 @@ export default function AnalyzeLiveResumeBody({
         }
 
         /* ── Bullet rows ── */
+        const bulletRows = collapseAdjacentSameBulletRows(blk.items, bulletAnalysis);
         return (
           <div key={bi} style={{ marginBottom: 10, marginTop: 4 }}>
-            {blk.items.map(({ rawLine, bulletIdx }, ii) => {
+            {bulletRows.map(({ rawLine, bulletIdx }, ii) => {
               const bullet = bulletAnalysis[bulletIdx];
               if (!bullet) return null;
 
@@ -645,7 +709,7 @@ export default function AnalyzeLiveResumeBody({
                     borderRadius: 4,
                     background: bgTint,
                     borderLeft: `3px solid ${isHighlighted || !activeCategory ? borderColor : "transparent"}`,
-                    boxShadow: isSelected ? "inset 0 0 0 1.5px #2196f3" : undefined,
+                    boxShadow: isSelected ? "inset 0 0 0 1.5px var(--resume-paper-accent)" : undefined,
                     cursor: hasActionable ? "pointer" : "default",
                     animation: isPulsing ? "az-mirror-pulse 0.85s ease-out 1" : undefined,
                   }}
@@ -661,25 +725,25 @@ export default function AnalyzeLiveResumeBody({
                         padding: "1px 5px",
                         borderRadius: 8,
                         background: bullet.score >= 70 ? "rgba(52,211,153,0.14)" : bullet.score >= 55 ? "rgba(245,158,11,0.14)" : "rgba(248,113,113,0.14)",
-                        color: bullet.score >= 70 ? "#2e7d32" : bullet.score >= 55 ? "#b45309" : "#c62828",
+                        color: bullet.score >= 70 ? "var(--green)" : bullet.score >= 55 ? "var(--yellow)" : "var(--red)",
                         fontFamily: "system-ui, sans-serif",
                       }}>
                         {bullet.score}
                       </span>
                     )}
 
-                    <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "#1f2937" }}>
+                    <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "var(--resume-paper-ink)" }}>
                       {highlightMetricSpans(showText)}
                       {previewLineApplied && (
                         <span className="az-preview-applied-mark"
                           title={presentationOnly ? "Suggestion applied" : "Preview updated"}
-                          style={{ marginLeft: 5, fontSize: 9, fontWeight: 800, color: presentationOnly ? "#43a047" : "#fb8c00" }}
+                          style={{ marginLeft: 5, fontSize: 9, fontWeight: 800, color: presentationOnly ? "var(--green)" : "var(--amber)" }}
                         >
                           {presentationOnly ? "✓" : "●"}
                         </span>
                       )}
                       {presentationOnly && hasActionable && !previewLineApplied && (
-                        <span title="Click to see AI suggestion" style={{ marginLeft: 5, fontSize: 9, color: "#90a4ae" }}>✦</span>
+                        <span title="Click to see AI suggestion" style={{ marginLeft: 5, fontSize: 9, color: "var(--resume-paper-muted)" }}>✦</span>
                       )}
                     </span>
                   </div>
@@ -690,7 +754,7 @@ export default function AnalyzeLiveResumeBody({
                       {bullet.issues.map((issue, ij) => (
                         <span key={ij} style={{
                           fontSize: 9, padding: "1px 6px", borderRadius: 8,
-                          background: "rgba(248,113,113,0.10)", color: "#c62828", fontWeight: 500,
+                          background: "var(--red-bg)", color: "var(--red)", fontWeight: 500,
                         }}>
                           {issue}
                         </span>
@@ -731,10 +795,10 @@ export default function AnalyzeLiveResumeBody({
             left: popup.left,
             zIndex: 9999,
             width: 320,
-            background: "#fff",
+            background: "var(--surface)",
             borderRadius: 10,
-            boxShadow: "0 8px 40px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10)",
-            border: "1px solid #e2e8f0",
+            boxShadow: "var(--shadow)",
+            border: "1px solid var(--border)",
             fontFamily: "system-ui, -apple-system, sans-serif",
             fontSize: 12,
             overflow: "hidden",
@@ -742,30 +806,30 @@ export default function AnalyzeLiveResumeBody({
         >
           <div style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "10px 12px 8px", borderBottom: "1px solid #f0f4f8", background: "#f8fafc",
+            padding: "10px 12px 8px", borderBottom: "1px solid var(--border)", background: "var(--surface2)",
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               <span style={{
                 fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 10,
                 background: popupBullet.score >= 70 ? "rgba(52,211,153,0.15)" : popupBullet.score >= 55 ? "rgba(245,158,11,0.15)" : "rgba(248,113,113,0.15)",
-                color: popupBullet.score >= 70 ? "#2e7d32" : popupBullet.score >= 55 ? "#c07000" : "#c62828",
+                color: popupBullet.score >= 70 ? "var(--green)" : popupBullet.score >= 55 ? "var(--yellow)" : "var(--red)",
               }}>
                 {popupBullet.score}
               </span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>AI Suggestion</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text)" }}>AI Suggestion</span>
             </div>
             <button
               type="button"
               onClick={() => setPopup(null)}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", padding: "2px 4px", borderRadius: 4, fontSize: 15, lineHeight: 1 }}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: "2px 4px", borderRadius: 4, fontSize: 15, lineHeight: 1 }}
               aria-label="Close"
             >×</button>
           </div>
 
           {popupBullet.issues.length > 0 && (
-            <div style={{ padding: "8px 12px 6px", display: "flex", flexWrap: "wrap", gap: 4, borderBottom: "1px solid #f0f4f8" }}>
+            <div style={{ padding: "8px 12px 6px", display: "flex", flexWrap: "wrap", gap: 4, borderBottom: "1px solid var(--border)" }}>
               {popupBullet.issues.map((issue, j) => (
-                <span key={j} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: "rgba(248,113,113,0.10)", color: "#c62828", fontWeight: 500 }}>
+                <span key={j} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: "var(--red-bg)", color: "var(--red)", fontWeight: 500 }}>
                   {issue}
                 </span>
               ))}
@@ -774,7 +838,7 @@ export default function AnalyzeLiveResumeBody({
 
           {popupBullet.improvedBullet ? (
             <div style={{ padding: "10px 12px 12px" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
                 Suggested rewrite
               </div>
               <textarea
@@ -783,43 +847,43 @@ export default function AnalyzeLiveResumeBody({
                 rows={4}
                 style={{
                   width: "100%", boxSizing: "border-box", fontSize: 12, lineHeight: 1.55,
-                  color: "#1e293b", border: "1px solid #e2e8f0", borderRadius: 6,
+                  color: "var(--text)", border: "1px solid var(--border-h)", borderRadius: 6,
                   padding: "8px 10px", resize: "vertical", fontFamily: "inherit",
-                  background: "#f8fafc", outline: "none",
+                  background: "var(--bg)", outline: "none",
                 }}
-                onFocus={(e) => { e.target.style.borderColor = "#6366f1"; e.target.style.background = "#fff"; }}
-                onBlur={(e) => { e.target.style.borderColor = "#e2e8f0"; e.target.style.background = "#f8fafc"; }}
+                onFocus={(e) => { e.target.style.borderColor = "var(--accent)"; e.target.style.background = "var(--surface2)"; }}
+                onBlur={(e) => { e.target.style.borderColor = "var(--border-h)"; e.target.style.background = "var(--bg)"; }}
               />
               <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
                 {popupDraft !== (popupBullet.improvedBullet ?? "") && (
                   <button
                     type="button"
                     onClick={() => { setPopupDraft(popupBullet.improvedBullet ?? ""); patchBulletRewrite(popup.bulletIdx, null); }}
-                    style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: "inherit" }}
+                    style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border-h)", background: "var(--surface2)", color: "var(--muted)", cursor: "pointer", fontFamily: "inherit" }}
                   >Reset</button>
                 )}
                 <button
                   type="button"
                   onClick={async (e) => { e.stopPropagation(); try { await navigator.clipboard.writeText(popupDraft); } catch { /* ignore */ } }}
-                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(52,211,153,0.4)", background: "rgba(52,211,153,0.08)", color: "#2e7d32", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(63,185,80,0.45)", background: "var(--green-bg)", color: "var(--green)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
                 >Copy</button>
                 {popupPreviewApplied ? (
                   <button
                     type="button"
                     onClick={() => { patchPreviewLine(popup.bulletIdx, null); setPopup(null); }}
-                    style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid #fb8c00", background: "rgba(251,140,0,0.08)", color: "#e65100", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                    style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid var(--amber)", background: "var(--amber-bg)", color: "var(--amber-h)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
                   >Revert</button>
                 ) : (
                   <button
                     type="button"
                     onClick={() => { patchPreviewLine(popup.bulletIdx, popupDraft.trim()); setPopup(null); }}
-                    style={{ fontSize: 11, padding: "5px 12px", borderRadius: 6, border: "none", background: "linear-gradient(135deg,#6366f1,#4f46e5)", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, boxShadow: "0 2px 6px rgba(79,70,229,0.3)" }}
+                    style={{ fontSize: 11, padding: "5px 12px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, boxShadow: "var(--shadow-sm)" }}
                   >Apply to preview</button>
                 )}
               </div>
             </div>
           ) : (
-            <div style={{ padding: "12px", color: "#6b7280", fontSize: 11 }}>No rewrite suggestion available for this bullet.</div>
+            <div style={{ padding: "12px", color: "var(--muted)", fontSize: 11 }}>No rewrite suggestion available for this bullet.</div>
           )}
         </div>
       )}
@@ -832,7 +896,7 @@ function CopyTiny({ text }: { text: string }) {
     <button
       type="button"
       onClick={async (e) => { e.stopPropagation(); try { await navigator.clipboard.writeText(text); } catch { /* ignore */ } }}
-      style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(52,211,153,0.35)", background: "rgba(52,211,153,0.08)", color: "#2e7d32", cursor: "pointer", fontFamily: "inherit" }}
+      style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(63,185,80,0.4)", background: "var(--green-bg)", color: "var(--green)", cursor: "pointer", fontFamily: "inherit" }}
     >Copy</button>
   );
 }

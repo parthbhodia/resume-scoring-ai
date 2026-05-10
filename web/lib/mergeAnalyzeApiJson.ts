@@ -10,5 +10,8 @@ export function mergeAnalyzeApiJson(json: Record<string, unknown>): Record<strin
   const rh = json.resumeHeader ?? json.resume_header;
   if (Array.isArray(rh) && rh.every((x) => typeof x === "string")) out.resumeHeader = rh;
 
+  const lf = json.libraryFolder ?? json.library_folder;
+  if (typeof lf === "string" && lf.trim() !== "") out.libraryFolder = lf.trim();
+
   return out;
 }

@@ -11,6 +11,13 @@ import {
 } from "@/lib/analysisCategoryMatch";
 import { apiUrl } from "@/lib/utils";
 import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
+import {
+  loadAnalyzeEditDraft,
+  saveAnalyzeEditDraft,
+  clearAnalyzeEditDraft,
+  migrateAnalyzeEditDraft,
+} from "@/lib/analyzeEditDraft";
+import { stripResumeBulletPrefix } from "@/lib/stripResumeBulletPrefix";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
 import type { AnalyzeRecord } from "@/lib/supabase";
@@ -61,11 +68,12 @@ interface AnalysisResult {
   sectionFeedback: Array<{ section: string; score: number; feedback: string }>;
   rewriteSuggestions: Array<{ before: string; after: string; reason: string }>;
   finalRecommendations: string[];
+  /** When analysis used a library folder (TeX on disk), persisted so history restore can reopen Builder with `base=`. */
+  libraryFolder?: string | null;
 }
 
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 function scoreColor(score: number | null): string {
   if (score === null) return "var(--border)";
@@ -108,7 +116,7 @@ const CATEGORY_LABELS: Array<{ key: keyof AnalysisResult["categoryScores"]; labe
   { key: "quantification", label: "Quantification" },
   { key: "sectionStructure", label: "Structure" },
   { key: "languageQuality", label: "Language" },
-  { key: "technicalBranding", label: "Tech Brand" },
+  { key: "technicalBranding", label: "Field & depth" },
 ];
 
 // Category icons (SVG paths)
@@ -130,7 +138,7 @@ const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   readability:        "A readable resume can be skimmed in 6 seconds by a recruiter. Short, clear bullets with strong openers help you get noticed faster.",
   atsCompatibility:   "ATS systems scan resumes before a human sees them. Poor formatting, missing keywords, or non-standard headings can get you filtered out automatically.",
   sectionStructure:   "A well-structured resume has the right sections in the right order, making it easy for recruiters to find what they need quickly.",
-  technicalBranding:  "Your technical profile should clearly communicate your stack and depth. Weak technical branding makes it hard for employers to match you to the right roles.",
+  technicalBranding:  "Recruiters should quickly see how your training, tools, and credentials fit the role—whether that is clinical systems, creative software, research methods, languages, or a code portfolio. Thin or vague professional signals make it harder to match you to the right jobs.",
   jobMatch:           "How well your resume keywords and experience match the target job description. Higher match means a higher chance of passing ATS filters.",
 };
 
@@ -142,7 +150,15 @@ const ISSUE_TEXT_TO_CATEGORY: Array<{ patterns: string[]; key: keyof AnalysisRes
   { patterns: ["readab", "length", "format", "clarity", "long", "short"], key: "readability" },
   { patterns: ["ats", "applicant", "tracking", "keyword", "scan"], key: "atsCompatibility" },
   { patterns: ["section", "structure", "summary", "objective", "order"], key: "sectionStructure" },
-  { patterns: ["technical", "skill", "stack", "technology", "branding"], key: "technicalBranding" },
+  {
+    patterns: [
+      "github", "gitlab", "portfolio", "tech stack", "full stack", "technical stack", "stack depth",
+      "technical branding", "writing sample", "work sample", "teaching portfolio", "clinical credential",
+      "licensure", "board certified", "certification gap", "creative reel", "publications section",
+      "domain expertise", "field-specific",
+    ],
+    key: "technicalBranding",
+  },
   { patterns: ["job match", "fit", "requirement", "relevance"], key: "jobMatch" },
 ];
 
@@ -218,14 +234,18 @@ export default function AnalyzeResume() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   /** Accordion for category-detail flagged bullets (`bulletAnalysis` index, or null = all collapsed). */
   const [expandedFlaggedBulletIdx, setExpandedFlaggedBulletIdx] = useState<number | null>(null);
-  const [previewOpen, setPreviewOpen]       = useState(true);
   /** Desktop: hide left improvement plan sidebar for more reading space (mobile overlay unchanged). Always starts open — not persisted across visits. */
   const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
   /** Library folder when last run used analyze-folder; PDF file via lastPdfRef otherwise */
   const [linkedFolder, setLinkedFolder]               = useState<string | null>(null);
-  /** True only for the current analyze run (lost when restoring from history) */
+  /** True when Builder / export can use the current run (upload PDF, library folder, or restored text). */
   const [builderLinkReady, setBuilderLinkReady]       = useState(false);
+  /** User picked a row from Recent Analyses — original PDF blob is not available until they upload again. */
+  const [historyRestoreActive, setHistoryRestoreActive] = useState(false);
+  /** Keys local preview-edit drafts (`rn_az_edit_v1_*` in localStorage); set to history row id or optimistic `local_*` id. */
+  const [activeEditDraftId, setActiveEditDraftId] = useState<string | null>(null);
+  const [editDraftStatus, setEditDraftStatus] = useState<string | null>(null);
   const [builderOpening, setBuilderOpening]           = useState(false);
   const [azHistory, setAzHistory]           = useState<AnalyzeRecord[]>([]);
   const [userId, setUserId]                 = useState<string | null>(null);
@@ -307,10 +327,42 @@ export default function AnalyzeResume() {
     });
   }, [result]);
 
+  /** Re-apply browser-stored preview edits after hydrate (layout effect clears overrides first). */
+  useEffect(() => {
+    if (!result || !activeEditDraftId) return;
+    const draft = loadAnalyzeEditDraft(activeEditDraftId);
+    if (!draft) return;
+    const lo: Record<number, string> = {};
+    for (const [k, v] of Object.entries(draft.lineOverrides)) {
+      const i = Number(k);
+      if (Number.isFinite(i) && typeof v === "string" && v.trim()) lo[i] = v;
+    }
+    const rw: Record<number, string> = {};
+    for (const [k, v] of Object.entries(draft.rewriteEdits)) {
+      const i = Number(k);
+      if (Number.isFinite(i) && typeof v === "string" && v.trim()) rw[i] = v;
+    }
+    if (Object.keys(lo).length > 0) {
+      useResumeAnalyzeStore.getState().replaceLineOverrides(lo);
+    }
+    if (Object.keys(rw).length > 0) {
+      setRewriteEdits(rw);
+    }
+    if (Object.keys(lo).length > 0 || Object.keys(rw).length > 0) {
+      setEditDraftStatus("Loaded saved preview edits from this browser.");
+    }
+  }, [result, activeEditDraftId]);
+
+  useEffect(() => {
+    if (!editDraftStatus) return;
+    const t = window.setTimeout(() => setEditDraftStatus(null), 4500);
+    return () => clearTimeout(t);
+  }, [editDraftStatus]);
+
   // Persist result to Supabase + localStorage
-  const persistResult = useCallback(async (label: string, res: AnalysisResult) => {
+  const persistResult = useCallback(async (label: string, res: AnalysisResult, forcedDraftId?: string) => {
     const optimistic: AnalyzeRecord = {
-      id:        `local_${Date.now()}`,
+      id:        forcedDraftId ?? `local_${Date.now()}`,
       label,
       score:     res.overallScore,
       createdAt: new Date().toISOString(),
@@ -323,6 +375,8 @@ export default function AnalyzeResume() {
     try {
       const newId = await insertAnalysis(label, res);
       if (newId) {
+        migrateAnalyzeEditDraft(optimistic.id, newId);
+        setActiveEditDraftId((cur) => (cur === optimistic.id ? newId : cur));
         // Replace optimistic row with real DB id
         setAzHistory(prev => prev.map(r => r.id === optimistic.id ? { ...r, id: newId } : r));
         if (userId) lsSave(userId, azHistory.map(r => r.id === optimistic.id ? { ...r, id: newId } : r));
@@ -337,10 +391,10 @@ export default function AnalyzeResume() {
     setRewriteEdits({});
     setExpandedBullets({});
     setActiveCategory(null);
-    setPreviewOpen(true);
     setImprovementPlanVisible(true);
     setSelectedBulletIndex(null);
     setBuilderLinkReady(false);
+    setHistoryRestoreActive(false);
     setLinkedFolder(null);
     lastPdfRef.current = file;
     bindSourcePdf(null);
@@ -352,10 +406,13 @@ export default function AnalyzeResume() {
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
       const res = mergeAnalyzeApiJson(json as Record<string, unknown>) as unknown as AnalysisResult;
-      setResult(res);
+      const resWithMeta: AnalysisResult = { ...res, libraryFolder: null };
+      const draftId = `local_${Date.now()}`;
+      setActiveEditDraftId(draftId);
+      setResult(resWithMeta);
       setBuilderLinkReady(true);
       bindSourcePdf(file);
-      persistResult(file.name.replace(/\.pdf$/i, ""), res);
+      persistResult(file.name.replace(/\.pdf$/i, ""), resWithMeta, draftId);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
       lastPdfRef.current = null;
@@ -373,9 +430,9 @@ export default function AnalyzeResume() {
     setExpandedBullets({});
     setActiveCategory(null);
     setSelectedBulletIndex(null);
-    setPreviewOpen(true);
     setImprovementPlanVisible(true);
     setBuilderLinkReady(false);
+    setHistoryRestoreActive(false);
     setLinkedFolder(null);
     lastPdfRef.current = null;
     bindSourcePdf(null);
@@ -390,10 +447,13 @@ export default function AnalyzeResume() {
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
       const res = mergeAnalyzeApiJson(json as Record<string, unknown>) as unknown as AnalysisResult;
-      setResult(res);
+      const resWithMeta: AnalysisResult = { ...res, libraryFolder: folder };
+      const draftId = `local_${Date.now()}`;
+      setActiveEditDraftId(draftId);
+      setResult(resWithMeta);
       setLinkedFolder(folder);
       setBuilderLinkReady(true);
-      persistResult(folder, res);
+      persistResult(folder, resWithMeta, draftId);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -403,16 +463,22 @@ export default function AnalyzeResume() {
 
   // Restore a cached result instantly — no re-analysis needed
   const restoreRecord = useCallback((rec: AnalyzeRecord) => {
-    setResult(rec.result);
+    setActiveEditDraftId(rec.id);
+    const merged = mergeAnalyzeApiJson(rec.result as Record<string, unknown>) as unknown as AnalysisResult;
+    setResult(merged);
     setRewriteEdits({});
     setExpandedBullets({});
     setHistoryOpen(false);
     setActiveCategory(null);
     setSelectedBulletIndex(null);
-    setBuilderLinkReady(false);
-    setLinkedFolder(null);
     lastPdfRef.current = null;
     bindSourcePdf(null);
+    const folder = typeof merged.libraryFolder === "string" && merged.libraryFolder.trim() !== ""
+      ? merged.libraryFolder.trim()
+      : null;
+    setLinkedFolder(folder);
+    setBuilderLinkReady(Boolean(folder));
+    setHistoryRestoreActive(true);
   }, [bindSourcePdf]);
 
   const deleteRecord = useCallback(async (id: string) => {
@@ -425,6 +491,119 @@ export default function AnalyzeResume() {
       try { await deleteAnalysis(id); } catch { /* ignore */ }
     }
   }, [userId, azHistory]);
+
+  const azHistoryRows = useMemo(
+    () =>
+      azHistory.map((rec) => (
+        <div
+          key={rec.id}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "9px 10px",
+            borderRadius: 8,
+            border: "1px solid var(--border)",
+            background: "transparent",
+            transition: "background var(--transition), border-color var(--transition)",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLDivElement).style.background = "var(--amber-bg)";
+            (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(196,121,58,0.3)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLDivElement).style.background = "transparent";
+            (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)";
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => restoreRecord(rec)}
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              textAlign: "left",
+              fontFamily: "inherit",
+              padding: 0,
+              minWidth: 0,
+            }}
+          >
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                flexShrink: 0,
+                background: "var(--surface2)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 11,
+                fontWeight: 700,
+                color: scoreColor(rec.score),
+              }}
+            >
+              {rec.score}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: "var(--text)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {rec.label}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 1 }}>
+                {new Date(rec.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+              </div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => deleteRecord(rec.id)}
+            title="Remove"
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 5,
+              flexShrink: 0,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--dim)",
+              transition: "background var(--transition), color var(--transition)",
+              padding: 0,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(248,113,113,0.15)";
+              e.currentTarget.style.color = "var(--red)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "var(--dim)";
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
+              <path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+      )),
+    [azHistory, restoreRecord, deleteRecord],
+  );
 
   const continueInBuilder = useCallback(async (opts?: { referenceFolder?: string }) => {
     if (!builderLinkReady) return;
@@ -448,12 +627,14 @@ export default function AnalyzeResume() {
           if (jd.trim()) sessionStorage.setItem("rn_builder_jd_prefill", jd.trim());
           else sessionStorage.removeItem("rn_builder_jd_prefill");
         } catch { /* quota */ }
-        router.push(`/?view=builder&base=${encodeURIComponent(linkedFolder)}${styleQ}`);
+        router.push(`/?view=builder&flow=template&base=${encodeURIComponent(linkedFolder)}${styleQ}`);
         return;
       }
       const file = lastPdfRef.current;
       if (!file) {
-        setError("Re-upload your PDF once to unlock editing in Résumé Builder — history-only results do not keep the file.");
+        setError(
+          "Résumé Builder is for tailoring a live PDF or library project to a job. Re-upload your PDF here to open that flow, or keep editing in this Analyze view (Quick export).",
+        );
         return;
       }
       const fd = new FormData();
@@ -467,7 +648,7 @@ export default function AnalyzeResume() {
         else sessionStorage.removeItem("rn_builder_jd_prefill");
         sessionStorage.setItem("rn_builder_from_analyze", "1");
       } catch { /* quota */ }
-      router.push(`/?view=builder&fromAnalyze=1${styleQ}`);
+      router.push(`/?view=builder&flow=template&fromAnalyze=1${styleQ}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not open Résumé Builder.");
     } finally {
@@ -569,7 +750,8 @@ export default function AnalyzeResume() {
     : [];
 
   /** Résumé on the right, suggestions on the left (desktop/tablet split). */
-  const workspaceSplit = !!(result && previewOpen);
+  /** Résumé preview stays on whenever we have a result (no user toggle). */
+  const workspaceSplit = !!result;
 
   // For the active category detail view
   const activeCategoryLabel = CATEGORY_LABELS.find(c => c.key === activeCategory)?.label ?? "";
@@ -622,78 +804,135 @@ export default function AnalyzeResume() {
     lastPdfRef.current = null;
     bindSourcePdf(null);
     setRewriteEdits({});
+    setHistoryRestoreActive(false);
+    setActiveEditDraftId(null);
+    setEditDraftStatus(null);
   }, [bindSourcePdf]);
 
-  /* ── Shared sidebar content ─────────────────── */
-  const sidebarContent = (
+  const saveLocalPreviewDraft = useCallback(() => {
+    if (!activeEditDraftId) {
+      setEditDraftStatus("Open an analysis first (upload or history).");
+      return;
+    }
+    const lineOverrides = useResumeAnalyzeStore.getState().lineOverrides;
+    saveAnalyzeEditDraft(activeEditDraftId, lineOverrides, rewriteEdits);
+    setEditDraftStatus("Saved preview edits in this browser only.");
+  }, [activeEditDraftId, rewriteEdits]);
+
+  const clearLocalPreviewDraft = useCallback(() => {
+    if (!activeEditDraftId || !result) return;
+    clearAnalyzeEditDraft(activeEditDraftId);
+    useResumeAnalyzeStore.getState().hydrateFromAnalysis({
+      extractedText: result.extractedText,
+      bulletAnalysis: result.bulletAnalysis,
+      resumeHeader: result.resumeHeader,
+    });
+    setRewriteEdits({});
+    setEditDraftStatus("Cleared saved draft; preview reset to analysis text.");
+  }, [activeEditDraftId, result]);
+
+  /* ── Shared sidebar: pinned strip (score / recent header) + scrollable body ─── */
+  const sidebarPinned = !result ? (
     <>
-      {result ? (
-        <>
-          {/* Analyze another — top of sidebar (same actions as main CTA) */}
+      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6, fontFamily: "'Cormorant Garant', Georgia, serif" }}>
+        Recent Analyses
+      </div>
+      <div style={{ fontSize: 10.5, color: "var(--dim)", lineHeight: 1.45 }}>
+        Saves scores and extracted résumé text to your account (not the original PDF file).
+      </div>
+    </>
+  ) : (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingBottom: 2 }}>
+      <div style={{ fontSize: 10, fontWeight: 800, color: "#78909c", textTransform: "uppercase", letterSpacing: 1.15, marginBottom: 10, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+        Improvement Plan
+      </div>
+      <ScoreRing score={result.overallScore} size={96} label="" />
+      <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8, color: scoreColor(result.overallScore) }}>
+        {scoreLabel(result.overallScore)}
+      </div>
+    </div>
+  );
+
+  const sidebarScroll = !result ? (
+    <>
+      {loadingHistory ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[1, 2, 3].map((i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
+              <div className="skeleton" style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0 }} />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+                <div className="skeleton" style={{ height: 11, borderRadius: 3, width: "75%" }} />
+                <div className="skeleton" style={{ height: 10, borderRadius: 3, width: "55%" }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : azHistory.length === 0 ? (
+        <div style={{ fontSize: 13, color: "var(--dim)", textAlign: "center", paddingTop: 24, lineHeight: 1.7 }}>
+          No analyses yet.<br />
+          <span style={{ fontSize: 12 }}>Upload a PDF above<br />to get started.</span>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{azHistoryRows}</div>
+      )}
+    </>
+  ) : (
+    <>
+          {/* Local preview draft — New Scan lives in the pinned sidebar header */}
           <div style={{
-            marginBottom: 16,
-            paddingBottom: 16,
+            marginBottom: 12,
+            paddingBottom: 12,
             borderBottom: "1px solid var(--border)",
           }}>
-            <div style={{
-              fontFamily: "'Cormorant Garant', Georgia, serif",
-              fontSize: 17, fontWeight: 600, letterSpacing: -0.35,
-              color: "var(--text)", marginBottom: 6, lineHeight: 1.25,
-            }}>
-              Ready to analyze another?
-            </div>
-            <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>
-              Upload a new résumé PDF or paste a different job description to get a fresh score and set of recommendations.
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  width: "100%", padding: "10px 14px", borderRadius: 9,
-                  background: "var(--amber)", border: "none", color: "#fff",
-                  fontSize: 12.5, fontWeight: 600, cursor: "pointer",
-                  transition: "opacity var(--transition)",
-                  letterSpacing: -0.15, fontFamily: "inherit", boxSizing: "border-box",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.opacity = "0.9"; }}
-                onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
-              >
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <path d="M8 2v9M4 6l4-4 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-                </svg>
-                Upload new résumé
-              </button>
-              <button
-                type="button"
-                onClick={startOverAnalyze}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                  width: "100%", padding: "9px 14px", borderRadius: 9,
-                  background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--muted)",
-                  fontSize: 12.5, fontWeight: 500, cursor: "pointer",
-                  transition: "background var(--transition), border-color var(--transition)",
-                  letterSpacing: -0.15, fontFamily: "inherit", boxSizing: "border-box",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.borderColor = "var(--border-h)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
-              >
-                ← Start over
-              </button>
-            </div>
-          </div>
-
-          {/* Score ring */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 16 }}>
-            <div style={{ fontSize: 10, fontWeight: 800, color: "#78909c", textTransform: "uppercase", letterSpacing: 1.15, marginBottom: 10, fontFamily: "system-ui, -apple-system, sans-serif" }}>
-              Improvement Plan
-            </div>
-            <ScoreRing score={result.overallScore} size={96} label="" />
-            <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8, color: scoreColor(result.overallScore) }}>
-              {scoreLabel(result.overallScore)}
-            </div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 }}>
+                Preview edits (local test)
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", lineHeight: 1.45, marginBottom: 10 }}>
+                Saves line tweaks + AI draft text in this browser. Re-open the same run from history to verify restore.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={saveLocalPreviewDraft}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-h)",
+                    background: "var(--surface3)",
+                    color: "var(--text)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Save preview edits
+                </button>
+                <button
+                  type="button"
+                  onClick={clearLocalPreviewDraft}
+                  style={{
+                    width: "100%",
+                    padding: "7px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "transparent",
+                    color: "var(--muted)",
+                    fontSize: 11.5,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Clear saved draft
+                </button>
+              </div>
+              {editDraftStatus ? (
+                <div style={{ marginTop: 10, fontSize: 10.5, color: "var(--green)", lineHeight: 1.4 }}>
+                  {editDraftStatus}
+                </div>
+              ) : null}
           </div>
 
           {/* Hint */}
@@ -821,96 +1060,25 @@ export default function AnalyzeResume() {
               </div>
             </div>
           )}
-        </>
-      ) : (
-        /* Pre-result: analyze history from localStorage */
-        <>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14, fontFamily: "'Cormorant Garant', Georgia, serif" }}>
-            Recent Analyses
-          </div>
-
-          {loadingHistory ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {[1,2,3].map(i => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
-                  <div className="skeleton" style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0 }} />
-                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
-                    <div className="skeleton" style={{ height: 11, borderRadius: 3, width: "75%" }} />
-                    <div className="skeleton" style={{ height: 10, borderRadius: 3, width: "55%" }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : azHistory.length === 0 ? (
-            <div style={{ fontSize: 13, color: "var(--dim)", textAlign: "center", paddingTop: 24, lineHeight: 1.7 }}>
-              No analyses yet.<br />
-              <span style={{ fontSize: 12 }}>Upload a PDF above<br />to get started.</span>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {azHistory.map(rec => (
-                <div
-                  key={rec.id}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    padding: "9px 10px", borderRadius: 8,
-                    border: "1px solid var(--border)", background: "transparent",
-                    transition: "background var(--transition), border-color var(--transition)",
-                  }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = "var(--amber-bg)"; (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(196,121,58,0.3)"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)"; }}
-                >
-                  {/* Score badge + label — clicking restores result */}
-                  <button
-                    onClick={() => restoreRecord(rec)}
-                    style={{
-                      flex: 1, display: "flex", alignItems: "center", gap: 8,
-                      background: "none", border: "none", cursor: "pointer",
-                      textAlign: "left", fontFamily: "inherit", padding: 0, minWidth: 0,
-                    }}
-                  >
-                    <div style={{
-                      width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                      background: "var(--surface2)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 11, fontWeight: 700, color: scoreColor(rec.score),
-                    }}>
-                      {rec.score}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {rec.label}
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 1 }}>
-                        {new Date(rec.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                      </div>
-                    </div>
-                  </button>
-
-                  {/* Delete */}
-                  <button
-                    onClick={() => deleteRecord(rec.id)}
-                    title="Remove"
-                    style={{
-                      width: 22, height: 22, borderRadius: 5, flexShrink: 0,
-                      border: "none", background: "transparent",
-                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                      color: "var(--dim)", transition: "background var(--transition), color var(--transition)",
-                      padding: 0,
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(248,113,113,0.15)"; e.currentTarget.style.color = "var(--red)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--dim)"; }}
-                  >
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                      <path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                    </svg>
-                  </button>
-                </div>
-              ))}
+          {azHistory.length > 0 && (
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+              <div style={{
+                fontSize: 9,
+                fontWeight: 800,
+                color: "var(--amber)",
+                textTransform: "uppercase",
+                letterSpacing: 0.9,
+                marginBottom: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}>
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--amber)" }} aria-hidden />
+                Past runs
+              </div>
+              <div style={{ maxHeight: 220, minHeight: 0, overflowY: "auto" }}>{azHistoryRows}</div>
             </div>
           )}
-        </>
-      )}
     </>
   );
 
@@ -971,8 +1139,7 @@ export default function AnalyzeResume() {
           width: 272px;
           flex-shrink: 0;
           border-right: 1px solid var(--border);
-          overflow-y: auto;
-          overflow-x: hidden;
+          overflow: hidden;
           display: flex;
           flex-direction: column;
           background: var(--surface);
@@ -998,10 +1165,65 @@ export default function AnalyzeResume() {
           pointer-events: none;
         }
 
+        .az-sidebar-inner {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        .az-sidebar-pinned {
+          flex-shrink: 0;
+          padding-bottom: 12px;
+          margin-bottom: 4px;
+          border-bottom: 1px solid var(--border);
+        }
+        .az-sidebar-scroll {
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+          padding-top: 4px;
+        }
+        @media (min-width: 768px) {
+          .az-sidebar {
+            max-height: 100vh;
+            max-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+          }
+        }
+
         /* Desktop scrim never shows — sidebar is inline, not overlaying */
         .az-sidebar-scrim-desktop { display: none !important; }
-        /* Restore FAB not needed — toggle button in header serves this */
-        .az-sidebar-restore-fab { display: none !important; }
+        /* Left pill: reopen improvement plan + past analyses when the rail is collapsed */
+        .az-sidebar-restore-fab {
+          display: none;
+          position: fixed;
+          left: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          z-index: 1001;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 12px 8px 8px;
+          border-radius: 0 999px 999px 0;
+          border: 1px solid var(--border);
+          border-left: none;
+          background: var(--surface);
+          box-shadow: 2px 0 14px rgba(0,0,0,0.08);
+          cursor: pointer;
+          font-family: inherit;
+          color: var(--text);
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: -0.02em;
+          transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+        }
+        @media (min-width: 768px) {
+          .az-sidebar-restore-fab.is-visible {
+            display: inline-flex;
+          }
+        }
 
         /* Mobile: keep slide-over overlay (screen too narrow for inline) */
         .az-sidebar-scrim-mobile { display: none; }
@@ -1023,6 +1245,10 @@ export default function AnalyzeResume() {
             z-index: 1000;
             width: min(296px, 92vw);
             height: auto;
+            max-height: 100dvh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
             box-shadow: 8px 0 32px rgba(15, 23, 42, 0.14);
             transform: translateX(-100%);
             pointer-events: none;
@@ -1038,7 +1264,7 @@ export default function AnalyzeResume() {
             width: min(296px, 92vw);
             padding: 20px 14px;
             opacity: 1;
-            overflow-y: auto;
+            overflow: hidden;
             border-right-color: var(--border);
           }
           .az-main { padding: 20px 16px 60px !important; }
@@ -1080,18 +1306,46 @@ export default function AnalyzeResume() {
             align-items: stretch;
           }
         }
-        @media (min-width: 768px) {
-          .az-analyze-sidebar-toggle-row {
-            display: flex;
-            justify-content: flex-end;
-            width: 100%;
-            margin-bottom: 16px;
-          }
-        }
         .az-mobile-only { display: flex; }
         @media (min-width: 768px) { .az-mobile-only { display: none !important; } }
       `}</style>
       <aside className={`az-sidebar${historyOpen ? " open" : ""}`}>
+        {result && (
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            title="Upload a new résumé PDF for a fresh score"
+            style={{
+              width: "100%",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              padding: "7px 12px",
+              marginBottom: 12,
+              borderRadius: 8,
+              border: "none",
+              background: "var(--amber)",
+              color: "#fff",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              letterSpacing: -0.05,
+              transition: "opacity var(--transition)",
+              boxSizing: "border-box",
+              flexShrink: 0,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.opacity = "0.92"; }}
+            onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path d="M8 2v9M4 6l4-4 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+            New Scan
+          </button>
+        )}
         {/* Sidebar header with close button */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 8 }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.8 }}>
@@ -1136,61 +1390,33 @@ export default function AnalyzeResume() {
             </button>
           </div>
         </div>
-        {sidebarContent}
+        <div className="az-sidebar-inner">
+          <div className="az-sidebar-pinned">{sidebarPinned}</div>
+          <div className="az-sidebar-scroll">{sidebarScroll}</div>
+        </div>
       </aside>
 
-      {/* Desktop: bring back improvement plan */}
+      {/* Desktop: left pill — reopen scores + past analyses when the plan rail is hidden */}
       <button
         type="button"
-        className="az-sidebar-restore-fab"
+        className={`az-sidebar-restore-fab${!improvementPlanVisible ? " is-visible" : ""}`}
         onClick={() => setImprovementPlanVisible(true)}
-        title="Show improvement plan"
-        style={{
-          position: "fixed",
-          left: 0,
-          top: "42%",
-          transform: "translateY(-50%)",
-          zIndex: 1001,
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 4,
-          padding: "10px 5px 12px",
-          borderRadius: "0 10px 10px 0",
-          border: "1px solid var(--border)",
-          borderLeft: "none",
-          background: "var(--surface)",
-          boxShadow: "2px 0 12px rgba(0,0,0,0.06)",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          color: "var(--muted)",
-          transition: "background var(--transition), color var(--transition)",
-        }}
+        title="Open improvement plan — scores, fixes, and past analyses"
+        aria-label="Open improvement plan and analysis history"
         onMouseEnter={e => {
           e.currentTarget.style.background = "var(--surface2)";
-          e.currentTarget.style.color = "var(--text)";
+          e.currentTarget.style.boxShadow = "2px 0 18px rgba(0,0,0,0.1)";
         }}
         onMouseLeave={e => {
           e.currentTarget.style.background = "var(--surface)";
-          e.currentTarget.style.color = "var(--muted)";
+          e.currentTarget.style.boxShadow = "";
         }}
       >
-        <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden>
-          <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden style={{ flexShrink: 0, opacity: 0.85 }}>
+          <rect x="2" y="3" width="4" height="10" rx="1" stroke="currentColor" strokeWidth="1.35" fill="none" />
+          <rect x="7" y="3" width="7" height="10" rx="1" stroke="currentColor" strokeWidth="1.35" fill="none" />
         </svg>
-        <span
-          style={{
-            fontSize: 9,
-            fontWeight: 700,
-            letterSpacing: 0.4,
-            textTransform: "uppercase",
-            writingMode: "vertical-rl",
-            transform: "rotate(180deg)",
-            maxHeight: 88,
-          }}
-        >
-          Sidebar
-        </span>
+        <span>{"Scores & history"}</span>
       </button>
       <main
         className={`az-main${workspaceSplit ? " az-main-workspace-split" : ""}`}
@@ -1220,9 +1446,21 @@ export default function AnalyzeResume() {
       >
 
         <style>{`
+          .az-mobile-sticky-head { display: none; }
           @media (max-width: 767px) {
-            .az-history-bar     { display: flex !important; }
-            .az-mobile-score    { display: block !important; }
+            .az-mobile-sticky-head {
+              display: flex !important;
+              flex-direction: column;
+              gap: 10px;
+              position: sticky;
+              top: 0;
+              z-index: 8;
+              background: var(--bg);
+              padding: 0 14px 12px;
+              margin: 0 0 12px;
+              border-bottom: 1px solid var(--border);
+              align-self: stretch;
+            }
             .az-main:not(.az-main-workspace-split) {
               padding: 16px 14px 60px !important;
             }
@@ -1247,6 +1485,16 @@ export default function AnalyzeResume() {
               overflow-y: auto !important;
               padding: 16px 0 60px !important;
             }
+            .az-main.az-main-workspace-split .az-mobile-sticky-head {
+              order: 3;
+              flex-shrink: 0;
+            }
+            .az-main.az-main-workspace-split .az-split-resume-slot {
+              order: 2;
+            }
+            .az-main.az-main-workspace-split .az-split-work-slot {
+              order: 1;
+            }
             .az-split-resume-slot {
               min-height: 42vh !important;
               border-left: none !important;
@@ -1258,9 +1506,11 @@ export default function AnalyzeResume() {
           }
         `}</style>
 
-        {/* ── Mobile-only score card (shown when result exists) ── */}
-        {result && (
-          <div className="az-mobile-score" style={{ display: "none", marginBottom: 20 }}>
+        {/* ── Mobile: score + category pills + history opener — sticky under top bar while scrolling ── */}
+        {(result || azHistory.length > 0) && (
+          <div className="az-mobile-sticky-head">
+            {result ? (
+          <div className="az-mobile-score" style={{ marginBottom: 0 }}>
             {/* Score row */}
             <div style={{
               background: "var(--surface)", border: "1px solid var(--border)",
@@ -1282,12 +1532,15 @@ export default function AnalyzeResume() {
                 </div>
                 <div style={{ flex: 1 }} />
                 <button
+                  type="button"
                   onClick={() => {
                     setResult(null); setError(null); setExpandedBullets({});
                     setActiveCategory(null); setSelectedBulletIndex(null);
-                    setBuilderLinkReady(false); setLinkedFolder(null);                     lastPdfRef.current = null;
+                    setBuilderLinkReady(false); setLinkedFolder(null);
+                    lastPdfRef.current = null;
                     bindSourcePdf(null);
                     setRewriteEdits({});
+                    setHistoryRestoreActive(false);
                   }}
                   style={{
                     padding: "8px 14px", borderRadius: 8, border: "none",
@@ -1325,53 +1578,36 @@ export default function AnalyzeResume() {
               })}
             </div>
           </div>
-        )}
-
-        {/* Mobile history toggle bar (pre-result only) */}
-        {!result && (
-          <div className="az-history-bar" style={{ display: "none", marginBottom: 16 }}>
+            ) : null}
+            {azHistory.length > 0 ? (
+          <div className="az-history-bar" style={{ marginBottom: 0 }}>
             <button
-              onClick={() => setHistoryOpen(o => !o)}
+              type="button"
+              onClick={() => setHistoryOpen((o) => !o)}
               style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "8px 14px", borderRadius: 8,
-                border: "1px solid var(--border)", background: "var(--surface)",
-                cursor: "pointer", fontFamily: "inherit",
-                fontSize: 13, color: "var(--muted)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: 13,
+                color: "var(--muted)",
+                boxSizing: "border-box",
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
                 <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
                 <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              {azHistory.length > 0 ? `Recent Analyses (${azHistory.length})` : "Recent Analyses"}
+              {`Recent analyses (${azHistory.length})`}
             </button>
           </div>
-        )}
-
-        {/* Desktop: hide score/history rail for a wider upload area */}
-        {!result && !loading && (
-          <div className="az-analyze-sidebar-toggle-row">
-            <button
-              type="button"
-              onClick={() => setImprovementPlanVisible(o => !o)}
-              title={improvementPlanVisible ? "Hide score sidebar" : "Show score sidebar"}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "6px 12px", borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: improvementPlanVisible ? "var(--surface2)" : "var(--accent-bg)",
-                cursor: "pointer", fontFamily: "inherit",
-                fontSize: 12, fontWeight: 600,
-                color: improvementPlanVisible ? "var(--muted)" : "var(--accent)",
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
-                <rect x="2" y="3" width="4" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" />
-                <rect x="7" y="3" width="7" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" opacity={improvementPlanVisible ? 1 : 0.4} />
-              </svg>
-              {improvementPlanVisible ? "Hide sidebar" : "Show sidebar"}
-            </button>
+            ) : null}
           </div>
         )}
 
@@ -1486,6 +1722,7 @@ export default function AnalyzeResume() {
               builderOpening={builderOpening}
               sourcePdfUrl={sourcePdfUrl}
               sourcePdfFileName={sourcePdfFileName}
+              restoredResumeNoPdfHint={historyRestoreActive && !sourcePdfUrl}
             />
             </div>
           </div>
@@ -1509,16 +1746,15 @@ export default function AnalyzeResume() {
                 : undefined
             }
           >
-        {/* ── Preview toggle bar ── */}
+        {/* ── Builder handoff (optional) ── */}
           <div style={{
             display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            alignItems: "flex-start",
             gap: 12,
             flexWrap: "wrap",
             marginBottom: 20,
           }}>
-            <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+            <div style={{ flex: "1 1 280px", minWidth: 0 }}>
               {builderLinkReady && (
                 <button
                   type="button"
@@ -1530,11 +1766,11 @@ export default function AnalyzeResume() {
                     gap: 8,
                     padding: "8px 16px",
                     borderRadius: 10,
-                    border: "none",
-                    background: "var(--accent)",
-                    color: "#fff",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface2)",
+                    color: "var(--text)",
                     fontSize: 13,
-                    fontWeight: 700,
+                    fontWeight: 600,
                     cursor: builderOpening || loading ? "wait" : "pointer",
                     fontFamily: "inherit",
                     opacity: builderOpening ? 0.85 : 1,
@@ -1542,7 +1778,7 @@ export default function AnalyzeResume() {
                   title={
                     linkedFolder
                       ? "Open this résumé in Résumé Builder (library draft)."
-                      : "Load PDF text into Résumé Builder to tailor or edit bullets."
+                      : "Send extracted text to Résumé Builder for full editing, ATS checks, and PDF export."
                   }
                 >
                   {builderOpening ? (
@@ -1551,10 +1787,11 @@ export default function AnalyzeResume() {
                     </>
                   ) : (
                     <>
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                        <path d="M8 3v10M12 11l-4 3-4-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                        <path d="M3 3h10v10H3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                        <path d="M6 6h4M6 8.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                       </svg>
-                      Edit in Résumé Builder
+                      Open in Résumé Builder
                     </>
                   )}
                 </button>
@@ -1564,59 +1801,15 @@ export default function AnalyzeResume() {
                   marginTop: 6,
                   fontSize: 11,
                   color: "var(--dim)",
-                  maxWidth: 460,
+                  maxWidth: 520,
                   lineHeight: 1.45,
                 }}>
                   {linkedFolder
-                    ? "Opens your library draft — edit bullets, run ATS checks, tailor to a JD."
-                    : "Copies extracted text into Résumé Builder — add JD & company details, then generate or edit bullets."}
+                    ? "Use the full LaTeX workspace for this library draft — bullets, ATS, tailoring, and export."
+                    : "Analyze stays read-only here. Builder is where you edit structure, run ATS, attach a JD, and generate a tailored PDF."}
                 </div>
               )}
             </div>
-            <button
-              onClick={() => setImprovementPlanVisible(o => !o)}
-              className="az-desktop-sidebar-toggle"
-              title={improvementPlanVisible ? "Hide score sidebar" : "Show score sidebar"}
-              style={{
-                alignItems: "center", gap: 6,
-                padding: "7px 13px", borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: improvementPlanVisible ? "var(--surface2)" : "var(--accent-bg)",
-                cursor: "pointer", fontFamily: "inherit",
-                fontSize: 12, fontWeight: 600,
-                color: improvementPlanVisible ? "var(--muted)" : "var(--accent)",
-                transition: "all 0.15s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; }}
-              onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
-                <rect x="2" y="3" width="4" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" />
-                <rect x="7" y="3" width="7" height="10" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" opacity={improvementPlanVisible ? 1 : 0.4} />
-              </svg>
-              {improvementPlanVisible ? "Hide sidebar" : "Show sidebar"}
-            </button>
-            <button
-              onClick={() => setPreviewOpen(o => !o)}
-              style={{
-                display: "flex", alignItems: "center", gap: 7,
-                padding: "7px 13px", borderRadius: 8,
-                border: `1px solid ${previewOpen ? "var(--accent)" : "var(--border)"}`,
-                background: previewOpen ? "var(--accent-bg)" : "var(--surface2)",
-                cursor: "pointer", fontFamily: "inherit",
-                fontSize: 12, fontWeight: 600,
-                color: previewOpen ? "var(--accent)" : "var(--muted)",
-                transition: "all 0.15s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.opacity = "0.85"; }}
-              onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                <rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4"/>
-                <path d="M5 6h6M5 8.5h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-              </svg>
-              {previewOpen ? "Hide annotated preview" : "Show annotated preview"}
-            </button>
           </div>
 
         {workspaceSplit && (
@@ -1689,14 +1882,14 @@ export default function AnalyzeResume() {
             {result.bulletAnalysis.length > 0 && (
               <div style={{
                 padding: "18px 20px",
-                background: "#fafbfc",
-                border: "1px solid #cfd8dc",
+                background: "var(--surface2)",
+                border: "1px solid var(--border)",
                 borderRadius: 12,
-                boxShadow: "0 1px 0 rgba(0,0,0,0.04)",
+                boxShadow: "var(--shadow-sm)",
               }}>
                 <div style={{
                   fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.75,
-                  color: "#546e7a",
+                  color: "var(--muted)",
                   marginBottom: 12,
                   fontFamily: "system-ui, sans-serif",
                 }}>
@@ -1709,8 +1902,8 @@ export default function AnalyzeResume() {
                 }}>
                   <div style={{
                     width: 34, height: 34, borderRadius: "50%",
-                    background: "#ffebee",
-                    color: "#c62828",
+                    background: "var(--red-bg)",
+                    color: "var(--red)",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     flexShrink: 0,
                     fontWeight: 800,
@@ -1719,7 +1912,7 @@ export default function AnalyzeResume() {
                   }} aria-hidden>
                     ×
                   </div>
-                  <p style={{ margin: 0, fontSize: 14, color: "#455a64", lineHeight: 1.65 }}>
+                  <p style={{ margin: 0, fontSize: 14, color: "var(--text)", lineHeight: 1.65 }}>
                     {activeBullets.length > 0
                       ? `We compared your bullets to what hiring managers expect for ${activeCategoryLabel.toLowerCase()}. Weak lines use a blush highlight in the preview; numbers and percentages get a soft green cue — typical of annotated résumé scorecards.`
                       : `Strong — most bullets already meet expectations for ${activeCategoryLabel.toLowerCase()}. Keep this consistency in every section.`}
@@ -1728,9 +1921,9 @@ export default function AnalyzeResume() {
 
                 <details style={{
                   marginBottom: 14,
-                  border: "1px solid #e1e8ed",
+                  border: "1px solid var(--border)",
                   borderRadius: 10,
-                  background: "#fff",
+                  background: "var(--surface)",
                   padding: "0 14px",
                   fontSize: 13,
                   color: "var(--muted)",
@@ -1743,34 +1936,49 @@ export default function AnalyzeResume() {
                   }}>
                     What do we mean by {activeCategoryLabel.toLowerCase()}?
                   </summary>
-                  <div style={{ padding: "0 0 14px", borderTop: "1px solid #eceff1", paddingTop: 12, lineHeight: 1.65 }}>
+                  <div style={{
+                    padding: "0 0 14px",
+                    borderTop: "1px solid var(--border)",
+                    paddingTop: 12,
+                    lineHeight: 1.65,
+                    color: "var(--muted)",
+                  }}>
                     {CATEGORY_DESCRIPTIONS[activeCategory] ?? ""}
                   </div>
                 </details>
 
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#78909c", textTransform: "uppercase", letterSpacing: 0.06 }}>
-                    Category coverage
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.06 }}>
+                    Sample line mapping
                   </span>
-                  <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 600, color: "#37474f" }}>
-                    <span style={{ color: "#2e7d32", fontWeight: 800 }}>{result.bulletAnalysis.length - activeBullets.length}</span>
-                    {" "}of {result.bulletAnalysis.length} bullets look strong here
+                  <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 600, color: "var(--text)", textAlign: "right" }}>
+                    {activeBullets.length > 0 ? (
+                      <>
+                        <span style={{ color: "var(--accent)", fontWeight: 800 }}>{activeBullets.length}</span>
+                        {" "}of {result.bulletAnalysis.length} deep-reviewed lines map to this topic
+                      </>
+                    ) : (
+                      <>None of {result.bulletAnalysis.length} sample lines map here — feedback may sit in other sections.</>
+                    )}
                   </span>
                 </div>
+                <p style={{ margin: "0 0 12px", fontSize: 11.5, lineHeight: 1.55, color: "var(--dim)" }}>
+                  The score above reflects your whole résumé for this pillar. This bar only shows how many of the model&apos;s weakest-line sample are tagged to this topic for highlighting — not the same calculation as the score.
+                </p>
                 <div style={{
                   height: 10,
                   borderRadius: 6,
                   overflow: "hidden",
-                  background: "#eceff1",
+                  background: "var(--surface3)",
                 }}>
                   <div style={{
                     height: "100%",
                     width: "100%",
                     background: (() => {
                       const t = Math.max(result.bulletAnalysis.length, 1);
-                      const strong = Math.max(t - activeBullets.length, 0);
-                      const g = (strong / t) * 100;
-                      return `linear-gradient(90deg, #66bb6a 0%, #66bb6a ${g}%, #ef5350 ${g}%, #ef5350 100%)`;
+                      const mapped = Math.min(activeBullets.length, t);
+                      const p = (mapped / t) * 100;
+                      return `linear-gradient(90deg, rgba(33,150,243,0.55) 0%, rgba(33,150,243,0.55) ${p}%, var(--surface3) ${p}%, var(--surface3) 100%)`;
                     })(),
                     transition: "background 0.6s cubic-bezier(0.16,1,0.3,1)",
                   }} />
@@ -1839,6 +2047,22 @@ export default function AnalyzeResume() {
                       : bullet.score < 70
                         ? "rgba(245,158,11,0.14)"
                         : "rgba(52,211,153,0.12)";
+                    const bBorderSoft = bullet.score < 50
+                      ? "rgba(248,113,113,0.28)"
+                      : bullet.score < 70
+                        ? "rgba(245,158,11,0.28)"
+                        : "rgba(52,211,153,0.28)";
+                    const bRowBgOpen = bullet.score < 50
+                      ? "rgba(248,113,113,0.07)"
+                      : bullet.score < 70
+                        ? "rgba(245,158,11,0.06)"
+                        : "rgba(52,211,153,0.06)";
+                    const bRowBgClosed = bullet.score < 50
+                      ? "rgba(248,113,113,0.04)"
+                      : bullet.score < 70
+                        ? "rgba(245,158,11,0.03)"
+                        : "rgba(52,211,153,0.04)";
+                    const displayBulletLine = stripResumeBulletPrefix(previewMain);
                     const onFlaggedAccordionToggle = () => {
                       handleBulletLinkedSelect(safeIdx);
                       setExpandedFlaggedBulletIdx((prev) => (prev === safeIdx ? null : safeIdx));
@@ -1848,11 +2072,11 @@ export default function AnalyzeResume() {
                       key={safeIdx}
                       data-az-bullet-workspace={safeIdx}
                       style={{
-                      border: "1px solid rgba(245,158,11,0.25)",
-                      borderLeft: "4px solid #f59e0b",
+                      border: `1px solid ${bBorderSoft}`,
+                      borderLeft: `4px solid ${bColor}`,
                       borderRadius: 10,
                       overflow: "hidden",
-                      background: isFlaggedAccordionOpen ? "rgba(245,158,11,0.06)" : "rgba(245,158,11,0.03)",
+                      background: isFlaggedAccordionOpen ? bRowBgOpen : bRowBgClosed,
                     }}>
                       <button
                         type="button"
@@ -1865,7 +2089,7 @@ export default function AnalyzeResume() {
                           gap: 12,
                           padding: "12px 14px",
                           border: "none",
-                          background: isFlaggedAccordionOpen ? "rgba(245,158,11,0.06)" : "transparent",
+                          background: isFlaggedAccordionOpen ? bRowBgOpen : "transparent",
                           cursor: "pointer",
                           fontFamily: "inherit",
                           textAlign: "left",
@@ -1895,9 +2119,10 @@ export default function AnalyzeResume() {
                           WebkitBoxOrient: "vertical" as const,
                           overflow: "hidden",
                         }} title={previewMain}>
-                          {previewMain}
+                          <span aria-hidden style={{ color: "var(--muted)", fontWeight: 700, marginRight: "0.35em" }}>•</span>
+                          {displayBulletLine}
                           {previewLineAppliedHere && (
-                            <span title="Replaced for this Analyze session’s preview." style={{ marginLeft: 6, color: "#fbbf24", fontSize: 11, fontWeight: 700 }}>●</span>
+                            <span title="Replaced for this Analyze session’s preview." style={{ marginLeft: 6, color: "#fbbf24", fontSize: 10, fontWeight: 800 }}>✓</span>
                           )}
                         </span>
                         <svg
@@ -2250,8 +2475,9 @@ export default function AnalyzeResume() {
                           <span style={{
                             fontSize: 13, color: "var(--muted)", flex: 1, minWidth: 0,
                             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}>
-                            {previewAcc}
+                          }} title={previewAcc}>
+                            <span aria-hidden style={{ color: "var(--dim)", fontWeight: 700, marginRight: "0.35em" }}>•</span>
+                            {stripResumeBulletPrefix(previewAcc)}
                           </span>
                           <svg
                             width="16" height="16" viewBox="0 0 16 16" fill="none"
@@ -2497,27 +2723,6 @@ export default function AnalyzeResume() {
         ) : null}
 
       </main>
-
-      {/* ── Right panel (narrow mode when résumé split is off) ── */}
-      {result && !workspaceSplit && (
-        <div className={`az-resume-panel${previewOpen ? "" : " hidden"}`}>
-          <AnalyzePreviewPane
-            analyzeSnapshot={analyzePreviewSnapshot}
-            sectionFeedback={result.sectionFeedback}
-            activeCategory={activeCategory}
-            rewriteEdits={rewriteEdits}
-            patchBulletRewrite={patchBulletRewrite}
-            patchPreviewLine={patchPreviewLine}
-            selectedBulletIndex={selectedBulletIndex}
-            onBulletLinkedSelect={handleBulletLinkedSelect}
-            onOpenBuilder={continueInBuilder}
-            builderReady={builderLinkReady}
-            builderOpening={builderOpening}
-            sourcePdfUrl={sourcePdfUrl}
-            sourcePdfFileName={sourcePdfFileName}
-          />
-        </div>
-      )}
 
       <input
         ref={fileRef}

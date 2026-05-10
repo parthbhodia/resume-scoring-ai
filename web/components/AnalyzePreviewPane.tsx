@@ -36,6 +36,8 @@ interface Props {
   /** Original upload as blob URL (PDF upload flow). */
   sourcePdfUrl?: string | null;
   sourcePdfFileName?: string | null;
+  /** Shown when a saved analysis was restored — PDF bytes are not in storage. */
+  restoredResumeNoPdfHint?: boolean;
 }
 
 /**
@@ -57,6 +59,7 @@ export default function AnalyzePreviewPane({
   builderOpening,
   sourcePdfUrl = null,
   sourcePdfFileName = null,
+  restoredResumeNoPdfHint = false,
 }: Props) {
   const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
   const resumeHeaderStore = useResumeAnalyzeStore((s) => s.resumeHeader);
@@ -103,6 +106,7 @@ export default function AnalyzePreviewPane({
       pulseBulletIndex={pulseBulletIndex}
       sourcePdfUrl={sourcePdfUrl}
       sourcePdfFileName={sourcePdfFileName}
+      restoredResumeNoPdfHint={restoredResumeNoPdfHint}
     />
   );
 }

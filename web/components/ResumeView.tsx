@@ -179,7 +179,7 @@ export default function ResumeView({ folder }: { folder: string }) {
   }, [tree, folder, atsJd, user?.id]);
 
   const useAsBase = () => {
-    router.push(`/?base=${encodeURIComponent(folder)}`);
+    router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}`);
   };
 
   return (

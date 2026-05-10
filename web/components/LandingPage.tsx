@@ -61,7 +61,7 @@ function useLandingTheme(): [Theme, () => void] {
 
 // ── Data ────────────────────────────────────────────────────────────────────
 const FEATURES = [
-  { num: "01", title: "Match Score",          desc: "0–100 breakdown across 8 dimensions: readability, ATS safety, achievement quality, keyword density, and more." },
+  { num: "01", title: "Match Score",          desc: "0–100 breakdown across eight dimensions—readability, ATS safety, achievement quality, keyword fit, field signals, and more—tuned for any major or career path." },
   { num: "02", title: "Keyword Intelligence", desc: "Extract every keyword the JD demands. See which ones you're missing — and get precise suggestions on where to add them." },
   { num: "03", title: "AI Bullet Rewrites",   desc: "Turn vague duty-lists into achievement narratives with metrics. Your voice, amplified. Truthfulness preserved." },
   { num: "04", title: "ATS Compatibility",    desc: "Detect tables, columns, and formatting that breaks applicant tracking systems before they reject you silently." },
@@ -76,9 +76,9 @@ const STEPS = [
 ];
 
 const REVIEWS = [
-  { quote: "The AI identified exactly what the recruiters were looking for. I went from zero interviews to three in one week.", name: "Sarah M.", role: "Software Engineer · hired at Meta",    avatar: "S", col: "#2563eb" },
-  { quote: "I didn't know my résumé was being rejected by ATS before anyone even read it. Resunova fixed that overnight.",    name: "James K.", role: "Product Manager · hired at Stripe",  avatar: "J", col: "#059669" },
-  { quote: "The bullet rewrites made my experience sound 10× more impactful. Completely changed my results.",                 name: "Aisha P.", role: "Data Analyst · hired at Airbnb",    avatar: "A", col: "#7c3aed" },
+  { quote: "The AI identified exactly what the recruiters were looking for. I went from zero interviews to three in one week.", name: "Sarah M.", role: "Registered Nurse · hospital system offer", avatar: "S", col: "#2563eb" },
+  { quote: "I didn't know my résumé was being rejected by ATS before anyone even read it. Resunova fixed that overnight.",    name: "James K.", role: "Marketing coordinator · agency offer",   avatar: "J", col: "#059669" },
+  { quote: "The bullet rewrites made my experience sound 10× more impactful. Completely changed my results.",                 name: "Aisha P.", role: "Policy analyst · nonprofit offer",       avatar: "A", col: "#7c3aed" },
 ];
 
 // ── Root ────────────────────────────────────────────────────────────────────
@@ -109,8 +109,15 @@ export default function LandingPage() {
     if (err) { setError(err.message); setLoading(false); }
   }
 
-  const scrollTo = (id: string) =>
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const scrollTo = useCallback((id: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const header = document.querySelector(".lp-header");
+    const offset =
+      header instanceof HTMLElement ? header.getBoundingClientRect().height + 10 : 72;
+    const top = el.getBoundingClientRect().top + window.scrollY - offset;
+    window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }, []);
 
   const primaryBtn: React.CSSProperties = {
     display: "inline-flex", alignItems: "center", gap: 10,
@@ -137,11 +144,11 @@ export default function LandingPage() {
   };
 
   return (
-    <div style={{ background: C.bg, color: C.ink, fontFamily: "'DM Sans', -apple-system, sans-serif", minHeight: "100vh", overflowX: "hidden" }}>
+    <div style={{ background: C.bg, color: C.ink, fontFamily: "'DM Sans', -apple-system, sans-serif", minHeight: "100vh" }}>
 
       {/* ───────────── Header ───────────────────────────────── */}
       <header className="lp-header" style={{
-        position: "sticky", top: 0, zIndex: 100,
+        position: "sticky", top: 0, zIndex: 100, width: "100%",
         height: 60, padding: "0 40px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         background: dark ? "rgba(13,17,23,0.92)" : "rgba(246,248,250,0.93)",
@@ -157,13 +164,18 @@ export default function LandingPage() {
         {/* Nav */}
         <nav className="lp-nav" style={{ display: "flex", alignItems: "center", gap: 28 }}>
           {[["Features","features"],["How it works","how"],["Reviews","reviews"]].map(([lbl,id]) => (
-            <button key={id} onClick={() => scrollTo(id)} style={{
-              background: "none", border: "none", color: C.muted,
-              fontSize: 13.5, cursor: "pointer", fontFamily: "inherit",
-              fontWeight: 500, letterSpacing: -0.2, padding: 0, transition: "color 0.15s",
-            }}
-            onMouseEnter={e => { (e.target as HTMLElement).style.color = C.ink; }}
-            onMouseLeave={e => { (e.target as HTMLElement).style.color = C.muted; }}
+            <button
+              key={id}
+              type="button"
+              className="lp-nav-section"
+              onClick={() => scrollTo(id)}
+              style={{
+                background: "none", border: "none", color: C.muted,
+                fontSize: 13.5, cursor: "pointer", fontFamily: "inherit",
+                fontWeight: 500, letterSpacing: -0.2, padding: 0, transition: "color 0.15s",
+              }}
+              onMouseEnter={e => { (e.target as HTMLElement).style.color = C.ink; }}
+              onMouseLeave={e => { (e.target as HTMLElement).style.color = C.muted; }}
             >{lbl}</button>
           ))}
 
@@ -187,6 +199,8 @@ export default function LandingPage() {
         </nav>
       </header>
 
+      {/* overflow-x only below header — overflow on a sticky ancestor breaks position:sticky */}
+      <div className="lp-main" style={{ overflowX: "hidden", minWidth: 0 }}>
       {/* ───────────── Hero ─────────────────────────────────── */}
       <section className="lp-hero-grid" style={{ maxWidth: 1200, margin: "0 auto", padding: "80px 40px 80px", display: "grid", gridTemplateColumns: "1fr 460px", gap: 56, alignItems: "center", minHeight: "88vh" }}>
 
@@ -284,7 +298,7 @@ export default function LandingPage() {
       </div>
 
       {/* ───────────── Features ─────────────────────────────── */}
-      <section id="features" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto" }}>
+      <section id="features" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto", scrollMarginTop: 76 }}>
         <div style={{ marginBottom: 64 }}>
           <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
             What we analyze
@@ -301,7 +315,7 @@ export default function LandingPage() {
       </section>
 
       {/* ───────────── How it works ─────────────────────────── */}
-      <section id="how" style={{ background: C.bg2, borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}` }}>
+      <section id="how" style={{ background: C.bg2, borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, scrollMarginTop: 76 }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "100px 40px" }}>
           <div style={{ textAlign: "center", marginBottom: 72 }}>
             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>The process</p>
@@ -325,7 +339,7 @@ export default function LandingPage() {
       </section>
 
       {/* ───────────── Reviews ──────────────────────────────── */}
-      <section id="reviews" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto" }}>
+      <section id="reviews" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto", scrollMarginTop: 76 }}>
         <div style={{ textAlign: "center", marginBottom: 64 }}>
           <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>Testimonials</p>
           <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
@@ -467,6 +481,7 @@ export default function LandingPage() {
           .lp-hero-h1   { font-size: 38px !important; }
         }
       `}</style>
+      </div>
     </div>
   );
 }
