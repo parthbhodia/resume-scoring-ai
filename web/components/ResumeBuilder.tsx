@@ -393,6 +393,12 @@ export default function ResumeBuilder({
       const qs = sp.toString();
       router.replace(qs ? `/?${qs}` : "/?view=builder&flow=tailor");
     }
+
+    // If we land on the tailor flow (from Analyze or plain navigation),
+    // do not keep a stale "template studio" UI mode from a previous run.
+    if (!fromTemplateStudio && flow === "tailor") {
+      setStudioHandoff(false);
+    }
   }, [router]);
 
   // ── ATS state — populated lazily when the user opens the ATS panel. ──

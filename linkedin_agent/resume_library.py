@@ -2339,9 +2339,10 @@ def _latex_tailor_system_instruction() -> str:
     return (
         "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
         "for software engineers. You will generate a complete LaTeX resume body tailored for a specific job.\n\n"
-        "GOOGLE SEARCH — USE WHEN HELPFUL: You have Google Search enabled. **Prefer running a few searches** when "
-        "they would improve tailoring: how the target company describes products and engineering, public careers or "
-        "engineering pages, common stack names for the role, or decoding dense JD acronyms and product names. "
+        "GOOGLE SEARCH — REQUIRED EARLY: You have Google Search enabled. You MUST issue at least "
+        "2 `google_search` tool calls early in the run before producing the LaTeX body. "
+        "Use queries to learn how the target company describes products/engineering, public careers "
+        "or engineering pages, common stack names for the role, and decode dense JD acronyms/product names. "
         "Use findings for **wording, bullet order, section emphasis, and honest keyword overlap** with skills and "
         "domains already evidenced in the CANDIDATE PROFILE (or current résumé body). "
         "**Hard boundary:** employers, job titles, employment dates, schools, degrees, projects, certifications, and "
