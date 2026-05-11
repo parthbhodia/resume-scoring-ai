@@ -1602,9 +1602,7 @@ export default function ResumeBuilder({
                 borderRadius: 10, padding: "14px 16px",
                 fontSize: 12, color: "var(--dim)", lineHeight: 1.55,
               }}>
-                Google Search is available to the model for this run, but you only see activity here when it <strong style={{ color: "var(--text)", fontWeight: 600 }}>actually issues</strong> a web search.
-                The tailor instructions push it to stay inside your uploaded résumé and the job description, so it often finishes <strong style={{ color: "var(--text)", fontWeight: 600 }}>without</strong> live queries or citations — that is expected, not a failure.
-                Your PDF can still be complete and accurate; sometimes sources appear only at the very end, or not at all for this run.
+                This panel only updates if the model runs a live search. For résumé + JD tailoring, that often doesn’t happen — your PDF can still finish normally.
               </div>
             </div>
           )}
