@@ -672,7 +672,13 @@ async def api_share_create(request: Request):
                   .execute()
         )
         if not resume_res.data:
-            return JSONResponse({"error": "resume not saved yet; generate or save it before sharing"}, status_code=404)
+            return JSONResponse(
+                {
+                    "error": "Résumé not in your library yet — wait a moment and tap Share again, "
+                    "or sign in and generate so we can save the row Supabase needs for links.",
+                },
+                status_code=404,
+            )
         pdf_url = pdf_url or (resume_res.data[0].get("pdf_url") or "")
     except Exception as exc:
         logger.exception("share resume ownership lookup failed")

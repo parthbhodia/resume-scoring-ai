@@ -25,10 +25,12 @@ interface ShareResp {
   error?:   string;
 }
 
-export default function ShareButton({ folder, pdfUrl, userId }: {
+export default function ShareButton({ folder, pdfUrl, userId, ensureLibraryRow }: {
   folder: string;
   pdfUrl: string | null;
   userId: string | null;
+  /** If /api/share returns “not saved yet”, run this once then retry (library upsert race). */
+  ensureLibraryRow?: () => Promise<void>;
 }) {
   const [open,    setOpen]    = useState(false);
   const [loading, setLoading] = useState(false);
@@ -83,12 +85,24 @@ export default function ShareButton({ folder, pdfUrl, userId }: {
     setLoading(true);
     setError(null);
     try {
-      const resp = await fetch(apiUrl(`/api/share/${encodeURIComponent(folder)}`), {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ user_id: userId, pdf_url: pdfUrl ?? "" }),
-      });
-      const json = await parseJsonOrThrow<ShareResp>(resp);
+      const postShare = () =>
+        fetch(apiUrl(`/api/share/${encodeURIComponent(folder)}`), {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ user_id: userId, pdf_url: pdfUrl ?? "" }),
+        });
+      let resp = await postShare();
+      let json = await parseJsonOrThrow<ShareResp>(resp);
+      const errMsg = (typeof json.error === "string" ? json.error : "").toLowerCase();
+      const needsSync =
+        (!resp.ok || !json.shortid) &&
+        ensureLibraryRow &&
+        (errMsg.includes("not saved") || errMsg.includes("not in your library"));
+      if (needsSync) {
+        await ensureLibraryRow();
+        resp = await postShare();
+        json = await parseJsonOrThrow<ShareResp>(resp);
+      }
       if (!resp.ok || !json.shortid) throw new Error(json.error ?? "Share failed.");
       setShortid(json.shortid);
     } catch (e: unknown) {

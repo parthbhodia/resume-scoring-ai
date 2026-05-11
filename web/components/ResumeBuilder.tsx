@@ -757,13 +757,16 @@ export default function ResumeBuilder({
               break;
             case "done":
               if (acc.folder) {
-                void upsertResume(
-                  acc.folder, effCompany, effRole, model, acc.texPath ?? "", acc.pdfUrl, acc.ratings, effJd,
-                ).catch((e: unknown) => {
+                try {
+                  // Wait for library row so Share and /api/share/{folder} succeed immediately after.
+                  await upsertResume(
+                    acc.folder, effCompany, effRole, model, acc.texPath ?? "", acc.pdfUrl, acc.ratings, effJd,
+                  );
+                } catch (e: unknown) {
                   console.error("upsertResume (library row)", e);
                   const msg = e instanceof Error ? e.message : String(e);
                   setError(`Résumé generated, but saving to your library failed: ${msg}`);
-                });
+                }
                 setBaseFolder(acc.folder);
               }
               setResult({ ...acc });
@@ -780,6 +783,21 @@ export default function ResumeBuilder({
       setStatusMsg("");
     }
   }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds]);
+
+  /** Re-upsert library row so POST /api/share/{folder} finds resumes (fixes race or retry after a hiccup). */
+  const syncLibraryRowForShare = useCallback(async () => {
+    if (!user?.id || !result?.folder) return;
+    await upsertResume(
+      result.folder,
+      company.trim(),
+      role.trim(),
+      model,
+      result.texPath ?? "",
+      result.pdfUrl ?? null,
+      result.ratings,
+      jd.trim() || null,
+    );
+  }, [user?.id, result, company, role, model, jd]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -1740,6 +1758,7 @@ export default function ResumeBuilder({
                 user={user}
                 storageFailures={storageFailures}
                 generate={generate}
+                ensureLibraryRow={syncLibraryRowForShare}
               />
             ) : (
             <div className="fade-in">
@@ -1843,7 +1862,12 @@ export default function ResumeBuilder({
                     {result.pdfUrl ? (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                         {result.folder ? (
-                          <ShareButton folder={result.folder} pdfUrl={result.pdfUrl} userId={user?.id ?? null} />
+                          <ShareButton
+                            folder={result.folder}
+                            pdfUrl={result.pdfUrl}
+                            userId={user?.id ?? null}
+                            ensureLibraryRow={syncLibraryRowForShare}
+                          />
                         ) : null}
                         <a
                           href={result.pdfUrl}
@@ -1963,6 +1987,7 @@ export default function ResumeBuilder({
                           folder={result.folder}
                           pdfUrl={result.pdfUrl}
                           userId={user?.id ?? null}
+                          ensureLibraryRow={syncLibraryRowForShare}
                         />
                       )}
                       <a
@@ -2301,6 +2326,7 @@ function TemplateCustomizePostResult({
   user,
   storageFailures,
   generate,
+  ensureLibraryRow,
 }: {
   generating: boolean;
   statusMsg: string;
@@ -2331,6 +2357,7 @@ function TemplateCustomizePostResult({
   user: User | null;
   storageFailures: { artifact: "pdf" | "tex"; reason: string }[];
   generate: () => void;
+  ensureLibraryRow: () => Promise<void>;
 }) {
   const roleCompany = [role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Your résumé";
   const fitsOne =
@@ -2947,7 +2974,12 @@ function TemplateCustomizePostResult({
             </button>
             {result.folder && result.pdfUrl && !generating ? (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                <ShareButton folder={result.folder} pdfUrl={result.pdfUrl} userId={user?.id ?? null} />
+                <ShareButton
+                  folder={result.folder}
+                  pdfUrl={result.pdfUrl}
+                  userId={user?.id ?? null}
+                  ensureLibraryRow={ensureLibraryRow}
+                />
               </div>
             ) : null}
           </div>
