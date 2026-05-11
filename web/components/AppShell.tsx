@@ -176,7 +176,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         data-active={isActive}
         onClick={onClick ?? (() => switchView(view))}
       >
-        <span style={{ display: "inline-flex", flexShrink: 0, opacity: isActive ? 1 : 0.75 }}>{VIEW_ICONS[view]}</span>
+        <span className="app-nav-icon" aria-hidden>{VIEW_ICONS[view]}</span>
         <span className="app-sidebar-label" style={{ flex: 1, minWidth: 0 }}>
           {VIEW_LABELS[view]}
           {BADGES[view] && (
@@ -244,40 +244,43 @@ export default function AppShell({ children }: { children: ReactNode }) {
               type="button"
               className="app-nav-row"
               data-active={builderActive}
+              data-expanded={builderOpen}
               onClick={() => setBuilderOpen(o => !o)}
               aria-expanded={builderOpen}
               style={{ marginBottom: builderOpen ? 4 : 0 }}
             >
-              <span style={{ display: "inline-flex", flexShrink: 0, opacity: builderActive ? 1 : 0.75 }}>{VIEW_ICONS.builder}</span>
+              <span className="app-nav-icon" aria-hidden>{VIEW_ICONS.builder}</span>
               <span className="app-sidebar-label" style={{ flex: 1, textAlign: "left", display: "flex", alignItems: "center", gap: 6 }}>
                 {VIEW_LABELS.builder}
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden style={{ opacity: 0.6, marginLeft: "auto" }}>
+                <svg className="app-nav-chevron" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden style={{ opacity: 0.6, marginLeft: "auto" }}>
                   <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </span>
             </button>
-            {builderOpen && (
-              <div className="app-sidebar-sublabel" style={{ paddingLeft: isTablet ? 0 : 4, display: "flex", flexDirection: "column", gap: 3 }}>
-                {[
-                  { flow: "tailor" as const, label: "Tailor to a job" },
-                  { flow: "template" as const, label: "Template gallery" },
-                ].map(({ flow, label }) => {
-                  const subActive = builderActive && builderFlow === flow;
-                  return (
-                    <button
-                      key={flow}
-                      type="button"
-                      className="app-nav-sublink"
-                      data-active={subActive}
-                      aria-current={subActive ? "page" : undefined}
-                      onClick={() => goBuilderFlow(flow)}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
+            <div className="app-nav-builder-drawer" data-open={builderOpen}>
+              <div className="app-nav-builder-drawer-inner" inert={builderOpen ? undefined : true}>
+                <div className="app-sidebar-sublabel" style={{ paddingLeft: isTablet ? 0 : 4, display: "flex", flexDirection: "column", gap: 3 }}>
+                  {[
+                    { flow: "tailor" as const, label: "Tailor to a job" },
+                    { flow: "template" as const, label: "Template gallery" },
+                  ].map(({ flow, label }) => {
+                    const subActive = builderActive && builderFlow === flow;
+                    return (
+                      <button
+                        key={flow}
+                        type="button"
+                        className="app-nav-sublink"
+                        data-active={subActive}
+                        aria-current={subActive ? "page" : undefined}
+                        onClick={() => goBuilderFlow(flow)}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            )}
+            </div>
           </div>
 
           <NavRow view="library" />
@@ -294,7 +297,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             title="Resume history"
             style={{ marginBottom: 0 }}
           >
-            <span style={{ display: "inline-flex", flexShrink: 0 }}>
+            <span className="app-nav-icon" aria-hidden>
               <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
                 <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
                 <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
@@ -400,7 +403,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* ── Main column ───────────────────────────────────────── */}
       <div className="app-shell-main">
-        <main style={{ flex: "1 1 0%", minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <main
+          key={active}
+          className="app-shell-view-pane"
+          style={{ flex: "1 1 0%", minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}
+        >
           {children}
         </main>
       </div>

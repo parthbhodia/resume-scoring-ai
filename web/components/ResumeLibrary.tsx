@@ -493,7 +493,6 @@ function ResumeCard({
       role="button"
       tabIndex={0}
       className={`library-card fade-in-up stagger-${stagger + 1}`}
-      data-selected={isSelected ? "true" : undefined}
       style={{
         borderWidth: isSelected ? 2 : 1,
         borderColor: isSelected ? "var(--accent)" : "var(--border)",

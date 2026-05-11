@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * ResumeView — Library detail: read-only metadata + PDF (product mockup).
- * No bullet editor, ATS, or analysis tabs — PDF opens beside metadata (iframe).
+ * Legacy full-page library detail (metadata + PDF). The main app now uses
+ * `ResumeLibrary` + `LibraryResumeDetailPanel` for `?view=library&resume=…`.
+ * Kept for reference or future routes.
  */
 
 import { useEffect, useState } from "react";
