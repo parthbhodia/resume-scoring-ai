@@ -77,11 +77,14 @@ export function findBulletIndexForLine(
     if (!b || b.length < 4) continue;
     let s = 0;
     if (ln === b) s = 100;
-    else if (ln.includes(b) || b.includes(ln)) s = Math.min(80, (Math.min(ln.length, b.length) / Math.max(ln.length, b.length)) * 90);
-    else {
+    else if (ln.includes(b) || b.includes(ln)) {
+      s = Math.min(80, (Math.min(ln.length, b.length) / Math.max(ln.length, b.length)) * 90);
+      // Short tail fragments score poorly on length ratio — upgrade if the
+      // line is a true suffix of the bullet (wrapped continuation line).
+      if (s < 55 && ln.length >= 6 && b.endsWith(ln)) s = 60;
+    } else {
       const p = Math.min(24, b.length - 1);
       if (ln.slice(0, p) === b.slice(0, p) && p >= 12) s = 55;
-      // Suffix match: line is a wrapped continuation of the bullet's tail
       else if (ln.length >= 6 && b.endsWith(ln)) s = 60;
     }
     if (s > bestScore) {
