@@ -357,10 +357,12 @@ function renderInline(text: string): ReactNode[] {
 /** True if a line looks like a job/education entry header (title | company | date). */
 function looksLikeEntryHeader(line: string): boolean {
   const t = line.trim();
-  if (!t || t.length > 140) return false;
+  if (!t || t.length > 200) return false;
   if (t.includes("|")) return true;
   if (/\b(19|20)\d{2}\s*[–—\-]\s*((19|20)\d{2}|present|current)/i.test(t)) return true;
   if (/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(19|20)\d{2}/i.test(t)) return true;
+  // Mid-dot separated entry: "Degree · Institution · Location · Year"
+  if (t.includes("·") && t.split("·").length >= 2) return true;
   return false;
 }
 
@@ -382,13 +384,49 @@ function EntryHeaderLine({ line }: { line: string }) {
           </span>
           {mains.slice(1).map((p, i) => (
             <span key={i} style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: "system-ui, sans-serif" }}>
-              · {p}
+              {"·"} {p}
             </span>
           ))}
         </div>
         {datePart && (
           <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: "system-ui, sans-serif", flexShrink: 0 }}>
             {datePart}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  // Mid-dot separated entry: degree (bold) on line 1, rest (muted/italic) on line 2
+  if (t.includes("·")) {
+    const parts = t.split("·").map(p => p.trim()).filter(Boolean);
+    const title = parts[0];
+    const rest = parts.slice(1);
+    // Separate trailing year/GPA tokens from the institution/location
+    const dateGpaRe = /^(\d{4}|\d\.\d{1,2})$/;
+    let metaStart = rest.length;
+    for (let i = rest.length - 1; i >= 1; i--) {
+      if (dateGpaRe.test(rest[i])) metaStart = i;
+      else break;
+    }
+    const institutionParts = rest.slice(0, metaStart);
+    const metaParts = rest.slice(metaStart);
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: "system-ui, sans-serif" }}>
+            {title}
+          </span>
+          {metaParts.length > 0 && (
+            <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: "system-ui, sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
+              {metaParts.join(" · ")}
+            </span>
+          )}
+        </div>
+        {institutionParts.length > 0 && (
+          <span style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: "system-ui, sans-serif" }}>
+            {institutionParts.join(" · ")}
           </span>
         )}
       </div>
