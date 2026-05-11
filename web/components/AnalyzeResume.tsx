@@ -21,6 +21,7 @@ import { stripResumeBulletPrefix } from "@/lib/stripResumeBulletPrefix";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
 import type { AnalyzeRecord } from "@/lib/supabase";
+import { TAILOR_PREFILL_JD } from "@/lib/tailorPrefill";
 import AnalyzePreviewPane from "@/components/AnalyzePreviewPane";
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
@@ -624,8 +625,8 @@ export default function AnalyzeResume() {
 
       if (linkedFolder) {
         try {
-          if (jd.trim()) sessionStorage.setItem("rn_builder_jd_prefill", jd.trim());
-          else sessionStorage.removeItem("rn_builder_jd_prefill");
+          if (jd.trim()) sessionStorage.setItem(TAILOR_PREFILL_JD, jd.trim());
+          else sessionStorage.removeItem(TAILOR_PREFILL_JD);
         } catch { /* quota */ }
         router.push(`/?view=builder&flow=template&base=${encodeURIComponent(linkedFolder)}${styleQ}`);
         return;
@@ -644,8 +645,8 @@ export default function AnalyzeResume() {
       if (!resp.ok) throw new Error(json.error ?? "Could not extract text from your PDF.");
       try {
         sessionStorage.setItem("rn_builder_profile_prefill", json.text ?? "");
-        if (jd.trim()) sessionStorage.setItem("rn_builder_jd_prefill", jd.trim());
-        else sessionStorage.removeItem("rn_builder_jd_prefill");
+        if (jd.trim()) sessionStorage.setItem(TAILOR_PREFILL_JD, jd.trim());
+        else sessionStorage.removeItem(TAILOR_PREFILL_JD);
         sessionStorage.setItem("rn_builder_from_analyze", "1");
       } catch { /* quota */ }
       router.push(`/?view=builder&flow=template&fromAnalyze=1${styleQ}`);
@@ -1136,7 +1137,7 @@ export default function AnalyzeResume() {
 
         /* ── Desktop: inline sidebar — stretches with shell height (no fixed 100vh) ── */
         .az-sidebar {
-          width: 272px;
+          width: min(320px, 40vw);
           flex-shrink: 0;
           border-right: 1px solid var(--border);
           overflow: hidden;
@@ -1426,7 +1427,7 @@ export default function AnalyzeResume() {
               flex: "1 1 0%",
               minWidth: 0,
               display: "grid",
-              gridTemplateColumns: "minmax(300px,min(472px, 44vw)) 1fr",
+              gridTemplateColumns: "minmax(260px, 2fr) minmax(280px, 3fr)",
               gridTemplateRows: "minmax(0, 1fr)",
               overflow: "hidden",
               padding: 0,

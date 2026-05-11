@@ -101,7 +101,7 @@ async def api_resumes(request: Request):
             try:
                 rows = (
                     supabase.table("resumes")
-                    .select("folder, company, role, score, pdf_url, created_at")
+                    .select("folder, company, role, score, pdf_url, created_at, job_description")
                     .eq("user_id", user_id)
                     .order("created_at", desc=True)
                     .execute()

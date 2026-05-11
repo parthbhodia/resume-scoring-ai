@@ -1,34 +1,36 @@
 "use client";
 
 /**
- * ResumeLibrary — full-page grid view of every saved resume.
+ * ResumeLibrary — grid of saved résumés (product design: Library view).
  *
- * Phase B of the app-shell rebuild — replaces the sidebar's "click to use as
- * base" flow with a proper detail view. From here:
- *   - Click a card → opens the resume in ResumeView (?view=library&resume=<folder>)
- *   - Right-side actions: Use as base · Download · Share (for items with PDF)
- *
- * Filtering + sorting happen client-side; the dataset is small (single-user app).
+ * - 2–3 columns desktop, 1 column mobile; score badge by threshold; paper-style preview.
+ * - Hover (desktop): overlay with View + Use as base; touch: actions always visible.
+ * - Card click → full detail (?view=library&resume=<folder>).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
+import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
 import type { ResumeRecord } from "@/lib/types";
 import { fetchResumes } from "@/lib/supabase";
-import { scoreColor } from "@/lib/utils";
 
 type SortKey = "recent" | "score" | "company";
 
+/** Aligns with Analyze bullet bands: strong ≥70, improvable 55–69, weak &lt;55 */
+function matchScoreBand(score: number): "strong" | "mid" | "weak" {
+  if (score >= 70) return "strong";
+  if (score >= 55) return "mid";
+  return "weak";
+}
+
 export default function ResumeLibrary({ onUseAsBase }: {
-  /** Optional callback — if provided, the "Use as base" button will switch to
-   *  the builder view with this folder pre-loaded. */
   onUseAsBase?: (folder: string) => void;
 }) {
   const router = useRouter();
   const [resumes, setResumes] = useState<ResumeRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter,  setFilter]  = useState("");
-  const [sort,    setSort]    = useState<SortKey>("recent");
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<SortKey>("recent");
 
   useEffect(() => {
     fetchResumes().then(setResumes).catch(console.error).finally(() => setLoading(false));
@@ -38,8 +40,9 @@ export default function ResumeLibrary({ onUseAsBase }: {
     const scored = resumes.filter(r => r.score != null);
     return {
       total: resumes.length,
-      avg:   scored.length ? Math.round(scored.reduce((a, r) => a + (r.score ?? 0), 0) / scored.length) : 0,
-      best:  scored.length ? Math.max(...scored.map(r => r.score ?? 0)) : 0,
+      scoredCount: scored.length,
+      avg: scored.length ? Math.round(scored.reduce((a, r) => a + (r.score ?? 0), 0) / scored.length) : 0,
+      best: scored.length ? Math.max(...scored.map(r => r.score ?? 0)) : 0,
     };
   }, [resumes]);
 
@@ -52,7 +55,7 @@ export default function ResumeLibrary({ onUseAsBase }: {
       arr = [...arr].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
     } else if (sort === "score") {
       arr = [...arr].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
-    } else if (sort === "company") {
+    } else {
       arr = [...arr].sort((a, b) => a.company.localeCompare(b.company));
     }
     return arr;
@@ -62,97 +65,194 @@ export default function ResumeLibrary({ onUseAsBase }: {
     router.push(`/?view=library&resume=${encodeURIComponent(folder)}`);
   };
 
-  const useAsBase = (folder: string) => {
-    if (onUseAsBase) onUseAsBase(folder);
-    router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}`);
+  const useAsBase = (r: ResumeRecord) => {
+    onUseAsBase?.(r.folder);
+    stashTailorPrefillFromLibrary(r);
+    router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(r.folder)}`);
   };
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 28px" }}>
-      {/* Header */}
-      <div style={{ marginBottom: 22 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: -0.6, marginBottom: 4 }}>
-          My Resumes
-        </h1>
-        <p style={{ fontSize: 13, color: "var(--dim)", letterSpacing: -0.1 }}>
-          Every resume you&apos;ve generated. Click any card to open the editor + PDF preview.
-        </p>
-      </div>
+    <div
+      className="library-page fade-in"
+      style={{
+        width: "100%",
+        maxWidth: 1180,
+        margin: "0 auto",
+        padding: "24px 20px 32px",
+        boxSizing: "border-box",
+      }}
+    >
+      <style>{`
+        .library-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+          gap: 16px;
+        }
+        @media (min-width: 1024px) {
+          .library-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (min-width: 768px) and (max-width: 1023px) {
+          .library-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        .library-card {
+          position: relative;
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-xl, 14px);
+          box-shadow: var(--shadow-card, 0 1px 4px rgba(0,0,0,0.08));
+          overflow: hidden;
+          cursor: pointer;
+          transition: border-color 0.14s ease, box-shadow 0.14s ease, transform 0.1s ease;
+          display: flex;
+          flex-direction: column;
+          min-height: 280px;
+        }
+        .library-card:hover {
+          border-color: rgba(47, 129, 247, 0.35);
+          box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
+        }
+        [data-theme="dark"] .library-card:hover {
+          box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+        }
+        .library-card:focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 2px;
+        }
+        .library-card-preview {
+          flex-shrink: 0;
+          aspect-ratio: 8.5 / 11;
+          max-height: 148px;
+          background: linear-gradient(180deg, var(--resume-paper-bg, #fff) 0%, var(--surface2) 100%);
+          border-bottom: 1px solid var(--border);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+        }
+        [data-theme="dark"] .library-card-preview {
+          background: linear-gradient(180deg, #1e293b 0%, var(--surface2) 100%);
+        }
+        .library-card-body { padding: 14px 16px 16px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+        .library-card-actions {
+          display: flex;
+          gap: 8px;
+          margin-top: auto;
+          padding-top: 12px;
+          border-top: 1px solid var(--border);
+        }
+        @media (min-width: 768px) {
+          .library-card-actions--hover {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            z-index: 2;
+            padding: 14px 16px 16px;
+            background: linear-gradient(to top, var(--surface) 72%, rgba(255,255,255,0) 100%);
+            border-top: none;
+            opacity: 0;
+            transform: translateY(4px);
+            transition: opacity 0.12s ease, transform 0.12s ease;
+          }
+          [data-theme="dark"] .library-card-actions--hover {
+            background: linear-gradient(to top, var(--surface) 72%, rgba(22,27,34,0) 100%);
+          }
+          .library-card:hover .library-card-actions--hover {
+            opacity: 1;
+            transform: translateY(0);
+          }
+          .library-card .library-card-actions--static { display: none; }
+        }
+        @media (max-width: 767px) {
+          .library-card-actions--hover { display: none !important; }
+          .library-card .library-card-actions--static { display: flex; }
+        }
+        @media (min-width: 768px) {
+          .library-stats-row { grid-template-columns: repeat(3, 1fr) !important; }
+        }
+      `}</style>
 
-      {/* Stats strip */}
+      <header style={{ marginBottom: 24 }}>
+        <h1
+          style={{
+            fontSize: 26,
+            fontWeight: 700,
+            letterSpacing: "-0.03em",
+            color: "var(--text)",
+            marginBottom: 6,
+            lineHeight: 1.15,
+          }}
+        >
+          Library
+        </h1>
+        <p style={{ fontSize: 13.5, color: "var(--muted)", letterSpacing: "-0.02em", lineHeight: 1.55, maxWidth: 520 }}>
+          Saved résumés and tailored versions. Open any card for the full viewer, or use one as the starting point for a new job.
+        </p>
+      </header>
+
       {!loading && resumes.length > 0 && (
-        <div style={{
-          display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 18,
-        }}>
-          <Stat label="Total saved" value={String(stats.total)} />
-          <Stat label="Average score" value={stats.avg ? String(stats.avg) : "—"} color={stats.avg ? scoreColor(stats.avg) : undefined} />
-          <Stat label="Best score" value={stats.best ? String(stats.best) : "—"} color={stats.best ? scoreColor(stats.best) : undefined} />
+        <div
+          className="fade-in-up library-stats-row"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+            gap: 10,
+            marginBottom: 20,
+          }}
+        >
+          <Stat label="Saved" value={String(stats.total)} tone="none" />
+          <Stat
+            label="Avg match"
+            value={stats.scoredCount ? String(stats.avg) : "—"}
+            tone={stats.scoredCount ? matchScoreBand(stats.avg) : "none"}
+          />
+          <Stat
+            label="Best match"
+            value={stats.scoredCount ? String(stats.best) : "—"}
+            tone={stats.scoredCount ? matchScoreBand(stats.best) : "none"}
+          />
         </div>
       )}
 
-      {/* Filter + sort */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 18, alignItems: "center" }}>
         <input
           value={filter}
           onChange={e => setFilter(e.target.value)}
           placeholder="Search company or role…"
-          style={{
-            flex: 1, fontSize: 13, padding: "9px 12px",
-            background: "var(--surface)", border: "1px solid var(--border)",
-            borderRadius: 9, color: "var(--text)", fontFamily: "inherit",
-          }}
+          aria-label="Filter resumes"
+          style={{ flex: "1 1 220px", minWidth: 0 }}
         />
         <select
           value={sort}
           onChange={e => setSort(e.target.value as SortKey)}
-          style={{
-            fontSize: 12.5, padding: "9px 12px",
-            background: "var(--surface)", border: "1px solid var(--border)",
-            borderRadius: 9, color: "var(--text)", fontFamily: "inherit", cursor: "pointer",
-          }}
+          aria-label="Sort resumes"
+          style={{ width: "auto", minWidth: 150, flexShrink: 0 }}
         >
           <option value="recent">Most recent</option>
-          <option value="score">Highest score</option>
-          <option value="company">Company A→Z</option>
+          <option value="score">Highest match</option>
+          <option value="company">Company A–Z</option>
         </select>
       </div>
 
       {loading ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--dim)" }}>
-          <div style={{
-            width: 22, height: 22, margin: "0 auto 12px",
-            border: "2px solid var(--surface2)", borderTopColor: "var(--accent)",
-            borderRadius: "50%", animation: "spin 0.8s linear infinite",
-          }} />
-          <div style={{ fontSize: 12 }}>Loading saved resumes…</div>
+        <div className="library-grid" aria-busy>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              className={`skeleton stagger-${Math.min(i + 1, 4)}`}
+              style={{ height: 300, borderRadius: "var(--radius-xl, 14px)" }}
+            />
+          ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div style={{
-          padding: "56px 24px", textAlign: "center",
-          background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12,
-        }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>📄</div>
-          <div style={{ fontSize: 14, color: "var(--text)", marginBottom: 6, letterSpacing: -0.2 }}>
-            {resumes.length === 0 ? "No resumes yet" : `No results for "${filter}"`}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--dim)" }}>
-            {resumes.length === 0
-              ? <>Head to the <button type="button" onClick={() => router.push("/?view=builder&flow=tailor")} style={linkBtnStyle}>Résumé Builder</button> to create one.</>
-              : "Try a different search."}
-          </div>
-        </div>
+        <EmptyLibrary hasAny={resumes.length > 0} filter={filter} onGoBuilder={() => router.push("/?view=builder&flow=tailor")} />
       ) : (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-          gap: 12,
-        }}>
-          {filtered.map(r => (
+        <div className="library-grid">
+          {filtered.map((r, i) => (
             <ResumeCard
               key={r.id}
               record={r}
+              stagger={Math.min(i % 5, 4)}
               onOpen={() => openResume(r.folder)}
-              onUseAsBase={() => useAsBase(r.folder)}
+              onUseAsBase={() => useAsBase(r)}
             />
           ))}
         </div>
@@ -161,125 +261,296 @@ export default function ResumeLibrary({ onUseAsBase }: {
   );
 }
 
-const linkBtnStyle: React.CSSProperties = {
-  background: "transparent", border: "none", padding: 0,
-  color: "var(--accent)", cursor: "pointer", fontFamily: "inherit",
-  fontSize: 12, textDecoration: "underline",
-};
-
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+function EmptyLibrary({
+  hasAny,
+  filter,
+  onGoBuilder,
+}: {
+  hasAny: boolean;
+  filter: string;
+  onGoBuilder: () => void;
+}) {
   return (
-    <div style={{
-      background: "var(--surface)", border: "1px solid var(--border)",
-      borderRadius: 10, padding: "12px 16px",
-    }}>
-      <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.6, color: color ?? "var(--text)", lineHeight: 1.1 }}>
-        {value}
-      </div>
-      <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 4, letterSpacing: -0.1 }}>{label}</div>
+    <div
+      className="scale-in fade-in-up"
+      style={{
+        padding: "48px 28px",
+        textAlign: "center",
+        background: "var(--surface)",
+        border: "1px dashed var(--border)",
+        borderRadius: "var(--radius-xl, 14px)",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      <div style={{ fontSize: 40, marginBottom: 12, lineHeight: 1 }} aria-hidden>📋</div>
+      <h2 style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--text)", marginBottom: 8 }}>
+        {hasAny ? "No matches" : "No résumés yet"}
+      </h2>
+      <p style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.6, maxWidth: 400, margin: "0 auto 20px" }}>
+        {hasAny
+          ? `Nothing matches “${filter}”. Try another search or clear the filter.`
+          : "Tailor a résumé to a job posting — we’ll save each version here with match scores so you can compare and reuse."}
+      </p>
+      {!hasAny && (
+        <button
+          type="button"
+          onClick={onGoBuilder}
+          style={{
+            padding: "11px 22px",
+            borderRadius: "var(--radius-lg, 12px)",
+            border: "none",
+            background: "var(--accent)",
+            color: "#fff",
+            fontWeight: 600,
+            fontSize: 13,
+            letterSpacing: "-0.02em",
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          Open Résumé Builder
+        </button>
+      )}
     </div>
   );
 }
 
-function ResumeCard({ record, onOpen, onUseAsBase }: {
+function Stat({ label, value, tone }: { label: string; value: string; tone: "strong" | "mid" | "weak" | "none" }) {
+  const color =
+    tone === "strong" ? "var(--green)"
+      : tone === "mid" ? "var(--amber)"
+        : tone === "weak" ? "var(--red)"
+          : "var(--text)";
+  return (
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-lg, 12px)",
+        padding: "12px 14px",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.03em", color, lineHeight: 1.1 }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ResumeCard({
+  record,
+  stagger,
+  onOpen,
+  onUseAsBase,
+}: {
   record: ResumeRecord;
+  stagger: number;
   onOpen: () => void;
   onUseAsBase: () => void;
 }) {
   const sc = record.score;
   const dateStr = record.created_at
     ? new Date(record.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
-    : "";
+    : "—";
+  const band = sc != null ? matchScoreBand(sc) : null;
+
+  const scoreBadge =
+    sc != null ? (
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          padding: "4px 10px",
+          borderRadius: "var(--radius-pill, 99px)",
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "-0.02em",
+          background:
+            band === "strong" ? "var(--green-bg)"
+              : band === "mid" ? "var(--amber-bg)"
+                : "var(--red-bg)",
+          color: band === "strong" ? "var(--green)" : band === "mid" ? "var(--amber)" : "var(--red)",
+        }}
+      >
+        {sc} match
+      </span>
+    ) : (
+      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)" }}>No score</span>
+    );
+
+  const actions = (className: string) => (
+    <div className={className} style={{ display: "flex", gap: 8 }}>
+      <button
+        type="button"
+        onClick={e => {
+          e.stopPropagation();
+          onOpen();
+        }}
+        style={actionBtnPrimary}
+      >
+        View
+      </button>
+      <button
+        type="button"
+        onClick={e => {
+          e.stopPropagation();
+          onUseAsBase();
+        }}
+        title="Start the builder with this version as the base"
+        style={actionBtnGhost}
+      >
+        Use as base
+      </button>
+      {record.pdf_url && (
+        <a
+          href={record.pdf_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          title="Download PDF"
+          style={{ ...actionBtnGhost, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}
+        >
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden>
+            <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M2 11h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          </svg>
+          PDF
+        </a>
+      )}
+    </div>
+  );
 
   return (
-    <div
+    <article
+      role="button"
+      tabIndex={0}
+      className={`library-card fade-in-up stagger-${stagger + 1}`}
       onClick={onOpen}
-      style={{
-        background: "var(--surface)", border: "1px solid var(--border)",
-        borderRadius: 12, padding: 16, cursor: "pointer",
-        display: "flex", flexDirection: "column", gap: 10,
-        transition: "border-color 0.12s, transform 0.08s",
+      onKeyDown={e => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
       }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(0,113,227,0.35)"; }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; }}
+      aria-label={`${record.company}, ${record.role}. Open resume.`}
     >
-      {/* Top row — score + date */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        {sc != null ? (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "3px 9px", borderRadius: 999,
-            background: sc >= 75 ? "rgba(52,211,153,0.13)" : sc >= 55 ? "rgba(251,191,36,0.13)" : "rgba(248,113,113,0.13)",
-            color: sc >= 75 ? "var(--green)" : sc >= 55 ? "var(--yellow, #fbbf24)" : "var(--red)",
-            fontSize: 11, fontWeight: 700, letterSpacing: -0.2,
-          }}>
-            {sc} match
-          </div>
-        ) : <span />}
-        <span style={{ fontSize: 11, color: "var(--dim)", letterSpacing: -0.1 }}>{dateStr}</span>
+      <div className="library-card-preview">
+        <div
+          style={{
+            position: "relative",
+            zIndex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            padding: 12,
+          }}
+        >
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden style={{ opacity: 0.4 }}>
+            <path d="M7 3h8l4 4v14H7V3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+            <path d="M14 3v4h4M9 12h6M9 16h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+          </svg>
+          {record.pdf_url ? (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: "var(--accent)",
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                padding: "4px 10px",
+                borderRadius: "var(--radius-pill, 99px)",
+                background: "var(--accent-bg)",
+              }}
+            >
+              PDF ready
+            </span>
+          ) : (
+            <span style={{ fontSize: 10, fontWeight: 600, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              No PDF yet
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Company + role */}
-      <div style={{ minHeight: 52 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", letterSpacing: -0.3, marginBottom: 3 }}>
-          {record.company}
+      <div className="library-card-body">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+          {scoreBadge}
+          <time dateTime={record.created_at} style={{ fontSize: 11, color: "var(--dim)", whiteSpace: "nowrap", flexShrink: 0 }}>
+            {dateStr}
+          </time>
         </div>
-        <div style={{
-          fontSize: 12, color: "var(--muted)", letterSpacing: -0.1, lineHeight: 1.4,
-          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
-        }}>
-          {record.role}
-        </div>
-      </div>
 
-      {/* Footer actions */}
-      <div style={{
-        display: "flex", gap: 6, marginTop: 4, paddingTop: 10,
-        borderTop: "1px solid var(--border)",
-      }}>
-        <button
-          onClick={e => { e.stopPropagation(); onOpen(); }}
-          style={cardActionStyle(true)}
-        >Open</button>
-        <button
-          onClick={e => { e.stopPropagation(); onUseAsBase(); }}
-          title="Use as the base for the next generation"
-          style={cardActionStyle(false)}
-        >Use as base</button>
-        {record.pdf_url && (
-          <a
-            href={record.pdf_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()}
-            title="Download PDF"
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <h2
             style={{
-              ...cardActionStyle(false),
-              padding: "6px 9px",
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-              textDecoration: "none",
+              fontSize: 17,
+              fontWeight: 700,
+              letterSpacing: "-0.03em",
+              color: "var(--text)",
+              lineHeight: 1.25,
+              marginBottom: 4,
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
             }}
           >
-            <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
-              <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M2 11h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-            </svg>
-          </a>
-        )}
+            {record.company}
+          </h2>
+          <p
+            style={{
+              fontSize: 13,
+              color: "var(--muted)",
+              letterSpacing: "-0.02em",
+              lineHeight: 1.45,
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {record.role}
+          </p>
+        </div>
+
+        {actions("library-card-actions library-card-actions--static")}
       </div>
-    </div>
+
+      {actions("library-card-actions library-card-actions--hover")}
+    </article>
   );
 }
 
-function cardActionStyle(primary: boolean): React.CSSProperties {
-  return {
-    flex: primary ? 1 : "initial",
-    fontSize: 11.5, padding: "6px 12px",
-    background: primary ? "var(--accent)" : "var(--surface2)",
-    color: primary ? "#fff" : "var(--text)",
-    border: primary ? "none" : "1px solid var(--border)",
-    borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
-    fontWeight: primary ? 600 : 500, letterSpacing: -0.1,
-    transition: "background 0.1s",
-  };
-}
+const actionBtnPrimary: CSSProperties = {
+  flex: 1,
+  fontSize: 12,
+  fontWeight: 600,
+  padding: "8px 12px",
+  borderRadius: "var(--radius, 8px)",
+  border: "none",
+  background: "var(--accent)",
+  color: "#fff",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  letterSpacing: "-0.02em",
+};
+
+const actionBtnGhost: CSSProperties = {
+  flex: 1,
+  fontSize: 12,
+  fontWeight: 600,
+  padding: "8px 12px",
+  borderRadius: "var(--radius, 8px)",
+  border: "1px solid var(--border)",
+  background: "var(--surface2)",
+  color: "var(--text)",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  letterSpacing: "-0.02em",
+};

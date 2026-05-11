@@ -40,6 +40,8 @@ export interface ResumeRecord {
   pdf_url: string | null;
   score: number | null;
   verdict: string | null;
+  /** Job description text from the last tailor run — used to prefill Builder when tailoring again. */
+  job_description?: string | null;
   created_at: string;
   user_id?: string;
   criteria?: Criterion[];

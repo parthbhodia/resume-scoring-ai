@@ -1,15 +1,25 @@
 "use client";
 import { useState, useCallback, useRef, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale } from "@/lib/types";
 import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
-import { upsertResume, getSupabaseClient } from "@/lib/supabase";
+import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
+import { TAILOR_PREFILL_JD, TAILOR_PREFILL_COMPANY, TAILOR_PREFILL_ROLE } from "@/lib/tailorPrefill";
 import type { User } from "@supabase/supabase-js";
 import {
   DEFAULT_REFERENCE_FOLDER,
   distinctStyleTemplates,
   isValidResumeStyleFolder,
 } from "@/lib/resumeTemplates";
+import {
+  loadProfile,
+  saveProfile,
+  mergeProfilePreferEmpty,
+  getProfileAutofillFromUpload,
+  setProfileAutofillFromUpload,
+} from "@/lib/profileStorage";
+import { extractProfileHintsFromResumeText } from "@/lib/profileFromResumeText";
 
 import ScoreRing    from "./ScoreRing";
 import CriteriaTable from "./CriteriaTable";
@@ -25,6 +35,23 @@ type Suggestion = {
   suggested: string;
   reason: string;
   priority: "high" | "medium" | "low";
+};
+
+/** Labels for Profile keys when we merge from résumé extract */
+const PROFILE_FIELD_LABELS: Record<string, string> = {
+  displayName: "Display name",
+  tagline: "Subtitle",
+  email: "Email",
+  phone: "Phone",
+  linkedin: "LinkedIn",
+  portfolio: "Portfolio / GitHub",
+  headline: "Headline",
+  roles: "Target roles",
+  locations: "Locations",
+  school: "School",
+  degree: "Degree",
+  graduation: "Graduation",
+  gpa: "GPA",
 };
 
 function extractJdKeywords(jdText: string): string[] {
@@ -101,7 +128,7 @@ export default function ResumeBuilder({
   const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
-  /** After Résumé Template Studio — hide JD wizard chrome; optional job + generate only. */
+  /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(false);
 
   // ── Suggestions state ──────────────────────────────────────────────────────
@@ -117,6 +144,14 @@ export default function ResumeBuilder({
   const [uploadingPdf,        setUploadingPdf]        = useState(false);
   const [uploadError,         setUploadError]         = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** Latest PDF extract text — used to merge into saved Profile */
+  const lastResumeExtractRef = useRef<string>("");
+  const [profileSyncUpsell, setProfileSyncUpsell] = useState<{
+    autoFilled: boolean;
+    filledLabels: string[];
+    hintedCount: number;
+  } | null>(null);
+  const [profileAutofillUpload, setProfileAutofillUpload] = useState(false);
 
   const [extractingJd, setExtractingJd] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
@@ -128,6 +163,10 @@ export default function ResumeBuilder({
     } catch { /* ignore */ }
   }, [scratchStart]);
 
+  useEffect(() => {
+    setProfileAutofillUpload(getProfileAutofillFromUpload());
+  }, []);
+
   // Prefill from Analyze (`fromAnalyze=1`) or Template Studio (`fromTemplateStudio=1`).
   useEffect(() => {
     if (typeof window === "undefined" || scratchStart) return;
@@ -137,7 +176,9 @@ export default function ResumeBuilder({
     const flow = (sp.get("flow") || "tailor").toLowerCase();
     try {
       const profile = sessionStorage.getItem("rn_builder_profile_prefill");
-      const jdPre = sessionStorage.getItem("rn_builder_jd_prefill");
+      const jdPre = sessionStorage.getItem(TAILOR_PREFILL_JD);
+      const companyPre = sessionStorage.getItem(TAILOR_PREFILL_COMPANY);
+      const rolePre = sessionStorage.getItem(TAILOR_PREFILL_ROLE);
       if ((fromAnalyze || fromTemplateStudio) && profile) {
         setCandidateProfile(profile);
         setUploadedFileName(fromTemplateStudio ? "From template studio" : "From Analyze");
@@ -146,8 +187,18 @@ export default function ResumeBuilder({
         setJdRaw(jdPre);
         saveDraft({ jd: jdPre });
       }
+      if (companyPre) {
+        setCompanyRaw(companyPre);
+        saveDraft({ company: companyPre });
+      }
+      if (rolePre) {
+        setRoleRaw(rolePre);
+        saveDraft({ role: rolePre });
+      }
       if (fromAnalyze) sessionStorage.removeItem("rn_builder_profile_prefill");
-      sessionStorage.removeItem("rn_builder_jd_prefill");
+      sessionStorage.removeItem(TAILOR_PREFILL_JD);
+      sessionStorage.removeItem(TAILOR_PREFILL_COMPANY);
+      sessionStorage.removeItem(TAILOR_PREFILL_ROLE);
       sessionStorage.removeItem("rn_builder_from_analyze");
       if (fromTemplateStudio) sessionStorage.removeItem("rn_builder_profile_prefill");
     } catch { /* ignore */ }
@@ -305,18 +356,48 @@ export default function ResumeBuilder({
     }
   }, [jd, candidateProfile, studioHandoff]);
 
+  const mergeProfileFromLastExtract = useCallback(() => {
+    const text = lastResumeExtractRef.current.trim();
+    if (!text) return;
+    const hints = extractProfileHintsFromResumeText(text);
+    const cur = loadProfile();
+    const { next } = mergeProfilePreferEmpty(cur, hints);
+    saveProfile(next);
+    void upsertUserProfile(next);
+    router.push("/?view=profile");
+  }, [router]);
+
   const handlePdfUpload = useCallback(async (file: File) => {
     if (!file.type.includes("pdf")) { setUploadError("Please upload a PDF file."); return; }
     setUploadingPdf(true);
     setUploadError(null);
+    setProfileSyncUpsell(null);
     try {
       const formData = new FormData();
       formData.append("file", file);
       const resp = await fetch(apiUrl("/api/upload-resume"), { method: "POST", body: formData });
       const json = await parseJsonOrThrow<{ error?: string; text?: string }>(resp);
       if (!resp.ok) throw new Error(json.error ?? "Upload failed");
-      setCandidateProfile(json.text ?? "");
+      const text = json.text ?? "";
+      setCandidateProfile(text);
       setUploadedFileName(file.name);
+      lastResumeExtractRef.current = text;
+
+      const hints = extractProfileHintsFromResumeText(text);
+      const hintedKeys = Object.keys(hints).filter(k => String((hints as Record<string, unknown>)[k] ?? "").trim());
+      const hintedCount = hintedKeys.length;
+      if (hintedCount === 0) {
+        setProfileSyncUpsell(null);
+      } else if (getProfileAutofillFromUpload()) {
+        const cur = loadProfile();
+        const { next, filled } = mergeProfilePreferEmpty(cur, hints);
+        saveProfile(next);
+        void upsertUserProfile(next);
+        const filledLabels = filled.map(f => PROFILE_FIELD_LABELS[f] ?? String(f));
+        setProfileSyncUpsell({ autoFilled: true, filledLabels, hintedCount });
+      } else {
+        setProfileSyncUpsell({ autoFilled: false, filledLabels: [], hintedCount });
+      }
     } catch (e: unknown) {
       setUploadError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -431,7 +512,20 @@ export default function ResumeBuilder({
           switch (ev.event) {
             case "status":  setStatusMsg(ev.msg); break;
             case "chunk":   acc.latexPreview += ev.text; setPreview(p => p + ev.text); break;
-            case "sources": acc.sources = ev.urls as Source[]; break;
+            case "sources": {
+              const urls = ev.urls as Source[];
+              acc.sources = urls;
+              // Grounding sometimes arrives only in the final `sources` bundle — mirror into
+              // the live web research panel so users still see cited pages when SSE had no search_source chunks.
+              for (const u of urls) {
+                if (u?.url) {
+                  setSearchSources(ss =>
+                    ss.some(s => s.url === u.url) ? ss : [...ss, { title: u.title ?? null, url: u.url }],
+                  );
+                }
+              }
+              break;
+            }
             case "search_query":
               setSearchQueries(qs => qs.includes(ev.query) ? qs : [...qs, ev.query]);
               break;
@@ -464,7 +558,13 @@ export default function ResumeBuilder({
               break;
             case "done":
               if (acc.folder) {
-                upsertResume(acc.folder, effCompany, effRole, model, acc.texPath ?? "", acc.pdfUrl, acc.ratings).catch(console.error);
+                void upsertResume(
+                  acc.folder, effCompany, effRole, model, acc.texPath ?? "", acc.pdfUrl, acc.ratings, effJd,
+                ).catch((e: unknown) => {
+                  console.error("upsertResume (library row)", e);
+                  const msg = e instanceof Error ? e.message : String(e);
+                  setError(`Résumé generated, but saving to your library failed: ${msg}`);
+                });
                 setBaseFolder(acc.folder);
               }
               setResult({ ...acc });
@@ -502,7 +602,15 @@ export default function ResumeBuilder({
       <main style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
 
         {/* Page content */}
-        <div className="rb-page" style={{ padding: "44px 48px 80px", maxWidth: studioHandoff ? 920 : 820, margin: "0 auto", width: "100%" }}>
+        <div
+          className="rb-page"
+          style={{
+            padding: "44px 48px 80px",
+            maxWidth: result ? 960 : studioHandoff ? 920 : 820,
+            margin: "0 auto",
+            width: "100%",
+          }}
+        >
 
           {/* ── Hero (pre-generation) ── */}
           {!result && !generating && (
@@ -520,8 +628,8 @@ export default function ResumeBuilder({
                   Layout &amp; extract ready
                 </div>
                 <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
-                  You picked a template in the layout gallery. Optionally add a job posting below to sharpen keywords—then
-                  generate your PDF. To change layout or spacing, go back via the app menu:{" "}
+                  This step compiles your <strong style={{ color: "var(--text)" }}>personal résumé template</strong> from the layout
+                  and content you set in the gallery — no job posting. To change layout or spacing, use the app menu:{" "}
                   <strong style={{ color: "var(--text)" }}>Résumé Builder → Template &amp; PDF</strong>.
                 </p>
               </div>
@@ -714,38 +822,147 @@ export default function ResumeBuilder({
             />
 
             {candidateProfile ? (
-              <div style={{
-                display: "flex", alignItems: "center", gap: 12,
-                padding: "14px 16px",
-                background: "var(--green-bg)", border: "1px solid rgba(52,211,153,0.2)",
-                borderRadius: 10,
-              }}>
+              <>
                 <div style={{
-                  width: 34, height: 34, borderRadius: 8,
-                  background: "rgba(52,211,153,0.15)",
-                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "14px 16px",
+                  background: "var(--green-bg)", border: "1px solid rgba(52,211,153,0.2)",
+                  borderRadius: 10,
                 }}>
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M3 2h7l3 3v9H3V2z" stroke="var(--green)" strokeWidth="1.3" strokeLinejoin="round"/>
-                    <path d="M10 2v3h3" stroke="var(--green)" strokeWidth="1.3" strokeLinejoin="round"/>
-                    <path d="M5.5 8.5l1.5 1.5 3-3" stroke="var(--green)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)", letterSpacing: -0.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {uploadedFileName}
+                  <div style={{
+                    width: 34, height: 34, borderRadius: 8,
+                    background: "rgba(52,211,153,0.15)",
+                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                  }}>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path d="M3 2h7l3 3v9H3V2z" stroke="var(--green)" strokeWidth="1.3" strokeLinejoin="round"/>
+                      <path d="M10 2v3h3" stroke="var(--green)" strokeWidth="1.3" strokeLinejoin="round"/>
+                      <path d="M5.5 8.5l1.5 1.5 3-3" stroke="var(--green)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--green)", marginTop: 2 }}>Ready to use</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)", letterSpacing: -0.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {uploadedFileName}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--green)", marginTop: 2 }}>Ready to use</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCandidateProfile(null);
+                      setUploadedFileName(null);
+                      lastResumeExtractRef.current = "";
+                      setProfileSyncUpsell(null);
+                    }}
+                    style={{
+                      background: "none", border: "none", color: "var(--dim)",
+                      cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "2px 4px",
+                    }}
+                    title="Remove"
+                  >×</button>
                 </div>
-                <button
-                  onClick={() => { setCandidateProfile(null); setUploadedFileName(null); }}
-                  style={{
-                    background: "none", border: "none", color: "var(--dim)",
-                    cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "2px 4px",
-                  }}
-                  title="Remove"
-                >×</button>
-              </div>
+
+                {profileSyncUpsell && profileSyncUpsell.hintedCount > 0 && !studioHandoff && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: "16px 18px",
+                      borderRadius: "var(--radius-xl)",
+                      border: "1px solid var(--border)",
+                      background: "var(--surface)",
+                      boxShadow: "var(--shadow-card)",
+                    }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", letterSpacing: -0.2, marginBottom: 8 }}>
+                      Keep Profile in sync?
+                    </div>
+                    <p style={{ margin: "0 0 12px", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>
+                      We scan the extracted text for obvious contact signals (email, phone, LinkedIn, links, name, headline, light education
+                      cues). Only <strong style={{ color: "var(--text)" }}>empty</strong> fields in your saved Profile are filled — nothing is
+                      overwritten without you reviewing on the Profile page. Everything stays on this device until we add cloud sync.
+                    </p>
+                    {profileSyncUpsell.autoFilled && profileSyncUpsell.filledLabels.length > 0 ? (
+                      <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--green)", fontWeight: 600, lineHeight: 1.45 }}>
+                        Auto-updated Profile ({profileSyncUpsell.filledLabels.join(", ")}) — open Profile to verify.
+                      </p>
+                    ) : profileSyncUpsell.autoFilled ? (
+                      <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+                        Auto-fill is on, but your Profile already had those values — nothing changed.
+                      </p>
+                    ) : null}
+                    <label
+                      style={{
+                        display: "flex", alignItems: "flex-start", gap: 10,
+                        fontSize: 12, color: "var(--text)", cursor: "pointer", marginBottom: 14, lineHeight: 1.45,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={profileAutofillUpload}
+                        onChange={e => {
+                          const v = e.target.checked;
+                          setProfileAutofillUpload(v);
+                          setProfileAutofillFromUpload(v);
+                        }}
+                        style={{ marginTop: 3 }}
+                      />
+                      <span>
+                        Automatically merge future uploads into my Profile in the background (this device only). You can still review
+                        everything under <strong style={{ color: "var(--text)" }}>Profile</strong> anytime.
+                      </span>
+                    </label>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        onClick={mergeProfileFromLastExtract}
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          padding: "8px 16px",
+                          borderRadius: "var(--radius)",
+                          border: "none",
+                          background: "var(--accent)",
+                          color: "#fff",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {profileSyncUpsell.autoFilled ? "Open Profile" : "Merge into Profile & review"}
+                      </button>
+                      <Link
+                        href="/?view=manual-form"
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: "var(--accent)",
+                          textDecoration: "none",
+                          padding: "8px 4px",
+                        }}
+                      >
+                        Step-by-step (same wizard as From scratch) →
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => setProfileSyncUpsell(null)}
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 500,
+                          marginLeft: "auto",
+                          padding: "6px 10px",
+                          borderRadius: "var(--radius)",
+                          border: "1px solid var(--border)",
+                          background: "transparent",
+                          color: "var(--dim)",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
               <div
                 onClick={() => !uploadingPdf && fileInputRef.current?.click()}
@@ -797,13 +1014,12 @@ export default function ResumeBuilder({
           </>
           )}
 
-          {/* ── Step 3: Job target ── */}
+          {/* ── Step 3: Job target (JD tailoring only — not shown for template-gallery handoff) ── */}
+          {!studioHandoff && (
           <StepCard
-            step={studioHandoff ? 1 : 3}
-            title={studioHandoff ? "Target job (optional)" : "Target job"}
-            subtitle={studioHandoff
-              ? "Paste a posting to sharpen keywords—or leave everything blank and we'll compile from your extract with safe defaults."
-              : "Tell us what you're applying for"}
+            step={3}
+            title="Target job"
+            subtitle="Tell us what you're applying for"
           >
             {/* URL import — auto-fills company/role/JD */}
             <Field label="Job posting link (optional)">
@@ -860,6 +1076,7 @@ export default function ResumeBuilder({
               </Field>
             )}
           </StepCard>
+          )}
 
           {/* Base resume indicator */}
           {baseFolder && (
@@ -890,42 +1107,84 @@ export default function ResumeBuilder({
             </div>
           )}
 
-          {/* ── Primary CTA: Get Suggestions ── */}
-          {suggestError && (
-            <div style={{ marginBottom: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
-              {suggestError}
-            </div>
+          {/* ── Primary CTA: template handoff = compile PDF only; tailor flow = suggestions first ── */}
+          {studioHandoff ? (
+            <>
+              <button
+                type="button"
+                onClick={() => { void generate(); }}
+                disabled={generating || !(candidateProfile ?? "").trim()}
+                style={{
+                  width: "100%", padding: "14px 20px", marginBottom: 8,
+                  background: generating || !(candidateProfile ?? "").trim() ? "var(--surface2)" : "var(--accent)",
+                  color: generating || !(candidateProfile ?? "").trim() ? "var(--muted)" : "#fff",
+                  border: "none", borderRadius: 12,
+                  fontSize: 16, fontWeight: 600, fontFamily: "inherit",
+                  cursor: generating || !(candidateProfile ?? "").trim() ? "not-allowed" : "pointer",
+                  letterSpacing: -0.35, transition: "background 0.2s",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}
+                onMouseEnter={e => {
+                  if (!generating && (candidateProfile ?? "").trim()) {
+                    e.currentTarget.style.background = "var(--accent-h)";
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!generating && (candidateProfile ?? "").trim()) {
+                    e.currentTarget.style.background = "var(--accent)";
+                  }
+                }}
+              >
+                {generating ? (
+                  <><Spinner size={16} />Generating your résumé PDF…</>
+                ) : (
+                  "Generate résumé PDF →"
+                )}
+              </button>
+              <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
+                Uses your template layout and extracted text only — no job posting or tailoring step.
+              </p>
+            </>
+          ) : (
+            <>
+              {suggestError && (
+                <div style={{ marginBottom: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
+                  {suggestError}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={getSuggestions}
+                disabled={suggestLoading || generating}
+                style={{
+                  width: "100%", padding: "14px 20px", marginBottom: 8,
+                  background: suggestLoading ? "var(--surface2)" : "var(--accent)",
+                  color: suggestLoading ? "var(--muted)" : "#fff",
+                  border: "none", borderRadius: 12,
+                  fontSize: 16, fontWeight: 500, fontFamily: "inherit",
+                  cursor: suggestLoading || generating ? "not-allowed" : "pointer",
+                  letterSpacing: -0.4, transition: "background 0.2s",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}
+                onMouseEnter={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent-h)"; }}
+                onMouseLeave={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent)"; }}
+              >
+                {suggestLoading ? (
+                  <><Spinner size={16} />Analyzing your resume…</>
+                ) : (
+                  "Analyze & get suggestions →"
+                )}
+              </button>
+              <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
+                We&apos;ll show you exactly what to change — you pick what to apply.
+              </p>
+            </>
           )}
-          <button
-            onClick={getSuggestions}
-            disabled={suggestLoading || generating}
-            style={{
-              width: "100%", padding: "14px 20px", marginBottom: 8,
-              background: suggestLoading ? "var(--surface2)" : "var(--accent)",
-              color: suggestLoading ? "var(--muted)" : "#fff",
-              border: "none", borderRadius: 12,
-              fontSize: 16, fontWeight: 500, fontFamily: "inherit",
-              cursor: suggestLoading || generating ? "not-allowed" : "pointer",
-              letterSpacing: -0.4, transition: "background 0.2s",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            }}
-            onMouseEnter={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent-h)"; }}
-            onMouseLeave={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent)"; }}
-          >
-            {suggestLoading ? (
-              <><Spinner size={16} />Analyzing your resume…</>
-            ) : (
-              studioHandoff ? "Generate suggestions →" : "Analyze & get suggestions →"
-            )}
-          </button>
-          <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
-            We&apos;ll show you exactly what to change — you pick what to apply.
-          </p>
 
           </>)} {/* end !result && !generating inputs block */}
 
-          {/* ── Suggestions review panel ── */}
-          {suggestions && !generating && !result && (
+          {/* ── Suggestions review panel (JD tailor flow only) ── */}
+          {!studioHandoff && suggestions && !generating && !result && (
             <SuggestionsPanel
               summary={suggestSummary}
               suggestions={suggestions}
@@ -972,9 +1231,39 @@ export default function ResumeBuilder({
               <div style={{ fontSize: 17, fontWeight: 600, color: "var(--text)", letterSpacing: -0.3 }}>
                 {statusMsg || "Tailoring your resume…"}
               </div>
-              <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, maxWidth: 440, margin: 0 }}>
-                Analyzing the job description and drafting your tailored résumé. Live preview and web research will appear below as they stream in.
+              <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, maxWidth: 480, margin: 0 }}>
+                Analyzing the job description and drafting your tailored résumé. LaTeX streams below when the model starts writing. If this
+                run uses Google Search grounding, search queries and sources show up in the web research panel as they arrive (sometimes
+                only after a short delay).
               </p>
+            </div>
+          )}
+
+          {/* Web research: live panel once SSE events arrive, or a waiting skeleton while generating */}
+          {generating && !hasWebResearch && (
+            <div style={{ marginBottom: 16 }} className="fade-in">
+              <div style={{
+                display: "flex", alignItems: "center", gap: 8,
+                fontSize: 11, fontWeight: 600, color: "var(--dim)",
+                letterSpacing: -0.1, marginBottom: 8, textTransform: "uppercase",
+              }}>
+                <span>Web research</span>
+                <span style={{
+                  fontSize: 9, padding: "2px 7px", borderRadius: 999,
+                  background: "var(--surface2)", color: "var(--muted)",
+                  letterSpacing: 0, textTransform: "none",
+                }}>
+                  Waiting for search signals…
+                </span>
+              </div>
+              <div style={{
+                background: "var(--surface)", border: "1px dashed var(--border)",
+                borderRadius: 10, padding: "14px 16px",
+                fontSize: 12, color: "var(--dim)", lineHeight: 1.55,
+              }}>
+                When the model issues live Google Search queries, they will list here. If the API does not return grounding metadata for
+                this run, this section stays empty — your résumé still generates normally.
+              </div>
             </div>
           )}
 
@@ -1078,7 +1367,7 @@ export default function ResumeBuilder({
             </div>
           )}
 
-          {/* ── Results ── */}
+          {/* ── Results (tailor flow) — card layout aligned with profile / product mockups ── */}
           {result && (
             <div className="fade-in">
 
@@ -1092,10 +1381,11 @@ export default function ResumeBuilder({
                     alignItems: "center",
                     gap: 14,
                     marginBottom: 20,
-                    padding: "14px 18px",
-                    borderRadius: 12,
+                    padding: "16px 20px",
+                    borderRadius: "var(--radius-xl)",
                     background: "var(--accent-bg)",
                     border: "1px solid var(--border)",
+                    boxShadow: "var(--shadow-card)",
                   }}
                 >
                   <Spinner size={22} />
@@ -1110,37 +1400,51 @@ export default function ResumeBuilder({
                 </div>
               )}
 
+              <header style={{ marginBottom: 22 }}>
+                <h2 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.75, color: "var(--text)", marginBottom: 6 }}>
+                  Your tailored résumé
+                </h2>
+                <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.5, letterSpacing: -0.15 }}>
+                  {[company, role].map(s => s.trim()).filter(Boolean).join(" · ") || "Match results for this run"}
+                </p>
+              </header>
+
               {/* Results header row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
-                <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                <span style={{ fontSize: 11, color: "var(--dim)", letterSpacing: 0.5, textTransform: "uppercase" }}>Results</span>
-                <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 22, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, height: 1, background: "var(--border)", minWidth: 40 }} />
+                <span style={{ fontSize: 11, color: "var(--dim)", letterSpacing: 0.45, textTransform: "uppercase", fontWeight: 700 }}>
+                  Match &amp; export
+                </span>
+                <div style={{ flex: 1, height: 1, background: "var(--border)", minWidth: 40 }} />
                 <button
+                  type="button"
                   onClick={() => setResult(null)}
                   style={{
                     display: "flex", alignItems: "center", gap: 6,
-                    padding: "6px 12px", borderRadius: 8,
-                    background: "var(--surface2)", border: "1px solid var(--border)",
-                    color: "var(--muted)", fontSize: 12, fontWeight: 500,
+                    padding: "8px 14px", borderRadius: "var(--radius)",
+                    background: "var(--surface)", border: "1px solid var(--border)",
+                    color: "var(--muted)", fontSize: 12, fontWeight: 600,
                     cursor: "pointer", fontFamily: "inherit", letterSpacing: -0.2,
                     whiteSpace: "nowrap",
+                    boxShadow: "var(--shadow-sm)",
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.color = "var(--text)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--muted)"; }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.color = "var(--muted)"; }}
                 >
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
                     <path d="M1 6a5 5 0 109.9-1M1 6V2m0 4h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
-                  Try new resume
+                  Try another job
                 </button>
               </div>
 
               {/* Score hero card */}
               <div className="rb-score-card" style={{
                 background: "var(--surface)", border: "1px solid var(--border)",
-                borderRadius: 16, padding: "28px 28px 24px",
+                borderRadius: "var(--radius-xl)", padding: "28px 28px 24px",
                 marginBottom: 16,
                 position: "relative", overflow: "hidden",
+                boxShadow: "var(--shadow-card)",
               }}>
                 {/* Subtle accent glow behind score */}
                 <div style={{
@@ -1212,13 +1516,14 @@ export default function ResumeBuilder({
 
               {/* Strengths + Gaps */}
               {ratings && (ratings.whats_working?.length > 0 || ratings.gaps?.length > 0) && (
-                <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
                   {ratings.whats_working?.length > 0 && (
                     <div style={{
-                      background: "var(--surface)", border: "1px solid rgba(52,211,153,0.18)",
-                      borderRadius: 12, padding: "16px 18px",
+                      background: "var(--surface)", border: "1px solid rgba(52,211,153,0.2)",
+                      borderRadius: "var(--radius-xl)", padding: "18px 20px",
+                      boxShadow: "var(--shadow-card)",
                     }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
                         What&apos;s working
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1233,10 +1538,11 @@ export default function ResumeBuilder({
                   )}
                   {ratings.gaps?.length > 0 && (
                     <div style={{
-                      background: "var(--surface)", border: "1px solid rgba(251,191,36,0.18)",
-                      borderRadius: 12, padding: "16px 18px",
+                      background: "var(--surface)", border: "1px solid rgba(251,191,36,0.22)",
+                      borderRadius: "var(--radius-xl)", padding: "18px 20px",
+                      boxShadow: "var(--shadow-card)",
                     }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--orange)", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--orange)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
                         Gaps to address
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1254,8 +1560,17 @@ export default function ResumeBuilder({
 
               {/* JD requirement breakdown (was under Analysis tab) */}
               {ratings && ratings.criteria.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
+                <div
+                  style={{
+                    marginBottom: 16,
+                    borderRadius: "var(--radius-xl)",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface)",
+                    boxShadow: "var(--shadow-card)",
+                    padding: "18px 20px 20px",
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
                     Match breakdown
                   </div>
                   <CriteriaTable criteria={ratings.criteria} />
@@ -1264,9 +1579,18 @@ export default function ResumeBuilder({
 
               {/* Inline diff — line-by-line edits below analysis */}
               {result.diff.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
-                    Changes to your resume&ensp;
+                <div
+                  style={{
+                    marginBottom: 16,
+                    borderRadius: "var(--radius-xl)",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface)",
+                    boxShadow: "var(--shadow-card)",
+                    padding: "18px 20px 20px",
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
+                    Changes to your résumé{" "}
                     <span style={{ color: "var(--green)", fontWeight: 600 }}>+{result.adds}</span>
                     <span style={{ color: "var(--dim)" }}> / </span>
                     <span style={{ color: "var(--red)", fontWeight: 600 }}>−{result.removes}</span>
@@ -1277,8 +1601,17 @@ export default function ResumeBuilder({
 
               {/* Sources */}
               {result.sources.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <SourcesPanel sources={result.sources} />
+                <div
+                  style={{
+                    marginBottom: 16,
+                    borderRadius: "var(--radius-xl)",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface)",
+                    boxShadow: "var(--shadow-card)",
+                    padding: "18px 20px 20px",
+                  }}
+                >
+                  <SourcesPanel sources={result.sources} embedded />
                 </div>
               )}
 
@@ -1287,11 +1620,12 @@ export default function ResumeBuilder({
                   later. */}
               {storageFailures.length > 0 && (
                 <div style={{
-                  marginBottom: 16, padding: "10px 14px",
+                  marginBottom: 16, padding: "14px 18px",
                   background: "rgba(251,191,36,0.08)",
                   border: "1px solid rgba(251,191,36,0.35)",
-                  borderRadius: 9, fontSize: 12, color: "var(--text)",
+                  borderRadius: "var(--radius-xl)", fontSize: 12, color: "var(--text)",
                   letterSpacing: -0.1, lineHeight: 1.5,
+                  boxShadow: "var(--shadow-card)",
                 }}>
                   <div style={{ fontWeight: 600, color: "var(--orange)", marginBottom: 4, fontSize: 11, letterSpacing: 0.3, textTransform: "uppercase" }}>
                     ⚠ Cloud backup incomplete
@@ -1309,8 +1643,17 @@ export default function ResumeBuilder({
               )}
 
               {/* ATS panel — auto-runs after generation */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
+              <div
+                style={{
+                  marginBottom: 16,
+                  borderRadius: "var(--radius-xl)",
+                  border: "1px solid var(--border)",
+                  background: "var(--surface)",
+                  boxShadow: "var(--shadow-card)",
+                  padding: "18px 20px 20px",
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
                   ATS check{atsResult ? ` — ${atsResult.score}` : ""}
                 </div>
                 {atsLoading && (
@@ -1334,11 +1677,38 @@ export default function ResumeBuilder({
               </div>
 
               {/* Start over nudge */}
-              <div style={{ marginTop: 32, paddingTop: 20, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "var(--dim)", letterSpacing: -0.2 }}>Want to try a different job?</span>
+              <div
+                style={{
+                  marginTop: 28,
+                  padding: "16px 20px",
+                  borderRadius: "var(--radius-xl)",
+                  border: "1px solid var(--border)",
+                  background: "var(--surface2)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span style={{ fontSize: 13, color: "var(--muted)", letterSpacing: -0.15, lineHeight: 1.45 }}>
+                  Want to tailor another posting? Clear the form and keep your layout template.
+                </span>
                 <button
+                  type="button"
                   onClick={() => { setResult(null); setSuggestions(null); setJd(""); setCompany(""); setRole(""); setPreview(""); }}
-                  style={{ fontSize: 12, padding: "6px 14px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", fontFamily: "inherit" }}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: "8px 16px",
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    color: "var(--text)",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    boxShadow: "var(--shadow-sm)",
+                  }}
                 >
                   Start over
                 </button>
@@ -1420,11 +1790,17 @@ function ResumePaperView({ text, highlightOriginals }: { text: string; highlight
 /* ── Suggestions panel ───────────────────────────────────────────────────── */
 
 const PRIORITY_COLOR: Record<string, string> = {
-  high: "#ef4444", medium: "#f59e0b", low: "#94a3b8",
+  high: "var(--red)", medium: "var(--amber)", low: "var(--muted)",
 };
 const PRIORITY_BG: Record<string, string> = {
-  high: "rgba(239,68,68,0.08)", medium: "rgba(245,158,11,0.08)", low: "rgba(148,163,184,0.08)",
+  high: "var(--red-bg)", medium: "var(--amber-bg)", low: "rgba(148,163,184,0.12)",
 };
+
+function priorityLabel(p: Suggestion["priority"]): string {
+  if (p === "high") return "HIGH";
+  if (p === "medium") return "MEDIUM";
+  return "LOW";
+}
 
 function SuggestionsPanel({
   summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
@@ -1446,20 +1822,32 @@ function SuggestionsPanel({
 
   return (
     <div className="fade-in" style={{ marginBottom: 32 }}>
+      <style>{`
+        .rb-suggestions-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+          align-items: start;
+        }
+        @media (max-width: 900px) {
+          .rb-suggestions-grid { grid-template-columns: 1fr; }
+        }
+      `}</style>
       {/* Summary banner */}
       {summary && (
         <div style={{
           marginBottom: 16, padding: "12px 16px",
           background: "var(--surface)", border: "1px solid var(--border)",
-          borderRadius: 10, fontSize: 13, color: "var(--muted)", lineHeight: 1.55,
+          borderRadius: "var(--radius-lg, 12px)", fontSize: 13, color: "var(--muted)", lineHeight: 1.55,
           borderLeft: "3px solid var(--accent)",
+          boxShadow: "var(--shadow-card)",
         }}>
           <strong style={{ color: "var(--text)" }}>Key gap: </strong>{summary}
         </div>
       )}
 
-      {/* Two-panel layout */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+      {/* Two-panel layout (View 5 — Phase 2); stacks on narrow screens */}
+      <div className="rb-suggestions-grid">
 
         {/* Left: live resume preview */}
         <div>
@@ -1482,20 +1870,22 @@ function SuggestionsPanel({
               const isRejected = rejectedIds.has(s.id);
               return (
                 <div key={s.id} style={{
-                  borderRadius: 10, border: `1.5px solid ${isAccepted ? "rgba(52,211,153,0.4)" : isRejected ? "var(--border)" : "var(--border)"}`,
-                  background: isAccepted ? "rgba(52,211,153,0.04)" : isRejected ? "var(--surface2)" : "var(--surface)",
+                  borderRadius: "var(--radius-lg, 12px)",
+                  border: `1.5px solid ${isAccepted ? "rgba(52,211,153,0.45)" : isRejected ? "var(--border)" : "var(--border)"}`,
+                  background: isAccepted ? "rgba(52,211,153,0.06)" : isRejected ? "var(--surface2)" : "var(--surface)",
                   padding: "12px 14px",
-                  opacity: isRejected ? 0.5 : 1,
-                  transition: "all 0.15s",
+                  opacity: isRejected ? 0.55 : 1,
+                  transition: "border-color 0.12s ease, background 0.12s ease, opacity 0.12s ease",
+                  boxShadow: "var(--shadow-card)",
                 }}>
                   {/* Header row */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                     <span style={{
-                      fontSize: 9, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase",
-                      padding: "2px 7px", borderRadius: 99,
-                      color: PRIORITY_COLOR[s.priority] ?? "#64748b",
+                      fontSize: 9, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase",
+                      padding: "3px 9px", borderRadius: "var(--radius-pill, 99px)",
+                      color: PRIORITY_COLOR[s.priority] ?? "var(--muted)",
                       background: PRIORITY_BG[s.priority] ?? "transparent",
-                    }}>{s.priority}</span>
+                    }}>{priorityLabel(s.priority)}</span>
                     <span style={{ fontSize: 10.5, color: "var(--dim)", letterSpacing: -0.1 }}>{s.section}</span>
                   </div>
 
@@ -1514,25 +1904,27 @@ function SuggestionsPanel({
                   {/* Accept / Reject buttons */}
                   <div style={{ display: "flex", gap: 6 }}>
                     <button
+                      type="button"
                       onClick={() => onToggleAccept(s.id)}
                       style={{
-                        flex: 1, padding: "6px 0", fontSize: 11, fontWeight: 600,
-                        borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit",
-                        background: isAccepted ? "rgba(52,211,153,0.15)" : "var(--surface2)",
+                        flex: 1, padding: "7px 0", fontSize: 11, fontWeight: 600,
+                        borderRadius: "var(--radius, 8px)", border: "none", cursor: "pointer", fontFamily: "inherit",
+                        background: isAccepted ? "var(--green-bg)" : "var(--surface2)",
                         color: isAccepted ? "var(--green)" : "var(--muted)",
-                        transition: "all 0.12s",
+                        transition: "background 0.12s ease, color 0.12s ease",
                       }}
                     >
                       {isAccepted ? "Accepted" : "Accept"}
                     </button>
                     <button
+                      type="button"
                       onClick={() => onToggleReject(s.id)}
                       style={{
-                        flex: 1, padding: "6px 0", fontSize: 11, fontWeight: 600,
-                        borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit",
-                        background: isRejected ? "rgba(248,113,113,0.1)" : "var(--surface2)",
+                        flex: 1, padding: "7px 0", fontSize: 11, fontWeight: 600,
+                        borderRadius: "var(--radius, 8px)", border: "none", cursor: "pointer", fontFamily: "inherit",
+                        background: isRejected ? "var(--red-bg)" : "var(--surface2)",
                         color: isRejected ? "var(--red)" : "var(--muted)",
-                        transition: "all 0.12s",
+                        transition: "background 0.12s ease, color 0.12s ease",
                       }}
                     >
                       {isRejected ? "Skipped" : "Skip"}

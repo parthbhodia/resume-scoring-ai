@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { ResumeRecord, Criterion, RatingsData } from "./types";
+import { type ProfileFormState, EMPTY_PROFILE } from "./profileStorage";
 
 /* ── Analyze-history types ───────────────────────────────────── */
 // result is typed as Record<string,unknown> here because the DB stores raw
@@ -53,6 +54,7 @@ export async function upsertResume(
   texPath: string,
   pdfUrl: string | null,
   ratings: RatingsData | null,
+  jobDescription?: string | null,
 ): Promise<string> {
   const db = getSupabaseClient();
 
@@ -72,9 +74,10 @@ export async function upsertResume(
         pdf_url: pdfUrl,
         score: ratings?.match_score ?? null,
         verdict: ratings?.verdict ?? null,
+        job_description: jobDescription?.trim() || null,
         user_id,
       },
-      { onConflict: "folder" },
+      { onConflict: "user_id,folder" },
     )
     .select("id")
     .single();
@@ -166,4 +169,58 @@ export async function deleteAnalysis(id: string): Promise<void> {
     .delete()
     .eq("id", id);
   if (error) throw error;
+}
+
+/* ── User profile (Tailor defaults + EEO) ─────────────────────────────────── */
+
+function coerceUserProfilePayload(raw: unknown): ProfileFormState {
+  if (!raw || typeof raw !== "object") return { ...EMPTY_PROFILE };
+  return { ...EMPTY_PROFILE, ...(raw as Partial<ProfileFormState>) };
+}
+
+/** Load signed-in user’s profile row from `user_profiles`. Returns null if missing, logged out, or on error. */
+export async function fetchUserProfile(): Promise<ProfileFormState | null> {
+  try {
+    const db = getSupabaseClient();
+    const { data: { session } } = await db.auth.getSession();
+    if (!session?.user?.id) return null;
+
+    const { data, error } = await db
+      .from("user_profiles")
+      .select("profile")
+      .eq("user_id", session.user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[user_profiles] fetch:", error.message);
+      return null;
+    }
+    if (!data?.profile) return null;
+    return coerceUserProfilePayload(data.profile);
+  } catch (e) {
+    console.warn("[user_profiles] fetch:", e);
+    return null;
+  }
+}
+
+/** Upsert full profile JSON for the signed-in user. No-op when logged out. */
+export async function upsertUserProfile(profile: ProfileFormState): Promise<void> {
+  try {
+    const db = getSupabaseClient();
+    const { data: { session } } = await db.auth.getSession();
+    if (!session?.user?.id) return;
+
+    const { error } = await db.from("user_profiles").upsert(
+      {
+        user_id: session.user.id,
+        profile: profile as unknown as Record<string, unknown>,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
+
+    if (error) console.warn("[user_profiles] upsert:", error.message);
+  } catch (e) {
+    console.warn("[user_profiles] upsert:", e);
+  }
 }

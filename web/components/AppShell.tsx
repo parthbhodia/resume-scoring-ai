@@ -1,25 +1,13 @@
 "use client";
 
 /**
- * AppShell — persistent top navbar + collapsible left drawer for signed-in app.
+ * AppShell — persistent left sidebar (desktop / tablet) + mobile bottom tab bar.
+ * Design reference: docs/PRODUCT_DESIGN.md (Linear × Notion × career coach).
  *
- * Layout:
- *   ┌──────────────────────────────────────────────────────────────────┐
- *   │  [R] Resunova                                  ☀  [◧]  [avatar] │  ← sticky top bar
- *   ├──────────────────────────────────────────────────────────────────┤
- *   │                                                                  │
- *   │                        children                                  │
- *   │                        (the active view, full width)             │
- *   │                                                                  │
- *   └──────────────────────────────────────────────────────────────────┘
- *
- * Navigation drawer (hidden by default, opens on panel-icon click):
- *   Slides in from the left as an overlay, closes on backdrop click.
- *
- * Routing:
- *   ?view=builder|library|analyze|profile|jobs  (defaults: analyze)
- *   ?view=builder&flow=tailor|scratch|template (builder sub-modes)
- *   ?view=library&resume=<folder>               (specific resume)
+ * Routing (static export):
+ *   ?view=builder|library|analyze|profile|jobs  (default: analyze)
+ *   ?view=builder&flow=tailor|scratch|template
+ *   ?view=library&resume=<folder>
  */
 
 import { useEffect, useState, useCallback, type ReactNode } from "react";
@@ -28,8 +16,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
 import { CONTACT_EMAIL } from "@/lib/brand";
-import { LogoFull } from "./BrandLogo";
+import { LogoFull, LogoMark } from "./BrandLogo";
 import ResumeSidebar from "./ResumeSidebar";
+import { useAppBreakpoints } from "@/hooks/useAppBreakpoints";
 
 export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs";
 
@@ -62,42 +51,42 @@ function useTheme(): [Theme, () => void] {
 
 const VIEW_LABELS: Record<AppView, string> = {
   builder:  "Resume Builder",
-  library:  "My Resumes",
-  analyze:  "Analyze Resume",
+  library:  "Library",
+  analyze:  "Analyze",
   profile:  "Profile",
   jobs:     "Jobs",
 };
 
 const VIEW_ICONS: Record<AppView, ReactNode> = {
   builder: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
       <path d="M3 2h7l3 3v9H3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
       <path d="M10 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
       <path d="M5.5 8h5M5.5 10.5h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
     </svg>
   ),
   library: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
       <rect x="2.5" y="2.5" width="3.5" height="11" rx="1" stroke="currentColor" strokeWidth="1.4"/>
       <rect x="6.5" y="2.5" width="3.5" height="11" rx="1" stroke="currentColor" strokeWidth="1.4"/>
       <rect x="10.5" y="2.5" width="3" height="11" rx="1" stroke="currentColor" strokeWidth="1.4"/>
     </svg>
   ),
   analyze: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
       <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4"/>
       <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
       <path d="M5 7h4M7 5v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
     </svg>
   ),
   profile: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
       <circle cx="8" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
       <path d="M2.5 13.5c0-2.5 2.5-4.5 5.5-4.5s5.5 2 5.5 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
     </svg>
   ),
   jobs: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
       <rect x="2" y="4.5" width="12" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.4"/>
       <path d="M5.5 4.5V3.5a1 1 0 011-1h3a1 1 0 011 1v1" stroke="currentColor" strokeWidth="1.4"/>
       <path d="M2 8h12" stroke="currentColor" strokeWidth="1.3"/>
@@ -116,17 +105,19 @@ export function useAppView(): AppView {
   return valid.includes(raw as AppView) ? (raw as AppView) : "analyze";
 }
 
-const HEADER_H = 56;
-
 export default function AppShell({ children }: { children: ReactNode }) {
-  const router  = useRouter();
-  const active  = useAppView();
-  const [user, setUser]             = useState<User | null>(null);
-  const [menuOpen, setMenuOpen]     = useState(false);
-  const [theme, toggleTheme]        = useTheme();
-  const [navOpen, setNavOpen]       = useState(false);     // left nav drawer
-  const [historyOpen, setHistoryOpen] = useState(false);   // right history drawer
-  const [builderMenuOpen, setBuilderMenuOpen] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const active = useAppView();
+  const { isTablet } = useAppBreakpoints();
+  const flowRaw = (searchParams?.get("flow") || "tailor").toLowerCase();
+  const builderFlow: "tailor" | "template" | "scratch" =
+    flowRaw === "template" ? "template" : flowRaw === "scratch" ? "scratch" : "tailor";
+  const [user, setUser] = useState<User | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, toggleTheme] = useTheme();
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -135,7 +126,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Close user-menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     const onDoc = (e: MouseEvent) => {
@@ -146,30 +136,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, [menuOpen]);
 
   useEffect(() => {
-    if (!builderMenuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest("[data-builder-nav]")) setBuilderMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [builderMenuOpen]);
-
-  useEffect(() => {
-    setBuilderMenuOpen(false);
+    setBuilderOpen(active === "builder");
   }, [active]);
 
   const switchView = (next: AppView) => {
-    setBuilderMenuOpen(false);
     router.push(`/?view=${next}`);
-    setNavOpen(false);
     setHistoryOpen(false);
+    setBuilderOpen(false);
   };
 
   const goBuilderFlow = (flow: "tailor" | "scratch" | "template") => {
-    setBuilderMenuOpen(false);
     router.push(`/?view=builder&flow=${flow}`);
-    setNavOpen(false);
     setHistoryOpen(false);
+    setBuilderOpen(false);
   };
 
   const onSignOut = async () => {
@@ -178,422 +157,306 @@ export default function AppShell({ children }: { children: ReactNode }) {
   };
 
   const initial = (user?.email || "?").charAt(0).toUpperCase();
+  const builderActive = active === "builder";
+
+  const NavRow = ({
+    view,
+    onClick,
+    extraActive,
+  }: {
+    view: AppView;
+    onClick?: () => void;
+    extraActive?: boolean;
+  }) => {
+    const isActive = extraActive ?? (view === active);
+    return (
+      <button
+        type="button"
+        className="app-nav-row"
+        data-active={isActive}
+        onClick={onClick ?? (() => switchView(view))}
+      >
+        <span style={{ display: "inline-flex", flexShrink: 0, opacity: isActive ? 1 : 0.75 }}>{VIEW_ICONS[view]}</span>
+        <span className="app-sidebar-label" style={{ flex: 1, minWidth: 0 }}>
+          {VIEW_LABELS[view]}
+          {BADGES[view] && (
+            <span
+              style={{
+                marginLeft: 8,
+                fontSize: 9,
+                padding: "2px 7px",
+                borderRadius: "var(--radius-pill)",
+                background: "var(--surface3)",
+                color: "var(--dim)",
+                letterSpacing: 0.04,
+                textTransform: "uppercase",
+                fontWeight: 700,
+                verticalAlign: "middle",
+              }}
+            >
+              {BADGES[view]}
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  };
 
   return (
-    <div
-      style={{
-        height: "100dvh",
-        maxHeight: "100dvh",
-        minHeight: 0,
-        background: "var(--bg)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-    >
+    <div className="app-shell-root">
+      {/* ── Persistent sidebar (tablet + desktop) ───────────────── */}
+      <aside
+        className="app-shell-sidebar"
+        data-compact={isTablet ? "true" : "false"}
+        aria-label="Primary navigation"
+      >
+        <div style={{ padding: "18px 14px 14px", flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => switchView("analyze")}
+            aria-label="Resunova — go to Analyze"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              width: "100%",
+              justifyContent: isTablet ? "center" : "flex-start",
+            }}
+          >
+            {isTablet ? (
+              <LogoMark size={28} />
+            ) : (
+              <LogoFull markSize={26} textColor="var(--text)" />
+            )}
+          </button>
+        </div>
 
-      {/* ── Persistent top navbar ──────────────────────────── */}
-      <header style={{
-        position: "sticky", top: 0, zIndex: 50,
-        flexShrink: 0,
-        height: HEADER_H, padding: "0 20px",
-        display: "flex", alignItems: "center", gap: 4,
-        background: "var(--glass-bg)",
-        backdropFilter: "blur(24px) saturate(200%)",
-        WebkitBackdropFilter: "blur(24px) saturate(200%)",
-        borderBottom: "1px solid var(--border)",
-      }}>
+        <nav style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <NavRow view="analyze" />
 
-        {/* Logo — SVG mark + wordmark (shared with marketing + legal) */}
-        <button
-          type="button"
-          onClick={() => switchView("analyze")}
-          aria-label="Resunova — go to analyze résumé"
-          style={{
-            display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none", flexShrink: 0,
-            background: "none", border: "none", padding: 0, fontFamily: "inherit",
-          }}
-        >
-          <LogoFull markSize={26} textColor="var(--text)" />
-        </button>
-
-        {/* Divider */}
-        <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 8px", flexShrink: 0 }} />
-
-        {/* Inline nav links (hidden on mobile via .app-nav-links) */}
-        <nav className="app-nav-links" style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          {(["analyze", "library"] as AppView[]).map(v => {
-            const isActive = v === active;
-            return (
-              <button
-                key={v}
-                type="button"
-                onClick={() => switchView(v)}
-                style={{
-                  fontSize: 13, fontWeight: isActive ? 600 : 500,
-                  padding: "5px 11px", borderRadius: 7,
-                  border: "none", fontFamily: "inherit",
-                  background: isActive ? "var(--accent-bg)" : "transparent",
-                  color: isActive ? "var(--accent)" : "var(--muted)",
-                  cursor: "pointer",
-                  transition: "background var(--transition), color var(--transition)",
-                  letterSpacing: -0.1,
-                }}
-                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "var(--surface2)"; }}
-                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
-              >
-                {VIEW_LABELS[v]}
-              </button>
-            );
-          })}
-          <div data-builder-nav style={{ position: "relative" }}>
+          <div style={{ marginTop: 4 }}>
             <button
               type="button"
-              onClick={() => setBuilderMenuOpen(o => !o)}
-              aria-expanded={builderMenuOpen}
-              aria-haspopup="menu"
-              aria-label="Resume Builder — choose a workflow"
-              style={{
-                fontSize: 13, fontWeight: active === "builder" ? 600 : 500,
-                padding: "5px 9px 5px 11px", borderRadius: 7,
-                border: "none", fontFamily: "inherit",
-                background: active === "builder" ? "var(--accent-bg)" : "transparent",
-                color: active === "builder" ? "var(--accent)" : "var(--muted)",
-                cursor: "pointer",
-                transition: "background var(--transition), color var(--transition)",
-                letterSpacing: -0.1,
-                display: "inline-flex", alignItems: "center", gap: 4,
-              }}
-              onMouseEnter={e => { if (active !== "builder") e.currentTarget.style.background = "var(--surface2)"; }}
-              onMouseLeave={e => { if (active !== "builder") e.currentTarget.style.background = "transparent"; }}
+              className="app-nav-row"
+              data-active={builderActive}
+              onClick={() => setBuilderOpen(o => !o)}
+              aria-expanded={builderOpen}
+              style={{ marginBottom: builderOpen ? 4 : 0 }}
             >
-              {VIEW_LABELS.builder}
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden style={{ opacity: 0.75 }}>
-                <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+              <span style={{ display: "inline-flex", flexShrink: 0, opacity: builderActive ? 1 : 0.75 }}>{VIEW_ICONS.builder}</span>
+              <span className="app-sidebar-label" style={{ flex: 1, textAlign: "left", display: "flex", alignItems: "center", gap: 6 }}>
+                {VIEW_LABELS.builder}
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden style={{ opacity: 0.6, marginLeft: "auto" }}>
+                  <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </span>
             </button>
-            {builderMenuOpen && (
-              <div
-                role="menu"
-                style={{
-                  position: "absolute", top: "calc(100% + 6px)", left: 0,
-                  minWidth: 280, background: "var(--surface)",
-                  border: "1px solid var(--border)", borderRadius: 10,
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
-                  padding: 6, zIndex: 60,
-                }}
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => goBuilderFlow("tailor")}
-                  style={{
-                    display: "block", width: "100%", textAlign: "left",
-                    padding: "10px 12px", borderRadius: 8, border: "none", fontFamily: "inherit",
-                    background: "transparent", color: "var(--text)", cursor: "pointer",
-                    fontSize: 13, fontWeight: 500, letterSpacing: -0.15, lineHeight: 1.35,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-                >
-                  Tailor my résumé to a job description
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => goBuilderFlow("template")}
-                  style={{
-                    display: "block", width: "100%", textAlign: "left",
-                    padding: "10px 12px", borderRadius: 8, border: "none", fontFamily: "inherit",
-                    background: "transparent", color: "var(--text)", cursor: "pointer",
-                    fontSize: 13, fontWeight: 500, letterSpacing: -0.15, lineHeight: 1.35,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-                >
-                  Template &amp; PDF (layout first)
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => goBuilderFlow("scratch")}
-                  style={{
-                    display: "block", width: "100%", textAlign: "left",
-                    padding: "10px 12px", borderRadius: 8, border: "none", fontFamily: "inherit",
-                    background: "transparent", color: "var(--text)", cursor: "pointer",
-                    fontSize: 13, fontWeight: 500, letterSpacing: -0.15, lineHeight: 1.35,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-                >
-                  Build my résumé from a new template (from scratch)
-                </button>
+            {builderOpen && (
+              <div className="app-sidebar-sublabel" style={{ paddingLeft: isTablet ? 0 : 4, display: "flex", flexDirection: "column", gap: 3 }}>
+                {[
+                  { flow: "tailor" as const, label: "Tailor to a job" },
+                  { flow: "template" as const, label: "Template gallery" },
+                  { flow: "scratch" as const, label: "From scratch" },
+                ].map(({ flow, label }) => {
+                  const subActive = builderActive && builderFlow === flow;
+                  return (
+                    <button
+                      key={flow}
+                      type="button"
+                      className="app-nav-sublink"
+                      data-active={subActive}
+                      aria-current={subActive ? "page" : undefined}
+                      onClick={() => goBuilderFlow(flow)}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
+
+          <NavRow view="library" />
+          <NavRow view="jobs" />
+          <NavRow view="profile" />
         </nav>
 
-        {/* Spacer */}
-        <div style={{ flex: 1 }} />
-
-        {/* Theme toggle */}
-        <NavIconBtn
-          onClick={toggleTheme}
-          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-        >
-          {theme === "dark" ? (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5"/>
-              <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4"
-                stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-            </svg>
-          ) : (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z"
-                stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-            </svg>
-          )}
-        </NavIconBtn>
-
-        {/* History drawer toggle */}
-        <NavIconBtn
-          onClick={() => { setHistoryOpen(o => !o); setNavOpen(false); }}
-          title={historyOpen ? "Hide history" : "Resume history"}
-          active={historyOpen}
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
-            <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </NavIconBtn>
-
-        {/* Nav drawer toggle (hamburger) */}
-        <NavIconBtn
-          onClick={() => { setNavOpen(o => !o); setHistoryOpen(false); }}
-          title={navOpen ? "Hide menu" : "Menu"}
-          active={navOpen}
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-        </NavIconBtn>
-
-        {/* User avatar + dropdown */}
-        <div data-user-menu style={{ position: "relative" }}>
+        <div style={{ borderTop: "1px solid var(--border)", padding: "10px 10px 12px", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
           <button
-            onClick={() => setMenuOpen(o => !o)}
-            style={{
-              width: 32, height: 32, borderRadius: "50%",
-              background: menuOpen ? "var(--accent-bg)" : "var(--surface2)",
-              border: `1px solid ${menuOpen ? "var(--accent)" : "var(--border)"}`,
-              cursor: "pointer", fontFamily: "inherit",
-              color: menuOpen ? "var(--accent)" : "var(--text)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontWeight: 600, fontSize: 12.5, letterSpacing: -0.2,
-              transition: "background 0.12s, border-color 0.12s",
-            }}
-          >{initial}</button>
+            type="button"
+            className="app-nav-row"
+            data-active={historyOpen}
+            onClick={() => setHistoryOpen(o => !o)}
+            title="Resume history"
+            style={{ marginBottom: 0 }}
+          >
+            <span style={{ display: "inline-flex", flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
+                <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </span>
+            <span className="app-sidebar-label" style={{ flex: 1 }}>History</span>
+          </button>
 
-          {menuOpen && (
-            <div style={{
-              position: "absolute", top: "calc(100% + 8px)", right: 0,
-              minWidth: 180, background: "var(--surface)",
-              border: "1px solid var(--border)", borderRadius: 10,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
-              padding: 6, zIndex: 60,
-            }}>
-              <div style={{
-                padding: "7px 10px 6px", fontSize: 11,
-                color: "var(--dim)", letterSpacing: -0.1,
-                borderBottom: "1px solid var(--border)", marginBottom: 4,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }}>{user?.email || "…"}</div>
-              <MenuBtn onClick={() => { switchView("profile"); setMenuOpen(false); }}>
-                Profile settings
-              </MenuBtn>
-              <MenuBtn onClick={onSignOut} danger>
-                Sign out
-              </MenuBtn>
-            </div>
-          )}
-        </div>
-      </header>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              title={theme === "dark" ? "Light mode" : "Dark mode"}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: "var(--radius)",
+                border: "1px solid var(--border)",
+                background: "var(--surface2)",
+                color: "var(--text)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              {theme === "dark" ? (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </button>
 
-      {/* ── Main content ─────────────────────────────────── */}
-      <main style={{ minWidth: 0, flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {children}
-      </main>
-
-      {/* ── Footer — legal + contact (signed-in app) ─────── */}
-      <footer style={{
-        flexShrink: 0,
-        borderTop: "1px solid var(--border)",
-        padding: "12px 20px",
-        display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between",
-        gap: 10,
-        fontSize: 12, color: "var(--dim)",
-        background: "var(--surface)",
-      }}>
-        <span style={{ letterSpacing: -0.1 }}>© 2026 Resunova</span>
-        <nav style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
-          <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: "var(--muted)", textDecoration: "none" }}>{CONTACT_EMAIL}</a>
-          <Link href="/contact" prefetch={false} style={{ color: "var(--muted)", textDecoration: "none" }}>Contact</Link>
-          <Link href="/terms" prefetch={false} style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</Link>
-          <Link href="/privacy" prefetch={false} style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy</Link>
-        </nav>
-      </footer>
-
-      {/* ── Backdrop (shared — click to close whichever drawer is open) ── */}
-      <div
-        onClick={() => { setNavOpen(false); setHistoryOpen(false); }}
-        style={{
-          position: "fixed", inset: 0, top: HEADER_H, zIndex: 39,
-          background: "rgba(0,0,0,0.28)",
-          opacity: (navOpen || historyOpen) ? 1 : 0,
-          pointerEvents: (navOpen || historyOpen) ? "auto" : "none",
-          transition: "opacity 0.22s",
-        }}
-      />
-
-      {/* ── Navigation drawer (left) ──────────────────────── */}
-      <aside style={{
-        position: "fixed", top: HEADER_H, left: 0, bottom: 0, zIndex: 40,
-        width: 220,
-        background: "var(--surface)",
-        borderRight: "1px solid var(--border)",
-        display: "flex", flexDirection: "column",
-        transform: navOpen ? "translateX(0)" : "translateX(-100%)",
-        transition: "transform 0.22s cubic-bezier(0.4,0,0.2,1)",
-        boxShadow: navOpen ? "4px 0 24px rgba(0,0,0,0.18)" : "none",
-      }}>
-        {/* Nav items */}
-        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 1, overflowY: "auto" }}>
-          {(["analyze", "library", "builder", "profile", "jobs"] as AppView[]).map(v => {
-            if (v === "builder") {
-              const builderActive = active === "builder";
-              return (
-                <div key="builder-group" style={{ marginBottom: 4 }}>
-                  <div style={{
-                    fontSize: 10, fontWeight: 700, color: "var(--dim)",
-                    textTransform: "uppercase", letterSpacing: 0.6,
-                    padding: "6px 11px 4px",
-                  }}>
-                    Resume Builder
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => { goBuilderFlow("tailor"); setNavOpen(false); }}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      padding: "8px 11px 8px 18px", borderRadius: 8,
-                      background: builderActive ? "var(--accent-bg)" : "transparent",
-                      border: builderActive ? "1px solid rgba(0,113,227,0.2)" : "1px solid transparent",
-                      cursor: "pointer", fontFamily: "inherit",
-                      color: builderActive ? "var(--accent)" : "var(--muted)",
-                      fontSize: 12.5, fontWeight: 500, letterSpacing: -0.12,
-                      textAlign: "left", width: "100%",
-                      transition: "background var(--transition), color var(--transition), border-color var(--transition)",
-                    }}
-                    onMouseEnter={e => { if (!builderActive) { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; } }}
-                    onMouseLeave={e => { if (!builderActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; } }}
-                  >
-                    Tailor my résumé to a job description
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { goBuilderFlow("template"); setNavOpen(false); }}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      padding: "8px 11px 8px 18px", borderRadius: 8,
-                      background: "transparent",
-                      border: "1px solid transparent",
-                      cursor: "pointer", fontFamily: "inherit",
-                      color: "var(--muted)",
-                      fontSize: 12.5, fontWeight: 500, letterSpacing: -0.12,
-                      textAlign: "left", width: "100%",
-                      transition: "background var(--transition), color var(--transition)",
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
-                  >
-                    Template &amp; PDF (layout first)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { goBuilderFlow("scratch"); setNavOpen(false); }}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      padding: "8px 11px 8px 18px", borderRadius: 8,
-                      background: "transparent",
-                      border: "1px solid transparent",
-                      cursor: "pointer", fontFamily: "inherit",
-                      color: "var(--muted)",
-                      fontSize: 12.5, fontWeight: 500, letterSpacing: -0.12,
-                      textAlign: "left", width: "100%",
-                      transition: "background var(--transition), color var(--transition)",
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
-                  >
-                    Build from a new template (from scratch)
-                  </button>
-                </div>
-              );
-            }
-            const isActive = v === active;
-            const badge    = BADGES[v];
-            return (
+            <div data-user-menu style={{ position: "relative", flex: 1, minWidth: 0 }}>
               <button
-                key={v}
                 type="button"
-                onClick={() => { switchView(v); setNavOpen(false); }}
+                onClick={() => setMenuOpen(o => !o)}
                 style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "8px 11px", borderRadius: 8,
-                  background: isActive ? "var(--accent-bg)" : "transparent",
-                  border: isActive ? "1px solid rgba(0,113,227,0.2)" : "1px solid transparent",
-                  cursor: "pointer", fontFamily: "inherit",
-                  color: isActive ? "var(--accent)" : "var(--muted)",
-                  fontSize: 13, fontWeight: isActive ? 600 : 500, letterSpacing: -0.15,
-                  textAlign: "left", transition: "background var(--transition), color var(--transition), border-color var(--transition)",
+                  width: "100%",
+                  height: 40,
+                  borderRadius: "var(--radius)",
+                  border: `1px solid ${menuOpen ? "var(--accent)" : "var(--border)"}`,
+                  background: menuOpen ? "var(--accent-bg)" : "var(--surface2)",
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontWeight: 600,
+                  fontSize: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  padding: "0 8px",
                 }}
-                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; } }}
-                onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; } }}
               >
-                <span style={{ display: "inline-flex", color: isActive ? "var(--accent)" : "var(--dim)", flexShrink: 0, transition: "color var(--transition)" }}>
-                  {VIEW_ICONS[v]}
+                <span style={{ width: 26, height: 26, borderRadius: "50%", background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, flexShrink: 0 }}>
+                  {initial}
                 </span>
-                <span style={{ flex: 1 }}>{VIEW_LABELS[v]}</span>
-                {badge && (
-                  <span style={{
-                    fontSize: 9, padding: "2px 6px", borderRadius: 4,
-                    background: "var(--surface3)", color: "var(--dim)",
-                    letterSpacing: 0.5, textTransform: "uppercase", fontWeight: 700,
-                  }}>{badge}</span>
-                )}
+                <span className="app-sidebar-label" style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>
+                  {user?.email || "…"}
+                </span>
               </button>
-            );
-          })}
-        </nav>
+              {menuOpen && (
+                <div
+                  style={{
+                    position: "absolute",
+                    bottom: "calc(100% + 8px)",
+                    left: 0,
+                    right: 0,
+                    minWidth: 160,
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-lg)",
+                    boxShadow: "var(--shadow-sm)",
+                    padding: 6,
+                    zIndex: 80,
+                  }}
+                >
+                  <MenuBtn onClick={() => { switchView("profile"); setMenuOpen(false); }}>Profile settings</MenuBtn>
+                  <MenuBtn onClick={onSignOut} danger>Sign out</MenuBtn>
+                </div>
+              )}
+            </div>
+          </div>
 
-        {/* User section at bottom */}
-        <div style={{ borderTop: "1px solid var(--border)", padding: "12px 10px" }}>
-          <div style={{
-            fontSize: 11.5, color: "var(--muted)", fontWeight: 500,
-            letterSpacing: -0.1, padding: "4px 6px",
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          }}>{user?.email || "Loading…"}</div>
+          <nav className="app-sidebar-legal" style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11, paddingTop: 4 }}>
+            <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: "var(--dim)", textDecoration: "none" }}>{CONTACT_EMAIL}</a>
+            <Link href="/contact" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Contact</Link>
+            <Link href="/terms" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Terms</Link>
+            <Link href="/privacy" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Privacy</Link>
+          </nav>
+          <div className="app-sidebar-legal" style={{ fontSize: 10, color: "var(--dim)", letterSpacing: 0.02 }}>
+            © 2026 Resunova
+          </div>
         </div>
       </aside>
 
-      {/* ── History drawer (right) ───────────────────────── */}
-      <div style={{
-        position: "fixed", top: HEADER_H, right: 0, bottom: 0, zIndex: 40,
-        width: 260,
-        transform: historyOpen ? "translateX(0)" : "translateX(100%)",
-        transition: "transform 0.22s cubic-bezier(0.4,0,0.2,1)",
-        boxShadow: historyOpen ? "-4px 0 24px rgba(0,0,0,0.18)" : "none",
-      }}>
+      {/* ── Main column ───────────────────────────────────────── */}
+      <div className="app-shell-main">
+        <main style={{ flex: "1 1 0%", minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          {children}
+        </main>
+      </div>
+
+      {/* ── Mobile bottom navigation ──────────────────────────── */}
+      <nav className="app-bottom-nav" aria-label="Primary">
+        {(["analyze", "builder", "library", "jobs", "profile"] as AppView[]).map(v => {
+          const isAct = v === "builder" ? builderActive : v === active;
+          return (
+            <button
+              key={v}
+              type="button"
+              data-active={isAct}
+              onClick={() => {
+                if (v === "builder") goBuilderFlow("tailor");
+                else switchView(v);
+              }}
+            >
+              {VIEW_ICONS[v]}
+              <span style={{ maxWidth: 72, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {VIEW_LABELS[v]}
+              </span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* ── History drawer (right) ───────────────────────────── */}
+      <div
+        onClick={() => setHistoryOpen(false)}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 45,
+          background: "rgba(15,23,42,0.32)",
+          opacity: historyOpen ? 1 : 0,
+          pointerEvents: historyOpen ? "auto" : "none",
+          transition: "opacity 0.2s",
+        }}
+        aria-hidden={!historyOpen}
+      />
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 50,
+          width: "min(300px, 92vw)",
+          transform: historyOpen ? "translateX(0)" : "translateX(100%)",
+          transition: "transform 0.24s cubic-bezier(0.4,0,0.2,1)",
+          boxShadow: historyOpen ? "-8px 0 32px rgba(0,0,0,0.18)" : "none",
+          pointerEvents: historyOpen ? "auto" : "none",
+        }}
+      >
         <ResumeSidebar
           activeFolder={null}
           onSelect={folder => {
@@ -606,42 +469,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-/* ── Small icon button for the top nav ────────────────── */
-function NavIconBtn({
-  children, onClick, title, active = false,
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  title?: string;
-  active?: boolean;
-}) {
-  const [hover, setHover] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        width: 30, height: 30, borderRadius: 7, flexShrink: 0,
-        background: active
-          ? "var(--accent-bg)"
-          : hover ? "var(--surface2)" : "transparent",
-        border: active ? "1px solid rgba(0,113,227,0.25)" : "1px solid transparent",
-        cursor: "pointer",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        color: active ? "var(--accent)" : hover ? "var(--text)" : "var(--dim)",
-        transition: "background var(--transition), color var(--transition), border-color var(--transition)",
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-/* ── Dropdown menu item ────────────────────────────────── */
 function MenuBtn({
-  children, onClick, danger = false,
+  children,
+  onClick,
+  danger = false,
 }: {
   children: ReactNode;
   onClick: () => void;
@@ -650,16 +481,22 @@ function MenuBtn({
   const [hover, setHover] = useState(false);
   return (
     <button
+      type="button"
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        width: "100%", padding: "8px 10px", textAlign: "left",
-        fontSize: 12.5, color: danger ? "var(--red)" : "var(--text)",
+        width: "100%",
+        padding: "8px 10px",
+        textAlign: "left",
+        fontSize: 12.5,
+        color: danger ? "var(--red)" : "var(--text)",
         letterSpacing: -0.1,
         background: hover ? "var(--surface2)" : "transparent",
-        border: "none", borderRadius: 6,
-        cursor: "pointer", fontFamily: "inherit",
+        border: "none",
+        borderRadius: "var(--radius)",
+        cursor: "pointer",
+        fontFamily: "inherit",
         transition: "background 0.1s",
       }}
     >

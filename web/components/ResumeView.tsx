@@ -1,413 +1,382 @@
 "use client";
 
 /**
- * ResumeView — full-page detail view for a single saved resume.
- *
- * Loads the parsed bullet tree from /api/resume/{folder} and surfaces
- * everything the user might want to do with an existing resume:
- *   - Edit bullets / contact / sections (uses the existing ResumeEditor)
- *   - View ATS readiness (uses AtsPanel)
- *   - Download PDF / share / use as base for a new generation
- *
- * Lighter than the main ResumeBuilder because there's no "generation" flow
- * — we're operating on something already produced. JD context is missing,
- * so the ATS check runs against an empty JD (structural-only score) unless
- * the user uploads / pastes one.
+ * ResumeView — Library detail: read-only metadata + PDF (product mockup).
+ * No bullet editor, ATS, or analysis tabs — PDF opens beside metadata (iframe).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
-import type { ParsedResume, ParsedBullet, ResumeRecord } from "@/lib/types";
-import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
+import type { ResumeRecord } from "@/lib/types";
+import { apiUrl } from "@/lib/utils";
 import { fetchResumes, getSupabaseClient } from "@/lib/supabase";
-
-import ResumeEditor from "./ResumeEditor";
-import AtsPanel, { type AtsResult } from "./AtsPanel";
 import ShareButton from "./ShareButton";
+import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
 
-type Tab = "edit" | "ats" | "analysis";
-
-interface ResumeAnalysisResult {
-  overall: { score: number; summary: string };
-  sections: Array<{ name: string; score: number; summary: string }>;
-  tips: Array<{ severity: "urgent" | "critical" | "optional"; title: string; detail: string }>;
-  counts: { urgent: number; critical: number; optional: number };
+function scoreBand(score: number): "strong" | "mid" | "weak" {
+  if (score >= 70) return "strong";
+  if (score >= 55) return "mid";
+  return "weak";
 }
 
 export default function ResumeView({ folder }: { folder: string }) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-
-  const [meta,    setMeta]    = useState<ResumeRecord | null>(null);
-  const [tree,    setTree]    = useState<ParsedResume | null>(null);
+  const [meta, setMeta] = useState<ResumeRecord | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
-  const [saving,  setSaving]  = useState(false);
-  const [saveErr, setSaveErr] = useState<string | null>(null);
-  const [pdfUrl,  setPdfUrl]  = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
-  const [activeTab,  setActiveTab]  = useState<Tab>("edit");
-  const [atsJd,      setAtsJd]      = useState("");
-  const [atsResult,  setAtsResult]  = useState<AtsResult | null>(null);
-  const [atsLoading, setAtsLoading] = useState(false);
-  const [atsError,   setAtsError]   = useState<string | null>(null);
-  const [doctorIssues, setDoctorIssues] = useState<Record<string, { id: string; severity: "warn" | "info"; msg: string }[]>>({});
-  const [analysis, setAnalysis] = useState<ResumeAnalysisResult | null>(null);
-  const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [analysisAt, setAnalysisAt] = useState<number | null>(null);
-
-  // Pull current user
   useEffect(() => {
     const supabase = getSupabaseClient();
     supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
   }, []);
 
-  // Load resume metadata (company, role, score, pdf_url) AND the parsed tree.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true); setError(null);
-    setTree(null); setMeta(null); setAtsResult(null); setDoctorIssues({});
-    setAnalysis(null); setAnalysisError(null); setAnalysisAt(null);
+    setLoading(true);
+    setError(null);
+    setMeta(null);
+    setPdfUrl(null);
 
-    (async () => {
-      try {
-        // Metadata for the header (parallel — small DB read)
-        const allMeta = await fetchResumes().catch(() => [] as ResumeRecord[]);
-        const m = allMeta.find(r => r.folder === folder) ?? null;
+    fetchResumes()
+      .then((rows) => {
         if (cancelled) return;
+        const m = rows.find((r) => r.folder === folder) ?? null;
         setMeta(m);
         setPdfUrl(m?.pdf_url ?? null);
-
-        // Parsed tree
-        const uid = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
-        const resp = await fetch(apiUrl(`/api/resume/${encodeURIComponent(folder)}${uid}`));
-        const json = await parseJsonOrThrow<ParsedResume & { error?: string }>(resp);
-        if (!resp.ok) throw new Error(json.error ?? "Could not load resume.");
-        if (cancelled) return;
-        setTree(json);
-        runDoctor(json);
-      } catch (e: unknown) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      } finally {
+        if (!m) setError("This résumé wasn’t found in your library.");
+      })
+      .catch(() => {
+        if (!cancelled) setError("Could not load your library.");
+      })
+      .finally(() => {
         if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folder, user?.id]);
-
-  const runDoctor = useCallback(async (parsed: ParsedResume) => {
-    try {
-      const resp = await fetch(apiUrl("/api/doctor-check"), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parsed }),
       });
-      const json = await parseJsonOrThrow<{ issues?: Record<string, { id: string; severity: "warn" | "info"; msg: string }[]> }>(resp);
-      if (resp.ok && json.issues) setDoctorIssues(json.issues);
-    } catch { /* doctor is best-effort */ }
-  }, []);
 
-  const onSave = useCallback(async (next: ParsedResume) => {
-    setSaving(true); setSaveErr(null);
-    try {
-      const resp = await fetch(apiUrl(`/api/resume/${encodeURIComponent(folder)}`), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: user?.id ?? "local", parsed: next }),
-      });
-      const json = await parseJsonOrThrow<{ error?: string; pdf_url?: string }>(resp);
-      if (!resp.ok) throw new Error(json.error ?? "Save failed.");
-      setTree(next);
-      if (json.pdf_url) setPdfUrl(json.pdf_url);
-      runDoctor(next);
-      // Stale ATS — clear so the next visit re-runs.
-      setAtsResult(null);
-    } catch (e: unknown) {
-      setSaveErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [folder, user?.id, runDoctor]);
-
-  const onAIEdit = useCallback(async (b: ParsedBullet, instruction: string): Promise<string> => {
-    const resp = await fetch(apiUrl("/api/ai-edit-bullet"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bullet_text: b.text, instruction, jd: atsJd.slice(0, 1500) }),
-    });
-    const json = await parseJsonOrThrow<{ error?: string; text?: string }>(resp);
-    if (!resp.ok || !json.text) throw new Error(json.error ?? "AI rewrite failed");
-    return json.text;
-  }, [atsJd]);
-
-  const runAts = useCallback(async () => {
-    setAtsLoading(true); setAtsError(null);
-    try {
-      const resp = await fetch(apiUrl(`/api/ats-check/${encodeURIComponent(folder)}`), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jd: atsJd.slice(0, 8000), user_id: user?.id ?? "local" }),
-      });
-      const json = await parseJsonOrThrow<AtsResult & { error?: string }>(resp);
-      if (!resp.ok) throw new Error(json.error ?? "ATS check failed.");
-      setAtsResult(json);
-    } catch (e: unknown) {
-      setAtsError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAtsLoading(false);
-    }
-  }, [folder, user?.id, atsJd]);
-
-  const runAnalysis = useCallback(async () => {
-    if (!tree) return;
-    setAnalysisLoading(true); setAnalysisError(null);
-    try {
-      const resp = await fetch(apiUrl(`/api/resume-analysis/${encodeURIComponent(folder)}`), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jd: atsJd.slice(0, 8000), user_id: user?.id ?? "local", parsed: tree }),
-      });
-      const json = await parseJsonOrThrow<ResumeAnalysisResult & { error?: string }>(resp);
-      if (!resp.ok) throw new Error(json.error ?? "Resume analysis failed.");
-      setAnalysis(json);
-      setAnalysisAt(Date.now());
-      setActiveTab("analysis");
-    } catch (e: unknown) {
-      setAnalysisError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAnalysisLoading(false);
-    }
-  }, [tree, folder, atsJd, user?.id]);
+    return () => {
+      cancelled = true;
+    };
+  }, [folder]);
 
   const useAsBase = () => {
+    if (meta) stashTailorPrefillFromLibrary(meta);
     router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}`);
   };
 
+  const pdfSrc = pdfUrl
+    ? pdfUrl.startsWith("http")
+      ? pdfUrl
+      : apiUrl(pdfUrl.startsWith("/") ? pdfUrl : `/${pdfUrl}`)
+    : null;
+
+  const dateStr = meta?.created_at
+    ? new Date(meta.created_at).toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
+
+  const sc = meta?.score;
+
   return (
-    <div style={{ maxWidth: 1280, margin: "0 auto", padding: "24px 28px 48px" }}>
+    <div
+      className="rv-library-detail"
+      style={{
+        flex: "1 1 0%",
+        width: "100%",
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        background: "var(--bg)",
+      }}
+    >
+      <style>{`
+        .rv-grid {
+          flex: 1 1 0%;
+          min-height: 0;
+          display: grid;
+          grid-template-columns: minmax(280px, 380px) 1fr;
+          gap: 0;
+          align-items: stretch;
+        }
+        @media (max-width: 900px) {
+          .rv-grid { grid-template-columns: 1fr; }
+          .rv-pdf-wrap { min-height: 62vh !important; border-left: none !important; border-top: 1px solid var(--border); }
+        }
+      `}</style>
+
       {/* Top bar */}
-      <div style={{ marginBottom: 18, display: "flex", alignItems: "center", gap: 14 }}>
+      <div
+        style={{
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          padding: "14px 20px",
+          borderBottom: "1px solid var(--border)",
+          background: "var(--surface)",
+        }}
+      >
         <button
+          type="button"
           onClick={() => router.push("/?view=library")}
           style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            fontSize: 12, padding: "7px 12px",
-            background: "var(--surface2)", border: "1px solid var(--border)",
-            borderRadius: 8, color: "var(--text)", cursor: "pointer", fontFamily: "inherit",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            padding: "7px 12px",
+            background: "var(--surface2)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius, 8px)",
+            color: "var(--text)",
+            cursor: "pointer",
+            fontFamily: "inherit",
           }}
         >
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-            <path d="M7 2L3 5.5L7 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
+            <path d="M7 2L3 5.5L7 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Back
+          Library
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 600 }}>
-            Resume
-          </div>
-          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5, color: "var(--text)", marginTop: 2 }}>
-            {meta?.company ?? "—"}{meta?.role ? <span style={{ color: "var(--dim)", fontWeight: 400 }}> · {meta.role}</span> : null}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-          <button
-            onClick={runAnalysis}
-            disabled={analysisLoading || !tree}
+          <div
             style={{
-              fontSize: 12, padding: "8px 14px",
-              background: "var(--accent)", border: "none",
-              borderRadius: 8, color: "#fff", cursor: analysisLoading ? "wait" : "pointer", fontFamily: "inherit",
-              fontWeight: 600, opacity: analysisLoading || !tree ? 0.65 : 1,
-            }}
-          >{analysisLoading ? "Analyzing..." : "Analyze resume"}</button>
-          <button
-            onClick={useAsBase}
-            title="Start a new generation using this resume as the base"
-            style={{
-              fontSize: 12, padding: "8px 14px",
-              background: "var(--surface2)", border: "1px solid var(--border)",
-              borderRadius: 8, color: "var(--text)", cursor: "pointer", fontFamily: "inherit",
-              fontWeight: 500, letterSpacing: -0.1,
-            }}
-          >Use as base</button>
-          {meta?.folder && <ShareButton folder={meta.folder} pdfUrl={pdfUrl} userId={user?.id ?? null} />}
-          {pdfUrl && (
-            <a
-              href={pdfUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                fontSize: 12, padding: "8px 14px",
-                background: "var(--accent)", color: "#fff",
-                borderRadius: 8, textDecoration: "none", letterSpacing: -0.1,
-                fontWeight: 600,
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
-                <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M2 11h9" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
-              Download PDF
-            </a>
-          )}
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div style={{
-        display: "flex", gap: 2, marginBottom: 18,
-        background: "var(--surface2)", borderRadius: 9, padding: 3,
-        width: "fit-content",
-      }}>
-        {(["edit", "ats", "analysis"] as Tab[]).map(t => (
-          <button
-            key={t}
-            onClick={() => {
-              setActiveTab(t);
-              if (t === "ats" && !atsResult && !atsLoading) runAts();
-            }}
-            style={{
-              padding: "7px 18px", fontSize: 12,
-              fontWeight: activeTab === t ? 600 : 400,
-              background: activeTab === t ? "var(--surface)" : "transparent",
-              border: "none", borderRadius: 7,
-              color: activeTab === t ? "var(--text)" : "var(--dim)",
-              cursor: "pointer", fontFamily: "inherit",
-              letterSpacing: -0.2,
-              boxShadow: activeTab === t ? "0 1px 3px rgba(0,0,0,0.2)" : "none",
+              fontSize: 10,
+              color: "var(--dim)",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              fontWeight: 700,
             }}
           >
-            {t === "edit"
-              ? "Edit & Preview"
-              : t === "ats"
-                ? (atsResult ? `ATS  ${atsResult.score}` : "ATS check")
-                : (analysis ? `Analysis  ${analysis.overall.score}/10` : "Analysis")}
-          </button>
-        ))}
+            Saved résumé
+          </div>
+          <div
+            style={{
+              fontSize: 17,
+              fontWeight: 700,
+              letterSpacing: "-0.03em",
+              color: "var(--text)",
+              marginTop: 2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {meta?.company ?? (loading ? "…" : "—")}
+            {meta?.role ? (
+              <span style={{ color: "var(--muted)", fontWeight: 500 }}> · {meta.role}</span>
+            ) : null}
+          </div>
+        </div>
       </div>
 
-      {/* Body */}
       {loading && (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
-          Loading resume…
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--dim)" }}>
+          <div className="skeleton" style={{ width: "min(400px, 90%)", height: 200, borderRadius: "var(--radius-lg)" }} />
         </div>
       )}
+
       {error && !loading && (
-        <div style={{ padding: 24, color: "var(--red)", fontSize: 13 }}>
-          {error}
-        </div>
+        <div style={{ padding: 32, textAlign: "center", color: "var(--red)", fontSize: 14 }}>{error}</div>
       )}
 
-      {!loading && !error && tree && activeTab === "edit" && (
-        <ResumeEditor
-          initial={tree}
-          folder={folder}
-          saving={saving}
-          saveError={saveErr}
-          onSave={onSave}
-          onAIEdit={onAIEdit}
-          doctorIssues={doctorIssues}
-          pdfUrl={pdfUrl}
-        />
-      )}
+      {!loading && !error && meta && (
+        <div className="rv-grid" style={{ flex: "1 1 0%", minHeight: 0, overflow: "hidden" }}>
+          {/* Left: metadata (mockup) */}
+          <aside
+            style={{
+              padding: "24px 22px 28px",
+              borderRight: "1px solid var(--border)",
+              background: "var(--surface)",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            {dateStr && (
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, letterSpacing: "-0.02em" }}>
+                Generated{" "}
+                <time dateTime={meta.created_at} style={{ color: "var(--text)", fontWeight: 600 }}>
+                  {dateStr}
+                </time>
+              </div>
+            )}
 
-      {!loading && !error && tree && activeTab === "ats" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{
-            background: "var(--surface)", border: "1px solid var(--border)",
-            borderRadius: 12, padding: 14,
-          }}>
-            <div style={{ fontSize: 11, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>
-              Job description (optional)
-            </div>
-            <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8, letterSpacing: -0.1 }}>
-              Paste the JD to get keyword-coverage analysis on top of the structural ATS checks.
-            </div>
-            <textarea
-              value={atsJd}
-              onChange={e => setAtsJd(e.target.value)}
-              placeholder="Paste the job description here to score keyword coverage…"
-              rows={4}
-              style={{
-                width: "100%", fontSize: 12, padding: "8px 10px",
-                background: "var(--surface2)", border: "1px solid var(--border)",
-                borderRadius: 7, color: "var(--text)", fontFamily: "inherit",
-                resize: "vertical",
-              }}
-            />
-            <button
-              onClick={runAts}
-              disabled={atsLoading}
-              style={{
-                marginTop: 8, fontSize: 12, padding: "7px 14px",
-                background: "var(--accent)", color: "#fff",
-                border: "none", borderRadius: 7,
-                cursor: atsLoading ? "wait" : "pointer", fontFamily: "inherit",
-                fontWeight: 600, letterSpacing: -0.1,
-              }}
-            >{atsLoading ? "Re-checking…" : atsResult ? "Re-run ATS check" : "Run ATS check"}</button>
-          </div>
-
-          {atsLoading && (
-            <div style={{ padding: 28, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
-              Running ATS check…
-            </div>
-          )}
-          {atsError && !atsLoading && (
-            <div style={{ padding: 16, color: "var(--red)", fontSize: 12 }}>{atsError}</div>
-          )}
-          {atsResult && !atsLoading && (
-            <AtsPanel result={atsResult} rechecking={atsLoading} onRecheck={runAts} />
-          )}
-        </div>
-      )}
-
-      {!loading && !error && tree && activeTab === "analysis" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {!analysis && !analysisLoading && !analysisError && (
-            <div style={{ padding: 18, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", color: "var(--dim)", fontSize: 13 }}>
-              Click <strong style={{ color: "var(--text)" }}>Analyze resume</strong> to generate section scores and prioritized fixes.
-            </div>
-          )}
-          {analysisError && (
-            <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 10, color: "var(--red)", fontSize: 12, background: "var(--surface)" }}>
-              Couldn&apos;t analyze resume: {analysisError}
-            </div>
-          )}
-          {analysis && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)" }}>
-                <div style={{ fontSize: 11, color: "var(--dim)", textTransform: "uppercase", marginBottom: 5 }}>Overall</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>{analysis.overall.score}/10</div>
-                <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>{analysis.overall.summary}</div>
-                <div style={{ marginTop: 8, fontSize: 11, color: "var(--dim)" }}>
-                  {analysis.counts.urgent} urgent · {analysis.counts.critical} critical · {analysis.counts.optional} optional fixes
-                  {analysisAt ? ` · analyzed ${new Date(analysisAt).toLocaleTimeString()}` : ""}
+            {sc != null && (
+              <div style={{ marginBottom: 20 }}>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "var(--dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 8,
+                  }}
+                >
+                  Match score
+                </div>
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "baseline",
+                    gap: 6,
+                    padding: "10px 14px",
+                    borderRadius: "var(--radius-lg, 12px)",
+                    background: "var(--surface2)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 28,
+                      fontWeight: 800,
+                      letterSpacing: "-0.04em",
+                      color:
+                        scoreBand(sc) === "strong"
+                          ? "var(--green)"
+                          : scoreBand(sc) === "mid"
+                            ? "var(--amber)"
+                            : "var(--red)",
+                    }}
+                  >
+                    {sc}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--muted)" }}>/100</span>
                 </div>
               </div>
+            )}
 
-              {analysis.sections.map(s => (
-                <div key={s.name} style={{ padding: 14, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                    <div style={{ fontSize: 16, fontWeight: 650, color: "var(--text)" }}>{s.name}</div>
-                    <div style={{ fontSize: 12, color: "var(--accent)", fontWeight: 700 }}>{s.score}/10</div>
-                  </div>
-                  <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>{s.summary}</div>
+            {meta.verdict && (
+              <div style={{ marginBottom: 20 }}>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "var(--dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 8,
+                  }}
+                >
+                  Verdict
                 </div>
-              ))}
+                <p style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.55, margin: 0 }}>{meta.verdict}</p>
+              </div>
+            )}
 
-              <div style={{ padding: 14, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)" }}>
-                <div style={{ fontSize: 12, color: "var(--dim)", textTransform: "uppercase", marginBottom: 8 }}>Top fixes</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {analysis.tips.map((t, i) => (
-                    <div key={`${t.title}-${i}`} style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>
-                      <strong>{i + 1}. {t.title}</strong> - {t.detail}
-                    </div>
-                  ))}
-                </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={useAsBase}
+                style={{
+                  width: "100%",
+                  padding: "11px 16px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  letterSpacing: "-0.02em",
+                  borderRadius: "var(--radius-lg, 12px)",
+                  border: "none",
+                  background: "var(--accent)",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Tailor again
+              </button>
+              {pdfSrc && (
+                <a
+                  href={pdfSrc}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    width: "100%",
+                    padding: "10px 16px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    borderRadius: "var(--radius-lg, 12px)",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface2)",
+                    color: "var(--text)",
+                    textDecoration: "none",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 13 13" fill="none" aria-hidden>
+                    <path
+                      d="M6.5 2v7M3.5 6.5l3 3 3-3"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path d="M2 11h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                  </svg>
+                  Download PDF
+                </a>
+              )}
+              <div style={{ display: "flex", justifyContent: "center", paddingTop: 4 }}>
+                <ShareButton folder={meta.folder} pdfUrl={pdfUrl} userId={user?.id ?? null} />
               </div>
             </div>
-          )}
+          </aside>
+
+          {/* Right: PDF (sidebar / main preview per mockup) */}
+          <section
+            className="rv-pdf-wrap"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              background: "var(--surface2)",
+              display: "flex",
+              flexDirection: "column",
+              position: "relative",
+            }}
+          >
+            {pdfSrc ? (
+              <iframe
+                title={`PDF — ${meta.company}`}
+                src={pdfSrc}
+                style={{
+                  flex: 1,
+                  width: "100%",
+                  minHeight: "min(720px, 85vh)",
+                  border: "none",
+                  background: "#525659",
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 40,
+                  textAlign: "center",
+                  color: "var(--muted)",
+                  gap: 12,
+                }}
+              >
+                <div style={{ fontSize: 40, opacity: 0.5 }} aria-hidden>📄</div>
+                <p style={{ fontSize: 14, lineHeight: 1.55, maxWidth: 320, margin: 0 }}>
+                  No PDF is stored for this version. Use <strong style={{ color: "var(--text)" }}>Tailor again</strong> to
+                  regenerate from the builder.
+                </p>
+              </div>
+            )}
+          </section>
         </div>
       )}
     </div>

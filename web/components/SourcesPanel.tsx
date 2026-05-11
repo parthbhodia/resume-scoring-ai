@@ -1,16 +1,20 @@
 "use client";
 import type { Source } from "@/lib/types";
 
-interface Props { sources: Source[] }
+interface Props {
+  sources: Source[];
+  /** When nested inside a parent card — no extra inset surface or top margin */
+  embedded?: boolean;
+}
 
-export default function SourcesPanel({ sources }: Props) {
+export default function SourcesPanel({ sources, embedded }: Props) {
   if (!sources.length) return null;
   return (
     <div style={{
-      background: "var(--surface2)",
+      background: embedded ? "transparent" : "var(--surface2)",
       borderRadius: "var(--radius)",
-      padding: "12px 14px",
-      marginTop: 14,
+      padding: embedded ? 0 : "12px 14px",
+      marginTop: embedded ? 0 : 14,
     }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: "var(--dim)", letterSpacing: -0.1, marginBottom: 10 }}>
         Sites visited ({sources.length})

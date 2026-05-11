@@ -2239,13 +2239,26 @@ def _extract_grounding_live(candidates) -> Tuple[List[str], List[Dict]]:
         if not gm:
             continue
         for q in (getattr(gm, "web_search_queries", None) or []):
-            if isinstance(q, str) and q.strip():
-                queries.append(q.strip())
+            qs = q.strip() if isinstance(q, str) else str(q).strip()
+            if qs:
+                queries.append(qs)
         for chunk in (getattr(gm, "grounding_chunks", None) or []):
             web = getattr(chunk, "web", None)
             if web and getattr(web, "uri", None):
                 sources.append({"title": getattr(web, "title", web.uri), "url": web.uri})
     return queries, sources
+
+
+def _grounding_signal_score(candidates) -> int:
+    """How much Google Search grounding is attached to this candidate list (pick richest chunk in stream)."""
+    n = 0
+    for cand in candidates or []:
+        gm = getattr(cand, "grounding_metadata", None)
+        if not gm:
+            continue
+        n += len(getattr(gm, "web_search_queries", None) or [])
+        n += len(getattr(gm, "grounding_chunks", None) or [])
+    return n
 
 
 def _compute_diff(base_body: str, new_body: str) -> tuple:
@@ -2387,6 +2400,8 @@ def stream_latex_resume(
             logger.info(f"Starting stream  |  {_m}  |  provider={provider}")
             t1 = time.time()
             try:
+                best_grounding_candidates = None
+                best_grounding_score = -1
                 if _is_grok(_m):
                     # xAI Responses API path with web_search tool. _stream_grok
                     # yields typed event dicts: text deltas, search queries, and
@@ -2425,6 +2440,10 @@ def stream_latex_resume(
                     for chunk in stream:
                         if getattr(chunk, "candidates", None):
                             last_candidates = chunk.candidates
+                            sc = _grounding_signal_score(chunk.candidates)
+                            if sc > best_grounding_score:
+                                best_grounding_score = sc
+                                best_grounding_candidates = chunk.candidates
                             # Surface Google Search activity live as Gemini
                             # issues queries / discovers sources mid-generation.
                             new_q, new_s = _extract_grounding_live(chunk.candidates)
@@ -2442,6 +2461,28 @@ def stream_latex_resume(
                         if text:
                             latex_body += text
                             yield {"event": "chunk", "text": text}
+
+                    # Gemini often attaches the richest grounding_metadata only on
+                    # a late chunk; earlier chunks may have empty metadata. Flush
+                    # from the chunk we saw with the most queries + citation URLs
+                    # so the UI still gets search_query / search_source SSE events.
+                    _flush_cands = (
+                        best_grounding_candidates
+                        if best_grounding_score > 0
+                        else (last_candidates if last_candidates else None)
+                    )
+                    if _flush_cands:
+                        fq, fs = _extract_grounding_live(_flush_cands)
+                        for q in fq:
+                            if q not in seen_queries:
+                                seen_queries.add(q)
+                                logger.info(f"🔍 Google search (post-stream)  |  {q}")
+                                yield {"event": "search_query", "query": q}
+                        for s in fs:
+                            u = s.get("url")
+                            if u and u not in seen_source_urls:
+                                seen_source_urls.add(u)
+                                yield {"event": "search_source", "title": s.get("title"), "url": u}
 
                 if latex_body:
                     break  # got real content — exit fallback loop
