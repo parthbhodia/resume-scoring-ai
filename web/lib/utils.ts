@@ -10,8 +10,9 @@ export function scoreClass(score: number): "s-high" | "s-mid" | "s-low" {
   return "s-low";
 }
 
+/** JD requirement weight — avoid red/error tones for “High” (that reads as a bad score). */
 export function weightColor(w: string): { bg: string; color: string } {
-  if (w === "High")   return { bg: "var(--red-bg)",    color: "var(--orange)" };
+  if (w === "High")   return { bg: "rgba(245, 158, 11, 0.14)", color: "var(--orange)" };
   if (w === "Medium") return { bg: "var(--yellow-bg)", color: "var(--yellow)" };
   return                     { bg: "var(--surface3)",  color: "var(--muted)"  };
 }
