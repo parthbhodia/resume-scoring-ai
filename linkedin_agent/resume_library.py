@@ -254,8 +254,9 @@ _LATEX_PREAMBLE = r"""%-------------------------
 
 \usepackage{verbatim}
 \usepackage{titlesec}
-\usepackage{color}
+\usepackage[dvipsnames]{xcolor}
 \usepackage{enumitem}
+\usepackage{multicol}
 \usepackage{fancyhdr}
 \usepackage{tabularx}
 \usepackage{latexsym}
@@ -322,6 +323,49 @@ _LATEX_PREAMBLE = r"""%-------------------------
 
 \newcommand{\resumeHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
 \newcommand{\resumeHeadingListEnd}{\end{itemize}}
+
+% ── Malta CV-style macros (accent color: flame orange on dark) ───────────────
+\definecolor{mcvAccent}{HTML}{E25822}
+\definecolor{mcvMuted}{HTML}{555555}
+\setlength\multicolsep{0pt}
+
+% \cvsection{Title} — colored bold heading + rule
+\newcommand{\cvsection}[1]{%
+  \vspace{8pt}%
+  {\color{mcvAccent}\large\bfseries\scshape #1}%
+  \vspace{2pt}\\*%
+  {\color{mcvAccent}\hrule height 0.6pt}%
+  \vspace{4pt}%
+}
+
+% \cvexperience{Role}{Company}{Date}{Location}{Keywords}
+\newcommand{\cvexperience}[5]{%
+  \vspace{2pt}%
+  \begin{tabular*}{\textwidth}[t]{l@{\extracolsep{\fill}}r}%
+    \textbf{#1} {\color{mcvMuted}\textit{at}} \textbf{#2} & {\color{mcvMuted}\small #3}\\%
+    {\color{mcvMuted}\small #4} & \\%
+  \end{tabular*}%
+  \ifx&#5&\else{\vspace{1pt}\textit{\color{mcvMuted}\small Tags: #5}\vspace{2pt}}\fi%
+}
+
+% \cvuniversity{Degree}{Institution}{Date}{Location}
+\newcommand{\cvuniversity}[4]{%
+  \vspace{2pt}%
+  \begin{tabular*}{\textwidth}[t]{l@{\extracolsep{\fill}}r}%
+    \textbf{#1} & {\color{mcvMuted}\small #3}\\%
+    \textit{\small #2} & {\color{mcvMuted}\small #4}\\%
+  \end{tabular*}%
+  \vspace{2pt}%
+}
+
+% \cvlistitem{Name}{Detail} — used inside multicols or plain itemize
+\newcommand{\cvlistitem}[2]{\item{\small\textbf{#1}\ifx&#2&\else{ --- \textit{#2}}\fi}}
+\newcommand{\cvliststart}{\begin{itemize}[leftmargin=*, nosep, topsep=0pt]}
+\newcommand{\cvlistend}{\end{itemize}}
+
+% \bio{text} — italic summary paragraph
+\newcommand{\bio}[1]{\vspace{4pt}\textit{\small #1}\vspace{6pt}}
+% ─────────────────────────────────────────────────────────────────────────────
 
 \begin{document}
 
