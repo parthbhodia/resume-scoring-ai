@@ -127,6 +127,11 @@ export default function ResumePublicLinkSettings({
       <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 6, letterSpacing: -0.1 }}>
         Customize your résumé link
       </label>
+      <div style={{ fontSize: 10, color: "var(--dim)", marginBottom: 6, lineHeight: 1.4 }}>
+        Path <code style={{ fontSize: 10, color: "var(--text)" }}>/r/</code> then query{" "}
+        <code style={{ fontSize: 10, color: "var(--text)" }}>?id=</code>
+        <span style={{ color: "var(--muted)" }}> (the question mark starts the query — not part of your slug)</span>
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch", gap: 0, marginBottom: 8 }}>
         <span
           style={{
@@ -143,9 +148,26 @@ export default function ResumePublicLinkSettings({
             maxWidth: "100%",
             overflow: "hidden",
             textOverflow: "ellipsis",
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+            letterSpacing: -0.2,
           }}
+          title="Public share URL prefix"
         >
-          {originHost ? `${originHost}/r/?id=` : "/r/?id="}
+          <span>{originHost ? `${originHost}/r/` : "/r/"}</span>
+          <span
+            style={{
+              display: "inline-block",
+              marginLeft: 1,
+              padding: "0 3px",
+              borderRadius: 3,
+              background: "rgba(59, 130, 246, 0.14)",
+              color: "#1d4ed8",
+              fontWeight: 700,
+            }}
+            title="Query parameter name is id"
+          >
+            ?id=
+          </span>
         </span>
         <input
           value={slugDraft}

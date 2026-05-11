@@ -479,6 +479,74 @@ _PROFILE_GITHUB_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Shown in LaTeX \uline{…} only when URL exists — hide default labels with no href target.
+_DEFAULT_CONTACT_LINK_LABELS = frozenset({"Website", "LinkedIn", "GitHub"})
+
+
+def _ingest_contact_token(token: str, out: Dict[str, str]) -> None:
+    """Parse one pipe- or space-delimited fragment into contact fields (best-effort)."""
+    p = (token or "").strip()
+    if len(p) < 3:
+        return
+    low = p.lower()
+
+    em = _PROFILE_EMAIL_RE.search(p)
+    if em and not out.get("email"):
+        out["email"] = em.group(0).strip()
+    ph = _PROFILE_PHONE_RE.search(p)
+    if ph and not out.get("phone"):
+        out["phone"] = ph.group(0).strip()
+
+    if not out.get("linkedin_url") and "linkedin.com" in low:
+        li = _PROFILE_LINKEDIN_RE.search(p)
+        if li:
+            u = li.group(0).strip()
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["linkedin_url"] = u
+            out.setdefault("linkedin", "LinkedIn")
+        return
+    if not out.get("github_url") and "github.com" in low:
+        gh = _PROFILE_GITHUB_RE.search(p)
+        if gh:
+            u = gh.group(0).strip()
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["github_url"] = u
+            out.setdefault("github", "GitHub")
+        return
+    if low.startswith("http") and "linkedin.com" not in low and "github.com" not in low:
+        if not out.get("website_url"):
+            out["website_url"] = p
+            out.setdefault("website", "Website")
+
+
+def _contact_tokens_from_lines(lines: List[str], out: Dict[str, str]) -> None:
+    """Scan first lines for pipe- or bullet-separated email / phone / URLs (common PDF header)."""
+    for raw in lines[:8]:
+        seg = re.sub(r"^[\s•\-–*]+", "", raw).strip()
+        if not seg or len(seg) > 220:
+            continue
+        if re.match(
+            r"^(experience|education|skills|projects|summary|objective|work|employment)\b",
+            seg,
+            re.I,
+        ):
+            continue
+        if "|" in seg or "·" in seg or "\u00b7" in seg or "•" in seg:
+            for part in re.split(r"\s*[|·•\u00b7]\s*", seg):
+                _ingest_contact_token(part, out)
+        elif sum(
+            bool(x)
+            for x in (
+                _PROFILE_EMAIL_RE.search(seg),
+                _PROFILE_PHONE_RE.search(seg),
+                re.search(r"linkedin\.com|github\.com|https?://", seg, re.I),
+            )
+        ) >= 2:
+            for part in re.split(r"\s{2,}|\t+", seg):
+                _ingest_contact_token(part, out)
+
 
 def _latex_escape_visible(s: str) -> str:
     """Escape user text embedded in LaTeX arguments (\\uline, \\textbf, etc.)."""
@@ -519,6 +587,11 @@ def _contact_from_candidate_profile(candidate_profile: Optional[str]) -> Dict[st
     if not candidate_profile or not str(candidate_profile).strip():
         return out
     text = str(candidate_profile).strip()
+    lines = [
+        re.sub(r"^[\s•\-–*]+", "", ln).strip()
+        for ln in text.replace("\r\n", "\n").split("\n")
+        if ln.strip()
+    ]
 
     m = re.search(r"(?im)^Name:\s*(.+)$", text)
     if m:
@@ -528,27 +601,54 @@ def _contact_from_candidate_profile(candidate_profile: Optional[str]) -> Dict[st
     if m:
         out["location"] = m.group(1).strip()
 
-    m = re.search(r"(?im)Email:\s*([^\s|]+)", text)
-    if m and "@" in m.group(1):
-        out["email"] = m.group(1).strip()
+    for pat in (
+        r"(?im)^E-?mail:\s*([^\s|]+)",
+        r"(?im)^Email:\s*([^\s|]+)",
+    ):
+        m = re.search(pat, text)
+        if m and "@" in m.group(1):
+            out["email"] = m.group(1).strip()
+            break
 
-    m = re.search(r"(?im)Phone:\s*([^|\n]+)", text)
-    if m:
-        out["phone"] = m.group(1).strip()
-    if "phone" not in out:
-        m = re.search(r"(?im)Mobile:\s*([^|\n]+)", text)
+    for pat in (
+        r"(?im)^(?:Tel|Telephone|Phone|Mobile):\s*([^|\n]+)",
+        r"(?im)^Phone:\s*([^|\n]+)",
+        r"(?im)^Mobile:\s*([^|\n]+)",
+    ):
+        m = re.search(pat, text)
         if m:
             out["phone"] = m.group(1).strip()
+            break
 
-    m = re.search(r"(?im)^Website:\s*([^\n|]+)", text)
+    m = re.search(r"(?im)^LinkedIn:\s*(\S+)", text)
+    if m:
+        u = m.group(1).strip()
+        if "linkedin.com" in u.lower():
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["linkedin_url"] = u
+            out.setdefault("linkedin", "LinkedIn")
+
+    m = re.search(r"(?im)^GitHub:\s*(\S+)", text)
+    if m:
+        u = m.group(1).strip()
+        if "github.com" in u.lower():
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["github_url"] = u
+            out.setdefault("github", "GitHub")
+
+    m = re.search(r"(?im)^(?:Website|Portfolio|URL):\s*([^\n|]+)", text)
     if m:
         w = m.group(1).strip()
         if w.lower().startswith("http"):
             out["website_url"] = w
-            if "website" not in out:
-                out["website"] = "Website"
+            out.setdefault("website", "Website")
         elif w:
             out["website"] = w
+
+    # Pipe- / bullet-separated header lines (very common in PDF extracts).
+    _contact_tokens_from_lines(lines, out)
 
     # Heuristic fallbacks — candidate text is often raw PDF extract without "Name:" lines.
     if not out.get("email"):
@@ -576,11 +676,6 @@ def _contact_from_candidate_profile(candidate_profile: Optional[str]) -> Dict[st
             out["github_url"] = u
             out.setdefault("github", "GitHub")
     if not out.get("name"):
-        lines = [
-            re.sub(r"^[\s•\-–*]+", "", ln).strip()
-            for ln in text.replace("\r\n", "\n").split("\n")
-            if ln.strip()
-        ]
         for line in lines[:14]:
             if len(line) > 55 or len(line) < 3:
                 continue
@@ -602,6 +697,25 @@ def _contact_from_candidate_profile(candidate_profile: Optional[str]) -> Dict[st
                 break
 
     return out
+
+
+def _strip_contact_block_empty_hrefs(tex: str) -> str:
+    """Remove empty \\href{#}{\\uline{}} link slots and stray $|$ so the PDF header is not a thin pipe row."""
+    start = tex.find("% RESUME-CONTACT-BLOCK-START")
+    end = tex.find("% RESUME-CONTACT-BLOCK-END")
+    if start == -1 or end == -1 or end <= start:
+        return tex
+    head, mid, tail = tex[:start], tex[start:end], tex[end:]
+    chunk = mid
+    for _ in range(40):
+        nxt = re.sub(r"\s*\\href\{#\}\{\\uline\{\}\}\s*(?:\$\|\$\s*)?", "", chunk)
+        nxt = re.sub(r"\s*\\href\{#\}\{\\uline\{\s*\}\}\s*(?:\$\|\$\s*)?", "", nxt)
+        if nxt == chunk:
+            break
+        chunk = nxt
+    chunk = re.sub(r"(?:\s*\$\|\$\s*){2,}", r" $|$ ", chunk)
+    chunk = re.sub(r"(?m)^(\s*)\$\|\$\s*$", r"\1", chunk)
+    return head + chunk + tail
 
 
 def _canonical_contact_fragment() -> str:
@@ -657,11 +771,21 @@ def _apply_preamble_subs(preamble: str, role: str, company: str, contact: Option
     out = preamble.replace("{role}", role).replace("{company}", company)
     merged: Dict[str, str] = {**DEFAULT_CONTACT, **(contact or {})}
 
-    url_keys = ("website_url", "linkedin_url", "github_url")
-    for uk in url_keys:
-        if not (merged.get(uk) or "").strip():
+    for uk, vk in (
+        ("website_url", "website"),
+        ("linkedin_url", "linkedin"),
+        ("github_url", "github"),
+    ):
+        u = (merged.get(uk) or "").strip()
+        if not u:
             merged[uk] = "#"
+            v = (merged.get(vk) or "").strip()
+            if v in _DEFAULT_CONTACT_LINK_LABELS or not v:
+                merged[vk] = ""
+        else:
+            merged[uk] = u
 
+    url_keys = ("website_url", "linkedin_url", "github_url")
     vis_keys = ("name", "location", "phone", "linkedin", "github", "website")
     raw_email = (merged.get("email") or "").strip()
     merged["email_mailto"] = _latex_mailto_href_arg(raw_email)
@@ -687,6 +811,7 @@ def _apply_preamble_subs(preamble: str, role: str, company: str, contact: Option
         "",
         out,
     )
+    out = _strip_contact_block_empty_hrefs(out)
     return out
 
 

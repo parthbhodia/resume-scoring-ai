@@ -1829,8 +1829,51 @@ export default function ResumeBuilder({
               `}</style>
               <section className="rb-results-phase3" aria-labelledby="rb-results-heading">
                 <div className="rb-results-phase3-preview" style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
-                    Résumé preview
+                  <div style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase" }}>
+                      Résumé preview
+                    </div>
+                    {result.pdfUrl ? (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                        {result.folder ? (
+                          <ShareButton folder={result.folder} pdfUrl={result.pdfUrl} userId={user?.id ?? null} />
+                        ) : null}
+                        <a
+                          href={result.pdfUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "8px 14px",
+                            minHeight: 40,
+                            background: "var(--accent)",
+                            borderRadius: 9,
+                            color: "#fff",
+                            textDecoration: "none",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            letterSpacing: -0.25,
+                            whiteSpace: "nowrap",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 13 13" fill="none" aria-hidden>
+                            <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M2 11h9" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
+                          </svg>
+                          Download PDF
+                        </a>
+                      </div>
+                    ) : null}
                   </div>
                   {result.pdfUrl ? (
                     <div style={{
@@ -1858,11 +1901,11 @@ export default function ResumeBuilder({
                   <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
                     {result.pdfUrl ? (
                       <>
-                        If the preview is blank (blocked embed),{" "}
+                        If the preview is blank,{" "}
                         <a href={result.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600 }}>
-                          open the PDF in a new tab
+                          open the PDF
                         </a>
-                        . Download and share are in the match card on the left.
+                        {" "}— you can also use Download above or in the match card.
                       </>
                     ) : (
                       "PDF preview appears when the compile step finishes."
