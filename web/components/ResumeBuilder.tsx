@@ -15,12 +15,17 @@ import ScoreRing    from "./ScoreRing";
 import CriteriaTable from "./CriteriaTable";
 import DiffView     from "./DiffView";
 import SourcesPanel from "./SourcesPanel";
-import ResumeEditor  from "./ResumeEditor";
 import AtsPanel, { type AtsResult } from "./AtsPanel";
 import ShareButton   from "./ShareButton";
-import type { ParsedResume, ParsedBullet } from "@/lib/types";
 
-type Tab = "ats" | "edit";
+type Suggestion = {
+  id: string;
+  section: string;
+  original: string;
+  suggested: string;
+  reason: string;
+  priority: "high" | "medium" | "low";
+};
 
 function extractJdKeywords(jdText: string): string[] {
   const STOP = new Set([
@@ -90,20 +95,22 @@ export default function ResumeBuilder({
   const [statusMsg,  setStatusMsg]  = useState("");
   const [result,     setResult]     = useState<GenerationResult | null>(null);
   const [error,      setError]      = useState<string | null>(null);
-  const [activeTab,  setActiveTab]  = useState<Tab>("ats");
   const [preview,    setPreview]    = useState("");
   const [jdKeywords, setJdKeywords] = useState<string[]>([]);
-  // Live Google Search activity from Gemini grounding — populated as the
-  // model issues queries / cites pages mid-generation. Cleared on each run.
   const [searchQueries, setSearchQueries] = useState<string[]>([]);
   const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
-  // Per-artifact upload state from the backend's `storage` SSE events. Lets
-  // us surface "Source not backed up — base-comparison won't work for this
-  // resume" in the UI instead of swallowing it as a console.warn.
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Résumé Template Studio — hide JD wizard chrome; optional job + generate only. */
   const [studioHandoff, setStudioHandoff] = useState(false);
+
+  // ── Suggestions state ──────────────────────────────────────────────────────
+  const [suggestions,    setSuggestions]    = useState<Suggestion[] | null>(null);
+  const [suggestSummary, setSuggestSummary] = useState("");
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestError,   setSuggestError]   = useState<string | null>(null);
+  const [acceptedIds,    setAcceptedIds]    = useState<Set<string>>(new Set());
+  const [rejectedIds,    setRejectedIds]    = useState<Set<string>>(new Set());
 
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(null);
   const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(null);
@@ -160,22 +167,10 @@ export default function ResumeBuilder({
     }
   }, [router, scratchStart]);
 
-  // ── Editor state — populated lazily when the user clicks the Edit tab. ──
-  // We keep `editorTree` as the freshly-fetched copy from /api/resume/{folder}
-  // so the user always edits the *current* on-disk version (not a stale tree
-  // captured at generation time, which would miss any prior edits).
-  const [editorTree,    setEditorTree]    = useState<ParsedResume | null>(null);
-  const [editorLoading, setEditorLoading] = useState(false);
-  const [editorSaving,  setEditorSaving]  = useState(false);
-  const [editorError,   setEditorError]   = useState<string | null>(null);
-
-  // ── ATS state — populated lazily when the user clicks the ATS tab. ──
+  // ── ATS state — populated lazily when the user opens the ATS panel. ──
   const [atsResult,    setAtsResult]    = useState<AtsResult | null>(null);
   const [atsLoading,   setAtsLoading]   = useState(false);
   const [atsError,     setAtsError]     = useState<string | null>(null);
-  // Map of bullet_id → list of writing-quality issues (passive voice, weak
-  // verbs, missing metrics, …). Lazily populated alongside the editor tree.
-  const [doctorIssues, setDoctorIssues] = useState<Record<string, { id: string; severity: "warn" | "info"; msg: string }[]>>({});
 
   const importFromUrl = useCallback(async (): Promise<{ company?: string; role?: string; job_description?: string } | null> => {
     const url = jobUrl.trim();
@@ -244,41 +239,6 @@ export default function ResumeBuilder({
     return () => subscription.unsubscribe();
   }, []);
 
-  // Lazy-load the parsed bullet tree the first time the Edit tab opens for a
-  // given folder. We re-fetch when `result.folder` changes (i.e. the user
-  // generated a new resume) to avoid showing the previous folder's bullets.
-  const runDoctor = useCallback(async (parsed: ParsedResume) => {
-    try {
-      const resp = await fetch(apiUrl("/api/doctor-check"), {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ parsed }),
-      });
-      const json = await parseJsonOrThrow<{ error?: string; issues?: Record<string, { id: string; severity: "warn" | "info"; msg: string }[]> }>(resp);
-      if (!resp.ok) return;  // Doctor is best-effort — never block the editor on failure
-      setDoctorIssues(json.issues ?? {});
-    } catch {
-      // swallow — doctor is a non-critical enhancement
-    }
-  }, []);
-
-  const loadEditor = useCallback(async (folder: string) => {
-    setEditorLoading(true); setEditorError(null);
-    try {
-      const uid = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
-      const resp = await fetch(apiUrl(`/api/resume/${encodeURIComponent(folder)}${uid}`));
-      const json = await parseJsonOrThrow<ParsedResume & { error?: string }>(resp);
-      if (!resp.ok) throw new Error(json.error ?? "Could not load resume.");
-      setEditorTree(json);
-      // Kick off doctor analysis in parallel — non-blocking.
-      runDoctor(json);
-    } catch (e: unknown) {
-      setEditorError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setEditorLoading(false);
-    }
-  }, [user, runDoctor]);
-
   const runAtsCheck = useCallback(async (folder: string) => {
     setAtsLoading(true); setAtsError(null);
     try {
@@ -297,65 +257,53 @@ export default function ResumeBuilder({
     }
   }, [jd, user]);
 
-  const saveEditor = useCallback(async (next: ParsedResume) => {
-    if (!result?.folder) return;
-    setEditorSaving(true); setEditorError(null);
-    try {
-      const resp = await fetch(apiUrl(`/api/resume/${encodeURIComponent(result.folder)}`), {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: user?.id ?? "local", parsed: next }),
-      });
-      const json = await parseJsonOrThrow<{ error?: string; pdf_url?: string }>(resp);
-      if (!resp.ok) throw new Error(json.error ?? "Save failed.");
-      setEditorTree(next);  // commit edits to local state — was draft until now
-      // Bubble the new PDF URL up so the Download button reflects the edit.
-      if (json.pdf_url) {
-        setResult(r => r ? { ...r, pdfUrl: json.pdf_url ?? r.pdfUrl } : r);
-      }
-      // Re-run doctor on the saved tree — the user may have fixed (or
-      // introduced) issues since the last run.
-      runDoctor(next);
-      // ATS results are now stale — clear so the ATS tab re-checks on next open.
-      setAtsResult(null);
-    } catch (e: unknown) {
-      setEditorError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setEditorSaving(false);
-    }
-  }, [result, user, runDoctor]);
-
-  const aiEditBullet = useCallback(async (bullet: ParsedBullet, instruction: string): Promise<string> => {
-    const resp = await fetch(apiUrl("/api/ai-edit-bullet"), {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        bullet_text: bullet.text,
-        instruction,
-        jd: jd.slice(0, 1500),
-      }),
-    });
-    const json = await parseJsonOrThrow<{ error?: string; text?: string }>(resp);
-    if (!resp.ok || !json.text) throw new Error(json.error ?? "AI rewrite failed");
-    return json.text;
-  }, [jd]);
-
-  // Reset the cached editor tree whenever we switch to a different generation
-  // — otherwise the Edit tab would show stale bullets from the previous run.
+  // Auto-run ATS after generation completes
   useEffect(() => {
-    setEditorTree(null);
-    setEditorError(null);
+    if (!result?.folder || atsLoading || atsResult || atsError) return;
+    void runAtsCheck(result.folder);
+  }, [result?.folder, atsLoading, atsResult, atsError, runAtsCheck]);
+
+  // Reset ATS when a new generation starts
+  useEffect(() => {
     setAtsResult(null);
     setAtsError(null);
-    setDoctorIssues({});
   }, [result?.folder]);
 
-  // Default tab is ATS — kick off the check automatically instead of requiring a tab click.
-  useEffect(() => {
-    if (activeTab !== "ats" || !result?.folder) return;
-    if (atsLoading || atsResult || atsError) return;
-    void runAtsCheck(result.folder);
-  }, [activeTab, result?.folder, atsLoading, atsResult, atsError, runAtsCheck]);
+  const getSuggestions = useCallback(async () => {
+    let effJd = jd.trim();
+    if (!effJd && studioHandoff) {
+      effJd = (candidateProfile ?? "").trim()
+        ? "No specific job — optimize structure, ATS safety, and measurable impact."
+        : "No specific job posting yet.";
+    }
+    if (!effJd) { setSuggestError("Please paste a job description first."); return; }
+    if (!candidateProfile) { setSuggestError("Please upload your resume first."); return; }
+
+    setSuggestLoading(true);
+    setSuggestError(null);
+    setSuggestions(null);
+    setAcceptedIds(new Set());
+    setRejectedIds(new Set());
+
+    try {
+      const resp = await fetch(apiUrl("/api/suggest-changes"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidate_profile: candidateProfile, job_description: effJd }),
+      });
+      const json = await parseJsonOrThrow<{ error?: string; summary?: string; suggestions?: Suggestion[] }>(resp);
+      if (!resp.ok) throw new Error(json.error ?? "Could not get suggestions.");
+      setSuggestions(json.suggestions ?? []);
+      setSuggestSummary(json.summary ?? "");
+      // Default: accept all high-priority suggestions
+      const highIds = new Set((json.suggestions ?? []).filter(s => s.priority === "high").map(s => s.id));
+      setAcceptedIds(highIds);
+    } catch (e: unknown) {
+      setSuggestError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSuggestLoading(false);
+    }
+  }, [jd, candidateProfile, studioHandoff]);
 
   const handlePdfUpload = useCallback(async (file: File) => {
     if (!file.type.includes("pdf")) { setUploadError("Please upload a PDF file."); return; }
@@ -435,6 +383,16 @@ export default function ResumeBuilder({
     setSearchSources([]);
     setStorageFailures([]);
 
+    // Bake accepted suggestions into the candidate profile as explicit instructions
+    const accepted = (suggestions ?? []).filter(s => acceptedIds.has(s.id));
+    let effProfile = candidateProfile ?? "";
+    if (accepted.length > 0) {
+      const instructions = accepted.map((s, i) =>
+        `${i + 1}. In ${s.section}: change "${s.original}" to "${s.suggested}" — ${s.reason}`
+      ).join("\n");
+      effProfile = `${effProfile}\n\n---\nACCEPTED IMPROVEMENTS TO APPLY:\n${instructions}`;
+    }
+
     const acc: GenerationResult = { ...EMPTY_RESULT, baseFolder, baseLoaded: baseFolder ? null : false };
 
     try {
@@ -445,7 +403,7 @@ export default function ResumeBuilder({
           company: effCompany, role: effRole, job_description: effJd,
           model, base_folder: baseFolder,
           reference_folder: styleReferenceFolder,
-          candidate_profile: candidateProfile,
+          candidate_profile: effProfile,
           user_id: user?.id ?? null,
         }),
       });
@@ -522,7 +480,7 @@ export default function ResumeBuilder({
       setGenerating(false);
       setStatusMsg("");
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -844,7 +802,7 @@ export default function ResumeBuilder({
             step={studioHandoff ? 1 : 3}
             title={studioHandoff ? "Target job (optional)" : "Target job"}
             subtitle={studioHandoff
-              ? "Paste a posting to sharpen keywords—or leave everything blank and we’ll compile from your extract with safe defaults."
+              ? "Paste a posting to sharpen keywords—or leave everything blank and we'll compile from your extract with safe defaults."
               : "Tell us what you're applying for"}
           >
             {/* URL import — auto-fills company/role/JD */}
@@ -932,36 +890,65 @@ export default function ResumeBuilder({
             </div>
           )}
 
-          {/* ── Generate button ── */}
+          {/* ── Primary CTA: Get Suggestions ── */}
+          {suggestError && (
+            <div style={{ marginBottom: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
+              {suggestError}
+            </div>
+          )}
           <button
-            onClick={generate}
-            disabled={generating}
+            onClick={getSuggestions}
+            disabled={suggestLoading || generating}
             style={{
-              width: "100%", padding: "14px 20px", marginBottom: 32,
-              background: generating ? "var(--surface2)" : "var(--accent)",
-              color: generating ? "var(--muted)" : "#fff",
+              width: "100%", padding: "14px 20px", marginBottom: 8,
+              background: suggestLoading ? "var(--surface2)" : "var(--accent)",
+              color: suggestLoading ? "var(--muted)" : "#fff",
               border: "none", borderRadius: 12,
               fontSize: 16, fontWeight: 500, fontFamily: "inherit",
-              cursor: generating ? "not-allowed" : "pointer",
-              letterSpacing: -0.4, transition: "background 0.2s, transform 0.1s",
+              cursor: suggestLoading || generating ? "not-allowed" : "pointer",
+              letterSpacing: -0.4, transition: "background 0.2s",
               display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
             }}
-            onMouseEnter={e => { if (!generating) e.currentTarget.style.background = "var(--accent-h)"; }}
-            onMouseLeave={e => { if (!generating) e.currentTarget.style.background = "var(--accent)"; }}
+            onMouseEnter={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent-h)"; }}
+            onMouseLeave={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent)"; }}
           >
-            {generating ? (
-              <>
-                <Spinner size={16} />
-                {statusMsg || "Tailoring your resume…"}
-              </>
+            {suggestLoading ? (
+              <><Spinner size={16} />Analyzing your resume…</>
             ) : (
-              studioHandoff ? "Generate résumé PDF →" : "Tailor my resume →"
+              studioHandoff ? "Generate suggestions →" : "Analyze & get suggestions →"
             )}
           </button>
+          <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
+            We&apos;ll show you exactly what to change — you pick what to apply.
+          </p>
 
           </>)} {/* end !result && !generating inputs block */}
 
-          {/* During generation, the form above is unmounted — show explicit progress so the page is never blank */}
+          {/* ── Suggestions review panel ── */}
+          {suggestions && !generating && !result && (
+            <SuggestionsPanel
+              summary={suggestSummary}
+              suggestions={suggestions}
+              acceptedIds={acceptedIds}
+              rejectedIds={rejectedIds}
+              candidateProfile={candidateProfile ?? ""}
+              onToggleAccept={id => setAcceptedIds(prev => {
+                const next = new Set(prev);
+                if (next.has(id)) { next.delete(id); } else { next.add(id); setRejectedIds(r => { const rn = new Set(r); rn.delete(id); return rn; }); }
+                return next;
+              })}
+              onToggleReject={id => setRejectedIds(prev => {
+                const next = new Set(prev);
+                if (next.has(id)) { next.delete(id); } else { next.add(id); setAcceptedIds(a => { const an = new Set(a); an.delete(id); return an; }); }
+                return next;
+              })}
+              onGenerate={generate}
+              generating={generating}
+              error={error}
+            />
+          )}
+
+          {/* During generation, show explicit progress */}
           {generating && !result && (
             <div
               className="fade-in"
@@ -1321,134 +1308,37 @@ export default function ResumeBuilder({
                 </div>
               )}
 
-              {/* Tabs */}
-              <div style={{
-                display: "flex", gap: 2, marginBottom: 18,
-                background: "var(--surface2)", borderRadius: 9, padding: 3,
-              }}>
-                {(["ats", "edit"] as Tab[]).map(t => {
-                  const labels: Record<Tab, string> = {
-                    ats:  atsResult ? `ATS  ${atsResult.score}` : "ATS check",
-                    edit: "Edit bullets",
-                  };
-                  return (
-                    <button
-                      key={t}
-                      onClick={() => {
-                        setActiveTab(t);
-                        // Lazy-load on first open of the Edit tab.
-                        if (t === "edit" && result.folder && !editorTree && !editorLoading) {
-                          loadEditor(result.folder);
-                        }
-                        // Lazy-run on first open of the ATS tab.
-                        if (t === "ats" && result.folder && !atsResult && !atsLoading) {
-                          runAtsCheck(result.folder);
-                        }
-                      }}
-                      style={{
-                        flex: 1, padding: "7px 14px", fontSize: 12,
-                        fontWeight: activeTab === t ? 600 : 400,
-                        background: activeTab === t ? "var(--surface)" : "transparent",
-                        border: "none", borderRadius: 7,
-                        color: activeTab === t ? "var(--text)" : "var(--dim)",
-                        cursor: "pointer", fontFamily: "inherit",
-                        letterSpacing: -0.2, transition: "all 0.15s",
-                        boxShadow: activeTab === t ? "0 1px 3px rgba(0,0,0,0.2)" : "none",
-                      }}
-                    >
-                      {labels[t]}
-                    </button>
-                  );
-                })}
+              {/* ATS panel — auto-runs after generation */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
+                  ATS check{atsResult ? ` — ${atsResult.score}` : ""}
+                </div>
+                {atsLoading && (
+                  <div style={{ padding: 20, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
+                    Running ATS check…
+                  </div>
+                )}
+                {atsError && !atsLoading && (
+                  <div style={{ padding: 12, color: "var(--red)", fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
+                    Couldn&apos;t run ATS check: {atsError}
+                    {result.folder && (
+                      <button onClick={() => runAtsCheck(result.folder!)} style={{ fontSize: 11, padding: "4px 10px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", cursor: "pointer", fontFamily: "inherit" }}>
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                )}
+                {atsResult && !atsLoading && (
+                  <AtsPanel result={atsResult} rechecking={atsLoading} onRecheck={() => result.folder && runAtsCheck(result.folder)} />
+                )}
               </div>
-
-              {activeTab === "ats" && (
-                <>
-                  {atsLoading && (
-                    <div style={{ padding: 28, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
-                      Running ATS check…
-                    </div>
-                  )}
-                  {atsError && !atsLoading && (
-                    <div style={{ padding: 16, color: "var(--red)", fontSize: 12 }}>
-                      Couldn&apos;t run ATS check: {atsError}
-                      {result.folder && (
-                        <button
-                          onClick={() => runAtsCheck(result.folder!)}
-                          style={{
-                            marginLeft: 12, fontSize: 11, padding: "4px 10px",
-                            background: "var(--surface2)", border: "1px solid var(--border)",
-                            borderRadius: 6, color: "var(--text)", cursor: "pointer",
-                            fontFamily: "inherit",
-                          }}
-                        >Retry</button>
-                      )}
-                    </div>
-                  )}
-                  {atsResult && !atsLoading && (
-                    <AtsPanel
-                      result={atsResult}
-                      rechecking={atsLoading}
-                      onRecheck={() => result.folder && runAtsCheck(result.folder)}
-                    />
-                  )}
-                </>
-              )}
-              {activeTab === "edit" && (
-                <>
-                  {editorLoading && (
-                    <div style={{ padding: 28, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
-                      Loading bullets…
-                    </div>
-                  )}
-                  {editorError && !editorLoading && (
-                    <div style={{ padding: 16, color: "var(--red)", fontSize: 12 }}>
-                      Couldn&apos;t load editor: {editorError}
-                      {result.folder && (
-                        <button
-                          onClick={() => loadEditor(result.folder!)}
-                          style={{
-                            marginLeft: 12, fontSize: 11, padding: "4px 10px",
-                            background: "var(--surface2)", border: "1px solid var(--border)",
-                            borderRadius: 6, color: "var(--text)", cursor: "pointer",
-                            fontFamily: "inherit",
-                          }}
-                        >Retry</button>
-                      )}
-                    </div>
-                  )}
-                  {editorTree && !editorLoading && (
-                    <ResumeEditor
-                      initial={editorTree}
-                      folder={result.folder}
-                      saving={editorSaving}
-                      saveError={editorError}
-                      onSave={saveEditor}
-                      onAIEdit={aiEditBullet}
-                      doctorIssues={doctorIssues}
-                      pdfUrl={result.pdfUrl}
-                      shareButton={result.folder && result.pdfUrl ? (
-                        <ShareButton
-                          folder={result.folder}
-                          pdfUrl={result.pdfUrl}
-                          userId={user?.id ?? null}
-                        />
-                      ) : undefined}
-                    />
-                  )}
-                </>
-              )}
 
               {/* Start over nudge */}
               <div style={{ marginTop: 32, paddingTop: 20, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 12, color: "var(--dim)", letterSpacing: -0.2 }}>Want to try a different job?</span>
                 <button
-                  onClick={() => { setResult(null); setJd(""); setCompany(""); setRole(""); setPreview(""); }}
-                  style={{
-                    fontSize: 12, padding: "6px 14px",
-                    background: "var(--surface2)", border: "1px solid var(--border)",
-                    borderRadius: 7, color: "var(--muted)", cursor: "pointer", fontFamily: "inherit",
-                  }}
+                  onClick={() => { setResult(null); setSuggestions(null); setJd(""); setCompany(""); setRole(""); setPreview(""); }}
+                  style={{ fontSize: 12, padding: "6px 14px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--muted)", cursor: "pointer", fontFamily: "inherit" }}
                 >
                   Start over
                 </button>
@@ -1460,6 +1350,236 @@ export default function ResumeBuilder({
         </div>
       </main>
 
+    </div>
+  );
+}
+
+/* ── Resume paper preview (plain text → paper-style render) ─────────────── */
+
+function ResumePaperView({ text, highlightOriginals }: { text: string; highlightOriginals: string[] }) {
+  const lines = text.split("\n");
+  const highlightSet = new Set(highlightOriginals.map(s => s.trim().toLowerCase()));
+
+  const isAllCaps = (t: string) => t.length > 2 && t === t.toUpperCase() && /[A-Z]/.test(t) && !t.startsWith("•");
+  const isBullet  = (t: string) => /^[•\-–*]/.test(t);
+  const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
+
+  return (
+    <div style={{
+      background: "#fff",
+      borderRadius: 6,
+      boxShadow: "0 2px 16px rgba(0,0,0,0.10)",
+      padding: "28px 32px",
+      fontFamily: "'Georgia', serif",
+      fontSize: 10.5,
+      lineHeight: 1.55,
+      color: "#1e293b",
+      minHeight: 480,
+    }}>
+      {lines.map((line, i) => {
+        const t = line.trim();
+        if (!t) return <div key={i} style={{ height: 7 }} />;
+
+        const highlighted = highlightSet.has(t.toLowerCase());
+        const hlStyle: React.CSSProperties = highlighted ? {
+          background: "rgba(245,158,11,0.12)",
+          borderLeft: "3px solid #f59e0b",
+          paddingLeft: 6,
+          marginLeft: -9,
+          borderRadius: "0 3px 3px 0",
+        } : {};
+
+        if (i === firstNonEmpty) {
+          return <div key={i} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5, marginBottom: 2, textAlign: "center", textTransform: "uppercase" }}>{t}</div>;
+        }
+        if (i === firstNonEmpty + 1 && !isAllCaps(t)) {
+          return <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: "center", marginBottom: 8 }}>{t}</div>;
+        }
+        if (isAllCaps(t)) {
+          return (
+            <div key={i} style={{ marginTop: 12, marginBottom: 3 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#0f172a" }}>{t}</div>
+              <div style={{ height: 0.8, background: "#0f172a", marginTop: 2 }} />
+            </div>
+          );
+        }
+        if (isBullet(t)) {
+          return (
+            <div key={i} style={{ display: "flex", gap: 6, marginBottom: 2, paddingLeft: 6, ...hlStyle }}>
+              <span style={{ flexShrink: 0, marginTop: 1 }}>•</span>
+              <span>{t.replace(/^[•\-–*]\s*/, "")}</span>
+            </div>
+          );
+        }
+        return <div key={i} style={{ marginBottom: 2, ...hlStyle }}>{t}</div>;
+      })}
+    </div>
+  );
+}
+
+/* ── Suggestions panel ───────────────────────────────────────────────────── */
+
+const PRIORITY_COLOR: Record<string, string> = {
+  high: "#ef4444", medium: "#f59e0b", low: "#94a3b8",
+};
+const PRIORITY_BG: Record<string, string> = {
+  high: "rgba(239,68,68,0.08)", medium: "rgba(245,158,11,0.08)", low: "rgba(148,163,184,0.08)",
+};
+
+function SuggestionsPanel({
+  summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
+  onToggleAccept, onToggleReject, onGenerate, generating, error,
+}: {
+  summary: string;
+  suggestions: Suggestion[];
+  acceptedIds: Set<string>;
+  rejectedIds: Set<string>;
+  candidateProfile: string;
+  onToggleAccept: (id: string) => void;
+  onToggleReject: (id: string) => void;
+  onGenerate: () => void;
+  generating: boolean;
+  error: string | null;
+}) {
+  const accepted = suggestions.filter(s => acceptedIds.has(s.id));
+  const highlightOriginals = suggestions.map(s => s.original);
+
+  return (
+    <div className="fade-in" style={{ marginBottom: 32 }}>
+      {/* Summary banner */}
+      {summary && (
+        <div style={{
+          marginBottom: 16, padding: "12px 16px",
+          background: "var(--surface)", border: "1px solid var(--border)",
+          borderRadius: 10, fontSize: 13, color: "var(--muted)", lineHeight: 1.55,
+          borderLeft: "3px solid var(--accent)",
+        }}>
+          <strong style={{ color: "var(--text)" }}>Key gap: </strong>{summary}
+        </div>
+      )}
+
+      {/* Two-panel layout */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+
+        {/* Left: live resume preview */}
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
+            Your resume — highlighted bullets can be improved
+          </div>
+          <div style={{ overflowY: "auto", maxHeight: 600 }}>
+            <ResumePaperView text={candidateProfile} highlightOriginals={highlightOriginals} />
+          </div>
+        </div>
+
+        {/* Right: suggestion cards */}
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
+            {suggestions.length} suggested improvements
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 600, overflowY: "auto" }}>
+            {suggestions.map(s => {
+              const isAccepted = acceptedIds.has(s.id);
+              const isRejected = rejectedIds.has(s.id);
+              return (
+                <div key={s.id} style={{
+                  borderRadius: 10, border: `1.5px solid ${isAccepted ? "rgba(52,211,153,0.4)" : isRejected ? "var(--border)" : "var(--border)"}`,
+                  background: isAccepted ? "rgba(52,211,153,0.04)" : isRejected ? "var(--surface2)" : "var(--surface)",
+                  padding: "12px 14px",
+                  opacity: isRejected ? 0.5 : 1,
+                  transition: "all 0.15s",
+                }}>
+                  {/* Header row */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase",
+                      padding: "2px 7px", borderRadius: 99,
+                      color: PRIORITY_COLOR[s.priority] ?? "#64748b",
+                      background: PRIORITY_BG[s.priority] ?? "transparent",
+                    }}>{s.priority}</span>
+                    <span style={{ fontSize: 10.5, color: "var(--dim)", letterSpacing: -0.1 }}>{s.section}</span>
+                  </div>
+
+                  {/* Original → Suggested */}
+                  <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6, lineHeight: 1.5, fontStyle: "italic", textDecoration: isAccepted ? "line-through" : "none", opacity: isAccepted ? 0.6 : 1 }}>
+                    {s.original}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 8 }}>
+                    <span style={{ color: "var(--green)", fontSize: 11, flexShrink: 0, marginTop: 2 }}>→</span>
+                    <span style={{ fontSize: 11.5, color: "var(--text)", lineHeight: 1.5, fontWeight: isAccepted ? 500 : 400 }}>{s.suggested}</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "var(--dim)", lineHeight: 1.45, marginBottom: 10, paddingLeft: 14 }}>
+                    {s.reason}
+                  </div>
+
+                  {/* Accept / Reject buttons */}
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      onClick={() => onToggleAccept(s.id)}
+                      style={{
+                        flex: 1, padding: "6px 0", fontSize: 11, fontWeight: 600,
+                        borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit",
+                        background: isAccepted ? "rgba(52,211,153,0.15)" : "var(--surface2)",
+                        color: isAccepted ? "var(--green)" : "var(--muted)",
+                        transition: "all 0.12s",
+                      }}
+                    >
+                      {isAccepted ? "Accepted" : "Accept"}
+                    </button>
+                    <button
+                      onClick={() => onToggleReject(s.id)}
+                      style={{
+                        flex: 1, padding: "6px 0", fontSize: 11, fontWeight: 600,
+                        borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit",
+                        background: isRejected ? "rgba(248,113,113,0.1)" : "var(--surface2)",
+                        color: isRejected ? "var(--red)" : "var(--muted)",
+                        transition: "all 0.12s",
+                      }}
+                    >
+                      {isRejected ? "Skipped" : "Skip"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Generate CTA */}
+      {error && (
+        <div style={{ marginTop: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
+          {error}
+        </div>
+      )}
+      <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          onClick={onGenerate}
+          disabled={generating}
+          style={{
+            flex: 1, padding: "13px 20px",
+            background: generating ? "var(--surface2)" : "var(--accent)",
+            color: generating ? "var(--muted)" : "#fff",
+            border: "none", borderRadius: 12,
+            fontSize: 15, fontWeight: 500, fontFamily: "inherit",
+            cursor: generating ? "not-allowed" : "pointer",
+            letterSpacing: -0.3, transition: "background 0.2s",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          }}
+          onMouseEnter={e => { if (!generating) e.currentTarget.style.background = "var(--accent-h)"; }}
+          onMouseLeave={e => { if (!generating) e.currentTarget.style.background = "var(--accent)"; }}
+        >
+          {generating ? (
+            <><Spinner size={16} />Generating your resume…</>
+          ) : (
+            accepted.length > 0
+              ? `Generate PDF with ${accepted.length} improvement${accepted.length > 1 ? "s" : ""} →`
+              : "Generate PDF without changes →"
+          )}
+        </button>
+      </div>
+      <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginTop: 8 }}>
+        {accepted.length} of {suggestions.length} suggestions accepted
+      </p>
     </div>
   );
 }
