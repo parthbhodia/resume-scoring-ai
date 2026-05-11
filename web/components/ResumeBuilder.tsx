@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback, useRef, useEffect, useId } from "react";
+import { useState, useCallback, useRef, useEffect, useId, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale } from "@/lib/types";
@@ -46,6 +46,15 @@ const SUGGEST_LOADER_TIPS = [
   "Spotting gaps between your story and this role…",
   "Prioritizing what recruiters skim in the first pass…",
 ] as const;
+
+/** Accent swatches — template “Customize preview” (preview chrome only; PDF uses LaTeX template). */
+const CUSTOMIZE_ACCENT_SWATCHES: { id: string; hex: string }[] = [
+  { id: "ink", hex: "#0f172a" },
+  { id: "navy", hex: "#1e3a5f" },
+  { id: "blue", hex: "#1d4ed8" },
+  { id: "purple", hex: "#6d28d9" },
+  { id: "orange", hex: "#ea580c" },
+];
 
 /** Labels for Profile keys when we merge from résumé extract */
 const PROFILE_FIELD_LABELS: Record<string, string> = {
@@ -260,6 +269,12 @@ export default function ResumeBuilder({
   );
   /** Linked selection: click a highlighted résumé line → scroll/highlight matching suggestion card (Analyze-style). */
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
+
+  /** Template handoff — post-compile “Customize preview” (layout-only; preview tweaks do not recompile PDF). */
+  const [customizeTab, setCustomizeTab] = useState<"style" | "sections" | "add">("style");
+  const [previewAccentHex, setPreviewAccentHex] = useState("#1d4ed8");
+  const [previewFontSize, setPreviewFontSize] = useState<"small" | "standard" | "large">("standard");
+  const [previewSpacing, setPreviewSpacing] = useState<"compact" | "balanced" | "spacious">("balanced");
 
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(
     () => builderSession0?.candidateProfile ?? null,
@@ -769,6 +784,17 @@ export default function ResumeBuilder({
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
 
+  const selectedTemplateLabel = useMemo(() => {
+    return distinctStyleTemplates().find((t) => t.referenceFolder === styleReferenceFolder)?.label ?? "Template";
+  }, [styleReferenceFolder]);
+
+  const customizePaperFont =
+    previewFontSize === "small" ? 9.85 : previewFontSize === "large" ? 11.2 : 10.5;
+  const customizePaperLH =
+    previewSpacing === "compact" ? 1.42 : previewSpacing === "spacious" ? 1.72 : 1.55;
+  const customizePaperPadY =
+    previewSpacing === "compact" ? 22 : previewSpacing === "spacious" ? 36 : 28;
+
   /** Full-width suggestions review: hide hero + form so the two-column panel can use the width. */
   const suggestionsReviewMode =
     !studioHandoff &&
@@ -783,7 +809,7 @@ export default function ResumeBuilder({
         minHeight: 0,
         display: "flex",
         flexDirection: "column",
-        background: "var(--bg)",
+        background: result && studioHandoff ? "#f8fafc" : "var(--bg)",
         overflow: "hidden",
       }}
     >
@@ -800,7 +826,7 @@ export default function ResumeBuilder({
           className="rb-page"
           style={{
             padding: "clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh)",
-            maxWidth: result ? 960 : suggestionsReviewMode ? 1180 : studioHandoff ? 920 : 820,
+            maxWidth: result && studioHandoff ? 1180 : result ? 960 : suggestionsReviewMode ? 1180 : studioHandoff ? 920 : 820,
             margin: "0 auto",
             width: "100%",
             boxSizing: "border-box",
@@ -1683,8 +1709,41 @@ export default function ResumeBuilder({
             </div>
           )}
 
-          {/* ── Results (tailor flow) — card layout aligned with profile / product mockups ── */}
-          {result && (
+          {/* ── Results: template path = customize preview; tailor = match + export ── */}
+          {result ? (
+            studioHandoff ? (
+              <TemplateCustomizePostResult
+                generating={generating}
+                statusMsg={statusMsg}
+                router={router}
+                setResult={setResult}
+                setPreview={setPreview}
+                result={result}
+                atsLoading={atsLoading}
+                atsResult={atsResult}
+                atsError={atsError}
+                runAtsCheck={runAtsCheck}
+                acceptedCount={acceptedIds.size}
+                selectedTemplateLabel={selectedTemplateLabel}
+                company={company}
+                role={role}
+                customizeTab={customizeTab}
+                setCustomizeTab={setCustomizeTab}
+                previewAccentHex={previewAccentHex}
+                setPreviewAccentHex={setPreviewAccentHex}
+                previewFontSize={previewFontSize}
+                setPreviewFontSize={setPreviewFontSize}
+                previewSpacing={previewSpacing}
+                setPreviewSpacing={setPreviewSpacing}
+                customizePaperFont={customizePaperFont}
+                customizePaperLH={customizePaperLH}
+                customizePaperPadY={customizePaperPadY}
+                candidateProfile={candidateProfile}
+                user={user}
+                storageFailures={storageFailures}
+                generate={generate}
+              />
+            ) : (
             <div className="fade-in">
 
               {generating && (
@@ -2108,7 +2167,8 @@ export default function ResumeBuilder({
                 </div>
               </section>
             </div>
-          )}
+            )
+          ) : null}
 
 
         </div>
@@ -2168,6 +2228,769 @@ function firstSuggestionMatchingLine(
   return null;
 }
 
+/** Template-studio handoff — post-compile screen aligned with Resunova “Customize preview” (Figma). */
+function TemplateCustomizePostResult({
+  generating,
+  statusMsg,
+  router,
+  setResult,
+  setPreview,
+  result,
+  atsLoading,
+  atsResult,
+  atsError,
+  runAtsCheck,
+  acceptedCount,
+  selectedTemplateLabel,
+  company,
+  role,
+  customizeTab,
+  setCustomizeTab,
+  previewAccentHex,
+  setPreviewAccentHex,
+  previewFontSize,
+  setPreviewFontSize,
+  previewSpacing,
+  setPreviewSpacing,
+  customizePaperFont,
+  customizePaperLH,
+  customizePaperPadY,
+  candidateProfile,
+  user,
+  storageFailures,
+  generate,
+}: {
+  generating: boolean;
+  statusMsg: string;
+  router: { push: (href: string) => void };
+  setResult: (v: GenerationResult | null) => void;
+  setPreview: (v: string) => void;
+  result: GenerationResult;
+  atsLoading: boolean;
+  atsResult: AtsResult | null;
+  atsError: string | null;
+  runAtsCheck: (folder: string) => void;
+  acceptedCount: number;
+  selectedTemplateLabel: string;
+  company: string;
+  role: string;
+  customizeTab: "style" | "sections" | "add";
+  setCustomizeTab: (t: "style" | "sections" | "add") => void;
+  previewAccentHex: string;
+  setPreviewAccentHex: (h: string) => void;
+  previewFontSize: "small" | "standard" | "large";
+  setPreviewFontSize: (s: "small" | "standard" | "large") => void;
+  previewSpacing: "compact" | "balanced" | "spacious";
+  setPreviewSpacing: (s: "compact" | "balanced" | "spacious") => void;
+  customizePaperFont: number;
+  customizePaperLH: number;
+  customizePaperPadY: number;
+  candidateProfile: string | null;
+  user: User | null;
+  storageFailures: { artifact: "pdf" | "tex"; reason: string }[];
+  generate: () => void;
+}) {
+  const roleCompany = [role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Your résumé";
+  const fitsOne =
+    !atsLoading && atsResult ? atsResult.stats.page_count <= 1 : null;
+
+  return (
+    <div className="fade-in rb-template-customize" style={{ marginBottom: 12 }}>
+      <style>{`
+        .rb-template-customize-grid {
+          display: grid;
+          grid-template-columns: minmax(300px, 1.42fr) minmax(280px, 0.88fr);
+          gap: 24px;
+          align-items: start;
+        }
+        @media (max-width: 960px) {
+          .rb-template-customize-grid { grid-template-columns: 1fr; }
+        }
+      `}</style>
+
+      {generating && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            marginBottom: 20,
+            padding: "16px 20px",
+            borderRadius: "var(--radius-xl)",
+            background: "var(--accent-bg)",
+            border: "1px solid var(--border)",
+            boxShadow: "var(--shadow-card)",
+          }}
+        >
+          <Spinner size={22} />
+          <div style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2 }}>
+              Still compiling…
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.45, marginTop: 2 }}>
+              {statusMsg || "Saving PDF — almost there."}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <nav aria-label="Breadcrumb" style={{ fontSize: 12, color: "var(--dim)", marginBottom: 14 }}>
+        <Link href="/?view=builder&flow=tailor" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
+          Resume Builder
+        </Link>
+        <span style={{ margin: "0 8px", opacity: 0.45 }} aria-hidden>›</span>
+        <Link href="/?view=builder&flow=template" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
+          Templates
+        </Link>
+        <span style={{ margin: "0 8px", opacity: 0.45 }} aria-hidden>›</span>
+        <span style={{ color: "var(--text)", fontWeight: 700 }}>Customize</span>
+      </nav>
+
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 20,
+          marginBottom: 18,
+        }}
+      >
+        <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+          <h2
+            id="rb-results-heading"
+            style={{
+              fontSize: 26,
+              fontWeight: 800,
+              letterSpacing: -0.65,
+              color: "var(--text)",
+              margin: "0 0 8px",
+              lineHeight: 1.15,
+            }}
+          >
+            Review the final resume before export
+          </h2>
+          <p style={{ margin: 0, fontSize: 14, color: "var(--muted)", lineHeight: 1.55, maxWidth: 540 }}>
+            Adjust layout-safe options only. Your accepted improvements stay intact and ATS-friendly.
+          </p>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10, minWidth: 200 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2, textAlign: "right" }}>
+              {selectedTemplateLabel} — {roleCompany}
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "4px 10px",
+                borderRadius: 999,
+                background: "rgba(52,211,153,0.14)",
+                color: "var(--green)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ATS safe
+            </span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => {
+                setResult(null);
+                setPreview("");
+                router.push("/?view=builder&flow=template");
+              }}
+              style={{
+                padding: "10px 18px",
+                minHeight: 44,
+                borderRadius: 10,
+                border: "1px solid #cbd5e1",
+                background: "#fff",
+                color: "var(--text)",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Back to templates
+            </button>
+            {result.pdfUrl ? (
+              <a
+                href={result.pdfUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "10px 20px",
+                  minHeight: 44,
+                  borderRadius: 10,
+                  background: "#1d4ed8",
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textDecoration: "none",
+                  fontFamily: "inherit",
+                }}
+              >
+                Download PDF →
+              </a>
+            ) : (
+              <button
+                type="button"
+                disabled
+                style={{
+                  padding: "10px 20px",
+                  minHeight: 44,
+                  borderRadius: 10,
+                  border: "none",
+                  background: "#e2e8f0",
+                  color: "var(--muted)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "not-allowed",
+                  fontFamily: "inherit",
+                }}
+              >
+                Download PDF →
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: "12px 16px",
+          borderRadius: 12,
+          background: "#fff",
+          border: "1px solid #e2e8f0",
+          marginBottom: 22,
+        }}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          {atsLoading ? (
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Checking page length…</span>
+          ) : atsResult ? (
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                padding: "4px 10px",
+                borderRadius: 999,
+                background: fitsOne ? "rgba(52,211,153,0.14)" : "rgba(251,191,36,0.16)",
+                color: fitsOne ? "var(--green)" : "var(--orange)",
+              }}
+            >
+              {atsResult.stats.page_count === 1 ? "Fits 1 page" : `${atsResult.stats.page_count} pages`}
+            </span>
+          ) : atsError ? (
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--orange)" }}>Length check unavailable</span>
+          ) : (
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>PDF ready</span>
+          )}
+          {acceptedCount > 0 ? (
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                padding: "4px 10px",
+                borderRadius: 999,
+                background: "rgba(59,130,246,0.12)",
+                color: "#1d4ed8",
+              }}
+            >
+              {acceptedCount} improvements applied
+            </span>
+          ) : null}
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>
+            Template: <strong style={{ color: "var(--text)", fontWeight: 600 }}>{selectedTemplateLabel}</strong>
+          </span>
+        </div>
+        <span style={{ fontSize: 12, color: "var(--dim)" }}>Changes update the preview instantly</span>
+      </div>
+
+      <div className="rb-template-customize-grid">
+        <div id="rb-customize-preview" style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "var(--dim)",
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+              }}
+            >
+              Live preview
+            </span>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>100% zoom</span>
+          </div>
+          {result.pdfUrl ? (
+            <div
+              style={{
+                borderRadius: 12,
+                overflow: "hidden",
+                border: `1px solid ${previewAccentHex}33`,
+                background: "#525659",
+                boxShadow: "0 8px 28px rgba(15,23,42,0.12)",
+                aspectRatio: "8.5 / 11",
+                maxHeight: 580,
+                minHeight: 320,
+              }}
+            >
+              <iframe
+                title="Résumé PDF preview"
+                src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
+                loading="lazy"
+                style={{ width: "100%", height: "100%", minHeight: 420, border: "none", display: "block" }}
+              />
+            </div>
+          ) : (
+            <ResumePaperView
+              text={(candidateProfile ?? "").trim() || "—"}
+              highlightOriginals={[]}
+              baseFontPx={customizePaperFont}
+              lineHeight={customizePaperLH}
+              paperPaddingY={customizePaperPadY}
+              sectionAccentColor={previewAccentHex}
+            />
+          )}
+          <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
+            {result.pdfUrl ? (
+              <>
+                If the preview is blank,{" "}
+                <a href={result.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8", fontWeight: 600 }}>
+                  open the PDF in a new tab
+                </a>
+                .
+              </>
+            ) : (
+              "PDF preview appears when the compile step finishes."
+            )}
+          </p>
+        </div>
+
+        <aside
+          style={{
+            background: "#fff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 14,
+            padding: "18px 16px 16px",
+            boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
+            minWidth: 0,
+          }}
+        >
+          <div
+            role="tablist"
+            aria-label="Customize"
+            style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #e2e8f0", paddingBottom: 12 }}
+          >
+            {(
+              [
+                ["style", "Style"],
+                ["sections", "Sections"],
+                ["add", "Add details"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={customizeTab === id}
+                onClick={() => setCustomizeTab(id)}
+                style={{
+                  flex: 1,
+                  padding: "8px 6px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: customizeTab === id ? "rgba(29,78,216,0.1)" : "transparent",
+                  color: customizeTab === id ? "#1d4ed8" : "var(--muted)",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {customizeTab === "style" && (
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--dim)",
+                  marginBottom: 8,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.35,
+                }}
+              >
+                Accent color
+              </div>
+              <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+                {CUSTOMIZE_ACCENT_SWATCHES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    aria-label={`Accent ${s.id}`}
+                    aria-pressed={previewAccentHex === s.hex}
+                    onClick={() => setPreviewAccentHex(s.hex)}
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: "50%",
+                      background: s.hex,
+                      border: previewAccentHex === s.hex ? "3px solid #fff" : "2px solid #e2e8f0",
+                      boxShadow: previewAccentHex === s.hex ? `0 0 0 2px ${s.hex}` : "none",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  />
+                ))}
+              </div>
+
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--dim)",
+                  marginBottom: 8,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.35,
+                }}
+              >
+                Font size
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  borderRadius: 10,
+                  border: "1px solid #e2e8f0",
+                  overflow: "hidden",
+                  marginBottom: 18,
+                }}
+              >
+                {(["small", "standard", "large"] as const).map((sz, i) => (
+                  <button
+                    key={sz}
+                    type="button"
+                    onClick={() => setPreviewFontSize(sz)}
+                    style={{
+                      flex: 1,
+                      padding: "10px 8px",
+                      border: "none",
+                      borderLeft: i ? "1px solid #e2e8f0" : "none",
+                      background: previewFontSize === sz ? "#f1f5f9" : "#fff",
+                      fontWeight: 600,
+                      fontSize: 12,
+                      color: previewFontSize === sz ? "var(--text)" : "var(--muted)",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {sz === "small" ? "Small" : sz === "standard" ? "Standard" : "Large"}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    background: fitsOne === true ? "rgba(52,211,153,0.14)" : fitsOne === false ? "rgba(251,191,36,0.14)" : "rgba(148,163,184,0.12)",
+                    color: fitsOne === true ? "var(--green)" : fitsOne === false ? "var(--orange)" : "var(--muted)",
+                  }}
+                >
+                  {atsLoading ? "Checking fit…" : fitsOne === true ? "Fits 1 page" : fitsOne === false ? "Multi-page" : "Page fit"}
+                </span>
+                <div
+                  style={{
+                    display: "flex",
+                    flex: "1 1 160px",
+                    borderRadius: 10,
+                    border: "1px solid #e2e8f0",
+                    overflow: "hidden",
+                    minWidth: 0,
+                  }}
+                >
+                  {(["compact", "balanced", "spacious"] as const).map((sp, i) => (
+                    <button
+                      key={sp}
+                      type="button"
+                      onClick={() => setPreviewSpacing(sp)}
+                      style={{
+                        flex: 1,
+                        padding: "8px 6px",
+                        border: "none",
+                        borderLeft: i ? "1px solid #e2e8f0" : "none",
+                        background: previewSpacing === sp ? "#f1f5f9" : "#fff",
+                        fontWeight: 600,
+                        fontSize: 11,
+                        color: previewSpacing === sp ? "var(--text)" : "var(--muted)",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {sp === "compact" ? "Compact" : sp === "balanced" ? "Balanced" : "Spacious"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => document.getElementById("rb-customize-preview")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  marginBottom: 18,
+                  borderRadius: 10,
+                  border: "1px dashed #cbd5e1",
+                  background: "#f8fafc",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Auto-fit
+              </button>
+
+              <div
+                style={{
+                  borderTop: "1px solid #e2e8f0",
+                  paddingTop: 14,
+                  marginTop: 4,
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>
+                  Add missing details
+                </div>
+                <p style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5, margin: "0 0 10px" }}>
+                  Use this when the resume lacks important info.
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setCustomizeTab("add")}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #e2e8f0",
+                      background: "#fff",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Add skill +
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCustomizeTab("add")}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #e2e8f0",
+                      background: "#fff",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Add experience +
+                  </button>
+                </div>
+                <span style={{ fontSize: 11, color: "var(--dim)" }}>Structured fields only — switch to the Add details tab.</span>
+              </div>
+
+              <p style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.45, margin: "16px 0 0" }}>
+                Preview typography and spacing are for on-screen review. The exported PDF follows your LaTeX template; re-run generate after
+                changing template in Templates.
+              </p>
+            </div>
+          )}
+
+          {customizeTab === "sections" && (
+            <div>
+              <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, margin: "0 0 12px" }}>
+                Reorder sections in the template gallery before you compile. Drag-and-drop here is limited to section order — not arbitrary
+                page layout — so exports stay ATS-safe.
+              </p>
+              <button
+                type="button"
+                onClick={() => router.push("/?view=builder&flow=template")}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  border: "1px solid #1d4ed8",
+                  background: "#fff",
+                  color: "#1d4ed8",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Open Templates
+              </button>
+            </div>
+          )}
+
+          {customizeTab === "add" && (
+            <div>
+              <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, margin: "0 0 12px" }}>
+                Add content only through structured résumé fields (profile, upload, or manual form) — not free-form canvas edits.
+              </p>
+              <Link
+                href="/?view=profile"
+                style={{
+                  display: "inline-block",
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  background: "#1d4ed8",
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textDecoration: "none",
+                  fontFamily: "inherit",
+                }}
+              >
+                Edit profile
+              </Link>
+            </div>
+          )}
+
+          <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => void generate()}
+              disabled={generating || !(candidateProfile ?? "").trim()}
+              style={{
+                width: "100%",
+                padding: "12px 16px",
+                minHeight: 44,
+                borderRadius: 10,
+                border: "none",
+                background: generating || !(candidateProfile ?? "").trim() ? "#e2e8f0" : "var(--surface2)",
+                color: "var(--text)",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: generating || !(candidateProfile ?? "").trim() ? "not-allowed" : "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {generating ? "Recompiling…" : "Recompile PDF"}
+            </button>
+            {result.folder && result.pdfUrl && !generating ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                <ShareButton folder={result.folder} pdfUrl={result.pdfUrl} userId={user?.id ?? null} />
+              </div>
+            ) : null}
+          </div>
+        </aside>
+      </div>
+
+      {storageFailures.length > 0 && (
+        <div
+          style={{
+            marginTop: 18,
+            padding: "14px 18px",
+            background: "rgba(251,191,36,0.08)",
+            border: "1px solid rgba(251,191,36,0.35)",
+            borderRadius: 12,
+            fontSize: 12,
+            color: "var(--text)",
+            lineHeight: 1.5,
+          }}
+        >
+          <div style={{ fontWeight: 700, color: "var(--orange)", marginBottom: 6, fontSize: 11, letterSpacing: 0.3, textTransform: "uppercase" }}>
+            Cloud backup incomplete
+          </div>
+          {storageFailures.map((f, i) => (
+            <div key={i} style={{ color: "var(--muted)" }}>
+              <strong style={{ color: "var(--text)" }}>{f.artifact === "tex" ? ".tex source" : "PDF"}</strong> didn&apos;t upload:{" "}
+              {f.reason}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {result.folder && result.pdfUrl && !generating ? (
+        <div style={{ marginTop: 16 }}>
+          <ResumePublicLinkSettings folder={result.folder} userId={user?.id ?? null} templateFlow />
+        </div>
+      ) : null}
+
+      <div
+        style={{
+          marginTop: 18,
+          borderRadius: 12,
+          border: "1px solid #e2e8f0",
+          background: "#fff",
+          padding: "16px 18px",
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
+          ATS check{atsResult ? ` — ${atsResult.score}` : ""}
+        </div>
+        {atsLoading && (
+          <div style={{ padding: 12, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>Running ATS check…</div>
+        )}
+        {atsError && !atsLoading && (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, fontSize: 12, color: "var(--red)" }}>
+            Couldn&apos;t run ATS check: {atsError}
+            {result.folder ? (
+              <button
+                type="button"
+                onClick={() => runAtsCheck(result.folder!)}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: "8px 14px",
+                  minHeight: 40,
+                  background: "var(--surface2)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Retry
+              </button>
+            ) : null}
+          </div>
+        )}
+        {atsResult && !atsLoading && (
+          <AtsPanel result={atsResult} rechecking={atsLoading} onRecheck={() => result.folder && runAtsCheck(result.folder)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 type BuilderPaperInteractive = {
   suggestions: Suggestion[];
   acceptedIds: Set<string>;
@@ -2180,11 +3003,23 @@ function ResumePaperView({
   text,
   highlightOriginals,
   interactiveSuggestions,
+  baseFontPx = 10.5,
+  lineHeight = 1.55,
+  paperPaddingY = 28,
+  paperPaddingX = 32,
+  sectionAccentColor = "#0f172a",
 }: {
   text: string;
   highlightOriginals: string[];
   /** When set, paper mirrors Analyze: clickable rows, accepted text replaces line, accent ring on linked card. */
   interactiveSuggestions?: BuilderPaperInteractive;
+  /** Optional typography for template “Customize preview” (does not affect exported PDF). */
+  baseFontPx?: number;
+  lineHeight?: number;
+  paperPaddingY?: number;
+  paperPaddingX?: number;
+  /** Section titles + rules (accent swatch in customize preview). */
+  sectionAccentColor?: string;
 }) {
   const lines = text.split("\n");
   const lineMatchesHighlight = buildResumeHighlightMatcher(highlightOriginals);
@@ -2226,10 +3061,10 @@ function ResumePaperView({
       background: "#fff",
       borderRadius: 6,
       boxShadow: "0 2px 16px rgba(0,0,0,0.10)",
-      padding: "28px 32px",
+      padding: `${paperPaddingY}px ${paperPaddingX}px`,
       fontFamily: "'Georgia', serif",
-      fontSize: 10.5,
-      lineHeight: 1.55,
+      fontSize: baseFontPx,
+      lineHeight,
       color: "#1e293b",
       minHeight: 480,
     }}>
@@ -2273,8 +3108,8 @@ function ResumePaperView({
         if (isAllCaps(t)) {
           return (
             <div key={i} style={{ marginTop: 12, marginBottom: 3 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#0f172a" }}>{t}</div>
-              <div style={{ height: 0.8, background: "#0f172a", marginTop: 2 }} />
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: sectionAccentColor }}>{t}</div>
+              <div style={{ height: 0.8, background: sectionAccentColor, marginTop: 2 }} />
             </div>
           );
         }
