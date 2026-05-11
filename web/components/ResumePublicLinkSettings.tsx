@@ -43,11 +43,14 @@ export default function ResumePublicLinkSettings({
   templateFlow,
   /** When true, wrap settings in a closed-by-default accordion to save vertical space (e.g. builder results). */
   collapseAsDetails = false,
+  /** If save hits “no library row”, run once then retry (same as Share mint). */
+  ensureLibraryRow,
 }: {
   folder: string;
   userId: string | null;
   templateFlow?: boolean;
   collapseAsDetails?: boolean;
+  ensureLibraryRow?: () => Promise<void>;
 }) {
   const [slugDraft, setSlugDraft] = useState("");
   const [isDefault, setIsDefault] = useState(false);
@@ -94,17 +97,27 @@ export default function ResumePublicLinkSettings({
     setSaving(true);
     setMessage(null);
     const slug = slugDraft.trim() ? normalizeResumePublicSlug(slugDraft) : "";
-    const res = await updateResumeShareSettings(folder, {
-      publicSlug: slug || null,
-      isDefault: isDefault,
-    });
+    const payload = { publicSlug: slug || null, isDefault: isDefault } as const;
+    let res = await updateResumeShareSettings(folder, payload);
+    const missingRow =
+      !res.ok &&
+      ensureLibraryRow &&
+      res.error.toLowerCase().includes("not in your library");
+    if (missingRow) {
+      try {
+        await ensureLibraryRow();
+        res = await updateResumeShareSettings(folder, payload);
+      } catch {
+        /* ensureLibraryRow surfaces via second res.error */
+      }
+    }
     setSaving(false);
     if (res.ok) {
       setMessage({ kind: "ok", text: "Link settings saved." });
     } else {
       setMessage({ kind: "err", text: res.error });
     }
-  }, [folder, userId, slugDraft, isDefault]);
+  }, [folder, userId, slugDraft, isDefault, ensureLibraryRow]);
 
   const intro = templateFlow ? (
     <p style={{ margin: collapseAsDetails ? "0 0 14px" : "0 0 16px", fontSize: 13, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>

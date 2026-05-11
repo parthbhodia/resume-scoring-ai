@@ -2020,6 +2020,7 @@ export default function ResumeBuilder({
                   userId={user?.id ?? null}
                   templateFlow={studioHandoff}
                   collapseAsDetails
+                  ensureLibraryRow={syncLibraryRowForShare}
                 />
               ) : null}
 
@@ -3013,7 +3014,13 @@ function TemplateCustomizePostResult({
 
       {result.folder && result.pdfUrl && !generating ? (
         <div style={{ marginTop: 16 }}>
-          <ResumePublicLinkSettings folder={result.folder} userId={user?.id ?? null} templateFlow collapseAsDetails />
+          <ResumePublicLinkSettings
+            folder={result.folder}
+            userId={user?.id ?? null}
+            templateFlow
+            collapseAsDetails
+            ensureLibraryRow={ensureLibraryRow}
+          />
         </div>
       ) : null}
 
