@@ -2185,6 +2185,78 @@ async def api_rewrite_role(request: Request):
     return JSONResponse({"bullets": rewritten})
 
 
+async def api_suggest_changes(request: Request):
+    """POST /api/suggest-changes — analyze resume vs JD and return per-bullet suggestions.
+
+    Body: { "candidate_profile": str, "job_description": str }
+    Returns: { "summary": str, "suggestions": [{ id, section, original, suggested, reason, priority }] }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+    candidate_profile = (body.get("candidate_profile") or "").strip()
+    job_description   = (body.get("job_description") or "").strip()
+
+    if not candidate_profile:
+        return JSONResponse({"error": "candidate_profile required"}, status_code=400)
+    if not job_description:
+        return JSONResponse({"error": "job_description required"}, status_code=400)
+
+    prompt = (
+        "You are an expert resume coach. Analyze this resume against the job description "
+        "and return 5-8 specific, actionable improvements for individual bullets or sections.\n\n"
+        f"RESUME:\n{candidate_profile[:6000]}\n\n"
+        f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
+        "Return a JSON object with this exact structure:\n"
+        '{\n'
+        '  "summary": "One sentence: the most important gap between this resume and the JD.",\n'
+        '  "suggestions": [\n'
+        '    {\n'
+        '      "id": "s1",\n'
+        '      "section": "Work Experience",\n'
+        '      "original": "The exact bullet text from the resume (quote it verbatim)",\n'
+        '      "suggested": "The improved version, tailored to the JD keywords",\n'
+        '      "reason": "Why this change improves the match — 1 concise sentence.",\n'
+        '      "priority": "high"\n'
+        '    }\n'
+        '  ]\n'
+        '}\n\n'
+        "Rules:\n"
+        "- Only suggest changes to bullets that EXIST in the resume — quote them exactly.\n"
+        "- Do NOT invent metrics, employers, or facts not in the resume.\n"
+        "- Priority: 'high' = missing critical JD keyword; 'medium' = wording improvement; 'low' = polish.\n"
+        "- Return ONLY the JSON object, no markdown fences."
+    )
+
+    def _call():
+        from google import genai as _genai  # type: ignore
+        from google.genai import types as _gtypes  # type: ignore
+        client = _genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=_gtypes.GenerateContentConfig(temperature=0.2),
+        )
+        return (resp.text or "").strip()
+
+    loop = asyncio.get_event_loop()
+    try:
+        text = await loop.run_in_executor(None, _call)
+        if text.startswith("```"):
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+        data = json.loads(text)
+        return JSONResponse(data)
+    except json.JSONDecodeError as exc:
+        logger.error(f"suggest-changes JSON parse error: {exc}  raw={text[:200]}")
+        return JSONResponse({"error": "AI response could not be parsed."}, status_code=500)
+    except Exception as exc:
+        logger.exception("suggest-changes failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 async def serve_pdf(request: Request):
     folder   = request.path_params["folder"]
     filename = request.path_params["filename"]
@@ -2224,6 +2296,7 @@ routes = [
     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
     Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),
+    Route("/api/suggest-changes",         api_suggest_changes, methods=["POST"]),
     Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
 
