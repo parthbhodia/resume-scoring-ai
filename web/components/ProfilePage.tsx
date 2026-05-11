@@ -75,14 +75,14 @@ function ProfilePdfUploadFeedback({
             <div
               title={fileName}
               style={{
-                fontSize: fs,
-                fontWeight: 700,
-                color: "var(--text)",
+                fontSize: fs - 1,
+                fontWeight: 600,
+                color: "var(--dim)",
                 marginBottom: ok || err ? 6 : 0,
                 wordBreak: "break-word",
               }}
             >
-              {fileName}
+              {truncateFileName(fileName, 56)}
             </div>
           ) : null}
           {ok ? (
@@ -339,6 +339,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
 
   const save = useCallback(() => {
     saveProfile(form);
+    void upsertUserProfile(form);
     const snap = JSON.stringify(form);
     setBaseline(snap);
     setSavedFlash(true);
@@ -382,15 +383,17 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
       setBaseline(JSON.stringify(next));
       setObUploadOk(
         filled.length
-          ? `Added ${filled.length} detail${filled.length === 1 ? "" : "s"} from your PDF (empty fields only). Scroll down to double-check.`
-          : "No changes — we either already had those details or couldn’t read them from this PDF.",
+          ? initPhase === "onboarding"
+            ? `Filled ${filled.length} empty field${filled.length === 1 ? "" : "s"} from your PDF. Use “Open Profile form” below to review.`
+            : `Filled ${filled.length} empty field${filled.length === 1 ? "" : "s"} from your PDF. Review the updated fields below.`
+          : "No new fields — those values were already filled or we couldn’t read them from this PDF.",
       );
     } catch (e: unknown) {
       setObUploadErr(e instanceof Error ? e.message : String(e));
     } finally {
       setObUploadBusy(false);
     }
-  }, [form]);
+  }, [form, initPhase]);
 
   if (initPhase === "loading") {
     return (
@@ -404,8 +407,19 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           color: "var(--text)",
         }}
       >
-        <div style={{ flex: 1, padding: 48, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
-          Loading profile…
+        <div style={{ flex: 1, padding: 48, textAlign: "center", color: "var(--muted)", fontSize: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+          <div
+            aria-hidden
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              border: "3px solid var(--border)",
+              borderTopColor: "var(--accent)",
+              animation: "spin 0.7s linear infinite",
+            }}
+          />
+          <span>Loading profile…</span>
         </div>
       </div>
     );
@@ -425,7 +439,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
       {initPhase === "onboarding" && (
         <div style={{ flex: 1, padding: "32px 20px 100px", maxWidth: 560, margin: "0 auto", width: "100%" }}>
           <div style={{ marginBottom: 20, display: "flex", gap: 8, justifyContent: "center" }}>
-            {[0, 1, 2].map(i => (
+            {[0, 1].map(i => (
               <span
                 key={i}
                 style={{
@@ -441,6 +455,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
 
           <div
             style={{
+              position: "relative",
               borderRadius: "var(--radius-xl)",
               border: "1px solid var(--border)",
               background: "var(--surface)",
@@ -448,20 +463,49 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
               padding: "28px 26px 26px",
             }}
           >
+            {initPhase === "onboarding" && obUploadBusy ? (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 4,
+                  borderRadius: "inherit",
+                  background: "var(--glass-bg)",
+                  backdropFilter: "blur(10px)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 14,
+                  padding: 24,
+                }}
+              >
+                <div
+                  aria-hidden
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: "50%",
+                    border: "3px solid var(--border)",
+                    borderTopColor: "var(--accent)",
+                    animation: "spin 0.7s linear infinite",
+                  }}
+                />
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", textAlign: "center" }}>Building profile from PDF…</div>
+                <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", maxWidth: 280 }}>
+                  Extracting text and filling empty fields only.
+                </div>
+              </div>
+            ) : null}
             {onboardingStep === 0 && (
               <>
                 <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.7, marginBottom: 12, color: "var(--text)" }}>
                   Welcome to your Profile
                 </h1>
-                <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.65, marginBottom: 16 }}>
+                <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.65, marginBottom: 0 }}>
                   This is where you keep career defaults — contact info, target roles, education, and optional equal-employment answers for
                   future <strong style={{ color: "var(--text)" }}>Apply jobs</strong>. Tailoring can reuse these fields so you type less.
                 </p>
-                <ul style={{ margin: "0 0 20px", paddingLeft: 20, fontSize: 13, color: "var(--muted)", lineHeight: 1.65 }}>
-                  <li>Saved on <strong style={{ color: "var(--text)" }}>this device</strong> until we add account sync</li>
-                  <li>We never sell your data</li>
-                  <li>Next: upload a PDF here or use the short manual wizard</li>
-                </ul>
               </>
             )}
 
@@ -530,20 +574,6 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
               </>
             )}
 
-            {onboardingStep === 2 && (
-              <>
-                <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.6, marginBottom: 12, color: "var(--text)" }}>
-                  You&apos;re ready for the full form
-                </h1>
-                <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.65, marginBottom: 8 }}>
-                  The next screen has all sections — contact, targets, education, tailoring defaults, and optional EEO. Use{" "}
-                  <strong style={{ color: "var(--text)" }}>Save profile</strong> at the bottom when you&apos;re happy.
-                </p>
-                <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.55, margin: 0 }}>
-                  We only merge into <strong>empty</strong> fields — nothing is overwritten without you saving on the next screen.
-                </p>
-              </>
-            )}
           </div>
         </div>
       )}
@@ -930,6 +960,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
             <button
               type="button"
               onClick={() => setOnboardingStep(s => s - 1)}
+              disabled={obUploadBusy}
               style={{
                 fontSize: 13,
                 fontWeight: 600,
@@ -938,17 +969,19 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                 border: "1px solid var(--border)",
                 background: "var(--surface)",
                 color: "var(--text)",
-                cursor: "pointer",
+                cursor: obUploadBusy ? "not-allowed" : "pointer",
+                opacity: obUploadBusy ? 0.45 : 1,
                 fontFamily: "inherit",
               }}
             >
               Back
             </button>
           )}
-          {onboardingStep < 2 ? (
+          {onboardingStep < 1 ? (
             <button
               type="button"
               onClick={() => setOnboardingStep(s => s + 1)}
+              disabled={obUploadBusy}
               style={{
                 fontSize: 13,
                 fontWeight: 600,
@@ -957,7 +990,8 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                 border: "none",
                 background: "var(--accent)",
                 color: "#fff",
-                cursor: "pointer",
+                cursor: obUploadBusy ? "not-allowed" : "pointer",
+                opacity: obUploadBusy ? 0.55 : 1,
                 fontFamily: "inherit",
                 boxShadow: "0 1px 8px rgba(47,129,247,0.35)",
               }}
@@ -968,6 +1002,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
             <button
               type="button"
               onClick={finishOnboarding}
+              disabled={obUploadBusy}
               style={{
                 fontSize: 13,
                 fontWeight: 600,
@@ -976,7 +1011,8 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                 border: "none",
                 background: "var(--accent)",
                 color: "#fff",
-                cursor: "pointer",
+                cursor: obUploadBusy ? "not-allowed" : "pointer",
+                opacity: obUploadBusy ? 0.55 : 1,
                 fontFamily: "inherit",
                 boxShadow: "0 1px 8px rgba(47,129,247,0.35)",
               }}
@@ -1007,7 +1043,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
       >
         <span style={{ fontSize: 12, color: "var(--dim)" }}>
           {savedFlash ? (
-            <span style={{ color: "var(--green)", fontWeight: 600 }}>Saved on this device</span>
+            <span style={{ color: "var(--green)", fontWeight: 600 }}>Saved</span>
           ) : dirty ? (
             "You have unsaved changes"
           ) : (

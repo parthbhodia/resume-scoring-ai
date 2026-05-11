@@ -42,6 +42,10 @@ export interface ResumeRecord {
   verdict: string | null;
   /** Job description text from the last tailor run — used to prefill Builder when tailoring again. */
   job_description?: string | null;
+  /** Lowercase segment for public URL `/r/?id=<public_slug>`. */
+  public_slug?: string | null;
+  /** Single primary resume per account (library ordering + “default link” UX). */
+  is_default?: boolean;
   created_at: string;
   user_id?: string;
   criteria?: Criterion[];

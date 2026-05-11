@@ -1,0 +1,267 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import {
+  fetchResumeShareMetaByFolder,
+  normalizeResumePublicSlug,
+  updateResumeShareSettings,
+} from "@/lib/supabase";
+
+export default function ResumePublicLinkSettings({
+  folder,
+  userId,
+  templateFlow,
+}: {
+  folder: string;
+  userId: string | null;
+  templateFlow?: boolean;
+}) {
+  const [slugDraft, setSlugDraft] = useState("");
+  const [isDefault, setIsDefault] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [originHost, setOriginHost] = useState("");
+
+  useEffect(() => {
+    setOriginHost(typeof window !== "undefined" ? window.location.host : "");
+  }, []);
+
+  useEffect(() => {
+    if (!folder || !userId) {
+      setLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    void fetchResumeShareMetaByFolder(folder).then((meta) => {
+      if (cancelled) return;
+      if (meta) {
+        setSlugDraft(meta.public_slug ?? "");
+        setIsDefault(!!meta.is_default);
+      } else {
+        setSlugDraft("");
+        setIsDefault(false);
+      }
+      setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [folder, userId]);
+
+  const fullUrl = (() => {
+    if (typeof window === "undefined") return "";
+    const seg = normalizeResumePublicSlug(slugDraft);
+    if (seg.length < 3) return "";
+    return `${window.location.origin}/r/?id=${encodeURIComponent(seg)}`;
+  })();
+
+  const onSave = useCallback(async () => {
+    if (!folder || !userId) return;
+    setSaving(true);
+    setMessage(null);
+    const slug = slugDraft.trim() ? normalizeResumePublicSlug(slugDraft) : "";
+    const res = await updateResumeShareSettings(folder, {
+      publicSlug: slug || null,
+      isDefault: isDefault,
+    });
+    setSaving(false);
+    if (res.ok) {
+      setMessage({ kind: "ok", text: "Link settings saved." });
+    } else {
+      setMessage({ kind: "err", text: res.error });
+    }
+  }, [folder, userId, slugDraft, isDefault]);
+
+  if (!loaded) {
+    return (
+      <div style={{ fontSize: 12, color: "var(--dim)", padding: "4px 0" }}>Loading link settings…</div>
+    );
+  }
+
+  if (!userId) {
+    return (
+      <div
+        style={{
+          borderRadius: "var(--radius-xl)",
+          border: "1px solid var(--border)",
+          background: "var(--surface2)",
+          padding: "16px 18px",
+          fontSize: 13,
+          color: "var(--muted)",
+          lineHeight: 1.55,
+        }}
+      >
+        Sign in to create a custom public link or mark this résumé as your default.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        marginBottom: 16,
+        borderRadius: "var(--radius-xl)",
+        border: "1px solid var(--border)",
+        background: "var(--surface)",
+        boxShadow: "var(--shadow-card)",
+        padding: "20px 22px 18px",
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
+        Public link &amp; default résumé
+      </div>
+      {templateFlow ? (
+        <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>
+          Optional: pick a memorable URL for this build, and choose whether it should be your primary résumé in the app.
+        </p>
+      ) : (
+        <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>
+          Share a stable link or set this version as your default résumé.
+        </p>
+      )}
+
+      <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 6, letterSpacing: -0.1 }}>
+        Customize your résumé link
+      </label>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch", gap: 0, marginBottom: 8 }}>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "0 10px",
+            fontSize: 12,
+            color: "var(--dim)",
+            background: "var(--surface2)",
+            border: "1px solid var(--border)",
+            borderRight: "none",
+            borderRadius: "8px 0 0 8px",
+            whiteSpace: "nowrap",
+            maxWidth: "100%",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {originHost ? `${originHost}/r/?id=` : "/r/?id="}
+        </span>
+        <input
+          value={slugDraft}
+          onChange={(e) => setSlugDraft(e.target.value)}
+          placeholder="your-name"
+          autoComplete="off"
+          spellCheck={false}
+          style={{
+            flex: "1 1 140px",
+            minWidth: 120,
+            padding: "10px 12px",
+            fontSize: 13,
+            borderRadius: "0 8px 8px 0",
+            border: "1px solid var(--border)",
+            background: "var(--bg)",
+            color: "var(--text)",
+            fontFamily: "inherit",
+            letterSpacing: -0.1,
+          }}
+        />
+      </div>
+      <div style={{ fontSize: 11, color: "var(--dim)", marginBottom: 14, lineHeight: 1.45 }}>
+        3–50 characters: lowercase letters, numbers, and hyphens. Leave empty to clear a custom slug.
+      </div>
+
+      <label
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          fontSize: 13,
+          color: "var(--text)",
+          cursor: "pointer",
+          marginBottom: 16,
+          lineHeight: 1.45,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={isDefault}
+          onChange={(e) => setIsDefault(e.target.checked)}
+          style={{ marginTop: 3 }}
+        />
+        <span>
+          <strong style={{ fontWeight: 600 }}>Set as my default résumé</strong>
+          <span style={{ display: "block", fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+            Your default appears first in the library and is treated as your primary version for this account.
+          </span>
+        </span>
+      </label>
+
+      {fullUrl ? (
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12, wordBreak: "break-all" }}>
+          Preview:{" "}
+          <a href={fullUrl} style={{ color: "var(--accent)", textDecoration: "none" }} target="_blank" rel="noopener noreferrer">
+            {fullUrl}
+          </a>
+        </div>
+      ) : null}
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+        <button
+          type="button"
+          onClick={() => void onSave()}
+          disabled={saving}
+          style={{
+            padding: "9px 18px",
+            borderRadius: 8,
+            border: "none",
+            background: saving ? "var(--surface2)" : "var(--accent)",
+            color: saving ? "var(--muted)" : "#fff",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: saving ? "not-allowed" : "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {saving ? "Saving…" : "Save link settings"}
+        </button>
+        {fullUrl ? (
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(fullUrl);
+                setMessage({ kind: "ok", text: "Link copied to clipboard." });
+              } catch {
+                setMessage({ kind: "err", text: "Could not copy — select the preview link manually." });
+              }
+            }}
+            style={{
+              padding: "9px 14px",
+              borderRadius: 8,
+              border: "1px solid var(--border)",
+              background: "var(--surface2)",
+              color: "var(--text)",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Copy link
+          </button>
+        ) : null}
+      </div>
+
+      {message ? (
+        <div
+          style={{
+            marginTop: 12,
+            fontSize: 12,
+            fontWeight: 500,
+            color: message.kind === "ok" ? "var(--green)" : "var(--red)",
+          }}
+        >
+          {message.text}
+        </div>
+      ) : null}
+    </div>
+  );
+}

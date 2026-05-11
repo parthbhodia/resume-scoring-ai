@@ -15,9 +15,19 @@ create table if not exists resumes (
   score       int,
   verdict     text,
   job_description text,
+  public_slug   text,          -- optional /r/?id=<slug> segment (lowercase; unique when set)
+  is_default    bool not null default false,  -- at most one true row per user_id (partial unique index)
   created_at  timestamptz default now(),
   unique (user_id, folder)
 );
+
+create unique index if not exists resumes_public_slug_lower_uidx
+  on resumes (lower(public_slug))
+  where public_slug is not null and btrim(public_slug) <> '';
+
+create unique index if not exists resumes_one_default_per_user_uidx
+  on resumes (user_id)
+  where is_default = true;
 
 -- ── criteria ─────────────────────────────────────────────────────────────────
 create table if not exists criteria (

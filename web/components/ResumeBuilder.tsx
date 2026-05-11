@@ -27,6 +27,7 @@ import DiffView     from "./DiffView";
 import SourcesPanel from "./SourcesPanel";
 import AtsPanel, { type AtsResult } from "./AtsPanel";
 import ShareButton   from "./ShareButton";
+import ResumePublicLinkSettings from "./ResumePublicLinkSettings";
 
 type Suggestion = {
   id: string;
@@ -873,13 +874,20 @@ export default function ResumeBuilder({
                       boxShadow: "var(--shadow-card)",
                     }}
                   >
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", letterSpacing: -0.2, marginBottom: 8 }}>
-                      Keep Profile in sync?
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", letterSpacing: -0.2 }}>
+                        Keep Profile in sync?
+                      </div>
+                      <InfoTip label="How profile sync works">
+                        We scan the extracted text for obvious contact signals (email, phone, LinkedIn,
+                        links, name, headline, light education cues). Only{" "}
+                        <strong style={{ color: "var(--text)" }}>empty</strong> fields in your saved
+                        Profile are filled — nothing is overwritten without you reviewing on the
+                        Profile page. Everything stays on this device until we add cloud sync.
+                      </InfoTip>
                     </div>
-                    <p style={{ margin: "0 0 12px", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>
-                      We scan the extracted text for obvious contact signals (email, phone, LinkedIn, links, name, headline, light education
-                      cues). Only <strong style={{ color: "var(--text)" }}>empty</strong> fields in your saved Profile are filled — nothing is
-                      overwritten without you reviewing on the Profile page. Everything stays on this device until we add cloud sync.
+                    <p style={{ margin: "0 0 12px", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, letterSpacing: -0.1 }}>
+                      Fill empty Profile fields from this resume — nothing gets overwritten.
                     </p>
                     {profileSyncUpsell.autoFilled && profileSyncUpsell.filledLabels.length > 0 ? (
                       <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--green)", fontWeight: 600, lineHeight: 1.45 }}>
@@ -907,8 +915,7 @@ export default function ResumeBuilder({
                         style={{ marginTop: 3 }}
                       />
                       <span>
-                        Automatically merge future uploads into my Profile in the background (this device only). You can still review
-                        everything under <strong style={{ color: "var(--text)" }}>Profile</strong> anytime.
+                        Auto-merge future uploads into my Profile (this device only).
                       </span>
                     </label>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
@@ -939,7 +946,7 @@ export default function ResumeBuilder({
                           padding: "8px 4px",
                         }}
                       >
-                        Step-by-step (same wizard as From scratch) →
+                        Step-by-step instead →
                       </Link>
                       <button
                         type="button"
@@ -1514,6 +1521,14 @@ export default function ResumeBuilder({
                 </div>
               </div>
 
+              {result.folder && result.pdfUrl && !generating ? (
+                <ResumePublicLinkSettings
+                  folder={result.folder}
+                  userId={user?.id ?? null}
+                  templateFlow={studioHandoff}
+                />
+              ) : null}
+
               {/* Strengths + Gaps */}
               {ratings && (ratings.whats_working?.length > 0 || ratings.gaps?.length > 0) && (
                 <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
@@ -2020,6 +2035,69 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       </label>
       {children}
     </div>
+  );
+}
+
+/**
+ * Small "i" info icon with a hover/focus tooltip popover.
+ *
+ * Used to hide longer explanatory copy behind an unobtrusive icon so panels
+ * stay short and scannable. Opens on hover, focus, or click; click toggles so
+ * touch users (no hover) can still pin it open.
+ */
+function InfoTip({ children, label }: { children: React.ReactNode; label?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span
+      style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onClick={() => setOpen(v => !v)}
+        aria-label={label ?? "More info"}
+        aria-expanded={open}
+        style={{
+          width: 14, height: 14, borderRadius: "50%",
+          border: "1px solid var(--dim)", background: "transparent",
+          color: "var(--dim)", fontSize: 9, fontWeight: 700, lineHeight: 1,
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          cursor: "help", padding: 0, fontFamily: "inherit",
+          fontStyle: "italic",
+        }}
+      >
+        i
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            left: 0,
+            zIndex: 20,
+            minWidth: 240,
+            maxWidth: 320,
+            padding: "10px 12px",
+            background: "var(--surface3)",
+            color: "var(--text)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            boxShadow: "var(--shadow-card)",
+            fontSize: 11.5,
+            lineHeight: 1.5,
+            letterSpacing: -0.1,
+            fontWeight: 400,
+            whiteSpace: "normal",
+          }}
+        >
+          {children}
+        </span>
+      )}
+    </span>
   );
 }
 

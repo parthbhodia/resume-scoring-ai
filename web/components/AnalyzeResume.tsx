@@ -1747,7 +1747,8 @@ export default function AnalyzeResume() {
                 : undefined
             }
           >
-        {/* ── Builder handoff (optional) ── */}
+        {/* ── Builder handoff (optional) — hidden in split results + preview to avoid duplicate “generate” affordances ── */}
+          {!(result && workspaceSplit) ? (
           <div style={{
             display: "flex",
             alignItems: "flex-start",
@@ -1812,6 +1813,7 @@ export default function AnalyzeResume() {
               )}
             </div>
           </div>
+          ) : null}
 
         {workspaceSplit && (
           <p style={{
@@ -1820,7 +1822,7 @@ export default function AnalyzeResume() {
             color: "var(--muted)",
             lineHeight: 1.55,
           }}>
-            Suggestions and rewrites stay in this column. The preview on the right is read-only tint + metrics — click a bullet to sync with the checklist here.
+            Suggestions and rewrites stay in this column. The preview on the right mirrors your lines with score-based color (and a stronger tint for the category you’re viewing) — click a bullet to sync with the checklist here.
           </p>
         )}
 

@@ -41,6 +41,7 @@ export async function fetchResumes(): Promise<ResumeRecord[]> {
     .from("resumes")
     .select("*, criteria(*)")
     .eq("user_id", userId)
+    .order("is_default", { ascending: false })
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as ResumeRecord[];
@@ -108,6 +109,88 @@ export async function upsertResume(
   }
 
   return resumeId;
+}
+
+/** Normalize user-facing slug input to stored form (lowercase, hyphenated, a-z0-9 only). */
+export function normalizeResumePublicSlug(raw: string): string {
+  const s = raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return s;
+}
+
+export async function fetchResumeShareMetaByFolder(
+  folder: string,
+): Promise<{ public_slug: string | null; is_default: boolean } | null> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.user?.id) return null;
+  const { data, error } = await db
+    .from("resumes")
+    .select("public_slug, is_default")
+    .eq("user_id", session.user.id)
+    .eq("folder", folder)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    public_slug: (data.public_slug as string | null) ?? null,
+    is_default: !!(data as { is_default?: boolean }).is_default,
+  };
+}
+
+/** Update public slug and/or default flag for a library row (RLS: own rows only). */
+export async function updateResumeShareSettings(
+  folder: string,
+  opts: { publicSlug: string | null; isDefault: boolean },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  const uid = session?.user?.id;
+  if (!uid) return { ok: false, error: "Sign in to save a public link." };
+
+  const normalized = opts.publicSlug?.trim()
+    ? normalizeResumePublicSlug(opts.publicSlug)
+    : "";
+  if (normalized && (normalized.length < 3 || normalized.length > 50)) {
+    return { ok: false, error: "Slug must be 3–50 characters." };
+  }
+  if (normalized && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized)) {
+    return { ok: false, error: "Use lowercase letters, numbers, and single hyphens only." };
+  }
+
+  if (opts.isDefault) {
+    const { error: e1 } = await db.from("resumes").update({ is_default: false }).eq("user_id", uid);
+    if (e1) return { ok: false, error: e1.message };
+  }
+
+  const { data: updated, error: e2 } = await db
+    .from("resumes")
+    .update({
+      is_default: opts.isDefault,
+      public_slug: normalized || null,
+    })
+    .eq("user_id", uid)
+    .eq("folder", folder)
+    .select("id");
+
+  if (e2) {
+    const msg = e2.message.toLowerCase();
+    if (e2.code === "23505" || msg.includes("unique") || msg.includes("duplicate")) {
+      return { ok: false, error: "That link is already taken. Try another slug." };
+    }
+    return { ok: false, error: e2.message };
+  }
+  if (!updated?.length) {
+    return {
+      ok: false,
+      error: "Résumé is not in your library yet — wait a few seconds after the PDF finishes, then try again.",
+    };
+  }
+  return { ok: true };
 }
 
 /* ── Analyze history CRUD ────────────────────────────────────── */

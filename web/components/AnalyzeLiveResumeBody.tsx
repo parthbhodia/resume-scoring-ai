@@ -63,6 +63,22 @@ export function normalizeForMatch(s: string): string {
     .trim();
 }
 
+/**
+ * PDF text sometimes loses spaces between words. Display-only heuristic: split camelCase
+ * and add a space after punctuation when missing (does not change stored bullets).
+ */
+export function softenRunOnExtractLine(s: string): string {
+  const t = s.trim();
+  if (t.length < 36) return s;
+  const spaceCount = (t.match(/\s/g) ?? []).length;
+  if (spaceCount / t.length > 0.035) return s;
+  let x = t;
+  x = x.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  x = x.replace(/([,;:])([^\s\d])/g, "$1 $2");
+  x = x.replace(/\s{2,}/g, " ");
+  return x;
+}
+
 export function findBulletIndexForLine(
   line: string,
   bulletAnalysis: LiveBulletItem[],
@@ -449,7 +465,13 @@ function scoreBorderColor(score: number): string {
   return "rgba(248,113,113,0.85)";
 }
 
-function scoreBgTint(score: number, highlighted: boolean): string {
+function scoreBgTint(score: number, highlighted: boolean, presentationOnly: boolean): string {
+  if (presentationOnly) {
+    if (highlighted) return "rgba(239,68,68,0.16)";
+    if (score >= 70) return "rgba(52,211,153,0.15)";
+    if (score >= 55) return "rgba(245,158,11,0.18)";
+    return "rgba(248,113,113,0.16)";
+  }
   if (highlighted) return "rgba(239,68,68,0.06)";
   if (score >= 70) return "rgba(52,211,153,0.04)";
   if (score >= 55) return "rgba(245,158,11,0.05)";
@@ -555,6 +577,8 @@ export default function AnalyzeLiveResumeBody({
       fontSize: 10.8,
       lineHeight: 1.45,
       minHeight: 120,
+      overflowWrap: "anywhere",
+      wordBreak: "break-word",
     }}>
       <style>{`
         @keyframes az-mirror-pulse {
@@ -698,8 +722,10 @@ export default function AnalyzeLiveResumeBody({
                     lineHeight: 1.55,
                     marginBottom: 2,
                     fontFamily: li === 0 ? "'Georgia', serif" : "system-ui, sans-serif",
+                    overflowWrap: "anywhere",
+                    wordBreak: "break-word",
                   }}>
-                    {renderInline(t)}
+                    {renderInline(softenRunOnExtractLine(t))}
                   </div>
                 );
               })}
@@ -716,7 +742,8 @@ export default function AnalyzeLiveResumeBody({
               if (!bullet) return null;
 
               const nm = normalizeForMatch(rawLine);
-              const showText = previewLineOverrides[bulletIdx] ?? (nm.length >= 8 ? nm : bullet.originalBullet);
+              const showTextRaw = previewLineOverrides[bulletIdx] ?? (nm.length >= 8 ? nm : bullet.originalBullet);
+              const showText = softenRunOnExtractLine(showTextRaw);
               const isHighlighted = activeCategory ? bulletMatchesAnalysisCategory(bullet, activeCategory) : false;
               const isSelected = selectedBulletIndex === bulletIdx;
               const previewLineApplied = previewLineOverrides[bulletIdx] !== undefined;
@@ -724,7 +751,11 @@ export default function AnalyzeLiveResumeBody({
               const isPulsing = pulseBulletIndex === bulletIdx;
 
               const borderColor = scoreBorderColor(bullet.score);
-              const bgTint = scoreBgTint(bullet.score, isHighlighted);
+              const bgTint = scoreBgTint(bullet.score, isHighlighted, presentationOnly);
+              const leftBar =
+                activeCategory && isHighlighted
+                  ? "4px solid rgba(248, 113, 113, 0.95)"
+                  : `3px solid ${borderColor}`;
 
               return (
                 <div
@@ -751,7 +782,7 @@ export default function AnalyzeLiveResumeBody({
                     padding: presentationOnly ? "5px 7px 6px 14px" : "6px 8px 8px 14px",
                     borderRadius: 4,
                     background: bgTint,
-                    borderLeft: `3px solid ${isHighlighted || !activeCategory ? borderColor : "transparent"}`,
+                    borderLeft: leftBar,
                     boxShadow: isSelected ? "inset 0 0 0 1.5px var(--resume-paper-accent)" : undefined,
                     cursor: hasActionable ? "pointer" : "default",
                     animation: isPulsing ? "az-mirror-pulse 0.85s ease-out 1" : undefined,
@@ -775,7 +806,7 @@ export default function AnalyzeLiveResumeBody({
                       </span>
                     )}
 
-                    <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "var(--resume-paper-ink)" }}>
+                    <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                       {highlightMetricSpans(showText)}
                       {previewLineApplied && (
                         <span className="az-preview-applied-mark"

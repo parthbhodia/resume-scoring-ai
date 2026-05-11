@@ -82,6 +82,16 @@ function pickSchoolFromLines(lines: string[]): string | null {
   return null;
 }
 
+/** ATS / PDF lines like "Location:JerseyCity,NJ…" — not a résumé headline. */
+function looksLikeLocationOrAddressLine(line: string): boolean {
+  const t = line.trim();
+  if (/^(location|address|based\s+in|residing|citizenship|visa\s*status)\s*:/i.test(t)) return true;
+  if (/^location\s*[|]/i.test(t)) return true;
+  // Collapsed geo after "Location:" (few spaces, commas, run-on words)
+  if (/location\s*:/i.test(t) && (t.match(/\s/g) ?? []).length <= 4 && (t.match(/,/g) ?? []).length >= 1) return true;
+  return false;
+}
+
 function firstHeadlineCandidate(lines: string[], displayName: string | undefined): string | null {
   if (!displayName?.trim()) return null;
   let seenNameLine = false;
@@ -93,6 +103,7 @@ function firstHeadlineCandidate(lines: string[], displayName: string | undefined
       continue;
     }
     if (!seenNameLine) continue;
+    if (looksLikeLocationOrAddressLine(line)) continue;
     if (looksLikeStructuredEmploymentLine(line)) continue;
     if (/^(experience|education|skills|projects|summary|objective|work|employment|publications)/i.test(line)) continue;
     if (/^\d{4}\s*[-–]\s*/.test(line)) continue;

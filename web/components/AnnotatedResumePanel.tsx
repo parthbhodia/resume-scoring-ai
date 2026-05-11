@@ -667,7 +667,7 @@ export default function AnnotatedResumePanel({
               {totalCount} lines scored
             </div>
           )}
-          {useLiveDoc && (!sourcePdfUrl || viewMode === "live") ? (
+          {!presentationOnly && useLiveDoc && (!sourcePdfUrl || viewMode === "live") ? (
             <div
               style={{
                 display: "flex",
@@ -920,7 +920,7 @@ export default function AnnotatedResumePanel({
       )}
 
       {/* Legend — hidden on PDF tab (viewer has its own legend + download) */}
-      {!activeCategory && !(sourcePdfUrl && viewMode === "pdf") && (
+      {!(sourcePdfUrl && viewMode === "pdf") && (
         <div style={{
           padding: "7px 14px",
           borderBottom: "1px solid var(--border)",
@@ -945,7 +945,7 @@ export default function AnnotatedResumePanel({
         </div>
       )}
 
-      {activeCategory && !presentationOnly && (
+      {activeCategory && (
         <div style={{
           padding: "8px 14px",
           borderBottom: "1px solid var(--border)",
