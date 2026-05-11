@@ -1,15 +1,16 @@
 "use client";
 
 /**
- * ResumeLibrary — grid of saved résumés (product design: Library view).
+ * ResumeLibrary — grid of saved résumés + optional right-hand detail panel (?resume=<folder>).
  *
  * - 2–3 columns desktop, 1 column mobile; score badge by threshold; paper-style preview.
  * - Hover (desktop): overlay with View + Use as base; touch: actions always visible.
- * - Card click → full detail (?view=library&resume=<folder>).
+ * - Card click → opens detail drawer beside the grid (matches product mockup).
  */
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import LibraryResumeDetailPanel from "./LibraryResumeDetailPanel";
 import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
 import type { ResumeRecord } from "@/lib/types";
 import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
@@ -28,6 +29,8 @@ export default function ResumeLibrary({ onUseAsBase }: {
   onUseAsBase?: (folder: string) => void;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedFolder = (searchParams?.get("resume") ?? "").trim();
   const [resumes, setResumes] = useState<ResumeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
@@ -37,15 +40,10 @@ export default function ResumeLibrary({ onUseAsBase }: {
     fetchResumes().then(setResumes).catch(console.error).finally(() => setLoading(false));
   }, []);
 
-  const stats = useMemo(() => {
-    const scored = resumes.filter(r => r.score != null);
-    return {
-      total: resumes.length,
-      scoredCount: scored.length,
-      avg: scored.length ? Math.round(scored.reduce((a, r) => a + (r.score ?? 0), 0) / scored.length) : 0,
-      best: scored.length ? Math.max(...scored.map(r => r.score ?? 0)) : 0,
-    };
-  }, [resumes]);
+  const selectedRecord = useMemo(() => {
+    if (!selectedFolder) return null;
+    return resumes.find(r => r.folder === selectedFolder) ?? null;
+  }, [resumes, selectedFolder]);
 
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase();
@@ -66,6 +64,10 @@ export default function ResumeLibrary({ onUseAsBase }: {
     router.push(`/?view=library&resume=${encodeURIComponent(folder)}`);
   };
 
+  const closeDetail = () => {
+    router.push("/?view=library");
+  };
+
   const useAsBase = (r: ResumeRecord) => {
     onUseAsBase?.(r.folder);
     stashTailorPrefillFromLibrary(r);
@@ -76,14 +78,67 @@ export default function ResumeLibrary({ onUseAsBase }: {
     <div
       className="library-page fade-in"
       style={{
+        flex: 1,
+        minHeight: 0,
         width: "100%",
-        maxWidth: 1180,
-        margin: "0 auto",
-        padding: "24px 20px 32px",
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
         boxSizing: "border-box",
       }}
     >
       <style>{`
+        .library-shell {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: row;
+          align-items: stretch;
+          width: 100%;
+        }
+        .library-main-scroll {
+          flex: 1 1 0%;
+          min-width: 0;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+          display: flex;
+          justify-content: center;
+        }
+        .library-main-inner {
+          width: 100%;
+          max-width: 1180px;
+          padding: 24px 20px 32px;
+          box-sizing: border-box;
+        }
+        .library-backdrop {
+          display: none;
+        }
+        @media (max-width: 900px) {
+          .library-backdrop.is-open {
+            display: block;
+            position: fixed;
+            inset: 0;
+            z-index: 199;
+            margin: 0;
+            padding: 0;
+            border: none;
+            background: rgba(15, 23, 42, 0.42);
+            cursor: pointer;
+          }
+          .library-detail-panel {
+            position: fixed !important;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: min(100%, 400px) !important;
+            max-width: 100vw;
+            z-index: 200;
+            box-shadow: -12px 0 36px rgba(15, 23, 42, 0.18);
+          }
+          [data-theme="dark"] .library-backdrop.is-open {
+            background: rgba(0, 0, 0, 0.55);
+          }
+        }
         .library-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
@@ -166,98 +221,129 @@ export default function ResumeLibrary({ onUseAsBase }: {
           .library-card-actions--hover { display: none !important; }
           .library-card .library-card-actions--static { display: flex; }
         }
-        @media (min-width: 768px) {
-          .library-stats-row { grid-template-columns: repeat(3, 1fr) !important; }
-        }
       `}</style>
 
-      <header style={{ marginBottom: 24 }}>
-        <h1
-          style={{
-            fontSize: 26,
-            fontWeight: 700,
-            letterSpacing: "-0.03em",
-            color: "var(--text)",
-            marginBottom: 6,
-            lineHeight: 1.15,
-          }}
-        >
-          Library
-        </h1>
-        <p style={{ fontSize: 13.5, color: "var(--muted)", letterSpacing: "-0.02em", lineHeight: 1.55, maxWidth: 520 }}>
-          Saved résumés and tailored versions. Open any card for the full viewer, or use one as the starting point for a new job.
-        </p>
-      </header>
-
-      {!loading && resumes.length > 0 && (
-        <div
-          className="fade-in-up library-stats-row"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-            gap: 10,
-            marginBottom: 20,
-          }}
-        >
-          <Stat label="Saved" value={String(stats.total)} tone="none" />
-          <Stat
-            label="Avg match"
-            value={stats.scoredCount ? String(stats.avg) : "—"}
-            tone={stats.scoredCount ? matchScoreBand(stats.avg) : "none"}
-          />
-          <Stat
-            label="Best match"
-            value={stats.scoredCount ? String(stats.best) : "—"}
-            tone={stats.scoredCount ? matchScoreBand(stats.best) : "none"}
-          />
-        </div>
-      )}
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 18, alignItems: "center" }}>
-        <input
-          value={filter}
-          onChange={e => setFilter(e.target.value)}
-          placeholder="Search company or role…"
-          aria-label="Filter resumes"
-          style={{ flex: "1 1 220px", minWidth: 0 }}
+      {selectedFolder ? (
+        <button
+          type="button"
+          className={`library-backdrop is-open`}
+          aria-label="Close resume details"
+          onClick={closeDetail}
         />
-        <select
-          value={sort}
-          onChange={e => setSort(e.target.value as SortKey)}
-          aria-label="Sort resumes"
-          style={{ width: "auto", minWidth: 150, flexShrink: 0 }}
-        >
-          <option value="recent">Most recent</option>
-          <option value="score">Highest match</option>
-          <option value="company">Company A–Z</option>
-        </select>
-      </div>
+      ) : null}
 
-      {loading ? (
-        <div className="library-grid" aria-busy>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div
-              key={i}
-              className={`skeleton stagger-${Math.min(i + 1, 4)}`}
-              style={{ height: 300, borderRadius: "var(--radius-xl, 14px)" }}
-            />
-          ))}
+      <div className="library-shell">
+        <div className="library-main-scroll">
+          <div className="library-main-inner">
+            <header
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: 16,
+                marginBottom: 24,
+              }}
+            >
+              <div style={{ minWidth: 0, flex: "1 1 200px" }}>
+                <h1
+                  style={{
+                    fontSize: 26,
+                    fontWeight: 700,
+                    letterSpacing: "-0.03em",
+                    color: "var(--text)",
+                    marginBottom: 6,
+                    lineHeight: 1.15,
+                  }}
+                >
+                  Resume Library
+                </h1>
+                <p style={{ fontSize: 13.5, color: "var(--muted)", letterSpacing: "-0.02em", lineHeight: 1.55, margin: 0, maxWidth: 520 }}>
+                  {loading ? "Loading…" : `${resumes.length} saved resume${resumes.length === 1 ? "" : "s"}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => router.push("/?view=builder&flow=tailor")}
+                style={{
+                  flexShrink: 0,
+                  padding: "10px 18px",
+                  borderRadius: "var(--radius-lg, 12px)",
+                  border: "none",
+                  background: "var(--accent)",
+                  color: "#fff",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  letterSpacing: "-0.02em",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                + New Resume
+              </button>
+            </header>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 18, alignItems: "center" }}>
+              <input
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+                placeholder="Search resumes…"
+                aria-label="Search resumes"
+                style={{ flex: "1 1 220px", minWidth: 0 }}
+              />
+              <select
+                value={sort}
+                onChange={e => setSort(e.target.value as SortKey)}
+                aria-label="Sort resumes"
+                style={{ width: "auto", minWidth: 150, flexShrink: 0 }}
+              >
+                <option value="recent">Most recent</option>
+                <option value="score">Highest match</option>
+                <option value="company">Company A–Z</option>
+              </select>
+            </div>
+
+            {loading ? (
+              <div className="library-grid" aria-busy>
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`skeleton stagger-${Math.min(i + 1, 4)}`}
+                    style={{ height: 300, borderRadius: "var(--radius-xl, 14px)" }}
+                  />
+                ))}
+              </div>
+            ) : filtered.length === 0 ? (
+              <EmptyLibrary hasAny={resumes.length > 0} filter={filter} onGoBuilder={() => router.push("/?view=builder&flow=tailor")} />
+            ) : (
+              <div className="library-grid">
+                {filtered.map((r, i) => (
+                  <ResumeCard
+                    key={r.id}
+                    record={r}
+                    isSelected={selectedFolder === r.folder}
+                    stagger={Math.min(i % 5, 4)}
+                    onOpen={() => openResume(r.folder)}
+                    onUseAsBase={() => useAsBase(r)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      ) : filtered.length === 0 ? (
-        <EmptyLibrary hasAny={resumes.length > 0} filter={filter} onGoBuilder={() => router.push("/?view=builder&flow=tailor")} />
-      ) : (
-        <div className="library-grid">
-          {filtered.map((r, i) => (
-            <ResumeCard
-              key={r.id}
-              record={r}
-              stagger={Math.min(i % 5, 4)}
-              onOpen={() => openResume(r.folder)}
-              onUseAsBase={() => useAsBase(r)}
-            />
-          ))}
-        </div>
-      )}
+
+        {selectedFolder ? (
+          <LibraryResumeDetailPanel
+            meta={selectedRecord}
+            loading={loading}
+            notFound={!loading && !selectedRecord}
+            onClose={closeDetail}
+            onTailorNewJob={() => {
+              if (selectedRecord) useAsBase(selectedRecord);
+            }}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -316,39 +402,15 @@ function EmptyLibrary({
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone: "strong" | "mid" | "weak" | "none" }) {
-  const color =
-    tone === "strong" ? "var(--green)"
-      : tone === "mid" ? "var(--amber)"
-        : tone === "weak" ? "var(--red)"
-          : "var(--text)";
-  return (
-    <div
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg, 12px)",
-        padding: "12px 14px",
-        boxShadow: "var(--shadow-card)",
-      }}
-    >
-      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.03em", color, lineHeight: 1.1 }}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function ResumeCard({
   record,
+  isSelected,
   stagger,
   onOpen,
   onUseAsBase,
 }: {
   record: ResumeRecord;
+  isSelected?: boolean;
   stagger: number;
   onOpen: () => void;
   onUseAsBase: () => void;
@@ -378,7 +440,7 @@ function ResumeCard({
           color: band === "strong" ? "var(--green)" : band === "mid" ? "var(--amber)" : "var(--red)",
         }}
       >
-        {sc} match
+        {sc}/100
       </span>
     ) : (
       <span style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)" }}>No score</span>
@@ -431,6 +493,12 @@ function ResumeCard({
       role="button"
       tabIndex={0}
       className={`library-card fade-in-up stagger-${stagger + 1}`}
+      data-selected={isSelected ? "true" : undefined}
+      style={{
+        borderWidth: isSelected ? 2 : 1,
+        borderColor: isSelected ? "var(--accent)" : "var(--border)",
+        boxShadow: isSelected ? "0 0 0 3px rgba(47, 129, 247, 0.18)" : undefined,
+      }}
       onClick={onOpen}
       onKeyDown={e => {
         if (e.key === "Enter" || e.key === " ") {

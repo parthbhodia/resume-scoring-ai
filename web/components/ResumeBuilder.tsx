@@ -97,22 +97,125 @@ function saveDraft(patch: Record<string, unknown>) {
   } catch { /* quota / SSR */ }
 }
 
+const BUILDER_SESSION_KEY = "builderSession";
+
+/** Survives sidebar view switches (ResumeBuilder unmounts when leaving ?view=builder). */
+type BuilderSessionV1 = {
+  v: 1;
+  candidateProfile: string | null;
+  uploadedFileName: string | null;
+  baseFolder: string | null;
+  studioHandoff: boolean;
+  suggestions: Suggestion[] | null;
+  suggestSummary: string;
+  acceptedSuggestionIds: string[];
+  rejectedSuggestionIds: string[];
+  result: GenerationResult | null;
+};
+
+function isSuggestionRecord(x: unknown): x is Suggestion {
+  if (!x || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  return (
+    typeof o.id === "string" &&
+    typeof o.original === "string" &&
+    typeof o.suggested === "string" &&
+    typeof o.reason === "string" &&
+    typeof o.section === "string" &&
+    (o.priority === "high" || o.priority === "medium" || o.priority === "low")
+  );
+}
+
+function parseResultFromDraft(x: unknown): GenerationResult | null {
+  if (!x || typeof x !== "object") return null;
+  const r = x as Partial<GenerationResult>;
+  return {
+    ...EMPTY_RESULT,
+    folder: r.folder ?? null,
+    baseFolder: r.baseFolder ?? null,
+    baseLoaded: r.baseLoaded ?? null,
+    texPath: r.texPath ?? null,
+    pdfUrl: typeof r.pdfUrl === "string" ? r.pdfUrl : null,
+    ratings: r.ratings ?? null,
+    diff: Array.isArray(r.diff) ? r.diff : [],
+    adds: typeof r.adds === "number" ? r.adds : 0,
+    removes: typeof r.removes === "number" ? r.removes : 0,
+    rationales: Array.isArray(r.rationales) ? r.rationales : [],
+    sources: Array.isArray(r.sources) ? r.sources : [],
+    latexPreview: typeof r.latexPreview === "string" ? r.latexPreview : "",
+    status: typeof r.status === "string" ? r.status : "",
+  };
+}
+
+function parseBuilderSessionFromDraft(d: Record<string, unknown>): BuilderSessionV1 | null {
+  const raw = d[BUILDER_SESSION_KEY];
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (o.v !== 1) return null;
+
+  let suggestions: Suggestion[] | null = null;
+  if (o.suggestions === null) suggestions = null;
+  else if (Array.isArray(o.suggestions)) {
+    const list = o.suggestions.filter(isSuggestionRecord);
+    suggestions = list.length ? list : null;
+  }
+
+  const acceptedSuggestionIds = Array.isArray(o.acceptedSuggestionIds)
+    ? o.acceptedSuggestionIds.filter((x): x is string => typeof x === "string")
+    : [];
+  const rejectedSuggestionIds = Array.isArray(o.rejectedSuggestionIds)
+    ? o.rejectedSuggestionIds.filter((x): x is string => typeof x === "string")
+    : [];
+
+  return {
+    v: 1,
+    candidateProfile: typeof o.candidateProfile === "string" ? o.candidateProfile : null,
+    uploadedFileName: typeof o.uploadedFileName === "string" ? o.uploadedFileName : null,
+    baseFolder: typeof o.baseFolder === "string" ? o.baseFolder : null,
+    studioHandoff: o.studioHandoff === true,
+    suggestions,
+    suggestSummary: typeof o.suggestSummary === "string" ? o.suggestSummary : "",
+    acceptedSuggestionIds,
+    rejectedSuggestionIds,
+    result: parseResultFromDraft(o.result),
+  };
+}
+
+function saveBuilderSessionToDraft(session: BuilderSessionV1) {
+  try {
+    const prev = loadDraft();
+    sessionStorage.setItem(SS_KEY, JSON.stringify({ ...prev, [BUILDER_SESSION_KEY]: session }));
+  } catch {
+    try {
+      const slim: BuilderSessionV1 = {
+        ...session,
+        result: session.result ? { ...session.result, latexPreview: "" } : null,
+      };
+      const prev = loadDraft();
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ ...prev, [BUILDER_SESSION_KEY]: slim }));
+    } catch { /* quota */ }
+  }
+}
+
 export default function ResumeBuilder({
   initialBaseFolder,
-  scratchStart = false,
 }: {
   initialBaseFolder?: string | null;
-  /** When true, start a clean builder session (no draft carry-over, no base resume). */
-  scratchStart?: boolean;
 } = {}) {
   const router = useRouter();
-  const draft0: Record<string, unknown> = scratchStart ? {} : loadDraft();
+  const draft0: Record<string, unknown> = loadDraft();
+  const builderSession0 = parseBuilderSessionFromDraft(draft0);
   const [company,    setCompanyRaw]    = useState<string>(String(draft0.company ?? ""));
   const [role,       setRoleRaw]       = useState<string>(String(draft0.role ?? ""));
   const [jd,         setJdRaw]         = useState<string>(String(draft0.jd ?? ""));
   const [jobUrl,     setJobUrlRaw]     = useState<string>(String(draft0.jobUrl ?? ""));
   const model = "gemini-2.5-flash";
-  const [baseFolder, setBaseFolder] = useState<string | null>(scratchStart ? null : (initialBaseFolder ?? null));
+  const [baseFolder, setBaseFolder] = useState<string | null>(() => {
+    const fromUrl = (initialBaseFolder ?? "").trim() || null;
+    if (fromUrl) return fromUrl;
+    const fromSession = builderSession0?.baseFolder?.trim() || null;
+    return fromSession;
+  });
   // Wrap setters to also persist to sessionStorage
   const setCompany = (v: string) => { setCompanyRaw(v); saveDraft({ company: v }); };
   const setRole    = (v: string) => { setRoleRaw(v);    saveDraft({ role: v }); };
@@ -121,27 +224,35 @@ export default function ResumeBuilder({
 
   const [generating, setGenerating] = useState(false);
   const [statusMsg,  setStatusMsg]  = useState("");
-  const [result,     setResult]     = useState<GenerationResult | null>(null);
+  const [result,     setResult]     = useState<GenerationResult | null>(() => builderSession0?.result ?? null);
   const [error,      setError]      = useState<string | null>(null);
-  const [preview,    setPreview]    = useState("");
+  const [preview,    setPreview]    = useState(() => builderSession0?.result?.latexPreview ?? "");
   const [jdKeywords, setJdKeywords] = useState<string[]>([]);
   const [searchQueries, setSearchQueries] = useState<string[]>([]);
   const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
-  const [studioHandoff, setStudioHandoff] = useState(false);
+  const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
 
   // ── Suggestions state ──────────────────────────────────────────────────────
-  const [suggestions,    setSuggestions]    = useState<Suggestion[] | null>(null);
-  const [suggestSummary, setSuggestSummary] = useState("");
+  const [suggestions,    setSuggestions]    = useState<Suggestion[] | null>(() => builderSession0?.suggestions ?? null);
+  const [suggestSummary, setSuggestSummary] = useState(() => builderSession0?.suggestSummary ?? "");
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError,   setSuggestError]   = useState<string | null>(null);
-  const [acceptedIds,    setAcceptedIds]    = useState<Set<string>>(new Set());
-  const [rejectedIds,    setRejectedIds]    = useState<Set<string>>(new Set());
+  const [acceptedIds,    setAcceptedIds]    = useState<Set<string>>(
+    () => new Set(builderSession0?.acceptedSuggestionIds ?? []),
+  );
+  const [rejectedIds,    setRejectedIds]    = useState<Set<string>>(
+    () => new Set(builderSession0?.rejectedSuggestionIds ?? []),
+  );
 
-  const [candidateProfile,    setCandidateProfile]    = useState<string | null>(null);
-  const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(null);
+  const [candidateProfile,    setCandidateProfile]    = useState<string | null>(
+    () => builderSession0?.candidateProfile ?? null,
+  );
+  const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(
+    () => builderSession0?.uploadedFileName ?? null,
+  );
   const [uploadingPdf,        setUploadingPdf]        = useState(false);
   const [uploadError,         setUploadError]         = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -153,16 +264,43 @@ export default function ResumeBuilder({
     hintedCount: number;
   } | null>(null);
   const [profileAutofillUpload, setProfileAutofillUpload] = useState(false);
+  const profileAutofillCheckboxId = useId();
 
   const [extractingJd, setExtractingJd] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
 
+  const acceptedDepsKey = [...acceptedIds].sort().join("\0");
+  const rejectedDepsKey = [...rejectedIds].sort().join("\0");
+
   useEffect(() => {
-    if (!scratchStart) return;
-    try {
-      sessionStorage.removeItem(SS_KEY);
-    } catch { /* ignore */ }
-  }, [scratchStart]);
+    lastResumeExtractRef.current = (candidateProfile ?? "").trim();
+  }, [candidateProfile]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    saveBuilderSessionToDraft({
+      v: 1,
+      candidateProfile,
+      uploadedFileName,
+      baseFolder,
+      studioHandoff,
+      suggestions,
+      suggestSummary,
+      acceptedSuggestionIds: [...acceptedIds],
+      rejectedSuggestionIds: [...rejectedIds],
+      result,
+    });
+  }, [
+    candidateProfile,
+    uploadedFileName,
+    baseFolder,
+    studioHandoff,
+    suggestions,
+    suggestSummary,
+    acceptedDepsKey,
+    rejectedDepsKey,
+    result,
+  ]);
 
   useEffect(() => {
     setProfileAutofillUpload(getProfileAutofillFromUpload());
@@ -170,7 +308,7 @@ export default function ResumeBuilder({
 
   // Prefill from Analyze (`fromAnalyze=1`) or Template Studio (`fromTemplateStudio=1`).
   useEffect(() => {
-    if (typeof window === "undefined" || scratchStart) return;
+    if (typeof window === "undefined") return;
     const sp = new URLSearchParams(window.location.search);
     const fromAnalyze = sp.get("fromAnalyze") === "1";
     const fromTemplateStudio = sp.get("fromTemplateStudio") === "1";
@@ -217,7 +355,7 @@ export default function ResumeBuilder({
       const qs = sp.toString();
       router.replace(qs ? `/?${qs}` : "/?view=builder&flow=tailor");
     }
-  }, [router, scratchStart]);
+  }, [router]);
 
   // ── ATS state — populated lazily when the user opens the ATS panel. ──
   const [atsResult,    setAtsResult]    = useState<AtsResult | null>(null);
@@ -586,6 +724,12 @@ export default function ResumeBuilder({
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
 
+  /** Full-width suggestions review: hide hero + form so the two-column panel can use the width. */
+  const suggestionsReviewMode =
+    !studioHandoff &&
+    Boolean(suggestions && suggestions.length > 0 && !generating && !result);
+  const showBuilderInputs = !result && !generating && !suggestionsReviewMode;
+
   return (
     <div
       className="rb-root"
@@ -611,7 +755,7 @@ export default function ResumeBuilder({
           className="rb-page"
           style={{
             padding: "clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh)",
-            maxWidth: result ? 960 : studioHandoff ? 920 : 820,
+            maxWidth: result ? 960 : suggestionsReviewMode ? 1180 : studioHandoff ? 920 : 820,
             margin: "0 auto",
             width: "100%",
             boxSizing: "border-box",
@@ -640,6 +784,18 @@ export default function ResumeBuilder({
                 font-size: 14px;
               }
             }
+            .rb-page input[type="checkbox"] {
+              width: 18px;
+              height: 18px;
+              min-width: 18px;
+              min-height: 18px;
+              flex-shrink: 0;
+              margin: 0;
+              accent-color: var(--accent);
+              cursor: pointer;
+              align-self: flex-start;
+              margin-top: 2px;
+            }
             @media (prefers-reduced-motion: reduce) {
               .rb-page .fade-in,
               .rb-page .fade-in-up,
@@ -654,7 +810,7 @@ export default function ResumeBuilder({
           `}</style>
 
           {/* ── Hero (pre-generation) ── */}
-          {!result && !generating && (
+          {showBuilderInputs && (
             studioHandoff ? (
               <div
                 style={{
@@ -718,8 +874,8 @@ export default function ResumeBuilder({
             )
           )}
 
-          {/* ── Inputs (hidden once results are shown) ── */}
-          {!result && !generating && (<>
+          {/* ── Inputs (hidden once results are shown, or while reviewing suggestions) ── */}
+          {showBuilderInputs && (<>
 
           {!studioHandoff && (
           <>
@@ -906,16 +1062,20 @@ export default function ResumeBuilder({
                 {profileSyncUpsell && profileSyncUpsell.hintedCount > 0 && !studioHandoff && (
                   <div
                     style={{
-                      marginTop: 12,
-                      padding: "16px 18px",
+                      marginTop: 14,
+                      padding: "18px 20px 16px",
                       borderRadius: "var(--radius-xl)",
                       border: "1px solid var(--border)",
+                      borderLeft: "3px solid var(--accent)",
                       background: "var(--surface)",
                       boxShadow: "var(--shadow-card)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", letterSpacing: -0.2 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", letterSpacing: -0.25, lineHeight: 1.35, flex: 1, minWidth: 0 }}>
                         Keep Profile in sync?
                       </div>
                       <InfoTip label="How profile sync works">
@@ -926,25 +1086,30 @@ export default function ResumeBuilder({
                         Profile page. Everything stays on this device until we add cloud sync.
                       </InfoTip>
                     </div>
-                    <p style={{ margin: "0 0 12px", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, letterSpacing: -0.1 }}>
+                    <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>
                       Fill empty Profile fields from this resume — nothing gets overwritten.
                     </p>
                     {profileSyncUpsell.autoFilled && profileSyncUpsell.filledLabels.length > 0 ? (
-                      <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--green)", fontWeight: 600, lineHeight: 1.45 }}>
+                      <p style={{ margin: 0, fontSize: 12, color: "var(--green)", fontWeight: 600, lineHeight: 1.5 }}>
                         Auto-updated Profile ({profileSyncUpsell.filledLabels.join(", ")}) — open Profile to verify.
                       </p>
                     ) : profileSyncUpsell.autoFilled ? (
-                      <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+                      <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
                         Auto-fill is on, but your Profile already had those values — nothing changed.
                       </p>
                     ) : null}
-                    <label
+
+                    <div
                       style={{
-                        display: "flex", alignItems: "flex-start", gap: 10,
-                        fontSize: 12, color: "var(--text)", cursor: "pointer", marginBottom: 14, lineHeight: 1.45,
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 12,
+                        padding: "12px 0 2px",
+                        borderTop: "1px solid var(--border)",
                       }}
                     >
                       <input
+                        id={profileAutofillCheckboxId}
                         type="checkbox"
                         checked={profileAutofillUpload}
                         onChange={e => {
@@ -952,54 +1117,81 @@ export default function ResumeBuilder({
                           setProfileAutofillUpload(v);
                           setProfileAutofillFromUpload(v);
                         }}
-                        style={{ marginTop: 3 }}
                       />
-                      <span>
-                        Auto-merge future uploads into my Profile (this device only).
-                      </span>
-                    </label>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-                      <button
-                        type="button"
-                        onClick={mergeProfileFromLastExtract}
+                      <label
+                        htmlFor={profileAutofillCheckboxId}
                         style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          padding: "8px 16px",
-                          borderRadius: "var(--radius)",
-                          border: "none",
-                          background: "var(--accent)",
-                          color: "#fff",
+                          flex: 1,
+                          minWidth: 0,
+                          fontSize: 13,
+                          color: "var(--text)",
                           cursor: "pointer",
-                          fontFamily: "inherit",
+                          lineHeight: 1.5,
+                          letterSpacing: -0.15,
+                          paddingTop: 1,
                         }}
                       >
-                        {profileSyncUpsell.autoFilled ? "Open Profile" : "Merge into Profile & review"}
-                      </button>
-                      <Link
-                        href="/?view=manual-form"
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: "var(--accent)",
-                          textDecoration: "none",
-                          padding: "8px 4px",
-                        }}
-                      >
-                        Step-by-step instead →
-                      </Link>
+                        Auto-merge future uploads into my Profile (this device only).
+                      </label>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        paddingTop: 4,
+                      }}
+                    >
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+                        <button
+                          type="button"
+                          onClick={mergeProfileFromLastExtract}
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            padding: "10px 18px",
+                            minHeight: 44,
+                            borderRadius: "var(--radius)",
+                            border: "none",
+                            background: "var(--accent)",
+                            color: "#fff",
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          {profileSyncUpsell.autoFilled ? "Open Profile" : "Merge into Profile & review"}
+                        </button>
+                        <Link
+                          href="/?view=manual-form"
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: "var(--accent)",
+                            textDecoration: "none",
+                            padding: "10px 4px",
+                            minHeight: 44,
+                            display: "inline-flex",
+                            alignItems: "center",
+                          }}
+                        >
+                          Step-by-step instead →
+                        </Link>
+                      </div>
                       <button
                         type="button"
                         onClick={() => setProfileSyncUpsell(null)}
                         style={{
-                          fontSize: 12,
-                          fontWeight: 500,
-                          marginLeft: "auto",
-                          padding: "6px 10px",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          padding: "10px 16px",
+                          minHeight: 44,
                           borderRadius: "var(--radius)",
                           border: "1px solid var(--border)",
-                          background: "transparent",
-                          color: "var(--dim)",
+                          background: "var(--surface2)",
+                          color: "var(--muted)",
                           cursor: "pointer",
                           fontFamily: "inherit",
                         }}
@@ -1262,6 +1454,13 @@ export default function ResumeBuilder({
               onGenerate={generate}
               generating={generating}
               error={error}
+              onBackToInputs={() => {
+                setSuggestions(null);
+                setSuggestSummary("");
+                setSuggestError(null);
+                setAcceptedIds(new Set());
+                setRejectedIds(new Set());
+              }}
             />
           )}
 
@@ -1858,12 +2057,47 @@ export default function ResumeBuilder({
 
 /* ── Resume paper preview (plain text → paper-style render) ─────────────── */
 
+/** Align resume lines with suggestion `original` strings (bullets / spacing often differ). */
+function normalizeResumeLineKey(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/^[\s\u2022\u00b7\u2023\u2024\u2043\u2219\-\–\—\*‧·.]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildResumeHighlightMatcher(highlightOriginals: string[]): (line: string) => boolean {
+  const keys = new Set<string>();
+  const normOriginals: string[] = [];
+  for (const o of highlightOriginals) {
+    const ot = o.trim();
+    if (!ot) continue;
+    keys.add(ot.toLowerCase());
+    const nk = normalizeResumeLineKey(ot);
+    keys.add(nk);
+    normOriginals.push(nk);
+  }
+  return (line: string) => {
+    const t = line.trim();
+    if (!t) return false;
+    const raw = t.toLowerCase();
+    const normLine = normalizeResumeLineKey(t);
+    if (keys.has(raw) || keys.has(normLine)) return true;
+    for (const on of normOriginals) {
+      if (on.length < 12) continue;
+      if (normLine.includes(on) || on.includes(normLine)) return true;
+    }
+    return false;
+  };
+}
+
 function ResumePaperView({ text, highlightOriginals }: { text: string; highlightOriginals: string[] }) {
   const lines = text.split("\n");
-  const highlightSet = new Set(highlightOriginals.map(s => s.trim().toLowerCase()));
+  const lineMatchesHighlight = buildResumeHighlightMatcher(highlightOriginals);
 
-  const isAllCaps = (t: string) => t.length > 2 && t === t.toUpperCase() && /[A-Z]/.test(t) && !t.startsWith("•");
-  const isBullet  = (t: string) => /^[•\-–*]/.test(t);
+  const isAllCaps = (t: string) => t.length > 2 && t === t.toUpperCase() && /[A-Z]/.test(t) && !/^[•\-–*\u2022\u00b7]/.test(t);
+  const isBullet  = (t: string) => /^[•\-–*\u2022\u00b7]/.test(t);
   const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
 
   return (
@@ -1882,7 +2116,7 @@ function ResumePaperView({ text, highlightOriginals }: { text: string; highlight
         const t = line.trim();
         if (!t) return <div key={i} style={{ height: 7 }} />;
 
-        const highlighted = highlightSet.has(t.toLowerCase());
+        const highlighted = lineMatchesHighlight(line);
         const hlStyle: React.CSSProperties = highlighted ? {
           background: "rgba(245,158,11,0.12)",
           borderLeft: "3px solid #f59e0b",
@@ -1909,7 +2143,7 @@ function ResumePaperView({ text, highlightOriginals }: { text: string; highlight
           return (
             <div key={i} style={{ display: "flex", gap: 6, marginBottom: 2, paddingLeft: 6, ...hlStyle }}>
               <span style={{ flexShrink: 0, marginTop: 1 }}>•</span>
-              <span>{t.replace(/^[•\-–*]\s*/, "")}</span>
+              <span>{t.replace(/^[•\-–*\u2022\u00b7]\s*/, "")}</span>
             </div>
           );
         }
@@ -1936,7 +2170,7 @@ function priorityLabel(p: Suggestion["priority"]): string {
 
 function SuggestionsPanel({
   summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
-  onToggleAccept, onToggleReject, onGenerate, generating, error,
+  onToggleAccept, onToggleReject, onGenerate, generating, error, onBackToInputs,
 }: {
   summary: string;
   suggestions: Suggestion[];
@@ -1948,23 +2182,49 @@ function SuggestionsPanel({
   onGenerate: () => void;
   generating: boolean;
   error: string | null;
+  onBackToInputs: () => void;
 }) {
   const accepted = suggestions.filter(s => acceptedIds.has(s.id));
   const highlightOriginals = suggestions.map(s => s.original);
+  const panelScrollMax = "min(720px, calc(100vh - 220px))";
 
   return (
     <div className="fade-in" style={{ marginBottom: 32 }}>
       <style>{`
         .rb-suggestions-grid {
           display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 16px;
+          grid-template-columns: minmax(260px, 1.15fr) minmax(280px, 1fr);
+          gap: 20px;
           align-items: start;
         }
         @media (max-width: 900px) {
           .rb-suggestions-grid { grid-template-columns: 1fr; }
         }
       `}</style>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", letterSpacing: -0.1 }}>
+          Review suggestions against your résumé text
+        </span>
+        <button
+          type="button"
+          onClick={onBackToInputs}
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--accent)",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            padding: "8px 4px",
+            minHeight: 44,
+            textDecoration: "underline",
+            textUnderlineOffset: 3,
+          }}
+        >
+          ← Edit inputs
+        </button>
+      </div>
       {/* Summary banner */}
       {summary && (
         <div style={{
@@ -1986,7 +2246,7 @@ function SuggestionsPanel({
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
             Your resume — highlighted bullets can be improved
           </div>
-          <div style={{ overflowY: "auto", maxHeight: 600 }}>
+          <div style={{ overflowY: "auto", maxHeight: panelScrollMax }}>
             <ResumePaperView text={candidateProfile} highlightOriginals={highlightOriginals} />
           </div>
         </div>
@@ -1996,7 +2256,7 @@ function SuggestionsPanel({
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
             {suggestions.length} suggested improvements
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 600, overflowY: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: panelScrollMax, overflowY: "auto" }}>
             {suggestions.map(s => {
               const isAccepted = acceptedIds.has(s.id);
               const isRejected = rejectedIds.has(s.id);

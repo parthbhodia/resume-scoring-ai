@@ -6,7 +6,7 @@
  *
  * Routing (static export):
  *   ?view=builder|library|analyze|profile|jobs  (default: analyze)
- *   ?view=builder&flow=tailor|scratch|template
+ *   ?view=builder&flow=tailor|template
  *   ?view=library&resume=<folder>
  */
 
@@ -111,8 +111,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const active = useAppView();
   const { isTablet } = useAppBreakpoints();
   const flowRaw = (searchParams?.get("flow") || "tailor").toLowerCase();
-  const builderFlow: "tailor" | "template" | "scratch" =
-    flowRaw === "template" ? "template" : flowRaw === "scratch" ? "scratch" : "tailor";
+  const builderFlow: "tailor" | "template" =
+    flowRaw === "template" ? "template" : "tailor";
   const [user, setUser] = useState<User | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, toggleTheme] = useTheme();
@@ -145,7 +145,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     setBuilderOpen(false);
   };
 
-  const goBuilderFlow = (flow: "tailor" | "scratch" | "template") => {
+  const goBuilderFlow = (flow: "tailor" | "template") => {
     router.push(`/?view=builder&flow=${flow}`);
     setHistoryOpen(false);
     setBuilderOpen(false);
@@ -261,7 +261,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 {[
                   { flow: "tailor" as const, label: "Tailor to a job" },
                   { flow: "template" as const, label: "Template gallery" },
-                  { flow: "scratch" as const, label: "From scratch" },
                 ].map(({ flow, label }) => {
                   const subActive = builderActive && builderFlow === flow;
                   return (

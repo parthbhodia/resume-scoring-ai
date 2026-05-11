@@ -4,9 +4,8 @@
  * Root page — routes between top-level views via query params.
  *
  *   /                            -> analyze (default)
- *   /?view=builder&flow=tailor|scratch|template -> résumé builder workflows
- *   /?view=library               -> library grid
- *   /?view=library&resume=<f>    -> ResumeView for folder <f>
+ *   /?view=builder&flow=tailor|template -> résumé builder workflows
+ *   /?view=library               -> library grid (+ optional right detail panel when resume=<f>)
  *   /?view=profile&prefill=1     -> Profile page + optional session prefill from Analyze / template flow
  *   /?view=jobs                  -> jobs (placeholder for now)
  *   /?view=builder&flow=tailor&base=<folder> -> builder with folder pre-loaded
@@ -15,15 +14,14 @@
  * `output: "export"` build, which can't enumerate runtime-minted IDs.
  */
 
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import AppShell, { useAppView } from "@/components/AppShell";
 import ResumeBuilder from "@/components/ResumeBuilder";
 import ResumeTemplateStudio from "@/components/ResumeTemplateStudio";
 import ContentSourcePicker from "@/components/ContentSourcePicker";
 import ManualResumeForm from "@/components/ManualResumeForm";
 import ResumeLibrary from "@/components/ResumeLibrary";
-import ResumeView from "@/components/ResumeView";
 import AnalyzeResume from "@/components/AnalyzeResume";
 import ProfilePage from "@/components/ProfilePage";
 
@@ -72,28 +70,26 @@ function ScrollPane({ children }: { children: React.ReactNode }) {
 
 function RouterView() {
   const params = useSearchParams();
+  const router = useRouter();
   const rawView = (params?.get("view") || "analyze").toLowerCase();
   const view = useAppView();
-  const resume = (params?.get("resume") || "").trim();
   const base = (params?.get("base") || "").trim();
   const flow = (params?.get("flow") || "tailor").toLowerCase();
-  const scratchStart = view === "builder" && flow === "scratch";
   const templateResumeStart = view === "builder" && flow === "template";
 
+  /** Legacy `flow=scratch` matched tailor; normalize URL so bookmarks still work. */
+  const searchQs = params.toString();
+  useEffect(() => {
+    if (view !== "builder" || flow !== "scratch") return;
+    const q = new URLSearchParams(searchQs);
+    q.set("flow", "tailor");
+    router.replace(`/?${q.toString()}`);
+  }, [view, flow, router, searchQs]);
+
   if (view === "library") {
-    if (resume) {
-      return (
-        <ViewFill>
-          {/* Full-height PDF + metadata — no outer scroll (ResumeView manages layout) */}
-          <ResumeView folder={resume} />
-        </ViewFill>
-      );
-    }
     return (
       <ViewFill>
-        <ScrollPane>
-          <ResumeLibrary />
-        </ScrollPane>
+        <ResumeLibrary />
       </ViewFill>
     );
   }
@@ -148,12 +144,12 @@ function RouterView() {
     );
   }
   // key ensures remount when base folder or builder workflow changes
+  const builderKeyFlow = flow === "scratch" ? "tailor" : flow;
   return (
     <ViewFill>
       <ResumeBuilder
-        key={`builder-${base}-${scratchStart ? "scratch" : flow}`}
-        initialBaseFolder={scratchStart ? null : (base || null)}
-        scratchStart={scratchStart}
+        key={`builder-${base}-${builderKeyFlow}`}
+        initialBaseFolder={base || null}
       />
     </ViewFill>
   );
