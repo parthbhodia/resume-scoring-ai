@@ -48,19 +48,49 @@ _REASONING_MODEL_GEMINI = "gemini-2.5-pro"
 _REASONING_MODEL_GROK   = os.environ.get("GROK_REASONING_MODEL", "grok-4")
 
 
+def _sse_friendly_error(exc: BaseException) -> str:
+    """User-visible SSE error line — avoid dumping raw provider JSON blobs."""
+    if _transient_provider_error(exc):
+        return (
+            "AI hit a temporary capacity limit. Wait a minute and try again, "
+            "or press retry — the server already retries when the provider is busy."
+        )
+    return str(exc)
+
+
+def _transient_provider_error(exc: BaseException) -> bool:
+    """True for quota/capacity errors where a short wait + retry often succeeds."""
+    m = str(exc).lower()
+    return any(
+        n in m
+        for n in (
+            "429",
+            "resource_exhausted",
+            "503",
+            "unavailable",
+            "service unavailable",
+            "high demand",
+            "overloaded",
+            "try again later",
+            "deadline exceeded",
+        )
+    )
+
+
 def _backoff_if_rate_limited(exc: BaseException, default_wait: float = 5.0) -> None:
     """
-    If Gemini returned 429, wait briefly before trying the *next* model in the
-    chain. We deliberately don't honor the full retry-in window: the suggested
-    delay is for retrying the SAME model, but we're moving on to a different
-    one which has its own quota bucket. Capped to keep total fail-fast latency
-    under ~15s across the whole chain.
+    If the provider returned a transient quota/capacity error, pause before
+    retrying the same model or advancing the fallback chain. 503 / UNAVAILABLE /
+    "high demand" from Gemini get a slightly longer pause than plain 429.
     """
-    msg = str(exc)
-    if "429" not in msg and "RESOURCE_EXHAUSTED" not in msg:
+    if not _transient_provider_error(exc):
         return
-    wait = min(max(default_wait, 1.0), 8.0)
-    logger.info(f"Gemini rate limited — pausing {wait:.1f}s before next fallback model")
+    msg = str(exc).lower()
+    if "503" in msg or "unavailable" in msg or "high demand" in msg or "overloaded" in msg:
+        wait = min(max(default_wait + 3.0, 4.0), 14.0)
+    else:
+        wait = min(max(default_wait, 1.0), 8.0)
+    logger.info(f"Transient API pressure — pausing {wait:.1f}s before retry or next model")
     time.sleep(wait)
 
 
@@ -2427,62 +2457,84 @@ def stream_latex_resume(
                                 grok_sources.append({"title": ev.get("title"), "url": u})
                                 yield {"event": "search_source", "title": ev.get("title"), "url": u}
                 else:
-                    # Gemini path — Google Search grounding
-                    stream = client.models.generate_content_stream(
-                        model=_m,
-                        contents=user_prompt,
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt,
-                            temperature=0.2,
-                            tools=[types.Tool(google_search=types.GoogleSearch())],
-                        ),
-                    )
-                    for chunk in stream:
-                        if getattr(chunk, "candidates", None):
-                            last_candidates = chunk.candidates
-                            sc = _grounding_signal_score(chunk.candidates)
-                            if sc > best_grounding_score:
-                                best_grounding_score = sc
-                                best_grounding_candidates = chunk.candidates
-                            # Surface Google Search activity live as Gemini
-                            # issues queries / discovers sources mid-generation.
-                            new_q, new_s = _extract_grounding_live(chunk.candidates)
-                            for q in new_q:
-                                if q not in seen_queries:
-                                    seen_queries.add(q)
-                                    logger.info(f"🔍 Google search  |  {q}")
-                                    yield {"event": "search_query", "query": q}
-                            for s in new_s:
-                                u = s.get("url")
-                                if u and u not in seen_source_urls:
-                                    seen_source_urls.add(u)
-                                    yield {"event": "search_source", "title": s.get("title"), "url": u}
-                        text = getattr(chunk, "text", None)
-                        if text:
-                            latex_body += text
-                            yield {"event": "chunk", "text": text}
+                    # Gemini path — Google Search grounding (retry same model on
+                    # transient 503 UNAVAILABLE / "high demand" before fallback chain).
+                    _gemini_stream_attempts = 3
+                    for _gem_attempt in range(_gemini_stream_attempts):
+                        best_grounding_candidates = None
+                        best_grounding_score = -1
+                        try:
+                            stream = client.models.generate_content_stream(
+                                model=_m,
+                                contents=user_prompt,
+                                config=types.GenerateContentConfig(
+                                    system_instruction=system_prompt,
+                                    temperature=0.2,
+                                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                                ),
+                            )
+                            for chunk in stream:
+                                if getattr(chunk, "candidates", None):
+                                    last_candidates = chunk.candidates
+                                    sc = _grounding_signal_score(chunk.candidates)
+                                    if sc > best_grounding_score:
+                                        best_grounding_score = sc
+                                        best_grounding_candidates = chunk.candidates
+                                    # Surface Google Search activity live as Gemini
+                                    # issues queries / discovers sources mid-generation.
+                                    new_q, new_s = _extract_grounding_live(chunk.candidates)
+                                    for q in new_q:
+                                        if q not in seen_queries:
+                                            seen_queries.add(q)
+                                            logger.info(f"🔍 Google search  |  {q}")
+                                            yield {"event": "search_query", "query": q}
+                                    for s in new_s:
+                                        u = s.get("url")
+                                        if u and u not in seen_source_urls:
+                                            seen_source_urls.add(u)
+                                            yield {"event": "search_source", "title": s.get("title"), "url": u}
+                                text = getattr(chunk, "text", None)
+                                if text:
+                                    latex_body += text
+                                    yield {"event": "chunk", "text": text}
 
-                    # Gemini often attaches the richest grounding_metadata only on
-                    # a late chunk; earlier chunks may have empty metadata. Flush
-                    # from the chunk we saw with the most queries + citation URLs
-                    # so the UI still gets search_query / search_source SSE events.
-                    _flush_cands = (
-                        best_grounding_candidates
-                        if best_grounding_score > 0
-                        else (last_candidates if last_candidates else None)
-                    )
-                    if _flush_cands:
-                        fq, fs = _extract_grounding_live(_flush_cands)
-                        for q in fq:
-                            if q not in seen_queries:
-                                seen_queries.add(q)
-                                logger.info(f"🔍 Google search (post-stream)  |  {q}")
-                                yield {"event": "search_query", "query": q}
-                        for s in fs:
-                            u = s.get("url")
-                            if u and u not in seen_source_urls:
-                                seen_source_urls.add(u)
-                                yield {"event": "search_source", "title": s.get("title"), "url": u}
+                            # Gemini often attaches the richest grounding_metadata only on
+                            # a late chunk; earlier chunks may have empty metadata. Flush
+                            # from the chunk we saw with the most queries + citation URLs
+                            # so the UI still gets search_query / search_source SSE events.
+                            _flush_cands = (
+                                best_grounding_candidates
+                                if best_grounding_score > 0
+                                else (last_candidates if last_candidates else None)
+                            )
+                            if _flush_cands:
+                                fq, fs = _extract_grounding_live(_flush_cands)
+                                for q in fq:
+                                    if q not in seen_queries:
+                                        seen_queries.add(q)
+                                        logger.info(f"🔍 Google search (post-stream)  |  {q}")
+                                        yield {"event": "search_query", "query": q}
+                                for s in fs:
+                                    u = s.get("url")
+                                    if u and u not in seen_source_urls:
+                                        seen_source_urls.add(u)
+                                        yield {"event": "search_source", "title": s.get("title"), "url": u}
+                            break
+                        except Exception as _gem_e:
+                            if (
+                                _gem_attempt + 1 < _gemini_stream_attempts
+                                and _transient_provider_error(_gem_e)
+                            ):
+                                logger.warning(
+                                    f"Gemini stream attempt {_gem_attempt + 1}/{_gemini_stream_attempts} "
+                                    f"failed (transient): {_gem_e}"
+                                )
+                                yield {"event": "status", "msg": "AI is busy — retrying shortly…"}
+                                latex_body = ""
+                                last_candidates = []
+                                _backoff_if_rate_limited(_gem_e)
+                                continue
+                            raise
 
                 if latex_body:
                     break  # got real content — exit fallback loop
@@ -2498,7 +2550,7 @@ def stream_latex_resume(
                 grok_sources = []
                 _backoff_if_rate_limited(_e)
             if idx + 1 < len(_fallback_models) and not latex_body:
-                time.sleep(1)
+                time.sleep(2)
 
         logger.info(f"Stream complete  |  {time.time()-t1:.1f}s  |  {len(latex_body)} chars")
 
@@ -2566,7 +2618,7 @@ def stream_latex_resume(
 
     except Exception as exc:
         logger.error(f"Stream error  |  {exc}", exc_info=True)
-        yield {"event": "error", "msg": str(exc)}
+        yield {"event": "error", "msg": _sse_friendly_error(exc)}
 
 
 # ============================================================================
