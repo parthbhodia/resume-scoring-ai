@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 from google import genai
 from google.genai import types
 
@@ -406,15 +406,41 @@ _LATEX_PREAMBLE = r"""%-------------------------
   \textbf{\Huge {contact_name} \vspace{2pt}} &
   Location: {contact_location} \\
 
-  \href{{contact_website_url}}{\uline{{contact_website}}} $|$
-  \href{{contact_linkedin_url}}{\uline{{contact_linkedin}}} $|$
-  \href{{contact_github_url}}{\uline{GitHub}}
-  &
-  Email: \href{mailto:{contact_email}}{\uline{{contact_email}}} $|$
-  Mobile: {contact_phone} \\
-\end{tabular*}
-% RESUME-CONTACT-BLOCK-END
 """
+
+_LATEX_PREAMBLE_CONTACT_ROWS = (
+    r"  \href{"
+    + "{contact_website_url}"
+    + r"}{\uline{"
+    + "{contact_website}"
+    + r"}} $|$\n"
+    + r"  \href{"
+    + "{contact_linkedin_url}"
+    + r"}{\uline{"
+    + "{contact_linkedin}"
+    + r"}} $|$\n"
+    + r"  \href{"
+    + "{contact_github_url}"
+    + r"}{\uline{"
+    + "{contact_github}"
+    + r"}}"
+    + "\n"
+    + r"  &"
+    + "\n"
+    + r"  Email: \href{mailto:"
+    + "{contact_email_mailto}"
+    + r"}{\uline{"
+    + "{contact_email}"
+    + r"}} $|$\n"
+    + r"  Mobile: {contact_phone} \\"
+    + "\n"
+    + r"\end{tabular*}"
+    + "\n"
+    + r"% RESUME-CONTACT-BLOCK-END"
+    + "\n"
+)
+
+_LATEX_PREAMBLE = _LATEX_PREAMBLE + _LATEX_PREAMBLE_CONTACT_ROWS
 
 _LATEX_FOOTER = r"""
 \end{document}
@@ -433,8 +459,192 @@ DEFAULT_CONTACT: Dict[str, str] = {
     "github":        os.environ.get("CONTACT_GITHUB",        "GitHub"),
     "github_url":    os.environ.get("CONTACT_GITHUB_URL",    ""),
     "email":         os.environ.get("CONTACT_EMAIL",         ""),
+    "email_mailto":  "",
     "phone":         os.environ.get("CONTACT_PHONE",         ""),
 }
+
+_PROFILE_EMAIL_RE = re.compile(
+    r"\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b",
+    re.IGNORECASE,
+)
+_PROFILE_PHONE_RE = re.compile(
+    r"(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}\b",
+)
+_PROFILE_LINKEDIN_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?linkedin\.com/(?:in|pub)/[\w\-]+/?",
+    re.IGNORECASE,
+)
+_PROFILE_GITHUB_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?github\.com/[\w\-]+(?:/[\w\-]+)?/?",
+    re.IGNORECASE,
+)
+
+
+def _latex_escape_visible(s: str) -> str:
+    """Escape user text embedded in LaTeX arguments (\\uline, \\textbf, etc.)."""
+    if not s:
+        return ""
+    return (
+        s.replace("\\", r"\textbackslash{}")
+        .replace("{", r"\{")
+        .replace("}", r"\}")
+        .replace("&", r"\&")
+        .replace("%", r"\%")
+        .replace("$", r"\$")
+        .replace("#", r"\#")
+        .replace("_", r"\_")
+        .replace("^", r"\textasciicircum{}")
+        .replace("~", r"\textasciitilde{}")
+    )
+
+
+def _latex_href_url(url: str) -> str:
+    """Make URL safe inside \\href{...}{} for pdflatex + hyperref."""
+    if not (url or "").strip() or (url or "").strip() == "#":
+        return "#"
+    u = url.strip()
+    return u.replace("%", r"\%").replace("#", r"\#")
+
+
+def _latex_mailto_href_arg(email: str) -> str:
+    """Minimal escaping for mailto: URL inside \\href (LaTeX + hyperref)."""
+    if not email:
+        return ""
+    return email.replace("%", r"\%").replace("#", r"\#")
+
+
+def _contact_from_candidate_profile(candidate_profile: Optional[str]) -> Dict[str, str]:
+    """Pull contact fields from the multiline profile the UI sends with generate-stream."""
+    out: Dict[str, str] = {}
+    if not candidate_profile or not str(candidate_profile).strip():
+        return out
+    text = str(candidate_profile).strip()
+
+    m = re.search(r"(?im)^Name:\s*(.+)$", text)
+    if m:
+        out["name"] = m.group(1).strip()
+
+    m = re.search(r"(?im)^Location:\s*(.+)$", text)
+    if m:
+        out["location"] = m.group(1).strip()
+
+    m = re.search(r"(?im)Email:\s*([^\s|]+)", text)
+    if m and "@" in m.group(1):
+        out["email"] = m.group(1).strip()
+
+    m = re.search(r"(?im)Phone:\s*([^|\n]+)", text)
+    if m:
+        out["phone"] = m.group(1).strip()
+    if "phone" not in out:
+        m = re.search(r"(?im)Mobile:\s*([^|\n]+)", text)
+        if m:
+            out["phone"] = m.group(1).strip()
+
+    m = re.search(r"(?im)^Website:\s*([^\n|]+)", text)
+    if m:
+        w = m.group(1).strip()
+        if w.lower().startswith("http"):
+            out["website_url"] = w
+            if "website" not in out:
+                out["website"] = "Website"
+        elif w:
+            out["website"] = w
+
+    # Heuristic fallbacks — candidate text is often raw PDF extract without "Name:" lines.
+    if not out.get("email"):
+        em = _PROFILE_EMAIL_RE.search(text)
+        if em:
+            out["email"] = em.group(0).strip()
+    if not out.get("phone"):
+        ph = _PROFILE_PHONE_RE.search(text)
+        if ph:
+            out["phone"] = ph.group(0).strip()
+    if not out.get("linkedin_url"):
+        li = _PROFILE_LINKEDIN_RE.search(text)
+        if li:
+            u = li.group(0).strip()
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["linkedin_url"] = u
+            out.setdefault("linkedin", "LinkedIn")
+    if not out.get("github_url"):
+        gh = _PROFILE_GITHUB_RE.search(text)
+        if gh:
+            u = gh.group(0).strip()
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["github_url"] = u
+            out.setdefault("github", "GitHub")
+    if not out.get("name"):
+        lines = [
+            re.sub(r"^[\s•\-–*]+", "", ln).strip()
+            for ln in text.replace("\r\n", "\n").split("\n")
+            if ln.strip()
+        ]
+        for line in lines[:14]:
+            if len(line) > 55 or len(line) < 3:
+                continue
+            if _PROFILE_EMAIL_RE.search(line) or _PROFILE_PHONE_RE.search(line) or re.search(
+                r"https?:", line, re.I
+            ):
+                continue
+            if re.match(
+                r"^(experience|education|skills|projects|summary|objective|work|employment)\b",
+                line,
+                re.I,
+            ):
+                continue
+            if re.match(r"^\d{4}\s*[-–]\s*", line):
+                continue
+            words = line.split()
+            if 2 <= len(words) <= 6 and re.match(r"^[A-Za-z.'\s\-]+$", line):
+                out["name"] = line
+                break
+
+    return out
+
+
+def _canonical_contact_fragment() -> str:
+    """Marked contact tabular from the canonical preamble (for splicing after template \\begin{document})."""
+    s = _LATEX_PREAMBLE
+    start_m = "% RESUME-CONTACT-BLOCK-START"
+    end_m = "% RESUME-CONTACT-BLOCK-END"
+    a = s.find(start_m)
+    b = s.find(end_m)
+    if a == -1 or b == -1:
+        return ""
+    return s[a : b + len(end_m)] + "\n"
+
+
+def _inject_latex_packages_before_document(pre: str, packages: List[str]) -> str:
+    if not packages:
+        return pre
+    return pre.rstrip() + "\n" + "\n".join(packages) + "\n"
+
+
+def _build_export_preamble(
+    reference_tex: Optional[str],
+    role: str,
+    company: str,
+    contact: Optional[Dict[str, str]],
+) -> str:
+    """Use the selected reference template preamble when possible; always emit a filled contact block."""
+    frag = _canonical_contact_fragment()
+    rt = (reference_tex or "").strip()
+    if rt and "\\begin{document}" in rt and frag:
+        pre_doc, sep, _rest = rt.partition("\\begin{document}")
+        if sep:
+            pre_doc = pre_doc.rstrip() + "\n"
+            low = pre_doc.lower()
+            adds: List[str] = []
+            if "hyperref" not in low:
+                adds.append("\\usepackage[hidelinks]{hyperref}")
+            if "ulem" not in low:
+                adds.append("\\usepackage[normalem]{ulem}")
+            pre_doc = _inject_latex_packages_before_document(pre_doc, adds)
+            combined = pre_doc + "\\begin{document}\n" + frag
+            return _apply_preamble_subs(combined, role, company, contact)
+    return _apply_preamble_subs(_LATEX_PREAMBLE, role, company, contact)
 
 
 def _apply_preamble_subs(preamble: str, role: str, company: str, contact: Optional[Dict[str, str]] = None) -> str:
@@ -445,9 +655,38 @@ def _apply_preamble_subs(preamble: str, role: str, company: str, contact: Option
     (just changing the email, say) still works.
     """
     out = preamble.replace("{role}", role).replace("{company}", company)
-    merged = {**DEFAULT_CONTACT, **(contact or {})}
+    merged: Dict[str, str] = {**DEFAULT_CONTACT, **(contact or {})}
+
+    url_keys = ("website_url", "linkedin_url", "github_url")
+    for uk in url_keys:
+        if not (merged.get(uk) or "").strip():
+            merged[uk] = "#"
+
+    vis_keys = ("name", "location", "phone", "linkedin", "github", "website")
+    raw_email = (merged.get("email") or "").strip()
+    merged["email_mailto"] = _latex_mailto_href_arg(raw_email)
+
+    for key, val in list(merged.items()):
+        if not isinstance(val, str):
+            merged[key] = str(val) if val is not None else ""
+
     for key, val in merged.items():
-        out = out.replace("{contact_" + key + "}", val)
+        raw = val if isinstance(val, str) else ""
+        if key in url_keys:
+            raw = _latex_href_url(raw)
+        elif key == "email_mailto":
+            pass
+        elif key == "email":
+            raw = _latex_escape_visible(raw_email) if raw_email else ""
+        elif key in vis_keys:
+            raw = _latex_escape_visible(raw) if raw else ""
+        out = out.replace("{contact_" + key + "}", raw)
+
+    out = re.sub(
+        r"Email:\s*\\href\{mailto:\}\{\\uline\{\}\}\s*\$\|\$\s*",
+        "",
+        out,
+    )
     return out
 
 
@@ -1937,6 +2176,7 @@ def generate_latex_resume(
     compile_pdf: bool = True,
     model: str = "gemini-2.5-flash",
     base_folder: Optional[str] = None,
+    candidate_profile: Optional[str] = None,
 ) -> Dict:
     """
     Generate a tailored LaTeX resume for a specific job and save it to the library.
@@ -1948,7 +2188,8 @@ def generate_latex_resume(
         reference_folder: LaTeX style reference folder under LIBRARY_ROOT (wins over base_folder for macros/layout)
         compile_pdf:      Whether to run pdflatex
         model:            Gemini model ID
-        base_folder:      Existing resume folder — content body to tailor; style comes from reference_folder when set
+        base_folder:        Existing resume folder — content body to tailor; style comes from reference_folder when set
+        candidate_profile: Multiline profile from the app (name, contact, experience); used for PDF header + LLM facts
     """
     t_start = time.time()
     logger.info("=" * 60)
@@ -1969,72 +2210,14 @@ def generate_latex_resume(
 
     client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
 
-    system_prompt = (
-        "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
-        "for software engineers. You will generate a complete LaTeX resume body tailored for a specific job.\n\n"
-        "STRICT NO-HALLUCINATION RULES — any violation makes the resume fraudulent and unusable:\n"
-        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named in the CANDIDATE PROFILE. "
-        "Do NOT add, infer, rename, or substitute any other employer or company name under any circumstances.\n"
-        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear are those explicitly stated in the CANDIDATE PROFILE. "
-        "Do NOT round up, extrapolate, or invent new figures.\n"
-        "3. FACTS ONLY: You may rephrase and reorder existing bullet points to match job keywords, but every single claim must trace back to an explicit fact in the CANDIDATE PROFILE. "
-        "Do not add achievements, tools, or responsibilities that are not in the profile.\n"
-        "4. VERIFICATION: Before writing each bullet point, ask yourself: 'Is this employer name / metric / claim verbatim in the CANDIDATE PROFILE?' If no, omit it.\n"
-        "5. Use the exact LaTeX macro vocabulary from the REFERENCE only. Examples: "
-        "\\resumeSubheading, \\resumeProjectHeading, \\resumeItem, \\resumeSubHeadingListStart, \\resumeItemListStart "
-        "OR (other templates) \\resumeQuadHeading, \\resumeTrioHeading — use whichever commands actually appear in the "
-        "reference snippet. Never mix incompatible macro sets.\n"
-        "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
-        "7. To bold the most relevant skills and technologies for this job, use the LaTeX command \\textbf{...} ONLY. "
-        "Never use Markdown bold syntax like **word** — pdflatex prints those asterisks literally instead of rendering bold text.\n"
-        "8. EDUCATION SECTION LOCK: Reproduce the EDUCATION section EXACTLY as it appears in the CANDIDATE PROFILE. "
-        "Do NOT rephrase, reorder, abbreviate, change degree names, university names, dates, or locations. "
-        "Same institutions, same degree names, same dates, same order — verbatim copy.\n"
-        "GPA in education: include only if explicitly stated in the CANDIDATE PROFILE and the profile is consistent "
-        "with UMBC guidance (typically list GPA when 3.00 or above).\n"
-        "9. FORMAT (UMBC Career Center Resume Guidelines — "
-        "https://careers.umbc.edu/wp-content/uploads/sites/221/2015/06/Resume-Guidelines.pdf): "
-        "Mirror section titles and content shape when profile facts exist. Header/contact per REFERENCE (name; "
-        "address, city, state, zip, email, phone as in profile). Optional \\section{Objective} — one concise "
-        "statement linking skills/education/career goals to the target role. Optional \\section{Summary} — "
-        "two to five \\resumeItem bullets of greatest strengths from the profile (UMBC: Objective and Summary "
-        "are optional when space is tight; do not require both; avoid redundant long Objective plus long Summary). "
-        "\\section{Education} verbatim per rule 8; GPA line only if explicitly in profile and above 3.00; "
-        "community-college line only if in profile. Certifications/Licenses section or lines only from profile "
-        "(title + date). Research, Publications and Presentations: for each item include title; venue or organization; "
-        "type (poster, paper, oral, etc.); date — profile facts only. Relevant Projects: heading with project/class title "
-        "without course number plus semester/year; one to two \\resumeItem bullets per project (role, actions, results; "
-        "tools/techniques; learning) from profile only. Relevant Coursework: optional; bullets; at most about three lines; "
-        "courses relevant to this role. Skills: \\section{Skills} with subcategories — e.g. Laboratory / Computer / "
-        "Quantitative/Analytic / Interpersonal, OR Technical Skills with Programming / Operating Systems / Software / "
-        "Design (Advanced/Proficient/Novice tiers when appropriate) and LANGUAGES with proficiency level. "
-        "Professional Experience (or job-focused Experience): each role — position, organization, city, state, dates on "
-        "header; two to five achievement bullets; never start bullets with a date range. Additional Experience: "
-        "one to three bullets per role for less-targeted paid work when profile distinguishes it; role-aligned activities "
-        "may stay under Professional Experience. Honors and Awards; Activities/Interests (one to three achievement bullets "
-        "per activity); Service/Community Engagement — only if in profile.\n"
-        "10. PLACEMENT: Put \\section{Objective} or \\section{Summary} immediately after the contact block and before "
-        "experience sections when used. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
-        "11. Keep to 1 page when possible — optional lead section + professional + additional (if any) + projects + education + skills + optional tails"
-    )
-
-    base_section = ""
-    if base_body:
-        base_section = (
-            f"\n---\nCURRENT RESUME BODY (use as your starting point, tailor it for {role} at {company}):\n"
-            f"{base_body[:2500]}\n"
-        )
-
-    user_prompt = (
-        f"Generate a tailored LaTeX resume body for this application:\n\n"
-        f"TARGET ROLE: {role}\nTARGET COMPANY: {company}\n\n"
-        f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
-        f"---\nCANDIDATE PROFILE (USE ONLY THESE FACTS):\n\n"
-        f"{_get_candidate_profile_block()}"
-        f"{base_section}"
-        f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:6500]}\n\n"
-        f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
-        f" Tailor bullet points to emphasize what matters most for {role} at {company}."
+    cp_prompt = (candidate_profile or "").strip() or None
+    system_prompt, user_prompt = _build_prompts(
+        company,
+        role,
+        job_description,
+        base_body,
+        reference_tex,
+        candidate_profile=cp_prompt,
     )
 
     logger.info(f"Calling {model} for resume generation (Google Search grounding enabled)...")
@@ -2085,7 +2268,8 @@ def generate_latex_resume(
     logger.info(f"Ratings  |  {time.time() - t2:.1f}s  |  {ratings}")
 
     # ── Assemble + save ───────────────────────────────────────────────────────
-    preamble = _apply_preamble_subs(_LATEX_PREAMBLE, role, company)
+    contact_hints = _contact_from_candidate_profile(candidate_profile) if candidate_profile else {}
+    preamble = _build_export_preamble(reference_tex, role, company, contact_hints)
     full_tex = preamble + "\n" + latex_body + _LATEX_FOOTER
 
     folder_name = _make_folder_name(company, role)
@@ -2094,7 +2278,8 @@ def generate_latex_resume(
 
     safe_company = re.sub(r"[^\w]", "", company)
     safe_role = re.sub(r"[^\w]", "", role.replace(" ", "_"))
-    _safe_owner = re.sub(r"[^\w]", "_", DEFAULT_CONTACT.get("name", "Resume").strip()) or "Resume"
+    merged_owner = {**DEFAULT_CONTACT, **contact_hints}
+    _safe_owner = re.sub(r"[^\w]", "_", (merged_owner.get("name") or "Resume").strip()) or "Resume"
     filename = f"{_safe_owner}_{safe_company}_{safe_role}_Resume"
     tex_path = os.path.join(folder_path, filename + ".tex")
 
@@ -2149,19 +2334,32 @@ def generate_latex_resume(
 # STREAM — same pipeline but yields SSE-friendly event dicts in real-time
 # ============================================================================
 
-def _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=None):
-    """Shared prompt builder used by both stream and non-stream paths."""
-    system_prompt = (
+def _latex_tailor_system_instruction() -> str:
+    """System instruction for LaTeX body generation (Gemini + Google Search)."""
+    return (
         "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
         "for software engineers. You will generate a complete LaTeX resume body tailored for a specific job.\n\n"
-        "STRICT NO-HALLUCINATION RULES — any violation makes the resume fraudulent and unusable:\n"
-        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named in the CANDIDATE PROFILE. "
-        "Do NOT add, infer, rename, or substitute any other employer or company name under any circumstances.\n"
-        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear are those explicitly stated in the CANDIDATE PROFILE. "
-        "Do NOT round up, extrapolate, or invent new figures.\n"
-        "3. FACTS ONLY: You may rephrase and reorder existing bullet points to match job keywords, but every single claim must trace back to an explicit fact in the CANDIDATE PROFILE. "
-        "Do not add achievements, tools, or responsibilities that are not in the profile.\n"
-        "4. VERIFICATION: Before writing each bullet point, ask yourself: 'Is this employer name / metric / claim verbatim in the CANDIDATE PROFILE?' If no, omit it.\n"
+        "GOOGLE SEARCH — USE WHEN HELPFUL: You have Google Search enabled. **Prefer running a few searches** when "
+        "they would improve tailoring: how the target company describes products and engineering, public careers or "
+        "engineering pages, common stack names for the role, or decoding dense JD acronyms and product names. "
+        "Use findings for **wording, bullet order, section emphasis, and honest keyword overlap** with skills and "
+        "domains already evidenced in the CANDIDATE PROFILE (or current résumé body). "
+        "**Hard boundary:** employers, job titles, employment dates, schools, degrees, projects, certifications, and "
+        "**all numbers and metrics** about the applicant must still come **only** from the CANDIDATE PROFILE and any "
+        "CURRENT RESUME BODY supplied — never invented or \"borrowed\" from the web.\n\n"
+        "CANDIDATE BIOGRAPHY — NON-NEGOTIABLE (fraudulent if violated):\n"
+        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named "
+        "in the CANDIDATE PROFILE (or in the supplied current résumé body when that line is clearly sourced there). "
+        "Do NOT add, infer, rename, or substitute any other employer or company name.\n"
+        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear "
+        "are those explicitly stated in the CANDIDATE PROFILE (or supplied résumé body). Do NOT round up, extrapolate, "
+        "or invent new figures.\n"
+        "3. EXPERIENCE & ACHIEVEMENT SUBSTANCE: Rephrase and reorder for ATS fit. Do **not** add new roles, clients, "
+        "tools used in a role, or responsibilities that are not supported by the profile or pasted résumé. "
+        "You **may** align phrasing with the JD when it clearly matches work already described (e.g. say "
+        "\"distributed systems\" if the profile describes equivalent work without that exact phrase).\n"
+        "4. BIOGRAPHICAL CHECK: Before each experience, education, or project bullet, confirm the substance is backed "
+        "by the profile or current résumé body. If not, omit it.\n"
         "5. Use the exact LaTeX macro vocabulary from the REFERENCE only. Examples: "
         "\\resumeSubheading, \\resumeProjectHeading, \\resumeItem, \\resumeSubHeadingListStart, \\resumeItemListStart "
         "OR (other templates) \\resumeQuadHeading, \\resumeTrioHeading — use whichever commands actually appear in the "
@@ -2199,6 +2397,29 @@ def _build_prompts(company, role, job_description, base_body, reference_tex, can
         "experience sections when used. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
         "11. Keep to 1 page when possible — optional lead section + professional + additional (if any) + projects + education + skills + optional tails"
     )
+
+
+def _user_prompt_research_tail(company: str, role: str) -> str:
+    """Encourage Google Search for company/JD context (not for inventing candidate facts)."""
+    c = (company or "").strip() or "the target company"
+    r = (role or "").strip() or "the role"
+    return (
+        f"---\nWEB RESEARCH (run unless the JD + profile already answer everything): Issue a few **specific** Google "
+        f"searches early (e.g. {c!r} engineering blog, {c!r} careers {r!r}, {c!r} product engineering, or look up "
+        "opaque acronyms from the JD). Briefly use what you learn for terminology, emphasis, and honest keyword fit "
+        "with the candidate's stated skills — **not** to add employers, schools, dates, projects, or metrics for the applicant.\n\n"
+    )
+
+
+def _profile_section_for_tailor_prompt(candidate_profile: Optional[str]) -> str:
+    if candidate_profile and str(candidate_profile).strip():
+        return str(candidate_profile).strip()[:12000] + "\n\n"
+    return _get_candidate_profile_block()
+
+
+def _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=None):
+    """Shared prompt builder used by both stream and non-stream paths."""
+    system_prompt = _latex_tailor_system_instruction()
     base_section = ""
     if base_body:
         base_section = (
@@ -2206,27 +2427,17 @@ def _build_prompts(company, role, job_description, base_body, reference_tex, can
             f"{base_body[:2500]}\n"
         )
 
-    if candidate_profile:
-        profile_section = candidate_profile[:4000]
-    else:
-        # Build a minimal contact header from env vars when no full profile is supplied.
-        # Callers should always pass candidate_profile for best results.
-        profile_section = (
-            f"Name: {DEFAULT_CONTACT['name']}\n"
-            f"Location: {DEFAULT_CONTACT['location']}\n"
-            f"Email: {DEFAULT_CONTACT['email']} | Phone: {DEFAULT_CONTACT['phone']}\n"
-            f"Website: {DEFAULT_CONTACT['website']} | LinkedIn: {DEFAULT_CONTACT['linkedin_url']}\n\n"
-            "(No detailed experience provided — tailor based on job description and any base resume.)\n"
-        )
+    profile_section = _profile_section_for_tailor_prompt(candidate_profile)
 
     user_prompt = (
         f"Generate a tailored LaTeX resume body for this application:\n\n"
         f"TARGET ROLE: {role}\nTARGET COMPANY: {company}\n\n"
         f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
-        f"---\nCANDIDATE PROFILE (USE ONLY THESE FACTS):\n\n"
+        f"---\nCANDIDATE PROFILE (biographical facts for this applicant — do not contradict or extend with the web):\n\n"
         f"{profile_section}"
         f"{base_section}"
         f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:6500]}\n\n"
+        f"{_user_prompt_research_tail(company, role)}"
         f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
         f" Tailor bullet points to emphasize what matters most for {role} at {company}."
     )
@@ -2309,9 +2520,17 @@ def _compute_diff(base_body: str, new_body: str) -> tuple:
     return diff_lines, adds, removes
 
 
-def _save_and_compile(company, role, latex_body, compile_pdf=True):
+def _save_and_compile(
+    company,
+    role,
+    latex_body,
+    compile_pdf=True,
+    reference_tex: Optional[str] = None,
+    candidate_profile: Optional[str] = None,
+):
     """Assemble full .tex, save to library, optionally compile PDF. Returns result dict."""
-    preamble = _apply_preamble_subs(_LATEX_PREAMBLE, role, company)
+    contact_hints = _contact_from_candidate_profile(candidate_profile) if candidate_profile else {}
+    preamble = _build_export_preamble(reference_tex, role, company, contact_hints)
     full_tex  = preamble + "\n" + latex_body + _LATEX_FOOTER
 
     folder_name = _make_folder_name(company, role)
@@ -2320,7 +2539,8 @@ def _save_and_compile(company, role, latex_body, compile_pdf=True):
 
     safe_company = re.sub(r"[^\w]", "", company)
     safe_role    = re.sub(r"[^\w]", "", role.replace(" ", "_"))
-    _safe_owner  = re.sub(r"[^\w]", "_", DEFAULT_CONTACT.get("name", "Resume").strip()) or "Resume"
+    merged_owner = {**DEFAULT_CONTACT, **contact_hints}
+    _safe_owner  = re.sub(r"[^\w]", "_", (merged_owner.get("name") or "Resume").strip()) or "Resume"
     filename     = f"{_safe_owner}_{safe_company}_{safe_role}_Resume"
     tex_path     = os.path.join(folder_path, filename + ".tex")
 
@@ -2604,7 +2824,14 @@ def stream_latex_resume(
 
         # Save + compile
         yield {"event": "status", "msg": "Saving .tex and compiling PDF…"}
-        saved = _save_and_compile(company, role, latex_body, compile_pdf)
+        saved = _save_and_compile(
+            company,
+            role,
+            latex_body,
+            compile_pdf,
+            reference_tex=reference_tex,
+            candidate_profile=candidate_profile,
+        )
         yield {"event": "saved", "folder": saved["folder"], "tex_path": saved["tex_path"]}
 
         if saved.get("pdf_path"):

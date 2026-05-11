@@ -196,6 +196,11 @@ select option { background: var(--surface); }
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+  .rb-suggest-loader-topshine {
+    animation: none !important;
+    background: var(--accent);
+    opacity: 0.35;
+  }
 }
 
 /* ── Mobile responsive overrides ──────────────────────────── */
@@ -487,6 +492,31 @@ select option { background: var(--surface); }
 
 .app-bottom-nav button[data-active="true"] svg {
   opacity: 1;
+}
+
+/* ── Resume Builder: “Analyze & get suggestions” loader (shimmer bar) ── */
+@keyframes rb-suggest-loader-shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -20% 0;
+  }
+}
+
+.rb-suggest-loader-topshine {
+  height: 4px;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(47, 129, 247, 0.15) 25%,
+    var(--accent) 50%,
+    rgba(47, 129, 247, 0.15) 75%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: rb-suggest-loader-shimmer 2.2s ease-in-out infinite;
 }
 
 

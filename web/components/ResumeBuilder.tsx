@@ -38,6 +38,15 @@ type Suggestion = {
   priority: "high" | "medium" | "low";
 };
 
+/** Rotating coach lines while “Analyze & get suggestions” runs (Resume Builder). */
+const SUGGEST_LOADER_TIPS = [
+  "Matching bullets to keywords from the posting…",
+  "Looking for vague metrics and weak verbs…",
+  "Checking impact lines vs plain responsibilities…",
+  "Spotting gaps between your story and this role…",
+  "Prioritizing what recruiters skim in the first pass…",
+] as const;
+
 /** Labels for Profile keys when we merge from résumé extract */
 const PROFILE_FIELD_LABELS: Record<string, string> = {
   displayName: "Display name",
@@ -240,12 +249,17 @@ export default function ResumeBuilder({
   const [suggestSummary, setSuggestSummary] = useState(() => builderSession0?.suggestSummary ?? "");
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError,   setSuggestError]   = useState<string | null>(null);
+  /** Phased checklist while suggestions API runs: 0 → 1 → 2 (timed), then hidden when done. */
+  const [suggestLoaderStepsDone, setSuggestLoaderStepsDone] = useState(0);
+  const [suggestLoaderTipIdx, setSuggestLoaderTipIdx] = useState(0);
   const [acceptedIds,    setAcceptedIds]    = useState<Set<string>>(
     () => new Set(builderSession0?.acceptedSuggestionIds ?? []),
   );
   const [rejectedIds,    setRejectedIds]    = useState<Set<string>>(
     () => new Set(builderSession0?.rejectedSuggestionIds ?? []),
   );
+  /** Linked selection: click a highlighted résumé line → scroll/highlight matching suggestion card (Analyze-style). */
+  const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
 
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(
     () => builderSession0?.candidateProfile ?? null,
@@ -305,6 +319,30 @@ export default function ResumeBuilder({
   useEffect(() => {
     setProfileAutofillUpload(getProfileAutofillFromUpload());
   }, []);
+
+  useEffect(() => {
+    if (!suggestLoading) {
+      setSuggestLoaderStepsDone(0);
+      setSuggestLoaderTipIdx(0);
+      return;
+    }
+    const t0 = Date.now();
+    const phaseTicker = setInterval(() => {
+      const elapsed = Date.now() - t0;
+      setSuggestLoaderStepsDone(prev => {
+        if (elapsed >= 2800) return Math.max(prev, 2);
+        if (elapsed >= 1400) return Math.max(prev, 1);
+        return prev;
+      });
+    }, 100);
+    const tipTicker = setInterval(() => {
+      setSuggestLoaderTipIdx(i => (i + 1) % SUGGEST_LOADER_TIPS.length);
+    }, 2600);
+    return () => {
+      clearInterval(phaseTicker);
+      clearInterval(tipTicker);
+    };
+  }, [suggestLoading]);
 
   // Prefill from Analyze (`fromAnalyze=1`) or Template Studio (`fromTemplateStudio=1`).
   useEffect(() => {
@@ -622,7 +660,8 @@ export default function ResumeBuilder({
         body: JSON.stringify({
           company: effCompany, role: effRole, job_description: effJd,
           model, base_folder: baseFolder,
-          reference_folder: styleReferenceFolder,
+          // JD tailor flow uses one fixed ATS layout on the server — layout choice is only for template / PDF studio.
+          reference_folder: studioHandoff ? styleReferenceFolder : DEFAULT_REFERENCE_FOLDER,
           candidate_profile: effProfile,
           user_id: user?.id ?? null,
         }),
@@ -822,12 +861,12 @@ export default function ResumeBuilder({
                 }}
               >
                 <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 6, letterSpacing: -0.2 }}>
-                  Layout &amp; extract ready
+                  Template &amp; PDF — layout only
                 </div>
                 <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
-                  This step compiles your <strong style={{ color: "var(--text)" }}>personal résumé template</strong> from the layout
-                  and content you set in the gallery — no job posting. To change layout or spacing, use the app menu:{" "}
-                  <strong style={{ color: "var(--text)" }}>Résumé Builder → Template &amp; PDF</strong>.
+                  Choose the <strong style={{ color: "var(--text)" }}>output layout</strong> (LaTeX style: sections, typography, spacing on the server).
+                  This path is <strong style={{ color: "var(--text)" }}>not</strong> for job-description tailoring — no JD analysis here.
+                  Upload or confirm your content, then compile. For fonts/header fine-tuning beyond these presets, use the gallery editor, then return here.
                 </p>
               </div>
             ) : (
@@ -844,14 +883,16 @@ export default function ResumeBuilder({
                   fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
                   marginBottom: 28, maxWidth: 520, letterSpacing: -0.1,
                 }}>
-                  Upload your current résumé, pick a template, paste the job posting, and receive an AI-tailored LaTeX résumé with match score, gap analysis, and ATS-safe PDF — in under 60 seconds.
+                  Upload your résumé, paste the job description, review JD-aligned suggestions, then generate a tailored LaTeX résumé and ATS-safe PDF. Layout uses our default professional template — change layout only from{" "}
+                  <strong style={{ color: "var(--text)" }}>Résumé Builder → Template &amp; PDF</strong>{" "}
+                  (template studio).
                 </p>
                 <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {[
-                    { n: 1, label: "Pick LaTeX layout" },
-                    { n: 2, label: "Upload résumé" },
-                    { n: 3, label: "Paste job posting" },
-                    { n: 4, label: "Tailor & download PDF" },
+                    { n: 1, label: "Upload résumé" },
+                    { n: 2, label: "Paste job posting" },
+                    { n: 3, label: "Review JD suggestions" },
+                    { n: 4, label: "Generate PDF" },
                   ].map(({ n, label }) => (
                     <div key={n} style={{
                       display: "flex", alignItems: "center", gap: 8,
@@ -877,13 +918,13 @@ export default function ResumeBuilder({
           {/* ── Inputs (hidden once results are shown, or while reviewing suggestions) ── */}
           {showBuilderInputs && (<>
 
-          {!studioHandoff && (
+          {studioHandoff && (
           <>
-          {/* ── Step 1: LaTeX layout (reference .tex on server) ── */}
+          {/* ── Template studio: output layout (LaTeX on server) ── */}
           <StepCard
             step={1}
-            title="Layout template"
-            subtitle="Pick the LaTeX style the AI will copy. Final PDF is compiled with pdflatex."
+            title="Output layout"
+            subtitle="Sections, typography, and spacing for your PDF (pdflatex). Layout only — not job-description tailoring."
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
@@ -1009,9 +1050,11 @@ export default function ResumeBuilder({
               </div>
             </div>
           </StepCard>
+          </>
+          )}
 
-          {/* ── Step 2: Resume ── */}
-          <StepCard step={2} title="Your resume" subtitle="Upload your current resume as a PDF">
+          {/* ── Your résumé (tailor + template studio) ── */}
+          <StepCard step={studioHandoff ? 2 : 1} title="Your resume" subtitle="Upload your current resume as a PDF">
             <input
               ref={fileInputRef} type="file" accept=".pdf,application/pdf"
               style={{ display: "none" }}
@@ -1250,13 +1293,11 @@ export default function ResumeBuilder({
               </div>
             )}
           </StepCard>
-          </>
-          )}
 
-          {/* ── Step 3: Job target (JD tailoring only — not shown for template-gallery handoff) ── */}
+          {/* ── Target job (JD tailor flow only) ── */}
           {!studioHandoff && (
           <StepCard
-            step={3}
+            step={2}
             title="Target job"
             subtitle="Tell us what you're applying for"
           >
@@ -1402,6 +1443,12 @@ export default function ResumeBuilder({
                   {suggestError}
                 </div>
               )}
+              {suggestLoading && (
+                <BuilderSuggestAnalysisLoader
+                  stepsDone={suggestLoaderStepsDone}
+                  tipIdx={suggestLoaderTipIdx}
+                />
+              )}
               <button
                 type="button"
                 onClick={getSuggestions}
@@ -1420,14 +1467,16 @@ export default function ResumeBuilder({
                 onMouseLeave={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent)"; }}
               >
                 {suggestLoading ? (
-                  <><Spinner size={16} />Analyzing your resume…</>
+                  <><Spinner size={16} />Comparing your résumé to this job…</>
                 ) : (
-                  "Analyze & get suggestions →"
+                  "Get suggestions for this job →"
                 )}
               </button>
-              <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
-                We&apos;ll show you exactly what to change — you pick what to apply.
-              </p>
+              {!suggestLoading && (
+                <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
+                  JD-focused edits only — you choose what to apply before generating the PDF.
+                </p>
+              )}
             </>
           )}
 
@@ -1441,6 +1490,8 @@ export default function ResumeBuilder({
               acceptedIds={acceptedIds}
               rejectedIds={rejectedIds}
               candidateProfile={candidateProfile ?? ""}
+              selectedSuggestionId={selectedSuggestionId}
+              onSelectSuggestionCard={setSelectedSuggestionId}
               onToggleAccept={id => setAcceptedIds(prev => {
                 const next = new Set(prev);
                 if (next.has(id)) { next.delete(id); } else { next.add(id); setRejectedIds(r => { const rn = new Set(r); rn.delete(id); return rn; }); }
@@ -1455,6 +1506,7 @@ export default function ResumeBuilder({
               generating={generating}
               error={error}
               onBackToInputs={() => {
+                setSelectedSuggestionId(null);
                 setSuggestions(null);
                 setSuggestSummary("");
                 setSuggestError(null);
@@ -1518,8 +1570,9 @@ export default function ResumeBuilder({
                 borderRadius: 10, padding: "14px 16px",
                 fontSize: 12, color: "var(--dim)", lineHeight: 1.55,
               }}>
-                When AI issues live web search queries, they will list here. If this run does not return web-research metadata, this section
-                stays empty — your résumé still generates normally.
+                Google Search is available to the model for this run, but you only see activity here when it <strong style={{ color: "var(--text)", fontWeight: 600 }}>actually issues</strong> a web search.
+                The tailor instructions push it to stay inside your uploaded résumé and the job description, so it often finishes <strong style={{ color: "var(--text)", fontWeight: 600 }}>without</strong> live queries or citations — that is expected, not a failure.
+                Your PDF can still be complete and accurate; sometimes sources appear only at the very end, or not at all for this run.
               </div>
             </div>
           )}
@@ -1699,16 +1752,20 @@ export default function ResumeBuilder({
               <style>{`
                 .rb-results-phase3 {
                   display: grid;
-                  grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.22fr);
+                  grid-template-columns: minmax(300px, 1.58fr) minmax(240px, 0.92fr);
                   gap: 20px;
                   align-items: start;
                 }
+                .rb-results-phase3-detail { order: 1; }
+                .rb-results-phase3-preview { order: 2; }
                 @media (max-width: 920px) {
                   .rb-results-phase3 { grid-template-columns: 1fr; }
+                  .rb-results-phase3-detail { order: 1; }
+                  .rb-results-phase3-preview { order: 2; }
                 }
               `}</style>
               <section className="rb-results-phase3" aria-labelledby="rb-results-heading">
-                <div style={{ minWidth: 0 }}>
+                <div className="rb-results-phase3-preview" style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
                     Résumé preview
                   </div>
@@ -1742,14 +1799,14 @@ export default function ResumeBuilder({
                         <a href={result.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600 }}>
                           open the PDF in a new tab
                         </a>
-                        . Download and share are in the match card →
+                        . Download and share are in the match card on the left.
                       </>
                     ) : (
                       "PDF preview appears when the compile step finishes."
                     )}
                   </p>
                 </div>
-                <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+                <div className="rb-results-phase3-detail" style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
               {/* Score hero card */}
               <div className="rb-score-card" style={{
                 background: "var(--surface)", border: "1px solid var(--border)",
@@ -2092,13 +2149,71 @@ function buildResumeHighlightMatcher(highlightOriginals: string[]): (line: strin
   };
 }
 
-function ResumePaperView({ text, highlightOriginals }: { text: string; highlightOriginals: string[] }) {
+/** First suggestion in list order whose `original` matches the résumé line (same rules as highlight). */
+function firstSuggestionMatchingLine(
+  line: string,
+  suggestions: Suggestion[],
+  predicate: (s: Suggestion) => boolean,
+): Suggestion | null {
+  for (const s of suggestions) {
+    if (!predicate(s)) continue;
+    if (buildResumeHighlightMatcher([s.original])(line)) return s;
+  }
+  return null;
+}
+
+type BuilderPaperInteractive = {
+  suggestions: Suggestion[];
+  acceptedIds: Set<string>;
+  rejectedIds: Set<string>;
+  selectedSuggestionId: string | null;
+  onLineSelectSuggestion: (id: string) => void;
+};
+
+function ResumePaperView({
+  text,
+  highlightOriginals,
+  interactiveSuggestions,
+}: {
+  text: string;
+  highlightOriginals: string[];
+  /** When set, paper mirrors Analyze: clickable rows, accepted text replaces line, accent ring on linked card. */
+  interactiveSuggestions?: BuilderPaperInteractive;
+}) {
   const lines = text.split("\n");
   const lineMatchesHighlight = buildResumeHighlightMatcher(highlightOriginals);
+  const ic = interactiveSuggestions;
 
   const isAllCaps = (t: string) => t.length > 2 && t === t.toUpperCase() && /[A-Z]/.test(t) && !/^[•\-–*\u2022\u00b7]/.test(t);
   const isBullet  = (t: string) => /^[•\-–*\u2022\u00b7]/.test(t);
   const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
+
+  const rowInteractiveProps = (
+    _line: string,
+    baseStyle: React.CSSProperties,
+    linkSug: Suggestion | null,
+    acceptedSug: Suggestion | null,
+  ): React.HTMLAttributes<HTMLDivElement> => {
+    if (!ic || !linkSug) return { style: baseStyle };
+    const linked = ic.selectedSuggestionId === linkSug.id;
+    return {
+      role: "button",
+      tabIndex: 0,
+      "aria-label": `Suggestion: ${acceptedSug ? "accepted change" : "pending improvement"}. Press to show in list.`,
+      style: {
+        ...baseStyle,
+        cursor: "pointer",
+        ...(linked ? { boxShadow: "inset 0 0 0 2px var(--accent)" } : {}),
+      },
+      onClick: () => ic.onLineSelectSuggestion(linkSug.id),
+      onKeyDown: (e: React.KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          ic.onLineSelectSuggestion(linkSug.id);
+        }
+      },
+    };
+  };
 
   return (
     <div style={{
@@ -2116,14 +2231,32 @@ function ResumePaperView({ text, highlightOriginals }: { text: string; highlight
         const t = line.trim();
         if (!t) return <div key={i} style={{ height: 7 }} />;
 
-        const highlighted = lineMatchesHighlight(line);
-        const hlStyle: React.CSSProperties = highlighted ? {
+        const acceptedSug = ic
+          ? firstSuggestionMatchingLine(line, ic.suggestions, s => ic.acceptedIds.has(s.id))
+          : null;
+        const linkSug = ic
+          ? firstSuggestionMatchingLine(line, ic.suggestions, s => !ic.rejectedIds.has(s.id))
+          : null;
+        const pendingHighlight = ic && linkSug && !ic.acceptedIds.has(linkSug.id);
+        const highlightedPlain = !ic && lineMatchesHighlight(line);
+
+        const amber: React.CSSProperties = {
           background: "rgba(245,158,11,0.12)",
           borderLeft: "3px solid #f59e0b",
           paddingLeft: 6,
           marginLeft: -9,
           borderRadius: "0 3px 3px 0",
-        } : {};
+        };
+        const green: React.CSSProperties = {
+          background: "rgba(52,211,153,0.14)",
+          borderLeft: "3px solid rgb(34, 197, 94)",
+          paddingLeft: 6,
+          marginLeft: -9,
+          borderRadius: "0 3px 3px 0",
+        };
+        let hlStyle: React.CSSProperties = {};
+        if (acceptedSug) hlStyle = green;
+        else if (pendingHighlight || highlightedPlain) hlStyle = amber;
 
         if (i === firstNonEmpty) {
           return <div key={i} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5, marginBottom: 2, textAlign: "center", textTransform: "uppercase" }}>{t}</div>;
@@ -2139,15 +2272,24 @@ function ResumePaperView({ text, highlightOriginals }: { text: string; highlight
             </div>
           );
         }
+        const stripped = t.replace(/^[•\-–*\u2022\u00b7]\s*/, "");
+        const innerFromAccepted = acceptedSug
+          ? (acceptedSug.suggested.trim().replace(/^[•\-–*\u2022\u00b7]\s*/, "").split("\n")[0]?.trim() || stripped)
+          : stripped;
+
         if (isBullet(t)) {
+          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 2, paddingLeft: 6, ...hlStyle };
+          const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
           return (
-            <div key={i} style={{ display: "flex", gap: 6, marginBottom: 2, paddingLeft: 6, ...hlStyle }}>
+            <div key={i} {...p}>
               <span style={{ flexShrink: 0, marginTop: 1 }}>•</span>
-              <span>{t.replace(/^[•\-–*\u2022\u00b7]\s*/, "")}</span>
+              <span>{innerFromAccepted}</span>
             </div>
           );
         }
-        return <div key={i} style={{ marginBottom: 2, ...hlStyle }}>{t}</div>;
+        const base: React.CSSProperties = { marginBottom: 2, ...hlStyle };
+        const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
+        return <div key={i} {...p}>{acceptedSug ? innerFromAccepted : t}</div>;
       })}
     </div>
   );
@@ -2170,6 +2312,7 @@ function priorityLabel(p: Suggestion["priority"]): string {
 
 function SuggestionsPanel({
   summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
+  selectedSuggestionId, onSelectSuggestionCard,
   onToggleAccept, onToggleReject, onGenerate, generating, error, onBackToInputs,
 }: {
   summary: string;
@@ -2177,6 +2320,8 @@ function SuggestionsPanel({
   acceptedIds: Set<string>;
   rejectedIds: Set<string>;
   candidateProfile: string;
+  selectedSuggestionId: string | null;
+  onSelectSuggestionCard: (id: string | null) => void;
   onToggleAccept: (id: string) => void;
   onToggleReject: (id: string) => void;
   onGenerate: () => void;
@@ -2187,6 +2332,12 @@ function SuggestionsPanel({
   const accepted = suggestions.filter(s => acceptedIds.has(s.id));
   const highlightOriginals = suggestions.map(s => s.original);
   const panelScrollMax = "min(720px, calc(100vh - 220px))";
+
+  useEffect(() => {
+    if (!selectedSuggestionId) return;
+    const el = document.getElementById(`rb-sug-${selectedSuggestionId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [selectedSuggestionId]);
 
   return (
     <div className="fade-in" style={{ marginBottom: 32 }}>
@@ -2247,7 +2398,17 @@ function SuggestionsPanel({
             Your resume — highlighted bullets can be improved
           </div>
           <div style={{ overflowY: "auto", maxHeight: panelScrollMax }}>
-            <ResumePaperView text={candidateProfile} highlightOriginals={highlightOriginals} />
+            <ResumePaperView
+              text={candidateProfile}
+              highlightOriginals={highlightOriginals}
+              interactiveSuggestions={{
+                suggestions,
+                acceptedIds,
+                rejectedIds,
+                selectedSuggestionId,
+                onLineSelectSuggestion: id => onSelectSuggestionCard(id),
+              }}
+            />
           </div>
         </div>
 
@@ -2260,16 +2421,23 @@ function SuggestionsPanel({
             {suggestions.map(s => {
               const isAccepted = acceptedIds.has(s.id);
               const isRejected = rejectedIds.has(s.id);
+              const isLinked = selectedSuggestionId === s.id;
               return (
-                <div key={s.id} style={{
+                <div
+                  key={s.id}
+                  id={`rb-sug-${s.id}`}
+                  onClick={() => onSelectSuggestionCard(s.id)}
+                  style={{
                   borderRadius: "var(--radius-lg, 12px)",
-                  border: `1.5px solid ${isAccepted ? "rgba(52,211,153,0.45)" : isRejected ? "var(--border)" : "var(--border)"}`,
+                  border: `1.5px solid ${isLinked ? "var(--accent)" : isAccepted ? "rgba(52,211,153,0.45)" : isRejected ? "var(--border)" : "var(--border)"}`,
                   background: isAccepted ? "rgba(52,211,153,0.06)" : isRejected ? "var(--surface2)" : "var(--surface)",
                   padding: "12px 14px",
                   opacity: isRejected ? 0.55 : 1,
-                  transition: "border-color 0.12s ease, background 0.12s ease, opacity 0.12s ease",
-                  boxShadow: "var(--shadow-card)",
-                }}>
+                  transition: "border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease",
+                  boxShadow: isLinked ? "inset 0 0 0 2px rgba(47,129,247,0.2), var(--shadow-card)" : "var(--shadow-card)",
+                  cursor: "pointer",
+                }}
+                >
                   {/* Header row */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                     <span style={{
@@ -2297,7 +2465,7 @@ function SuggestionsPanel({
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
                       type="button"
-                      onClick={() => onToggleAccept(s.id)}
+                      onClick={e => { e.stopPropagation(); onToggleAccept(s.id); }}
                       style={{
                         flex: 1, padding: "12px 14px", minHeight: 44, fontSize: 12, fontWeight: 600,
                         borderRadius: "var(--radius, 8px)", border: "none", cursor: "pointer", fontFamily: "inherit",
@@ -2310,7 +2478,7 @@ function SuggestionsPanel({
                     </button>
                     <button
                       type="button"
-                      onClick={() => onToggleReject(s.id)}
+                      onClick={e => { e.stopPropagation(); onToggleReject(s.id); }}
                       style={{
                         flex: 1, padding: "12px 14px", minHeight: 44, fontSize: 12, fontWeight: 600,
                         borderRadius: "var(--radius, 8px)", border: "none", cursor: "pointer", fontFamily: "inherit",
@@ -2481,6 +2649,99 @@ function InfoTip({ children, label }: { children: React.ReactNode; label?: strin
         </span>
       )}
     </span>
+  );
+}
+
+/** Full-width analysis loader: shimmer card + phased steps + rotating tips (tailor flow). */
+function BuilderSuggestAnalysisLoader({ stepsDone, tipIdx }: { stepsDone: number; tipIdx: number }) {
+  const tip = SUGGEST_LOADER_TIPS[tipIdx % SUGGEST_LOADER_TIPS.length];
+  const stepRow = (label: string, stepIndex: number, isLast: boolean) => {
+    const done = stepsDone > stepIndex;
+    const active = stepsDone === stepIndex;
+    return (
+      <div
+        key={label}
+        className="rb-suggest-loader-step"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "8px 0",
+          borderBottom: isLast ? "none" : "1px solid var(--border)",
+          color: done ? "var(--text)" : active ? "var(--text)" : "var(--dim)",
+        }}
+      >
+        <span style={{ width: 22, height: 22, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {done ? (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
+              <circle cx="10" cy="10" r="9" fill="rgba(52,211,153,0.2)" stroke="rgb(34,197,94)" strokeWidth="1.5" />
+              <path d="M6 10l2.5 2.5L14 7" stroke="rgb(22,101,52)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : active ? (
+            <Spinner size={18} />
+          ) : (
+            <span style={{
+              width: 18, height: 18, borderRadius: "50%",
+              border: "2px solid var(--border)",
+              background: "var(--surface2)",
+            }} aria-hidden />
+          )}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: active || done ? 600 : 500, letterSpacing: -0.2, flex: 1 }}>
+          {label}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className="fade-in rb-suggest-loader-card"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      style={{
+        position: "relative",
+        marginBottom: 16,
+        borderRadius: 16,
+        border: "1px solid var(--border)",
+        background: "var(--surface)",
+        boxShadow: "var(--shadow-card)",
+        overflow: "hidden",
+      }}
+    >
+      <div className="rb-suggest-loader-topshine" aria-hidden />
+      <div style={{ padding: "18px 20px 16px" }}>
+        <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.45, color: "var(--text)", marginBottom: 4 }}>
+          Comparing your résumé to this role
+        </div>
+        <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, letterSpacing: -0.1 }}>
+          Hang tight — we&apos;re reading both sides before listing improvements.
+        </p>
+        <div style={{ marginBottom: 14 }}>
+          {stepRow("Read your résumé text", 0, false)}
+          {stepRow("Read the job posting", 1, false)}
+          {stepRow("Build tailored suggestions", 2, true)}
+        </div>
+        <div
+          key={tipIdx}
+          className="fade-in"
+          style={{
+            fontSize: 12.5,
+            color: "var(--accent)",
+            fontWeight: 500,
+            lineHeight: 1.5,
+            letterSpacing: -0.15,
+            padding: "12px 14px",
+            borderRadius: 10,
+            background: "var(--accent-bg)",
+            border: "1px solid rgba(47,129,247,0.18)",
+          }}
+        >
+          {tip}
+        </div>
+      </div>
+    </div>
   );
 }
 

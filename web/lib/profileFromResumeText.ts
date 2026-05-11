@@ -92,11 +92,22 @@ function looksLikeLocationOrAddressLine(line: string): boolean {
   return false;
 }
 
+/**
+ * A line starting with a résumé action verb is a bullet point, not a
+ * headline. Catches the common offenders: "Collaborated on…", "Built…",
+ * "Designed…", etc. — these would otherwise sneak through the 14-line
+ * window and overwrite the headline field with a paragraph of body copy.
+ */
+const BULLET_VERB_PREFIX_RE =
+  /^(collaborat|built|designed|develop|creat|implement|led|manag|architect|engineer|work|spearhead|drove|improv|increas|reduc|optimiz|coordinat|deliver|launch|maintain|owned?|shipp|refactor|migrat|achiev|establish|construct|integrat|deploy|configur|test|wrote|setup|set\s+up|analyz|research|present|orchestrat|enhanc|automat|debugg|trained|mentor|drafted|authored|composed|produced|prepared|conducted|overseen|oversaw|reviewed|prototyped|streamlin)\w*\s/i;
+
 function firstHeadlineCandidate(lines: string[], displayName: string | undefined): string | null {
   if (!displayName?.trim()) return null;
   let seenNameLine = false;
   for (const line of lines.slice(0, 14)) {
-    if (line.length < 12 || line.length > 180) continue;
+    // Resume taglines are short by design — anything > 90 chars is almost
+    // certainly a bullet that wrapped onto a single line during PDF extract.
+    if (line.length < 12 || line.length > 90) continue;
     if (EMAIL_RE.test(line) || PHONE_RE.test(line) || /https?:/i.test(line)) continue;
     if (line === displayName) {
       seenNameLine = true;
@@ -105,6 +116,7 @@ function firstHeadlineCandidate(lines: string[], displayName: string | undefined
     if (!seenNameLine) continue;
     if (looksLikeLocationOrAddressLine(line)) continue;
     if (looksLikeStructuredEmploymentLine(line)) continue;
+    if (BULLET_VERB_PREFIX_RE.test(line)) continue;
     if (/^(experience|education|skills|projects|summary|objective|work|employment|publications)/i.test(line)) continue;
     if (/^\d{4}\s*[-–]\s*/.test(line)) continue;
     if (EDU_INST_RE.test(line) && /\b(20\d{2}|19\d{2})\b/.test(line)) continue;

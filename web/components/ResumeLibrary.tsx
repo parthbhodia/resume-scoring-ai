@@ -14,7 +14,7 @@ import LibraryResumeDetailPanel from "./LibraryResumeDetailPanel";
 import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
 import type { ResumeRecord } from "@/lib/types";
 import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
-import { fetchResumes } from "@/lib/supabase";
+import { fetchResumes, getSupabaseClient } from "@/lib/supabase";
 
 type SortKey = "recent" | "score" | "company";
 
@@ -33,12 +33,66 @@ export default function ResumeLibrary({ onUseAsBase }: {
   const selectedFolder = (searchParams?.get("resume") ?? "").trim();
   const [resumes, setResumes] = useState<ResumeRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  /** `null` until first auth check completes — avoids flashing the wrong empty state. */
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [oauthBusy, setOauthBusy] = useState(false);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
 
   useEffect(() => {
-    fetchResumes().then(setResumes).catch(console.error).finally(() => setLoading(false));
+    const supabase = getSupabaseClient();
+    let cancelled = false;
+
+    const syncLibrary = async () => {
+      setLoadError(null);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (cancelled) return;
+      setSignedIn(!!session?.user?.id);
+      setLoading(true);
+      try {
+        const rows = await fetchResumes();
+        if (!cancelled) setResumes(rows);
+      } catch (e: unknown) {
+        console.error("[library] fetchResumes", e);
+        if (!cancelled) {
+          setResumes([]);
+          setLoadError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void syncLibrary();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      void syncLibrary();
+    });
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
+
+  const signInWithGoogle = async () => {
+    setOauthBusy(true);
+    setLoadError(null);
+    try {
+      const redirectTo =
+        typeof window !== "undefined"
+          ? window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH ?? "")
+          : undefined;
+      const { error } = await getSupabaseClient().auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo },
+      });
+      if (error) setLoadError(error.message);
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOauthBusy(false);
+    }
+  };
 
   const selectedRecord = useMemo(() => {
     if (!selectedFolder) return null;
@@ -259,7 +313,11 @@ export default function ResumeLibrary({ onUseAsBase }: {
                   Resume Library
                 </h1>
                 <p style={{ fontSize: 13.5, color: "var(--muted)", letterSpacing: "-0.02em", lineHeight: 1.55, margin: 0, maxWidth: 520 }}>
-                  {loading ? "Loading…" : `${resumes.length} saved resume${resumes.length === 1 ? "" : "s"}`}
+                  {loading || signedIn === null
+                    ? "Loading…"
+                    : signedIn
+                      ? `${resumes.length} saved resume${resumes.length === 1 ? "" : "s"}`
+                      : "Sign in to sync saved résumés from the builder"}
                 </p>
               </div>
               <button
@@ -282,6 +340,69 @@ export default function ResumeLibrary({ onUseAsBase }: {
                 + New Resume
               </button>
             </header>
+
+            {signedIn === false ? (
+              <div
+                role="region"
+                aria-label="Sign in required"
+                style={{
+                  marginBottom: 18,
+                  padding: "14px 16px",
+                  borderRadius: "var(--radius-xl, 14px)",
+                  border: "1px solid rgba(47, 129, 247, 0.35)",
+                  background: "var(--accent-bg)",
+                  fontSize: 13,
+                  color: "var(--text)",
+                  lineHeight: 1.55,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <span style={{ flex: "1 1 220px", minWidth: 0 }}>
+                  The Library only lists résumés tied to your account. After you sign in with Google, new runs from the
+                  builder are saved here automatically.
+                </span>
+                <button
+                  type="button"
+                  disabled={oauthBusy}
+                  onClick={() => void signInWithGoogle()}
+                  style={{
+                    flexShrink: 0,
+                    padding: "10px 18px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "var(--accent)",
+                    color: "#fff",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: oauthBusy ? "wait" : "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {oauthBusy ? "Redirecting…" : "Sign in with Google"}
+                </button>
+              </div>
+            ) : null}
+
+            {loadError ? (
+              <div
+                style={{
+                  marginBottom: 18,
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(248,113,113,0.35)",
+                  background: "var(--red-bg)",
+                  color: "var(--red)",
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                }}
+              >
+                Could not load your library: {loadError}
+              </div>
+            ) : null}
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 18, alignItems: "center" }}>
               <input
@@ -314,7 +435,12 @@ export default function ResumeLibrary({ onUseAsBase }: {
                 ))}
               </div>
             ) : filtered.length === 0 ? (
-              <EmptyLibrary hasAny={resumes.length > 0} filter={filter} onGoBuilder={() => router.push("/?view=builder&flow=tailor")} />
+              <EmptyLibrary
+                hasAny={resumes.length > 0}
+                filter={filter}
+                signedIn={signedIn === true}
+                onGoBuilder={() => router.push("/?view=builder&flow=tailor")}
+              />
             ) : (
               <div className="library-grid">
                 {filtered.map((r, i) => (
@@ -351,10 +477,12 @@ export default function ResumeLibrary({ onUseAsBase }: {
 function EmptyLibrary({
   hasAny,
   filter,
+  signedIn,
   onGoBuilder,
 }: {
   hasAny: boolean;
   filter: string;
+  signedIn: boolean;
   onGoBuilder: () => void;
 }) {
   return (
@@ -371,14 +499,16 @@ function EmptyLibrary({
     >
       <div style={{ fontSize: 40, marginBottom: 12, lineHeight: 1 }} aria-hidden>📋</div>
       <h2 style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--text)", marginBottom: 8 }}>
-        {hasAny ? "No matches" : "No résumés yet"}
+        {hasAny ? "No matches" : signedIn ? "No résumés yet" : "Nothing to show yet"}
       </h2>
       <p style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.6, maxWidth: 400, margin: "0 auto 20px" }}>
         {hasAny
           ? `Nothing matches “${filter}”. Try another search or clear the filter.`
-          : "Tailor a résumé to a job posting — we’ll save each version here with match scores so you can compare and reuse."}
+          : signedIn
+            ? "Tailor a résumé to a job posting — we’ll save each version here with match scores so you can compare and reuse."
+            : "Use “Sign in with Google” above, then generate from the Résumé Builder — successful runs are saved to this library."}
       </p>
-      {!hasAny && (
+      {!hasAny && signedIn && (
         <button
           type="button"
           onClick={onGoBuilder}

@@ -1013,14 +1013,58 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
               </div>
             </Card>
 
-            <Card title="Target search">
-              <Field label="Headline (one line)" hint="Shown at the top of tailored résumés when you leave summary blank.">
-                <input value={form.headline} onChange={e => patch({ headline: e.target.value })} style={inputStyle()} placeholder="CS student · internships · key skills" />
-              </Field>
-              <Field label="Roles you want">
+            <Card title="Résumé tagline">
+              <label style={{ display: "block", marginBottom: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2, marginBottom: 6 }}>
+                  One-line headline
+                </div>
+                <input
+                  value={form.headline}
+                  onChange={e => patch({ headline: e.target.value })}
+                  style={inputStyle()}
+                  placeholder="CS student · ML internships · Python & Rust"
+                  maxLength={140}
+                  aria-describedby="rn-prof-headline-meta"
+                />
+                <div
+                  id="rn-prof-headline-meta"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    gap: 12,
+                    marginTop: 6,
+                    fontSize: 11,
+                    lineHeight: 1.45,
+                    color: "var(--dim)",
+                  }}
+                >
+                  <span style={{ flex: "1 1 auto", minWidth: 0 }}>
+                    Used at the top of a tailored résumé when no custom summary is written. Aim for a short, scannable tagline — not a sentence.
+                  </span>
+                  <span
+                    aria-live="polite"
+                    style={{
+                      flexShrink: 0,
+                      fontVariantNumeric: "tabular-nums",
+                      fontWeight: 600,
+                      color: form.headline.length > 90 ? "var(--amber)" : "var(--dim)",
+                    }}
+                  >
+                    {form.headline.length}/90
+                  </span>
+                </div>
+              </label>
+            </Card>
+
+            <Card title="Job preferences">
+              <p style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, margin: "-4px 0 14px" }}>
+                What kinds of roles and locations you&apos;re searching for. Used to focus tailoring and (soon) auto-apply.
+              </p>
+              <Field label="Roles you want" hint="Comma-separated — these guide which JD keywords get emphasised.">
                 <input value={form.roles} onChange={e => patch({ roles: e.target.value })} style={inputStyle()} placeholder="Backend intern, Platform intern…" />
               </Field>
-              <Field label="Locations">
+              <Field label="Locations" hint="Cities, regions, or “Remote”. Separators are fine — we keep it as written.">
                 <input value={form.locations} onChange={e => patch({ locations: e.target.value })} style={inputStyle()} placeholder="Remote · NYC · …" />
               </Field>
             </Card>

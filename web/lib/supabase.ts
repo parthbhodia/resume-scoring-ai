@@ -41,10 +41,16 @@ export async function fetchResumes(): Promise<ResumeRecord[]> {
     .from("resumes")
     .select("*, criteria(*)")
     .eq("user_id", userId)
-    .order("is_default", { ascending: false })
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as ResumeRecord[];
+  const rows = (data ?? []) as ResumeRecord[];
+  // Prefer default résumé first without relying on DB column sort (older DBs may lack `is_default`).
+  rows.sort((a, b) => {
+    const d = Number(!!b.is_default) - Number(!!a.is_default);
+    if (d !== 0) return d;
+    return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+  });
+  return rows;
 }
 
 export async function upsertResume(
@@ -59,9 +65,14 @@ export async function upsertResume(
 ): Promise<string> {
   const db = getSupabaseClient();
 
-  // Include the signed-in user's id so RLS policies apply
+  // Include the signed-in user's id so RLS policies apply (insert with null user_id is rejected).
   const { data: { session } } = await db.auth.getSession();
   const user_id = session?.user?.id ?? null;
+  if (!user_id) {
+    throw new Error(
+      "Not signed in — sign in with Google first, then generate again so we can save this résumé to your Library.",
+    );
+  }
 
   const { data, error } = await db
     .from("resumes")
