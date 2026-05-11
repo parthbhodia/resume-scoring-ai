@@ -63,10 +63,16 @@ function latexToText(s: string): string {
 
   // LaTeX text tweaks
   t = t.replace(/---/g, "—").replace(/--/g, "–");
-  t = t.replace(/~/g, " ").replace(/\\\\/g, " ");
+  t = t.replace(/~/g, " ").replace(/\\\\/g, "\n");
   t = t.replace(/[{}]/g, "");
 
-  return t.replace(/\s+/g, " ").trim();
+  // Preserve line breaks (Analyze-style readability); only collapse horizontal spaces per line.
+  return t
+    .split("\n")
+    .map((line) => line.replace(/[ \t\f\v]+/g, " ").trimEnd())
+    .join("\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
 }
 
 interface Change {
@@ -230,6 +236,8 @@ function ChangeCard({ change, jdKeywords = [] }: { change: Change; jdKeywords?: 
         <div style={{
           fontSize: 12, color: "var(--dim)", lineHeight: 1.55, marginBottom: 6,
           textDecoration: "line-through", opacity: 0.75,
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
         }}>
           {change.previous}
         </div>
@@ -239,6 +247,8 @@ function ChangeCard({ change, jdKeywords = [] }: { change: Change; jdKeywords?: 
         fontSize: 13, color: change.type === "removed" ? "var(--dim)" : "var(--text)",
         lineHeight: 1.55,
         textDecoration: change.type === "removed" ? "line-through" : "none",
+        whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
       }}>
         {change.type !== "removed"
           ? highlightKeywords(change.text, jdKeywords)

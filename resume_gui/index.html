@@ -213,7 +213,7 @@
 
 <header>
   <h1>Resume Generator</h1>
-  <span>Parth Bhodia · Gemini + Google Search</span>
+  <span>Parth Bhodia · AI + live web search</span>
 </header>
 
 <div class="layout">
@@ -248,11 +248,11 @@
           </select>
         </div>
         <div class="field">
-          <label>Model</label>
+          <label>Assistant</label>
           <div class="model-pills">
-            <button class="model-pill active" data-model="gemini-2.5-flash" onclick="selectModel(this)">2.5 Flash <span class="pill-tag">smart</span></button>
-            <button class="model-pill" data-model="gemini-2.0-flash" onclick="selectModel(this)">2.0 Flash <span class="pill-tag">stable</span></button>
-            <button class="model-pill" data-model="gemini-2.0-flash-lite" onclick="selectModel(this)">2.0 Lite <span class="pill-tag">fast</span></button>
+            <button class="model-pill active" data-model="gemini-2.5-flash" onclick="selectModel(this)">Recommended <span class="pill-tag">smart</span></button>
+            <button class="model-pill" data-model="gemini-2.0-flash" onclick="selectModel(this)">Balanced <span class="pill-tag">stable</span></button>
+            <button class="model-pill" data-model="gemini-2.0-flash-lite" onclick="selectModel(this)">Light <span class="pill-tag">fast</span></button>
           </div>
         </div>
       </div>
@@ -682,7 +682,7 @@
       }
 
     } else {
-      ratingsHtml += `<div style="color:var(--muted);font-size:13px;padding:8px 0">Analysis not available — model was overloaded.</div>`;
+      ratingsHtml += `<div style="color:var(--muted);font-size:13px;padding:8px 0">Analysis not available — AI was temporarily busy.</div>`;
     }
     ratingsHtml += `</div>`;
 

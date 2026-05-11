@@ -145,8 +145,8 @@ export type SSEEvent =
   | { event: "status";  msg: string }
   | { event: "chunk";   text: string }
   | { event: "sources"; urls: Source[] }
-  | { event: "search_query";  query: string }                 // Live: a Google query Gemini just issued
-  | { event: "search_source"; title: string | null; url: string }  // Live: a page Gemini just cited
+  | { event: "search_query";  query: string }                 // Live: a web search query from this AI run
+  | { event: "search_source"; title: string | null; url: string }  // Live: a page cited from web research
   | { event: "base";    folder: string; loaded: boolean; chars: number }
   | { event: "diff";    data: DiffLine[]; adds: number; removes: number }
   | { event: "rationales"; data: ChangeRationale[] }

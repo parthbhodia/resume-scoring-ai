@@ -26,6 +26,35 @@ import {
 export type { ProfileFormState };
 
 const PROFILE_PREFILL_KEY = "rn_profile_prefill";
+const EMPTY_HINT_DISMISSED_KEY = "rn_profile_empty_hint_dismissed";
+const AUTO_SAVE_DEBOUNCE_MS = 1500;
+
+/** Lightweight validators — show inline hints on blur, never block saves. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LINKEDIN_RE = /^(https?:\/\/)?([\w.-]+\.)?linkedin\.com\/(in|pub|company)\/[\w%\-./]+/i;
+
+function validateEmail(value: string): string {
+  const v = value.trim();
+  if (!v) return "";
+  return EMAIL_RE.test(v) ? "" : "Use a valid email like you@email.com";
+}
+
+function validateLinkedIn(value: string): string {
+  const v = value.trim();
+  if (!v) return "";
+  return LINKEDIN_RE.test(v) ? "" : "Looks off — try linkedin.com/in/your-handle";
+}
+
+function validateUrl(value: string): string {
+  const v = value.trim();
+  if (!v) return "";
+  try {
+    new URL(v.startsWith("http://") || v.startsWith("https://") ? v : `https://${v}`);
+    return "";
+  } catch {
+    return "Use a valid URL like https://github.com/you";
+  }
+}
 
 /** Keeps extension visible for long résumé filenames in tight UI. */
 function truncateFileName(name: string, max = 48): string {
@@ -129,10 +158,14 @@ function inputStyle(): CSSProperties {
 function Field({
   label,
   hint,
+  error,
+  errorId,
   children,
 }: {
   label: string;
   hint?: string;
+  error?: string;
+  errorId?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -149,7 +182,19 @@ function Field({
         {label}
       </div>
       {children}
-      {hint ? (
+      {error ? (
+        <div
+          id={errorId}
+          aria-live="polite"
+          style={{ fontSize: 11, color: "var(--red)", marginTop: 5, lineHeight: 1.45, display: "flex", alignItems: "flex-start", gap: 5 }}
+        >
+          <svg width="11" height="11" viewBox="0 0 11 11" aria-hidden style={{ flexShrink: 0, marginTop: 1 }}>
+            <circle cx="5.5" cy="5.5" r="4.8" stroke="currentColor" strokeWidth="1" fill="none" />
+            <path d="M5.5 3.1v3.3M5.5 7.7v.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          <span>{error}</span>
+        </div>
+      ) : hint ? (
         <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 5, lineHeight: 1.45 }}>{hint}</div>
       ) : null}
     </label>
@@ -216,17 +261,39 @@ function EeoRadioGroup({
   const labelId = `${name}-label`;
   return (
     <div role="radiogroup" aria-labelledby={labelId} style={{ marginBottom: 22 }}>
-      <div
-        id={labelId}
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          color: "var(--text)",
-          letterSpacing: -0.2,
-          marginBottom: 8,
-        }}
-      >
-        {label}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+        <div
+          id={labelId}
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--text)",
+            letterSpacing: -0.2,
+          }}
+        >
+          {label}
+        </div>
+        {value ? (
+          <button
+            type="button"
+            className="rn-profile-link-btn"
+            onClick={() => onChange("")}
+            aria-label={`Clear answer for: ${label}`}
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--dim)",
+              background: "transparent",
+              border: "none",
+              padding: "6px 8px",
+              cursor: "pointer",
+              borderRadius: "var(--radius)",
+              fontFamily: "inherit",
+            }}
+          >
+            Clear
+          </button>
+        ) : null}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 18px", alignItems: "center" }}>
         {options.map(opt => (
@@ -240,6 +307,7 @@ function EeoRadioGroup({
               color: "var(--text)",
               letterSpacing: -0.15,
               cursor: "pointer",
+              minHeight: 32,
             }}
           >
             <input
@@ -266,12 +334,24 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [importDraft, setImportDraft] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [obUploadBusy, setObUploadBusy] = useState(false);
   const [obUploadErr, setObUploadErr] = useState<string | null>(null);
   const [obUploadOk, setObUploadOk] = useState<string | null>(null);
   const [obUploadFileName, setObUploadFileName] = useState<string | null>(null);
-  const [emptyHintDismissed, setEmptyHintDismissed] = useState(false);
+  const [emptyHintDismissed, setEmptyHintDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try { return localStorage.getItem(EMPTY_HINT_DISMISSED_KEY) === "1"; } catch { return false; }
+  });
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<"email" | "linkedin" | "portfolio", string>>>({});
   const obFileRef = useRef<HTMLInputElement>(null);
+  const autoSaveTimerRef = useRef<number | null>(null);
+
+  const dismissEmptyHint = useCallback(() => {
+    setEmptyHintDismissed(true);
+    if (typeof window === "undefined") return;
+    try { localStorage.setItem(EMPTY_HINT_DISMISSED_KEY, "1"); } catch { /* ignore quota */ }
+  }, []);
 
   const dirty = useMemo(() => JSON.stringify(form) !== baseline, [form, baseline]);
 
@@ -337,16 +417,24 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
     setForm(prev => ({ ...prev, ...p }));
   }, []);
 
-  const save = useCallback(() => {
-    saveProfile(form);
-    void upsertUserProfile(form);
+  const save = useCallback(async () => {
+    if (saving) return;
+    setSaving(true);
     const snap = JSON.stringify(form);
+    saveProfile(form);
     setBaseline(snap);
+    try {
+      await upsertUserProfile(form);
+    } catch {
+      /* remote save best-effort — local copy is canonical */
+    }
+    setSaving(false);
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 2000);
-  }, [form]);
+  }, [form, saving]);
 
   const discard = useCallback(() => {
+    if (typeof window !== "undefined" && dirty && !window.confirm("Discard unsaved profile changes?")) return;
     try {
       const next = JSON.parse(baseline) as ProfileFormState;
       setForm({ ...EMPTY_PROFILE, ...next });
@@ -355,7 +443,53 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
       setForm(cleared);
       setBaseline(JSON.stringify(cleared));
     }
-  }, [baseline]);
+  }, [baseline, dirty]);
+
+  useEffect(() => {
+    if (!dirty || typeof window === "undefined") return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) {
+        if (!dirty || saving) return;
+        e.preventDefault();
+        void save();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dirty, saving, save]);
+
+  /**
+   * Debounced auto-save: persist locally + push to Supabase 1.5s after the
+   * user stops typing. We only schedule when there's something to save and no
+   * save is already in flight. Each keystroke resets the timer (debounce
+   * behaviour), and we tear the timer down on unmount or onboarding handoff.
+   */
+  useEffect(() => {
+    if (initPhase !== "form") return;
+    if (!dirty || saving) return;
+    if (typeof window === "undefined") return;
+    if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void save();
+    }, AUTO_SAVE_DEBOUNCE_MS);
+    return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    };
+  }, [form, dirty, saving, save, initPhase]);
 
   const strength = profileStrength(form);
 
@@ -521,9 +655,11 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
 
                 <Link
                   href="/?view=manual-form"
+                  className="rn-profile-cta-card"
                   style={{
                     display: "block",
-                    padding: "12px 16px",
+                    padding: "14px 16px",
+                    minHeight: 44,
                     borderRadius: "var(--radius-lg)",
                     border: "1px solid var(--border)",
                     background: "var(--surface2)",
@@ -542,11 +678,13 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                 <input ref={obFileRef} type="file" accept=".pdf,application/pdf" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleObPdf(f); e.target.value = ""; }} />
                 <button
                   type="button"
+                  className="rn-profile-dropzone"
                   disabled={obUploadBusy}
                   onClick={() => obFileRef.current?.click()}
                   style={{
                     width: "100%",
                     padding: "16px 14px",
+                    minHeight: 56,
                     borderRadius: "var(--radius-lg)",
                     border: "1.5px dashed var(--border-h)",
                     background: "var(--surface2)",
@@ -612,12 +750,14 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
                 <button
                   type="button"
+                  className="rn-btn-primary"
                   disabled={obUploadBusy}
                   onClick={() => obFileRef.current?.click()}
                   style={{
                     fontSize: 12,
                     fontWeight: 600,
-                    padding: "8px 14px",
+                    padding: "10px 16px",
+                    minHeight: 40,
                     borderRadius: "var(--radius)",
                     border: "none",
                     background: "var(--accent)",
@@ -628,7 +768,11 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                 >
                   {obUploadBusy ? "Extracting…" : "Upload PDF here"}
                 </button>
-                <Link href="/?view=manual-form" style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", alignSelf: "center", textDecoration: "none" }}>
+                <Link
+                  href="/?view=manual-form"
+                  className="rn-profile-link"
+                  style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", alignSelf: "center", textDecoration: "none", padding: "8px 4px", borderRadius: "var(--radius)" }}
+                >
                   Manual wizard →
                 </Link>
               </div>
@@ -642,12 +786,15 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
             </div>
             <button
               type="button"
-              onClick={() => setEmptyHintDismissed(true)}
+              className="rn-btn-secondary"
+              onClick={dismissEmptyHint}
+              aria-label="Dismiss sparse-profile hint"
               style={{
                 flexShrink: 0,
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 600,
-                padding: "6px 10px",
+                padding: "8px 14px",
+                minHeight: 36,
                 borderRadius: "var(--radius)",
                 border: "1px solid var(--border)",
                 background: "var(--surface)",
@@ -687,11 +834,13 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
             </pre>
             <button
               type="button"
+              className="rn-btn-secondary"
               onClick={() => setImportDraft(null)}
               style={{
                 fontSize: 12,
                 fontWeight: 600,
-                padding: "8px 14px",
+                padding: "10px 14px",
+                minHeight: 40,
                 borderRadius: "var(--radius)",
                 border: "1px solid var(--border)",
                 background: "var(--surface)",
@@ -731,6 +880,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                 value={form.displayName}
                 onChange={e => patch({ displayName: e.target.value })}
                 placeholder="Your name"
+                autoComplete="name"
                 style={{
                   ...inputStyle(),
                   textAlign: "center",
@@ -746,10 +896,28 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                 placeholder="Early-career software · NYC"
                 style={{ ...inputStyle(), textAlign: "center", fontSize: 12 }}
               />
-              <div style={{ height: 6, borderRadius: 99, background: "var(--surface2)", overflow: "hidden", marginBottom: 8, marginTop: 14 }}>
-                <div style={{ width: `${strength}%`, height: "100%", background: "var(--green)", borderRadius: 99, transition: "width 0.35s ease-out" }} />
+              <div
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={strength}
+                aria-label={`Profile strength ${strength}%`}
+                style={{ height: 6, borderRadius: 99, background: "var(--surface2)", overflow: "hidden", marginBottom: 8, marginTop: 14 }}
+              >
+                <div
+                  style={{
+                    width: `${strength}%`,
+                    height: "100%",
+                    background: strength < 40 ? "var(--red)" : strength < 70 ? "var(--amber)" : "var(--green)",
+                    borderRadius: 99,
+                    transition: "width 0.35s ease-out, background 0.35s ease-out",
+                  }}
+                />
               </div>
-              <div style={{ fontSize: 11, color: "var(--dim)" }}>Profile strength · {strength}%</div>
+              <div style={{ fontSize: 11, color: "var(--dim)" }}>
+                Profile strength · <span style={{ color: "var(--text)", fontWeight: 600 }}>{strength}%</span>
+                {strength < 40 ? " · just getting started" : strength < 70 ? " · keep going" : " · looking great"}
+              </div>
             </div>
 
             <Card title="Visibility" badge="Soon">
@@ -770,17 +938,77 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           <div>
             <Card title="Contact & links">
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }} className="rn-profile-two-col">
-                <Field label="Email" hint="We prefill from your account when empty.">
-                  <input value={form.email} onChange={e => patch({ email: e.target.value })} style={inputStyle()} placeholder="you@email.com" />
+                <Field
+                  label="Email"
+                  hint="We prefill from your account when empty."
+                  error={fieldErrors.email}
+                  errorId="rn-prof-email-err"
+                >
+                  <input
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    spellCheck={false}
+                    value={form.email}
+                    onChange={e => patch({ email: e.target.value })}
+                    onFocus={() => setFieldErrors(prev => ({ ...prev, email: undefined }))}
+                    onBlur={e => setFieldErrors(prev => ({ ...prev, email: validateEmail(e.target.value) || undefined }))}
+                    aria-invalid={Boolean(fieldErrors.email) || undefined}
+                    aria-describedby={fieldErrors.email ? "rn-prof-email-err" : undefined}
+                    style={inputStyle()}
+                    placeholder="you@email.com"
+                  />
                 </Field>
                 <Field label="Phone">
-                  <input value={form.phone} onChange={e => patch({ phone: e.target.value })} style={inputStyle()} placeholder="+1 …" />
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    value={form.phone}
+                    onChange={e => patch({ phone: e.target.value })}
+                    style={inputStyle()}
+                    placeholder="+1 …"
+                  />
                 </Field>
-                <Field label="LinkedIn">
-                  <input value={form.linkedin} onChange={e => patch({ linkedin: e.target.value })} style={inputStyle()} placeholder="linkedin.com/in/…" />
+                <Field
+                  label="LinkedIn"
+                  error={fieldErrors.linkedin}
+                  errorId="rn-prof-linkedin-err"
+                >
+                  <input
+                    type="url"
+                    inputMode="url"
+                    autoComplete="url"
+                    spellCheck={false}
+                    value={form.linkedin}
+                    onChange={e => patch({ linkedin: e.target.value })}
+                    onFocus={() => setFieldErrors(prev => ({ ...prev, linkedin: undefined }))}
+                    onBlur={e => setFieldErrors(prev => ({ ...prev, linkedin: validateLinkedIn(e.target.value) || undefined }))}
+                    aria-invalid={Boolean(fieldErrors.linkedin) || undefined}
+                    aria-describedby={fieldErrors.linkedin ? "rn-prof-linkedin-err" : undefined}
+                    style={inputStyle()}
+                    placeholder="linkedin.com/in/…"
+                  />
                 </Field>
-                <Field label="Portfolio / GitHub">
-                  <input value={form.portfolio} onChange={e => patch({ portfolio: e.target.value })} style={inputStyle()} placeholder="https://…" />
+                <Field
+                  label="Portfolio / GitHub"
+                  error={fieldErrors.portfolio}
+                  errorId="rn-prof-portfolio-err"
+                >
+                  <input
+                    type="url"
+                    inputMode="url"
+                    autoComplete="url"
+                    spellCheck={false}
+                    value={form.portfolio}
+                    onChange={e => patch({ portfolio: e.target.value })}
+                    onFocus={() => setFieldErrors(prev => ({ ...prev, portfolio: undefined }))}
+                    onBlur={e => setFieldErrors(prev => ({ ...prev, portfolio: validateUrl(e.target.value) || undefined }))}
+                    aria-invalid={Boolean(fieldErrors.portfolio) || undefined}
+                    aria-describedby={fieldErrors.portfolio ? "rn-prof-portfolio-err" : undefined}
+                    style={inputStyle()}
+                    placeholder="https://…"
+                  />
                 </Field>
               </div>
             </Card>
@@ -800,7 +1028,12 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
             <Card title="Education">
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }} className="rn-profile-two-col">
                 <Field label="School">
-                  <input value={form.school} onChange={e => patch({ school: e.target.value })} style={inputStyle()} />
+                  <input
+                    autoComplete="organization"
+                    value={form.school}
+                    onChange={e => patch({ school: e.target.value })}
+                    style={inputStyle()}
+                  />
                 </Field>
                 <Field label="Degree">
                   <input value={form.degree} onChange={e => patch({ degree: e.target.value })} style={inputStyle()} />
@@ -809,7 +1042,12 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                   <input value={form.graduation} onChange={e => patch({ graduation: e.target.value })} style={inputStyle()} placeholder="May 2027" />
                 </Field>
                 <Field label="GPA (optional)">
-                  <input value={form.gpa} onChange={e => patch({ gpa: e.target.value })} style={inputStyle()} />
+                  <input
+                    inputMode="decimal"
+                    value={form.gpa}
+                    onChange={e => patch({ gpa: e.target.value })}
+                    style={inputStyle()}
+                  />
                 </Field>
               </div>
             </Card>
@@ -854,8 +1092,25 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                   marginBottom: 20,
                 }}
               >
-                <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }} aria-hidden>
-                  🏁
+                <span
+                  aria-hidden
+                  style={{
+                    flexShrink: 0,
+                    width: 32,
+                    height: 32,
+                    borderRadius: "var(--radius)",
+                    background: "var(--amber-bg)",
+                    color: "var(--amber)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <rect x="3.25" y="2.5" width="9.5" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+                    <path d="M5.75 1.5h4.5v2h-4.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                    <path d="m6 8.5 1.5 1.5 2.5-2.75" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                 </span>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: -0.3, color: "var(--text)", marginBottom: 6 }}>
@@ -940,11 +1195,13 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
       >
         <button
           type="button"
+          className="rn-btn-ghost"
           onClick={finishOnboarding}
           style={{
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: 600,
-            padding: "8px 12px",
+            padding: "10px 14px",
+            minHeight: 44,
             borderRadius: "var(--radius)",
             border: "none",
             background: "transparent",
@@ -959,12 +1216,14 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           {onboardingStep > 0 && (
             <button
               type="button"
+              className="rn-btn-secondary"
               onClick={() => setOnboardingStep(s => s - 1)}
               disabled={obUploadBusy}
               style={{
                 fontSize: 13,
                 fontWeight: 600,
                 padding: "10px 16px",
+                minHeight: 44,
                 borderRadius: "var(--radius)",
                 border: "1px solid var(--border)",
                 background: "var(--surface)",
@@ -980,12 +1239,14 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           {onboardingStep < 1 ? (
             <button
               type="button"
+              className="rn-btn-primary"
               onClick={() => setOnboardingStep(s => s + 1)}
               disabled={obUploadBusy}
               style={{
                 fontSize: 13,
                 fontWeight: 600,
                 padding: "10px 20px",
+                minHeight: 44,
                 borderRadius: "var(--radius)",
                 border: "none",
                 background: "var(--accent)",
@@ -1001,12 +1262,14 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           ) : (
             <button
               type="button"
+              className="rn-btn-primary"
               onClick={finishOnboarding}
               disabled={obUploadBusy}
               style={{
                 fontSize: 13,
                 fontWeight: 600,
                 padding: "10px 20px",
+                minHeight: 44,
                 borderRadius: "var(--radius)",
                 border: "none",
                 background: "var(--accent)",
@@ -1041,30 +1304,52 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           flexWrap: "wrap",
         }}
       >
-        <span style={{ fontSize: 12, color: "var(--dim)" }}>
-          {savedFlash ? (
-            <span style={{ color: "var(--green)", fontWeight: 600 }}>Saved</span>
+        <span
+          role="status"
+          aria-live="polite"
+          style={{ fontSize: 12, color: "var(--dim)", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}
+        >
+          {saving ? (
+            <>
+              <span aria-hidden style={{ width: 10, height: 10, borderRadius: "50%", border: "2px solid var(--border)", borderTopColor: "var(--accent)", animation: "spin 0.7s linear infinite", display: "inline-block" }} />
+              Saving…
+            </>
+          ) : savedFlash ? (
+            <span style={{ color: "var(--green)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+                <path d="M2 6.5 4.5 9 10 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Saved
+            </span>
           ) : dirty ? (
-            "You have unsaved changes"
+            <>
+              <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--amber)", display: "inline-block", flexShrink: 0 }} />
+              Auto-saving shortly…
+            </>
           ) : (
-            "All changes saved"
+            <>
+              <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", display: "inline-block", flexShrink: 0 }} />
+              All changes saved · auto-save on
+            </>
           )}
         </span>
         <div style={{ display: "flex", gap: 10 }}>
           <button
             type="button"
+            className="rn-btn-secondary"
             onClick={discard}
-            disabled={!dirty}
+            disabled={!dirty || saving}
             style={{
               fontSize: 13,
               fontWeight: 600,
               padding: "10px 16px",
+              minHeight: 40,
               borderRadius: "var(--radius)",
               border: "1px solid var(--border)",
               background: "var(--surface)",
               color: "var(--text)",
-              cursor: dirty ? "pointer" : "not-allowed",
-              opacity: dirty ? 1 : 0.45,
+              cursor: dirty && !saving ? "pointer" : "not-allowed",
+              opacity: dirty && !saving ? 1 : 0.45,
               fontFamily: "inherit",
             }}
           >
@@ -1072,23 +1357,37 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           </button>
           <button
             type="button"
-            onClick={save}
-            disabled={!dirty}
+            className="rn-btn-primary"
+            onClick={() => { void save(); }}
+            disabled={!dirty || saving}
+            aria-keyshortcuts="Control+S Meta+S"
             style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
               fontSize: 13,
               fontWeight: 600,
               padding: "10px 20px",
+              minHeight: 40,
               borderRadius: "var(--radius)",
               border: "none",
               background: "var(--accent)",
               color: "#fff",
-              cursor: dirty ? "pointer" : "not-allowed",
-              opacity: dirty ? 1 : 0.55,
+              cursor: dirty && !saving ? "pointer" : "not-allowed",
+              opacity: dirty && !saving ? 1 : 0.55,
               fontFamily: "inherit",
-              boxShadow: dirty ? "0 1px 8px rgba(47,129,247,0.35)" : "none",
+              boxShadow: dirty && !saving ? "0 1px 8px rgba(47,129,247,0.35)" : "none",
             }}
           >
-            Save profile
+            {saving ? (
+              <>
+                <span aria-hidden style={{ width: 12, height: 12, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.45)", borderTopColor: "#fff", animation: "spin 0.7s linear infinite", display: "inline-block" }} />
+                Saving…
+              </>
+            ) : (
+              "Save now"
+            )}
           </button>
         </div>
       </div>
@@ -1102,6 +1401,67 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           .rn-profile-two-col {
             grid-template-columns: 1fr !important;
           }
+        }
+
+        /* Visible focus ring for keyboard users across all interactive
+           elements inside the profile page. The native input ring already
+           lives in globals.css; this fills the gap for buttons + links. */
+        .rn-profile-root button:focus-visible,
+        .rn-profile-root a:focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 2px;
+          border-radius: var(--radius);
+        }
+
+        /* Inline validation visual — turns the input red when aria-invalid is
+           set on blur. Clears as soon as the user re-focuses to give them a
+           clean slate (focus handler resets the error state). */
+        .rn-profile-root input[aria-invalid="true"] {
+          border-color: var(--red) !important;
+        }
+        .rn-profile-root input[aria-invalid="true"]:focus {
+          box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.22) !important;
+        }
+
+        /* Subtle press feedback so every tap/click has a visual response. */
+        .rn-profile-root .rn-btn-primary:not(:disabled):hover {
+          background: var(--accent-h) !important;
+        }
+        .rn-profile-root .rn-btn-primary:not(:disabled):active {
+          transform: translateY(1px);
+        }
+
+        .rn-profile-root .rn-btn-secondary:not(:disabled):hover {
+          background: var(--surface2) !important;
+          border-color: var(--border-h) !important;
+        }
+        .rn-profile-root .rn-btn-secondary:not(:disabled):active {
+          transform: translateY(1px);
+        }
+
+        .rn-profile-root .rn-btn-ghost:hover {
+          background: var(--surface2) !important;
+          color: var(--text) !important;
+        }
+
+        .rn-profile-root .rn-profile-link-btn:hover {
+          background: var(--surface2);
+          color: var(--text);
+        }
+
+        .rn-profile-root .rn-profile-link:hover {
+          text-decoration: underline;
+        }
+
+        .rn-profile-root .rn-profile-cta-card:hover {
+          background: var(--surface3) !important;
+          border-color: var(--accent) !important;
+        }
+
+        .rn-profile-root .rn-profile-dropzone:not(:disabled):hover {
+          border-color: var(--accent) !important;
+          background: var(--accent-bg) !important;
+          color: var(--text) !important;
         }
       `}</style>
     </div>

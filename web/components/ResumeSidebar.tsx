@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ResumeRecord } from "@/lib/types";
+import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
 import { fetchResumes } from "@/lib/supabase";
 import { scoreColor } from "@/lib/utils";
 
@@ -116,6 +117,7 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {filtered.map(r => {
               const sc = r.score;
+              const pdfHref = displayPdfUrlForResume(r);
               const isActive = r.folder === activeFolder;
               return (
                 <div
@@ -200,9 +202,9 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
                   </button>
 
                   {/* Download PDF */}
-                  {r.pdf_url ? (
+                  {pdfHref ? (
                     <a
-                      href={r.pdf_url}
+                      href={pdfHref}
                       target="_blank"
                       rel="noopener noreferrer"
                       download

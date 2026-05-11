@@ -2355,7 +2355,7 @@ def stream_latex_resume(
     Events:
       {"event": "status",  "msg": "..."}
       {"event": "chunk",   "text": "..."}      # streamed LaTeX
-      {"event": "sources", "urls": [...]}       # sites Gemini searched
+      {"event": "sources", "urls": [...]}       # sites from web research during generation
       {"event": "diff",    "data": [...], "adds": N, "removes": N}
       {"event": "ratings", "data": {...}}
       {"event": "saved",   "folder": "...", "tex_path": "..."}
@@ -2396,7 +2396,7 @@ def stream_latex_resume(
 
         for idx, _m in enumerate(_fallback_models):
             provider = "Grok" if _is_grok(_m) else "Gemini"
-            yield {"event": "status", "msg": f"Generating with {_m} ({provider})…"}
+            yield {"event": "status", "msg": "Generating with AI…"}
             logger.info(f"Starting stream  |  {_m}  |  provider={provider}")
             t1 = time.time()
             try:
@@ -2488,11 +2488,11 @@ def stream_latex_resume(
                     break  # got real content — exit fallback loop
                 else:
                     logger.warning(f"Model {_m} returned empty body — trying next fallback")
-                    yield {"event": "status", "msg": f"{_m} returned empty response, trying next model…"}
+                    yield {"event": "status", "msg": "AI returned an empty response — trying again…"}
                     last_candidates = []
             except Exception as _e:
                 logger.warning(f"Model {_m} failed: {_e} — trying next fallback")
-                yield {"event": "status", "msg": f"{_m} unavailable, trying next model…"}
+                yield {"event": "status", "msg": "AI temporarily unavailable — trying again…"}
                 latex_body = ""
                 last_candidates = []
                 grok_sources = []
@@ -2523,7 +2523,7 @@ def stream_latex_resume(
             yield {"event": "sources", "urls": sources}
 
         if not latex_body:
-            yield {"event": "error", "msg": "All models returned empty content. Try a different model or retry."}
+            yield {"event": "error", "msg": "AI could not produce content. Please retry."}
             return
 
         # Diff

@@ -1966,7 +1966,7 @@ export default function AnalyzeResume() {
                   </span>
                 </div>
                 <p style={{ margin: "0 0 12px", fontSize: 11.5, lineHeight: 1.55, color: "var(--dim)" }}>
-                  The score above reflects your whole résumé for this pillar. This bar only shows how many of the model&apos;s weakest-line sample are tagged to this topic for highlighting — not the same calculation as the score.
+                  The score above reflects your whole résumé for this pillar. This bar only shows how many of the weakest-line samples flagged by AI for this topic are used for highlighting — not the same calculation as the score.
                 </p>
                 <div style={{
                   height: 10,

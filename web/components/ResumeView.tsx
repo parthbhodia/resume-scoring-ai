@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import type { ResumeRecord } from "@/lib/types";
 import { apiUrl } from "@/lib/utils";
+import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
 import { fetchResumes, getSupabaseClient } from "@/lib/supabase";
 import ShareButton from "./ShareButton";
 import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
@@ -45,7 +46,7 @@ export default function ResumeView({ folder }: { folder: string }) {
         if (cancelled) return;
         const m = rows.find((r) => r.folder === folder) ?? null;
         setMeta(m);
-        setPdfUrl(m?.pdf_url ?? null);
+        setPdfUrl(m ? displayPdfUrlForResume(m) : null);
         if (!m) setError("This résumé wasn’t found in your library.");
       })
       .catch(() => {

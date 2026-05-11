@@ -57,7 +57,7 @@ const SAMPLE: ParsedResume = {
       entries: [{
         header: "Open-source · langgraph-resume-agent · 2025",
         bullets: [
-          { id: "proj-1", texLine: 52, text: "LangGraph-based agent that ingests JD + resume, runs multi-provider research (Gemini grounding, Grok web_search), and produces tailored LaTeX resumes — 800+ stars." },
+          { id: "proj-1", texLine: 52, text: "LangGraph-based agent that ingests JD + resume, runs multi-provider research (live web search + AI), and produces tailored LaTeX resumes — 800+ stars." },
         ],
       }],
     },
@@ -78,7 +78,7 @@ const SAMPLE: ParsedResume = {
         header: "",
         bullets: [
           { id: "skill-1", texLine: 72, text: "**Languages:** Python, TypeScript, Rust, Go, SQL" },
-          { id: "skill-2", texLine: 73, text: "**AI/ML:** LangChain, LangGraph, FAISS, vLLM, transformers, Anthropic/OpenAI/Gemini APIs" },
+          { id: "skill-2", texLine: 73, text: "**AI/ML:** LangChain, LangGraph, FAISS, vLLM, transformers, major cloud AI APIs" },
           { id: "skill-3", texLine: 74, text: "**Infra:** Kubernetes, Terraform, Kafka, Redis, Postgres, Snowflake" },
         ],
       }],

@@ -87,7 +87,7 @@ export default function PrivacyPage() {
             </ul>
             <p>We do not use your information for third‑party targeted advertising, and we do not monetize personal data by selling it.</p>
             <p>
-              <b>Separate from the above:</b> when you use AI features, portions of your content are sent to <b>Google&apos;s Gemini API</b> as described in <b>Section 5</b>. Google processes that traffic under <b>its own</b> terms and privacy rules — which are distinct from Resunova&apos;s no-sale and limited-use commitments in this section.
+              <b>Separate from the above:</b> when you use AI features, portions of your content are sent to <b>Google&apos;s generative AI API</b> as described in <b>Section 5</b>. Google processes that traffic under <b>its own</b> terms and privacy rules — which are distinct from Resunova&apos;s no-sale and limited-use commitments in this section.
             </p>
           </Section>
 
@@ -158,8 +158,8 @@ export default function PrivacyPage() {
                 link: "https://policies.google.com/privacy",
               },
               {
-                name: "Google Gemini API",
-                purpose: "AI large language model used to tailor your resume, rewrite bullets, and generate analysis",
+                name: "Google generative AI API",
+                purpose: "AI used to tailor your resume, rewrite bullets, and generate analysis",
                 data: "Resume text, job description text",
                 location: "US (Google LLC)",
                 link: "https://ai.google.dev/terms",
@@ -180,10 +180,10 @@ export default function PrivacyPage() {
 
           <Section title="5. AI Processing Notice">
             <Callout>
-              <b>Important:</b> When you use AI features (resume tailoring, bullet rewrites, match scoring), your resume text and job description are sent to Google&apos;s Gemini API for processing. Google&apos;s <a href="https://ai.google.dev/terms" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>Gemini API Terms</a> and <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>Privacy Policy</a> apply to that processing — including how Google may log, retain, secure, or use API traffic under its own rules (which can change from time to time).
+              <b>Important:</b> When you use AI features (resume tailoring, bullet rewrites, match scoring), your resume text and job description are sent to Google&apos;s generative AI API for processing. Google&apos;s <a href="https://ai.google.dev/terms" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>Google AI for Developers Terms</a> and <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>Privacy Policy</a> apply to that processing — including how Google may log, retain, secure, or use API traffic under its own rules (which can change from time to time).
             </Callout>
             <p>
-              <b>Resunova vs. Google:</b> The commitments elsewhere in this policy — for example that <b>we do not sell your personal data</b> and that we use data stored on our side only to operate the Service, run analytics, and improve quality for users — describe <b>Resunova&apos;s</b> practices and our agreements with you. They are not a substitute for Google&apos;s terms. When your content is transmitted to the Gemini API, it is processed on <b>Google&apos;s infrastructure</b> as an independent service provider; we do not control Google&apos;s internal systems, retention windows for transient API traffic, or any product-improvement or safety practices Google applies to its APIs as described in Google&apos;s own documentation.
+              <b>Resunova vs. Google:</b> The commitments elsewhere in this policy — for example that <b>we do not sell your personal data</b> and that we use data stored on our side only to operate the Service, run analytics, and improve quality for users — describe <b>Resunova&apos;s</b> practices and our agreements with you. They are not a substitute for Google&apos;s terms. When your content is transmitted to Google&apos;s generative AI API, it is processed on <b>Google&apos;s infrastructure</b> as an independent service provider; we do not control Google&apos;s internal systems, retention windows for transient API traffic, or any product-improvement or safety practices Google applies to its APIs as described in Google&apos;s own documentation.
             </p>
             <p>
               We send Google only what is reasonably necessary to fulfill each AI request (typically the résumé and job-description text you are actively working with). Outputs are returned to Resunova so we can show you results and save them to your account when you choose to save. For the most current rules on what Google does with API inputs and outputs, rely on Google&apos;s published terms and privacy materials linked above.

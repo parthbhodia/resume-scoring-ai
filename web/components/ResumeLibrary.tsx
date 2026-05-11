@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
 import type { ResumeRecord } from "@/lib/types";
+import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
 import { fetchResumes } from "@/lib/supabase";
 
 type SortKey = "recent" | "score" | "company";
@@ -352,6 +353,7 @@ function ResumeCard({
   onOpen: () => void;
   onUseAsBase: () => void;
 }) {
+  const displayPdf = useMemo(() => displayPdfUrlForResume(record), [record.folder, record.tex_path, record.pdf_url]);
   const sc = record.score;
   const dateStr = record.created_at
     ? new Date(record.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
@@ -405,9 +407,9 @@ function ResumeCard({
       >
         Use as base
       </button>
-      {record.pdf_url && (
+      {displayPdf && (
         <a
-          href={record.pdf_url}
+          href={displayPdf}
           target="_blank"
           rel="noopener noreferrer"
           onClick={e => e.stopPropagation()}
@@ -455,8 +457,9 @@ function ResumeCard({
             <path d="M7 3h8l4 4v14H7V3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
             <path d="M14 3v4h4M9 12h6M9 16h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
           </svg>
-          {record.pdf_url ? (
+          {displayPdf ? (
             <span
+              title={record.pdf_url ? "Stored PDF link" : "API PDF path (not saved to library — open to verify)"}
               style={{
                 fontSize: 10,
                 fontWeight: 700,

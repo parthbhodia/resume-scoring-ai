@@ -91,7 +91,7 @@ export default function CriteriaTable({ criteria }: Props) {
             </div>
 
             {/* Notes */}
-            <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.5 }}>
+            <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
               {c.notes}
             </div>
           </div>

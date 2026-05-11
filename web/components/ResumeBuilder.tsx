@@ -1,9 +1,9 @@
 "use client";
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useId } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale } from "@/lib/types";
-import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
+import { apiUrl, parseJsonOrThrow, scoreColor } from "@/lib/utils";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD, TAILOR_PREFILL_COMPANY, TAILOR_PREFILL_ROLE } from "@/lib/tailorPrefill";
 import type { User } from "@supabase/supabase-js";
@@ -599,19 +599,59 @@ export default function ResumeBuilder({
       }}
     >
 
-      {/* ── Main ── */}
-      <main style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+      {/* ── Main — landmark + busy state for assistive tech (WCAG 4.1.3) */}
+      <main
+        id="resume-builder-main"
+        aria-busy={generating}
+        style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}
+      >
 
         {/* Page content */}
         <div
           className="rb-page"
           style={{
-            padding: "44px 48px 80px",
+            padding: "clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh)",
             maxWidth: result ? 960 : studioHandoff ? 920 : 820,
             margin: "0 auto",
             width: "100%",
+            boxSizing: "border-box",
           }}
         >
+          <style>{`
+            .rb-page button:focus-visible,
+            .rb-page a:focus-visible {
+              outline: 2px solid var(--accent);
+              outline-offset: 2px;
+            }
+            .rb-page button:focus:not(:focus-visible) {
+              outline: none;
+            }
+            .rb-page input:not([type="checkbox"]),
+            .rb-page textarea {
+              min-height: 44px;
+              font-size: 16px;
+            }
+            .rb-page textarea[data-rb-jd="1"] {
+              min-height: 140px;
+            }
+            @media (min-width: 768px) {
+              .rb-page input:not([type="checkbox"]),
+              .rb-page textarea {
+                font-size: 14px;
+              }
+            }
+            @media (prefers-reduced-motion: reduce) {
+              .rb-page .fade-in,
+              .rb-page .fade-in-up,
+              .rb-page [class^="stagger-"] {
+                animation: none !important;
+                transition-duration: 0.01ms !important;
+              }
+            }
+            .rb-page {
+              touch-action: manipulation;
+            }
+          `}</style>
 
           {/* ── Hero (pre-generation) ── */}
           {!result && !generating && (
@@ -1043,12 +1083,12 @@ export default function ResumeBuilder({
                   onClick={importFromUrl}
                   disabled={extractingJd || !jobUrl.trim()}
                   style={{
-                    padding: "0 16px", fontSize: 12, fontWeight: 600, letterSpacing: -0.2,
+                    padding: "0 18px", minHeight: 44, fontSize: 13, fontWeight: 600, letterSpacing: -0.2,
                     background: extractingJd ? "var(--surface2)" : "var(--accent)",
                     color: extractingJd ? "var(--dim)" : "#fff",
                     border: "none", borderRadius: 8, cursor: extractingJd || !jobUrl.trim() ? "not-allowed" : "pointer",
                     fontFamily: "inherit", opacity: !jobUrl.trim() ? 0.55 : 1,
-                    whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 6,
+                    whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
                   }}
                 >
                   {extractingJd ? (
@@ -1075,6 +1115,7 @@ export default function ResumeBuilder({
             {!result && (
               <Field label="Job description">
                 <textarea
+                  data-rb-jd="1"
                   value={jd}
                   onChange={e => setJd(e.target.value)}
                   placeholder="Paste the full job description here — or import from a link above."
@@ -1096,8 +1137,15 @@ export default function ResumeBuilder({
               <span style={{ color: "var(--dim)" }}>Comparing against</span>
               <span style={{ color: "var(--text)", fontWeight: 500, flex: 1 }}>{baseFolder}</span>
               <button
+                type="button"
                 onClick={() => setBaseFolder(null)}
-                style={{ background: "none", border: "none", color: "var(--dim)", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: "0 2px" }}
+                aria-label="Clear base résumé comparison"
+                style={{
+                  background: "none", border: "none", color: "var(--dim)", cursor: "pointer",
+                  fontSize: 18, lineHeight: 1, minWidth: 44, minHeight: 44,
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  borderRadius: 8, margin: "-8px -6px -8px 0",
+                }}
                 title="Clear base"
               >×</button>
             </div>
@@ -1105,11 +1153,14 @@ export default function ResumeBuilder({
 
           {/* Error banner */}
           {error && (
-            <div style={{
-              marginBottom: 16, padding: "12px 16px",
-              background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)",
-              borderRadius: 10, color: "var(--red)", fontSize: 13, letterSpacing: -0.2,
-            }}>
+            <div
+              role="alert"
+              style={{
+                marginBottom: 16, padding: "12px 16px",
+                background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)",
+                borderRadius: 10, color: "var(--red)", fontSize: 13, letterSpacing: -0.2,
+              }}
+            >
               {error}
             </div>
           )}
@@ -1122,7 +1173,7 @@ export default function ResumeBuilder({
                 onClick={() => { void generate(); }}
                 disabled={generating || !(candidateProfile ?? "").trim()}
                 style={{
-                  width: "100%", padding: "14px 20px", marginBottom: 8,
+                  width: "100%", padding: "14px 20px", marginBottom: 8, minHeight: 48,
                   background: generating || !(candidateProfile ?? "").trim() ? "var(--surface2)" : "var(--accent)",
                   color: generating || !(candidateProfile ?? "").trim() ? "var(--muted)" : "#fff",
                   border: "none", borderRadius: 12,
@@ -1155,7 +1206,7 @@ export default function ResumeBuilder({
           ) : (
             <>
               {suggestError && (
-                <div style={{ marginBottom: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
+                <div role="alert" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
                   {suggestError}
                 </div>
               )}
@@ -1164,7 +1215,7 @@ export default function ResumeBuilder({
                 onClick={getSuggestions}
                 disabled={suggestLoading || generating}
                 style={{
-                  width: "100%", padding: "14px 20px", marginBottom: 8,
+                  width: "100%", padding: "14px 20px", marginBottom: 8, minHeight: 48,
                   background: suggestLoading ? "var(--surface2)" : "var(--accent)",
                   color: suggestLoading ? "var(--muted)" : "#fff",
                   border: "none", borderRadius: 12,
@@ -1239,15 +1290,15 @@ export default function ResumeBuilder({
                 {statusMsg || "Tailoring your resume…"}
               </div>
               <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, maxWidth: 480, margin: 0 }}>
-                Analyzing the job description and drafting your tailored résumé. LaTeX streams below when the model starts writing. If this
-                run uses Google Search grounding, search queries and sources show up in the web research panel as they arrive (sometimes
-                only after a short delay).
+                Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing. When this run
+                uses live web research, search queries and sources show up in the web research panel as they arrive (sometimes only after a
+                short delay).
               </p>
             </div>
           )}
 
-          {/* Web research: live panel once SSE events arrive, or a waiting skeleton while generating */}
-          {generating && !hasWebResearch && (
+          {/* Web research: only while no results card yet — ratings sets `result` before `done`, so hide once the results view is up */}
+          {generating && !result && !hasWebResearch && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
@@ -1268,14 +1319,14 @@ export default function ResumeBuilder({
                 borderRadius: 10, padding: "14px 16px",
                 fontSize: 12, color: "var(--dim)", lineHeight: 1.55,
               }}>
-                When the model issues live Google Search queries, they will list here. If the API does not return grounding metadata for
-                this run, this section stays empty — your résumé still generates normally.
+                When AI issues live web search queries, they will list here. If this run does not return web-research metadata, this section
+                stays empty — your résumé still generates normally.
               </div>
             </div>
           )}
 
-          {/* Live Google Search activity (Gemini grounding) */}
-          {hasWebResearch && (
+          {/* Live web search — hide after results appear so Phase 3 isn’t stacked under streaming chrome */}
+          {hasWebResearch && !result && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
@@ -1302,7 +1353,7 @@ export default function ResumeBuilder({
                 maxHeight: 220, overflow: "auto",
                 display: "flex", flexDirection: "column", gap: 10,
               }}>
-                {/* Queries Gemini issued to Google */}
+                {/* Live search queries from this run */}
                 {searchQueries.map((q, i) => (
                   <div key={`q-${i}`} style={{
                     display: "flex", alignItems: "flex-start", gap: 8,
@@ -1316,7 +1367,7 @@ export default function ResumeBuilder({
                   </div>
                 ))}
 
-                {/* Pages Gemini cited from those queries */}
+                {/* Pages cited from those queries */}
                 {searchSources.length > 0 && (
                   <div style={{
                     borderTop: searchQueries.length ? "1px solid var(--border)" : "none",
@@ -1356,8 +1407,8 @@ export default function ResumeBuilder({
           )}
 
 
-          {/* ── Streaming LaTeX preview (during generation) ── */}
-          {generating && preview && (
+          {/* ── Streaming LaTeX preview (only before results card; avoids concatenated-looking UI above scores) ── */}
+          {generating && !result && preview && (
             <div style={{ marginBottom: 28 }} className="fade-in">
               <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: -0.1, marginBottom: 8, textTransform: "uppercase" }}>
                 Live preview
@@ -1408,7 +1459,7 @@ export default function ResumeBuilder({
               )}
 
               <header style={{ marginBottom: 22 }}>
-                <h2 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.75, color: "var(--text)", marginBottom: 6 }}>
+                <h2 id="rb-results-heading" style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.75, color: "var(--text)", marginBottom: 6 }}>
                   Your tailored résumé
                 </h2>
                 <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.5, letterSpacing: -0.15 }}>
@@ -1428,7 +1479,7 @@ export default function ResumeBuilder({
                   onClick={() => setResult(null)}
                   style={{
                     display: "flex", alignItems: "center", gap: 6,
-                    padding: "8px 14px", borderRadius: "var(--radius)",
+                    padding: "10px 16px", minHeight: 44, borderRadius: "var(--radius)",
                     background: "var(--surface)", border: "1px solid var(--border)",
                     color: "var(--muted)", fontSize: 12, fontWeight: 600,
                     cursor: "pointer", fontFamily: "inherit", letterSpacing: -0.2,
@@ -1445,6 +1496,61 @@ export default function ResumeBuilder({
                 </button>
               </div>
 
+              {/* View 5 Phase 3 — same two-column rhythm as suggestions: preview + metrics (Analyze-style clarity) */}
+              <style>{`
+                .rb-results-phase3 {
+                  display: grid;
+                  grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.22fr);
+                  gap: 20px;
+                  align-items: start;
+                }
+                @media (max-width: 920px) {
+                  .rb-results-phase3 { grid-template-columns: 1fr; }
+                }
+              `}</style>
+              <section className="rb-results-phase3" aria-labelledby="rb-results-heading">
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
+                    Résumé preview
+                  </div>
+                  {result.pdfUrl ? (
+                    <div style={{
+                      borderRadius: "var(--radius-xl)",
+                      overflow: "hidden",
+                      border: "1px solid var(--border)",
+                      background: "#3d3d3d",
+                      boxShadow: "var(--shadow-card)",
+                      aspectRatio: "8.5 / 11",
+                      maxHeight: 560,
+                      minHeight: 280,
+                    }}>
+                      <iframe
+                        title="Tailored résumé PDF preview"
+                        src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
+                        loading="lazy"
+                        style={{ width: "100%", height: "100%", minHeight: 400, border: "none", display: "block", background: "#525659" }}
+                      />
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: 560, overflow: "auto", borderRadius: "var(--radius-xl)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
+                      <ResumePaperView text={(candidateProfile ?? "").trim() || "—"} highlightOriginals={[]} />
+                    </div>
+                  )}
+                  <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
+                    {result.pdfUrl ? (
+                      <>
+                        If the preview is blank (blocked embed),{" "}
+                        <a href={result.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                          open the PDF in a new tab
+                        </a>
+                        . Download and share are in the match card →
+                      </>
+                    ) : (
+                      "PDF preview appears when the compile step finishes."
+                    )}
+                  </p>
+                </div>
+                <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
               {/* Score hero card */}
               <div className="rb-score-card" style={{
                 background: "var(--surface)", border: "1px solid var(--border)",
@@ -1460,7 +1566,7 @@ export default function ResumeBuilder({
                   borderRadius: "50%", pointerEvents: "none",
                 }} />
 
-                <div className="rb-score-row" style={{ display: "flex", alignItems: "flex-start", gap: 24, position: "relative" }}>
+                <div className="rb-score-row" style={{ display: "flex", alignItems: "flex-start", gap: 24, position: "relative", flexWrap: "wrap" }}>
                   {ratings ? (
                     <ScoreRing score={score} size={130} />
                   ) : (
@@ -1475,10 +1581,10 @@ export default function ResumeBuilder({
                     </div>
                     {ratings ? (
                       <>
-                        <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: -0.6, color: "var(--text)", marginBottom: 8, lineHeight: 1.3 }}>
+                        <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.6, color: scoreColor(score), marginBottom: 8, lineHeight: 1.3 }}>
                           {score >= 80 ? "Strong match" : score >= 65 ? "Good match" : score >= 50 ? "Moderate match" : "Needs work"}
                         </div>
-                        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: 0 }}>
+                        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                           {ratings.verdict}
                         </p>
                       </>
@@ -1543,9 +1649,9 @@ export default function ResumeBuilder({
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         {ratings.whats_working.map((w, i) => (
-                          <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "var(--muted)", lineHeight: 1.5, letterSpacing: -0.2 }}>
-                            <span style={{ color: "var(--green)", flexShrink: 0, marginTop: 1 }}>✓</span>
-                            <span>{w}</span>
+                          <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "var(--muted)", lineHeight: 1.5, letterSpacing: -0.2, alignItems: "flex-start" }}>
+                            <span style={{ color: "var(--green)", flexShrink: 0, marginTop: 3 }}>✓</span>
+                            <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{w}</span>
                           </div>
                         ))}
                       </div>
@@ -1680,7 +1786,15 @@ export default function ResumeBuilder({
                   <div style={{ padding: 12, color: "var(--red)", fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
                     Couldn&apos;t run ATS check: {atsError}
                     {result.folder && (
-                      <button onClick={() => runAtsCheck(result.folder!)} style={{ fontSize: 11, padding: "4px 10px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", cursor: "pointer", fontFamily: "inherit" }}>
+                      <button
+                        type="button"
+                        onClick={() => runAtsCheck(result.folder!)}
+                        style={{
+                          fontSize: 12, fontWeight: 600, padding: "10px 16px", minHeight: 44,
+                          background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8,
+                          color: "var(--text)", cursor: "pointer", fontFamily: "inherit",
+                        }}
+                      >
                         Retry
                       </button>
                     )}
@@ -1715,7 +1829,8 @@ export default function ResumeBuilder({
                   style={{
                     fontSize: 12,
                     fontWeight: 600,
-                    padding: "8px 16px",
+                    padding: "12px 18px",
+                    minHeight: 44,
                     background: "var(--surface)",
                     border: "1px solid var(--border)",
                     borderRadius: "var(--radius)",
@@ -1728,6 +1843,8 @@ export default function ResumeBuilder({
                   Start over
                 </button>
               </div>
+                </div>
+              </section>
             </div>
           )}
 
@@ -1905,24 +2022,24 @@ function SuggestionsPanel({
                   </div>
 
                   {/* Original → Suggested */}
-                  <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6, lineHeight: 1.5, fontStyle: "italic", textDecoration: isAccepted ? "line-through" : "none", opacity: isAccepted ? 0.6 : 1 }}>
+                  <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6, lineHeight: 1.5, fontStyle: "italic", textDecoration: isAccepted ? "line-through" : "none", opacity: isAccepted ? 0.6 : 1, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                     {s.original}
                   </div>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 8 }}>
-                    <span style={{ color: "var(--green)", fontSize: 11, flexShrink: 0, marginTop: 2 }}>→</span>
-                    <span style={{ fontSize: 11.5, color: "var(--text)", lineHeight: 1.5, fontWeight: isAccepted ? 500 : 400 }}>{s.suggested}</span>
+                    <span style={{ color: "var(--green)", fontSize: 11, flexShrink: 0, marginTop: 2 }} aria-hidden>→</span>
+                    <span style={{ fontSize: 11.5, color: "var(--text)", lineHeight: 1.5, fontWeight: isAccepted ? 500 : 400, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{s.suggested}</span>
                   </div>
-                  <div style={{ fontSize: 10.5, color: "var(--dim)", lineHeight: 1.45, marginBottom: 10, paddingLeft: 14 }}>
+                  <div style={{ fontSize: 10.5, color: "var(--dim)", lineHeight: 1.45, marginBottom: 10, paddingLeft: 14, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                     {s.reason}
                   </div>
 
-                  {/* Accept / Reject buttons */}
-                  <div style={{ display: "flex", gap: 6 }}>
+                  {/* Accept / Reject — min 44px tap height (HIG / Material touch) */}
+                  <div style={{ display: "flex", gap: 8 }}>
                     <button
                       type="button"
                       onClick={() => onToggleAccept(s.id)}
                       style={{
-                        flex: 1, padding: "7px 0", fontSize: 11, fontWeight: 600,
+                        flex: 1, padding: "12px 14px", minHeight: 44, fontSize: 12, fontWeight: 600,
                         borderRadius: "var(--radius, 8px)", border: "none", cursor: "pointer", fontFamily: "inherit",
                         background: isAccepted ? "var(--green-bg)" : "var(--surface2)",
                         color: isAccepted ? "var(--green)" : "var(--muted)",
@@ -1935,7 +2052,7 @@ function SuggestionsPanel({
                       type="button"
                       onClick={() => onToggleReject(s.id)}
                       style={{
-                        flex: 1, padding: "7px 0", fontSize: 11, fontWeight: 600,
+                        flex: 1, padding: "12px 14px", minHeight: 44, fontSize: 12, fontWeight: 600,
                         borderRadius: "var(--radius, 8px)", border: "none", cursor: "pointer", fontFamily: "inherit",
                         background: isRejected ? "var(--red-bg)" : "var(--surface2)",
                         color: isRejected ? "var(--red)" : "var(--muted)",
@@ -1954,16 +2071,18 @@ function SuggestionsPanel({
 
       {/* Generate CTA */}
       {error && (
-        <div style={{ marginTop: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
+        <div role="alert" style={{ marginTop: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
           {error}
         </div>
       )}
       <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
         <button
+          type="button"
           onClick={onGenerate}
           disabled={generating}
+          aria-busy={generating}
           style={{
-            flex: 1, padding: "13px 20px",
+            flex: 1, padding: "14px 20px", minHeight: 48,
             background: generating ? "var(--surface2)" : "var(--accent)",
             color: generating ? "var(--muted)" : "#fff",
             border: "none", borderRadius: 12,
@@ -2028,11 +2147,15 @@ function StepCard({ step, title, subtitle, children }: {
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  const labelId = useId();
   return (
-    <div>
-      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--dim)", marginBottom: 6, letterSpacing: -0.1, textTransform: "uppercase" }}>
+    <div role="group" aria-labelledby={labelId}>
+      <div
+        id={labelId}
+        style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--dim)", marginBottom: 6, letterSpacing: -0.1, textTransform: "uppercase" }}
+      >
         {label}
-      </label>
+      </div>
       {children}
     </div>
   );
@@ -2061,9 +2184,9 @@ function InfoTip({ children, label }: { children: React.ReactNode; label?: strin
         aria-label={label ?? "More info"}
         aria-expanded={open}
         style={{
-          width: 14, height: 14, borderRadius: "50%",
+          minWidth: 44, minHeight: 44, borderRadius: "50%",
           border: "1px solid var(--dim)", background: "transparent",
-          color: "var(--dim)", fontSize: 9, fontWeight: 700, lineHeight: 1,
+          color: "var(--dim)", fontSize: 10, fontWeight: 700, lineHeight: 1,
           display: "inline-flex", alignItems: "center", justifyContent: "center",
           cursor: "help", padding: 0, fontFamily: "inherit",
           fontStyle: "italic",

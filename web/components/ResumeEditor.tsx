@@ -215,7 +215,7 @@ export default function ResumeEditor({ initial, saving, saveError, folder, onSav
     const sec = draft.sections[sIdx];
     if (!sec || !sec.editable) return;
     // Walk entries × bullets, awaiting each — do serial so we don't blast the
-    // backend with parallel LLM calls (Gemini free tier RPMs hate that).
+    // backend with parallel LLM calls (provider rate limits hate that).
     for (let ei = 0; ei < sec.entries.length; ei++) {
       const entry = sec.entries[ei];
       for (let bi = 0; bi < entry.bullets.length; bi++) {
