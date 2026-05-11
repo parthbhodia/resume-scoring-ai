@@ -81,6 +81,8 @@ export function findBulletIndexForLine(
     else {
       const p = Math.min(24, b.length - 1);
       if (ln.slice(0, p) === b.slice(0, p) && p >= 12) s = 55;
+      // Suffix match: line is a wrapped continuation of the bullet's tail
+      else if (ln.length >= 6 && b.endsWith(ln)) s = 60;
     }
     if (s > bestScore) {
       bestScore = s;
