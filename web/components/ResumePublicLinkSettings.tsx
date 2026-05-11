@@ -7,14 +7,47 @@ import {
   updateResumeShareSettings,
 } from "@/lib/supabase";
 
+const RN_PL_ACC_CSS = `
+  .rn-pl-acc > summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    cursor: pointer;
+    padding: 12px 16px;
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .rn-pl-acc > summary::-webkit-details-marker { display: none; }
+  .rn-pl-acc[open] > summary {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+  .rn-pl-acc .rn-pl-chev {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--dim);
+    transition: transform 0.15s ease;
+  }
+  .rn-pl-acc[open] .rn-pl-chev { transform: rotate(180deg); }
+`;
+
 export default function ResumePublicLinkSettings({
   folder,
   userId,
   templateFlow,
+  /** When true, wrap settings in a closed-by-default accordion to save vertical space (e.g. builder results). */
+  collapseAsDetails = false,
 }: {
   folder: string;
   userId: string | null;
   templateFlow?: boolean;
+  collapseAsDetails?: boolean;
 }) {
   const [slugDraft, setSlugDraft] = useState("");
   const [isDefault, setIsDefault] = useState(false);
@@ -73,54 +106,24 @@ export default function ResumePublicLinkSettings({
     }
   }, [folder, userId, slugDraft, isDefault]);
 
-  if (!loaded) {
-    return (
-      <div style={{ fontSize: 12, color: "var(--dim)", padding: "4px 0" }}>Loading link settings…</div>
-    );
-  }
+  const intro = templateFlow ? (
+    <p style={{ margin: collapseAsDetails ? "0 0 14px" : "0 0 16px", fontSize: 13, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>
+      Optional: pick a memorable URL for this build, and choose whether it should be your primary résumé in the app.
+    </p>
+  ) : (
+    <p style={{ margin: collapseAsDetails ? "0 0 14px" : "0 0 16px", fontSize: 13, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>
+      Share a stable link or set this version as your default résumé.
+    </p>
+  );
 
-  if (!userId) {
-    return (
-      <div
-        style={{
-          borderRadius: "var(--radius-xl)",
-          border: "1px solid var(--border)",
-          background: "var(--surface2)",
-          padding: "16px 18px",
-          fontSize: 13,
-          color: "var(--muted)",
-          lineHeight: 1.55,
-        }}
-      >
-        Sign in to create a custom public link or mark this résumé as your default.
-      </div>
-    );
-  }
+  const titleBar = (
+    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
+      Public link &amp; default résumé
+    </div>
+  );
 
-  return (
-    <div
-      style={{
-        marginBottom: 16,
-        borderRadius: "var(--radius-xl)",
-        border: "1px solid var(--border)",
-        background: "var(--surface)",
-        boxShadow: "var(--shadow-card)",
-        padding: "20px 22px 18px",
-      }}
-    >
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
-        Public link &amp; default résumé
-      </div>
-      {templateFlow ? (
-        <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>
-          Optional: pick a memorable URL for this build, and choose whether it should be your primary résumé in the app.
-        </p>
-      ) : (
-        <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--muted)", lineHeight: 1.55, letterSpacing: -0.1 }}>
-          Share a stable link or set this version as your default résumé.
-        </p>
-      )}
-
+  const fields = (
+    <>
       <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 6, letterSpacing: -0.1 }}>
         Customize your résumé link
       </label>
@@ -262,6 +265,92 @@ export default function ResumePublicLinkSettings({
           {message.text}
         </div>
       ) : null}
+    </>
+  );
+
+  if (!loaded) {
+    return (
+      <div style={{ fontSize: 12, color: "var(--dim)", padding: "4px 0" }}>Loading link settings…</div>
+    );
+  }
+
+  if (!userId) {
+    const signInBody = (
+      <div
+        style={{
+          borderRadius: collapseAsDetails ? "0 0 var(--radius-xl) var(--radius-xl)" : "var(--radius-xl)",
+          border: "1px solid var(--border)",
+          borderTop: collapseAsDetails ? "none" : "1px solid var(--border)",
+          background: "var(--surface2)",
+          padding: "16px 18px",
+          fontSize: 13,
+          color: "var(--muted)",
+          lineHeight: 1.55,
+        }}
+      >
+        Sign in to create a custom public link or mark this résumé as your default.
+      </div>
+    );
+
+    if (collapseAsDetails) {
+      return (
+        <details className="rn-pl-acc" style={{ marginBottom: 16 }}>
+          <style>{RN_PL_ACC_CSS}</style>
+          <summary>
+            <span>Public link &amp; default résumé</span>
+            <span className="rn-pl-chev" aria-hidden>
+              ▼
+            </span>
+          </summary>
+          {signInBody}
+        </details>
+      );
+    }
+
+    return signInBody;
+  }
+
+  if (collapseAsDetails) {
+    return (
+      <details className="rn-pl-acc" style={{ marginBottom: 16 }}>
+        <style>{RN_PL_ACC_CSS}</style>
+        <summary>
+          <span>Public link &amp; default résumé</span>
+          <span className="rn-pl-chev" aria-hidden>
+            ▼
+          </span>
+        </summary>
+        <div
+          style={{
+            borderRadius: "0 0 var(--radius-xl) var(--radius-xl)",
+            border: "1px solid var(--border)",
+            borderTop: "none",
+            background: "var(--surface)",
+            boxShadow: "var(--shadow-card)",
+            padding: "16px 18px 18px",
+          }}
+        >
+          {intro}
+          {fields}
+        </div>
+      </details>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        marginBottom: 16,
+        borderRadius: "var(--radius-xl)",
+        border: "1px solid var(--border)",
+        background: "var(--surface)",
+        boxShadow: "var(--shadow-card)",
+        padding: "20px 22px 18px",
+      }}
+    >
+      {titleBar}
+      {intro}
+      {fields}
     </div>
   );
 }

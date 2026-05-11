@@ -1953,6 +1953,7 @@ export default function ResumeBuilder({
                   folder={result.folder}
                   userId={user?.id ?? null}
                   templateFlow={studioHandoff}
+                  collapseAsDetails
                 />
               ) : null}
 
@@ -2939,7 +2940,7 @@ function TemplateCustomizePostResult({
 
       {result.folder && result.pdfUrl && !generating ? (
         <div style={{ marginTop: 16 }}>
-          <ResumePublicLinkSettings folder={result.folder} userId={user?.id ?? null} templateFlow />
+          <ResumePublicLinkSettings folder={result.folder} userId={user?.id ?? null} templateFlow collapseAsDetails />
         </div>
       ) : null}
 
