@@ -131,16 +131,65 @@ function ClassicProPreviewSvg() {
   );
 }
 
+function MaltaModernPreviewSvg() {
+  return (
+    <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg" style={{ display: "block" }}>
+      <rect width="200" height="260" fill="#ffffff" />
+      {/* Name + contact */}
+      <text x="12" y="20" fontSize="10.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Jennifer Jobscan</text>
+      <text x="12" y="29" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif">jennifer@example.com  ·  (555) 010-2030  ·  San Francisco, CA</text>
+      {/* Bio */}
+      <rect x="12" y="34" width="176" height="2.8" rx="1" fill="#e2e8f0" />
+      <rect x="12" y="39" width="155" height="2.8" rx="1" fill="#e2e8f0" />
+
+      {/* WORK EXPERIENCE — accent header */}
+      <text x="12" y="53" fontSize="6.5" fontWeight="700" fill="#E25822" fontFamily="Arial, sans-serif" letterSpacing="0.6">WORK EXPERIENCE</text>
+      <line x1="12" y1="56" x2="188" y2="56" stroke="#E25822" strokeWidth="0.7" />
+      <text x="12" y="65" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Senior Product Designer</text>
+      <text x="12" y="72" fontSize="5.8" fill="#64748b" fontFamily="Arial, sans-serif" fontStyle="italic">at Acme Labs</text>
+      <text x="188" y="65" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif" textAnchor="end">2021 – Present</text>
+      <text x="12" y="79" fontSize="5.5" fill="#94a3b8" fontFamily="Arial, sans-serif">Tags: Figma, React, Design Systems</text>
+      <rect x="16" y="83" width="158" height="2.8" rx="1" fill="#e2e8f0" />
+      <rect x="16" y="88" width="144" height="2.8" rx="1" fill="#e2e8f0" />
+      <rect x="16" y="93" width="151" height="2.8" rx="1" fill="#e2e8f0" />
+      <text x="12" y="104" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">Product Designer</text>
+      <text x="12" y="111" fontSize="5.8" fill="#64748b" fontFamily="Arial, sans-serif" fontStyle="italic">at Northwind</text>
+      <text x="188" y="104" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif" textAnchor="end">2018 – 2021</text>
+      <rect x="16" y="115" width="148" height="2.8" rx="1" fill="#e2e8f0" />
+      <rect x="16" y="120" width="134" height="2.8" rx="1" fill="#e2e8f0" />
+
+      {/* SKILLS — accent header + multi-col */}
+      <text x="12" y="133" fontSize="6.5" fontWeight="700" fill="#E25822" fontFamily="Arial, sans-serif" letterSpacing="0.6">CORE SKILLS</text>
+      <line x1="12" y1="136" x2="188" y2="136" stroke="#E25822" strokeWidth="0.7" />
+      <rect x="12" y="140" width="52" height="2.8" rx="1" fill="#e2e8f0" />
+      <rect x="72" y="140" width="52" height="2.8" rx="1" fill="#e2e8f0" />
+      <rect x="132" y="140" width="52" height="2.8" rx="1" fill="#e2e8f0" />
+      <rect x="12" y="145" width="52" height="2.8" rx="1" fill="#e2e8f0" />
+      <rect x="72" y="145" width="52" height="2.8" rx="1" fill="#e2e8f0" />
+      <rect x="132" y="145" width="52" height="2.8" rx="1" fill="#e2e8f0" />
+
+      {/* EDUCATION — accent header */}
+      <text x="12" y="158" fontSize="6.5" fontWeight="700" fill="#E25822" fontFamily="Arial, sans-serif" letterSpacing="0.6">EDUCATION</text>
+      <line x1="12" y1="161" x2="188" y2="161" stroke="#E25822" strokeWidth="0.7" />
+      <text x="12" y="170" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial, sans-serif">BFA, Graphic Design</text>
+      <text x="188" y="170" fontSize="5.5" fill="#64748b" fontFamily="Arial, sans-serif" textAnchor="end">2014 – 2018</text>
+      <text x="12" y="178" fontSize="5.8" fill="#64748b" fontFamily="Arial, sans-serif" fontStyle="italic">State University</text>
+    </svg>
+  );
+}
+
 function TemplatePreviewSvg({ templateId }: { templateId: string }) {
   if (templateId === "harshibar-ats") return <HarshibarPreviewSvg />;
+  if (templateId === "malta-modern") return <MaltaModernPreviewSvg />;
   return <ClassicProPreviewSvg />;
 }
 
 /* ── Template card ───────────────────────────────────────────────── */
 
-const TEMPLATE_META: Record<string, { isAts: boolean; isNew?: boolean; tag?: string }> = {
-  "harshibar-ats":   { isAts: true,  isNew: true, tag: "Modern" },
-  "ats-professional": { isAts: true,  tag: "Classic" },
+const TEMPLATE_META: Record<string, { isAts: boolean; isNew?: boolean; tag?: string; blurb?: string }> = {
+  "harshibar-ats":   { isAts: true,  isNew: true, tag: "Modern",  blurb: "Sans-serif, modern layout. Great for tech and design roles." },
+  "ats-professional": { isAts: true,  tag: "Classic", blurb: "Serif, traditional layout. Ideal for business and academic roles." },
+  "malta-modern":    { isAts: true,  isNew: true, tag: "Colorful", blurb: "Accent-color headers, bio block, multi-column skills. Stands out while staying ATS-safe." },
 };
 
 function TemplateCard({
@@ -236,9 +285,7 @@ function TemplateCard({
           )}
         </div>
         <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
-          {template.id === "harshibar-ats"
-            ? "Sans-serif, modern layout. Great for tech and design roles."
-            : "Serif, traditional layout. Ideal for business and academic roles."}
+          {meta.blurb ?? template.description}
         </p>
       </div>
 
@@ -263,9 +310,11 @@ function TemplateCard({
 
 function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: string; lineHeight: number; styleFolder: string }) {
   const isHarshibar = styleFolder === "Harshibar_Template1";
-  const font = isHarshibar
+  const isMalta = styleFolder === "MaltaCV_Modern";
+  const font = isHarshibar || isMalta
     ? "'Inter', 'Helvetica Neue', Arial, sans-serif"
     : "'Georgia', 'Times New Roman', serif";
+  const accentColor = isMalta ? "#E25822" : "#0f172a";
 
   const lines = text.split("\n");
 
@@ -290,6 +339,13 @@ function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: strin
 
         // Name line
         if (i === firstNonEmpty) {
+          if (isMalta) {
+            return (
+              <div key={i} style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.3, marginBottom: 2, lineHeight: 1.15, color: "#0f172a" }}>
+                {t}
+              </div>
+            );
+          }
           return isHarshibar ? (
             <div key={i} style={{ fontSize: 19, fontWeight: 700, letterSpacing: -0.5, marginBottom: 2, lineHeight: 1.15, color: "#0f172a" }}>
               {t}
@@ -304,7 +360,7 @@ function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: strin
         // Contact line
         if (isContactLine(line, i - firstNonEmpty)) {
           return (
-            <div key={i} style={{ fontSize: 9.5, color: "#475569", marginBottom: 2, letterSpacing: 0.1, textAlign: isHarshibar ? "left" : "center" }}>
+            <div key={i} style={{ fontSize: 9.5, color: "#475569", marginBottom: 2, letterSpacing: 0.1, textAlign: (!isHarshibar && !isMalta) ? "center" : "left" }}>
               {t}
             </div>
           );
@@ -312,15 +368,10 @@ function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: strin
 
         // Section header
         if (isHeader(t)) {
-          return isHarshibar ? (
+          return (
             <div key={i} style={{ marginTop: lineHeight * 8, marginBottom: 4 }}>
-              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 1.4, color: "#0f172a" }}>{t}</div>
-              <div style={{ height: 0.75, background: "#0f172a", marginTop: 3 }} />
-            </div>
-          ) : (
-            <div key={i} style={{ marginTop: lineHeight * 8, marginBottom: 4 }}>
-              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8, color: "#0f172a" }}>{t}</div>
-              <div style={{ height: 0.9, background: "#0f172a", marginTop: 3 }} />
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: isMalta ? 0.6 : isHarshibar ? 1.4 : 0.8, color: accentColor }}>{t}</div>
+              <div style={{ height: isMalta ? 0.7 : isHarshibar ? 0.75 : 0.9, background: accentColor, marginTop: 3 }} />
             </div>
           );
         }
@@ -337,7 +388,7 @@ function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: strin
 
         // Body line
         return (
-          <div key={i} style={{ fontSize: 10, marginBottom: 2, color: "#1e293b", fontStyle: !isHarshibar && t.includes("|") ? "italic" : "normal" }}>
+          <div key={i} style={{ fontSize: 10, marginBottom: 2, color: isMalta ? "#555555" : "#1e293b", fontStyle: !isHarshibar && !isMalta && t.includes("|") ? "italic" : "normal" }}>
             {t}
           </div>
         );

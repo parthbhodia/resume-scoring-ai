@@ -26,6 +26,13 @@ export const RESUME_STYLE_TEMPLATES: ResumeStyleTemplate[] = [
     description: "Original library reference (often Adobe_FullStack on deployed servers).",
     referenceFolder: "Adobe_FullStack",
   },
+  {
+    id: "malta-modern",
+    label: "Malta Modern",
+    description:
+      "Accent-color section headers (flame orange), multi-column skills, bio summary block. Uses \\cvsection, \\cvexperience, \\cvuniversity, \\cvlistitem. Clean and visually distinctive.",
+    referenceFolder: "MaltaCV_Modern",
+  },
 ];
 
 export const DEFAULT_REFERENCE_FOLDER = "Adobe_FullStack";
