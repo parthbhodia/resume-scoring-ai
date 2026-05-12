@@ -1173,7 +1173,6 @@ export default function ResumeBuilder({
           {/* ── Hero (pre-generation) ── */}
           {showBuilderInputs && (
             <>
-              <BuilderStartPathChooser active={studioHandoff ? "layout" : "tailor"} />
               {studioHandoff ? (
                 <div
                   style={{
@@ -1209,7 +1208,7 @@ export default function ResumeBuilder({
                   }}>
                     Upload your résumé, paste the job description, review suggestions (with an optional web-research pass), then generate an ATS-friendly PDF.
                     This path <strong style={{ color: "var(--text)" }}>rebuilds</strong> your content using the <strong style={{ color: "var(--text)" }}>template style</strong> you select under Your résumé — it will not look identical to your uploaded PDF.
-                    To pick a <strong style={{ color: "var(--text)" }}>visible gallery layout</strong> first and keep that structure, use <strong style={{ color: "var(--text)" }}>Match my layout</strong> above, then return here if you still want tailoring.
+                    To start from the <strong style={{ color: "var(--text)" }}>template gallery</strong> instead, open <strong style={{ color: "var(--text)" }}>Résumé Builder → Template gallery</strong> in the sidebar.
                   </p>
                   <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {[
@@ -4448,88 +4447,6 @@ function SuggestionsPanel({
 }
 
 /* ── Sub-components ─────────────────────────────────────── */
-
-/** Two-path entry: JD tailor (default ATS body) vs template gallery (chosen LaTeX layout). */
-function BuilderStartPathChooser({ active }: { active: "tailor" | "layout" }) {
-  const tailorHref = "/?view=builder&flow=tailor&intent=job";
-  const templateHref = "/?view=builder&flow=template";
-
-  const cardStyle = (isActive: boolean): CSSProperties => ({
-    flex: "1 1 min(260px, 100%)",
-    textAlign: "left",
-    borderRadius: 14,
-    padding: "16px 18px",
-    border: isActive ? "2px solid var(--accent)" : "1.5px solid var(--border)",
-    background: isActive ? "var(--accent-bg)" : "var(--surface)",
-    boxShadow: isActive ? "0 0 0 3px rgba(47,129,247,0.12), var(--shadow-card)" : "var(--shadow-card)",
-    textDecoration: "none",
-    color: "inherit",
-    display: "block",
-    transition: "border-color 0.15s, box-shadow 0.15s",
-    boxSizing: "border-box",
-    cursor: isActive ? "default" : "pointer",
-  });
-
-  return (
-    <div
-      className="fade-in"
-      role="region"
-      aria-label="Choose résumé builder path"
-      style={{ marginBottom: 22 }}
-    >
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
-        Choose your start
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "stretch" }}>
-        {active === "tailor" ? (
-          <div style={cardStyle(true)} aria-current="page">
-            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", color: "var(--accent)", marginBottom: 6 }}>
-              Current path
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.35, color: "var(--text)", marginBottom: 6 }}>
-              Tailor to a job posting
-            </div>
-            <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
-              JD-aware suggestions and AI edits. Output uses the <strong style={{ color: "var(--text)" }}>template style</strong> under Your résumé — not a pixel match to your uploaded PDF.
-            </p>
-          </div>
-        ) : (
-          <Link href={tailorHref} prefetch={false} style={cardStyle(false)}>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.35, color: "var(--text)", marginBottom: 6 }}>
-              Tailor to a job posting →
-            </div>
-            <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
-              Switch to job description, suggestions, and a tailored PDF in the default ATS layout.
-            </p>
-          </Link>
-        )}
-
-        {active === "layout" ? (
-          <div style={cardStyle(true)} aria-current="page">
-            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", color: "var(--accent)", marginBottom: 6 }}>
-              Current path
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.35, color: "var(--text)", marginBottom: 6 }}>
-              Match my layout (template gallery)
-            </div>
-            <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
-              Pick a visible layout, then compile — the PDF follows that LaTeX style with your extracted text (not a raster copy of your file).
-            </p>
-          </div>
-        ) : (
-          <Link href={templateHref} prefetch={false} style={cardStyle(false)}>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.35, color: "var(--text)", marginBottom: 6 }}>
-              Match my layout (template gallery) →
-            </div>
-            <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
-              Open the gallery to choose typography and structure first, then return here for PDF only.
-            </p>
-          </Link>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function StepCard({ step, title, subtitle, children }: {
   step: number; title: string; subtitle: string; children: React.ReactNode;
