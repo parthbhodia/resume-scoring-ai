@@ -3404,6 +3404,7 @@ def generate_latex_resume(
         candidate_profile=cp_prompt,
         accepted_suggestions=None,
         reference_folder=ref_folder,
+        post_suggestion_coach_run=False,
     )
 
     logger.info(f"Calling {model} for resume generation (Google Search grounding enabled)...")
@@ -3722,7 +3723,9 @@ def _accepted_suggestions_prompt_block(items: List[Dict]) -> str:
         "- REPLACE: apply each edit in LaTeX using the same \\resumeItem / heading style as the reference; "
         "do not skip any numbered item.\n"
         "- Preserve facts, employers, dates, and metrics unless the replacement text explicitly changes them.\n"
-        "- Do not invent additional bullet rewrites beyond these approvals and light JD alignment elsewhere.\n"
+        "- Do not add new \\resumeItem bullets, new skills lines, or new section bodies beyond these approved items. "
+        "Other existing lines may be lightly reworded for JD keywords only — no new employers, degrees, metrics, or "
+        "capabilities that are not already implied by the profile or current body.\n"
     )
     return "\n".join(lines)
 
@@ -3763,6 +3766,8 @@ def _build_prompts(
     pre_research_digest: Optional[str] = None,
     system_instruction: Optional[str] = None,
     reference_folder: Optional[str] = None,
+    *,
+    post_suggestion_coach_run: bool = False,
 ):
     """Shared prompt builder used by both stream and non-stream paths."""
     system_prompt = (
@@ -3807,8 +3812,16 @@ def _build_prompts(
     if approved:
         closing += (
             " Honor USER-APPROVED STRUCTURED EDITS first — including every DELETE (omit that bullet entirely from LaTeX) — "
-            "then align other bullets with the JD where it does not conflict."
-            " Keep the same section layout as the CANDIDATE PROFILE unless an approved edit explicitly changes it."
+            "then lightly align other *existing* bullets with the JD (reword only; do not add new bullets or skills lines "
+            "beyond those edits). Keep the same section layout as the CANDIDATE PROFILE unless an approved edit explicitly changes it."
+        )
+    elif post_suggestion_coach_run:
+        closing += (
+            " The candidate ran the JD suggestion coach for this job but did not submit any ticked (accepted) structured "
+            "edits for this generate. Treat that as intent to stay close to the source: keep the same substantive bullets "
+            "and skills content as in the CANDIDATE PROFILE / current body — only tighten wording or reorder within "
+            "sections for JD fit. Do NOT add new \\resumeItem bullets, new skills rows, or long new keyword blocks that "
+            "were not already present in that source text."
         )
     else:
         closing += (
@@ -3993,9 +4006,13 @@ def stream_latex_resume(
     layout_compile: bool = False,
     accepted_suggestions: Optional[List] = None,
     pre_research_digest: Optional[str] = None,
+    post_suggestion_coach_run: bool = False,
 ):
     """
     Generator that yields SSE-style event dicts while generating the resume.
+
+    ``post_suggestion_coach_run``: True when the client already showed JD suggestions for this session
+    but may send zero accepted structured edits — prompts stay conservative (no silent new bullets).
 
     Events:
       {"event": "status",  "msg": "..."}
@@ -4055,6 +4072,7 @@ def stream_latex_resume(
             pre_research_digest=digest_for_prompt or None,
             system_instruction=system_inst,
             reference_folder=ref_folder,
+            post_suggestion_coach_run=post_suggestion_coach_run,
         )
 
         _fallback_models = _model_chain(model)

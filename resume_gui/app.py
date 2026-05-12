@@ -137,6 +137,7 @@ async def api_generate_stream(request: Request):
     layout_compile    = bool(body.get("layout_compile"))
     accepted_suggestions = body.get("accepted_suggestions")
     suggest_research_digest = (body.get("suggest_research_digest") or "").strip() or None
+    post_suggestion_coach_run = bool(body.get("post_suggestion_coach_run"))
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
@@ -144,6 +145,7 @@ async def api_generate_stream(request: Request):
         f"|  custom_profile={bool(candidate_profile)}  |  layout_compile={layout_compile}  "
         f"|  user={user_id or 'anon'}  |  accepted_suggestions={len(accepted_suggestions) if isinstance(accepted_suggestions, list) else 0}"
         f"  |  reuse_suggest_digest={bool(suggest_research_digest)}"
+        f"  |  post_suggestion_coach_run={post_suggestion_coach_run}"
     )
 
     if not company or not role or not jd:
@@ -169,6 +171,7 @@ async def api_generate_stream(request: Request):
             layout_compile=layout_compile,
             accepted_suggestions=accepted_suggestions if isinstance(accepted_suggestions, list) else None,
             pre_research_digest=suggest_research_digest,
+            post_suggestion_coach_run=post_suggestion_coach_run,
         ):
             ev_name = event.get("event")
 

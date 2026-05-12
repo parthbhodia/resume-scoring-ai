@@ -937,6 +937,7 @@ export default function ResumeBuilder({
           user_id: user?.id ?? null,
           layout_compile: studioHandoff,
           ...(digestTrim ? { suggest_research_digest: suggestResearchDigest } : {}),
+          post_suggestion_coach_run: Array.isArray(suggestions) && suggestions.length > 0,
         }),
       });
 
@@ -2463,13 +2464,12 @@ export default function ResumeBuilder({
                     <span style={{ color: "var(--red)", fontWeight: 600 }}>−{result.removes}</span>
                   </div>
                   <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--muted)", lineHeight: 1.55 }}>
-                    Your PDF already includes these edits — tailoring runs when you use{" "}
-                    <strong style={{ color: "var(--text)" }}>Improve this résumé</strong>. Each card explains a line-level change. Use{" "}
-                    <strong style={{ color: "var(--text)" }}>Keep this update</strong> or{" "}
-                    <strong style={{ color: "var(--text)" }}>I&apos;ll change wording myself</strong> to note what you want to revisit (your
-                    choices do not alter or revert the file). To steer the model <em>before</em> tailoring, run{" "}
-                    <strong style={{ color: "var(--text)" }}>Analyze &amp; get suggestions</strong>, accept or reject suggestions there, then
-                    run <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> again.
+                    Your PDF already reflects these line-level edits from the last generate. This list is a{" "}
+                    <strong style={{ color: "var(--text)" }}>read-only summary</strong> — not a second approval step. The small{" "}
+                    <strong style={{ color: "var(--text)" }}>?</strong> on each card opens &quot;why this change&quot; from the model. To control what
+                    goes into the <em>next</em> PDF, use{" "}
+                    <strong style={{ color: "var(--text)" }}>Analyze &amp; get suggestions</strong>, tick the edits you want, then{" "}
+                    <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> again. Optional buttons below are only for your notes.
                   </p>
                   <DiffView
                     key={result.folder ?? "diff"}
@@ -4589,13 +4589,18 @@ function SuggestionsPanel({
           ) : (
             accepted.length > 0
               ? `Apply ${accepted.length} accepted edit${accepted.length > 1 ? "s" : ""} & generate PDF →`
-              : "Generate tailored PDF (no accepted bullet edits) →"
+              : "Generate PDF (no ticks — light JD pass, no new bullets) →"
           )}
         </button>
       </div>
       <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginTop: 8, lineHeight: 1.5 }}>
-        {accepted.length} of {suggestions.length} accepted — structured edits are sent to the model before LaTeX is written.
-        {" "}
+        {accepted.length} of {suggestions.length} accepted — ticked edits are sent to the server as structured instructions.
+        {accepted.length === 0 ? (
+          <>
+            {" "}
+            With none ticked, the model is instructed to keep your existing bullets and only tighten wording for the JD (not add new lines). Use <strong style={{ color: "var(--text)" }}>Accept all</strong> or individual checkmarks to apply specific rewrites.
+          </>
+        ) : null}{" "}
         <strong style={{ color: "var(--text)" }}>Empty suggested text</strong> counts as a <strong style={{ color: "var(--text)" }}>delete</strong> (that bullet is omitted from the PDF).
       </p>
     </div>

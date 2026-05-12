@@ -326,7 +326,7 @@ function ChangeCard({
       {reviewAcknowledgement && onReviewChoice && (
         <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${meta.border}` }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.35, textTransform: "uppercase", color: "var(--dim)", marginBottom: 8 }}>
-            Your review
+            Optional note
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
             <button
@@ -387,15 +387,15 @@ function InfoIcon({ color, open, onToggle, tooltip }: { color: string; open: boo
       title={tooltip}
       aria-label={`Why this change: ${tooltip}`}
       style={{
-        width: 16, height: 16, borderRadius: "50%",
+        width: 18, height: 18, borderRadius: "50%",
         border: `1px solid ${color}`, background: open ? color : "transparent",
         color: open ? "white" : color,
-        fontSize: 10, fontWeight: 700, lineHeight: 1,
+        fontSize: 11, fontWeight: 700, lineHeight: 1,
         display: "inline-flex", alignItems: "center", justifyContent: "center",
         cursor: "pointer", padding: 0, fontFamily: "inherit",
       }}
     >
-      i
+      ?
     </button>
   );
 }
