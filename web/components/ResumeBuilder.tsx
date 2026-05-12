@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback, useRef, useEffect, useLayoutEffect, useId, useMemo, type CSSProperties } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useId, useMemo, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -22,9 +22,9 @@ import {
   setProfileAutofillFromUpload,
 } from "@/lib/profileStorage";
 import { extractProfileHintsFromResumeText } from "@/lib/profileFromResumeText";
-import { resumeLineMatchesSuggestionOriginal } from "@/lib/suggestionResumeMatch";
+import { resumeLineMatchesSuggestionOriginal, computeCombinedMatchTextByLineIndex } from "@/lib/suggestionResumeMatch";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
-import { nameAndSubtitleLineIndices, isPlaceholderResumeHeaderLine } from "@/lib/resumePreviewNameLine";
+import { nameAndSubtitleLineIndices, isPlaceholderResumeHeaderLine, dedupeRepeatedLeadingResumeHeader } from "@/lib/resumePreviewNameLine";
 
 import ScoreRing    from "./ScoreRing";
 import MatchBreakdownCards from "./MatchBreakdownCards";
@@ -164,6 +164,10 @@ type BuilderSessionV1 = {
   acceptedSuggestionIds: string[];
   rejectedSuggestionIds: string[];
   result: GenerationResult | null;
+  /** Web research digest from GET suggestions (reused for PDF — no second search). */
+  suggestResearchDigest: string;
+  suggestResearchQueries: string[];
+  suggestResearchSources: { title: string | null; url: string }[];
 };
 
 function isSuggestionRecord(x: unknown): x is Suggestion {
@@ -220,6 +224,13 @@ function parseBuilderSessionFromDraft(d: Record<string, unknown>): BuilderSessio
     ? o.rejectedSuggestionIds.filter((x): x is string => typeof x === "string")
     : [];
 
+  const suggestResearchSourcesParsed = Array.isArray(o.suggestResearchSources)
+    ? o.suggestResearchSources.filter(
+        (s): s is { title?: string | null; url: string } =>
+          s && typeof s === "object" && typeof (s as { url?: unknown }).url === "string",
+      ).map(s => ({ title: typeof (s as { title?: unknown }).title === "string" ? (s as { title: string }).title : null, url: s.url }))
+    : [];
+
   return {
     v: 1,
     candidateProfile: typeof o.candidateProfile === "string" ? o.candidateProfile : null,
@@ -231,6 +242,11 @@ function parseBuilderSessionFromDraft(d: Record<string, unknown>): BuilderSessio
     acceptedSuggestionIds,
     rejectedSuggestionIds,
     result: parseResultFromDraft(o.result),
+    suggestResearchDigest: typeof o.suggestResearchDigest === "string" ? o.suggestResearchDigest : "",
+    suggestResearchQueries: Array.isArray(o.suggestResearchQueries)
+      ? o.suggestResearchQueries.filter((x): x is string => typeof x === "string")
+      : [],
+    suggestResearchSources: suggestResearchSourcesParsed,
   };
 }
 
@@ -285,9 +301,18 @@ export default function ResumeBuilder({
   const [searchQueries, setSearchQueries] = useState<string[]>([]);
   const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
   /** Grounding from POST /api/suggest-changes (live search runs before the coach JSON). */
-  const [suggestResearchQueries, setSuggestResearchQueries] = useState<string[]>([]);
-  const [suggestResearchSources, setSuggestResearchSources] = useState<{ title: string | null; url: string }[]>([]);
+  const [suggestResearchQueries, setSuggestResearchQueries] = useState<string[]>(
+    () => builderSession0?.suggestResearchQueries ?? [],
+  );
+  const [suggestResearchSources, setSuggestResearchSources] = useState<{ title: string | null; url: string }[]>(
+    () => builderSession0?.suggestResearchSources ?? [],
+  );
+  /** Same digest the server injected before suggestions — sent back on generate-stream to skip a second web search. */
+  const [suggestResearchDigest, setSuggestResearchDigest] = useState(
+    () => builderSession0?.suggestResearchDigest ?? "",
+  );
   const hasSuggestResearch = suggestResearchQueries.length > 0 || suggestResearchSources.length > 0;
+  const reusingSuggestWebForPdf = suggestResearchDigest.trim().length > 0;
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
   /** Right-panel “Save to library” re-upsert (compile already upserts; this is explicit retry). */
   const [libraryReSaveBusy, setLibraryReSaveBusy] = useState(false);
@@ -377,6 +402,9 @@ export default function ResumeBuilder({
       acceptedSuggestionIds: [...acceptedIds],
       rejectedSuggestionIds: [...rejectedIds],
       result,
+      suggestResearchDigest,
+      suggestResearchQueries,
+      suggestResearchSources,
     });
   }, [
     candidateProfile,
@@ -388,6 +416,9 @@ export default function ResumeBuilder({
     acceptedDepsKey,
     rejectedDepsKey,
     result,
+    suggestResearchDigest,
+    suggestResearchQueries,
+    suggestResearchSources,
   ]);
 
   useEffect(() => {
@@ -701,6 +732,7 @@ export default function ResumeBuilder({
     setRejectedIds(new Set());
     setSuggestResearchQueries([]);
     setSuggestResearchSources([]);
+    setSuggestResearchDigest("");
 
     try {
       const resp = await fetch(apiUrl("/api/suggest-changes"), {
@@ -714,6 +746,7 @@ export default function ResumeBuilder({
         suggestions?: Suggestion[];
         research_queries?: string[];
         research_sources?: { title?: string | null; url?: string }[];
+        research_digest?: string;
       }>(resp);
       if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "Could not get suggestions."));
       setSuggestions(json.suggestions ?? []);
@@ -726,6 +759,7 @@ export default function ResumeBuilder({
         : [];
       setSuggestResearchQueries(rq);
       setSuggestResearchSources(rs);
+      setSuggestResearchDigest(typeof json.research_digest === "string" ? json.research_digest : "");
       // User explicitly accepts suggestions before generate — nothing pre-selected.
     } catch (e: unknown) {
       setSuggestError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
@@ -858,8 +892,14 @@ export default function ResumeBuilder({
     setPreview("");
     setStatusMsg("Connecting…");
     setJdKeywords(extractJdKeywords(effJd));
-    setSearchQueries([]);
-    setSearchSources([]);
+    const digestTrim = suggestResearchDigest.trim();
+    if (digestTrim) {
+      setSearchQueries(suggestResearchQueries.length ? [...suggestResearchQueries] : []);
+      setSearchSources(suggestResearchSources.length ? [...suggestResearchSources] : []);
+    } else {
+      setSearchQueries([]);
+      setSearchSources([]);
+    }
     setStorageFailures([]);
 
     const acceptedList = (suggestions ?? []).filter(s => acceptedIds.has(s.id)).map(s => ({
@@ -896,6 +936,7 @@ export default function ResumeBuilder({
           accepted_suggestions: acceptedList.length > 0 ? acceptedList : undefined,
           user_id: user?.id ?? null,
           layout_compile: studioHandoff,
+          ...(digestTrim ? { suggest_research_digest: suggestResearchDigest } : {}),
         }),
       });
 
@@ -1010,7 +1051,7 @@ export default function ResumeBuilder({
       setStatusMsg("");
       return null;
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources]);
 
   /** Template customize: run full compile, then optional blob download + toast. */
   const finalizeLayoutPdf = useCallback(
@@ -1699,8 +1740,8 @@ export default function ResumeBuilder({
               </button>
               {!suggestLoading && (
                 <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
-                  The first pass runs live web research on the posting, then compares your résumé to the job and lists edits. If the model runs
-                  extra searches while generating your PDF, they appear in the lower panel then.
+                  The first pass runs live web research on the posting, then compares your résumé to the job and lists edits.
+                  When you generate the PDF after that, we <strong style={{ color: "var(--text)" }}>reuse</strong> the same research digest — no second live search.
                 </p>
               )}
             </>
@@ -1824,6 +1865,7 @@ export default function ResumeBuilder({
               error={error}
               styleReferenceFolder={styleReferenceFolder}
               setStyleReferenceFolder={setStyleReferenceFolder}
+              previewSectionAccentHex={previewAccentHex}
               onBackToInputs={() => {
                 setSelectedSuggestionId(null);
                 setSuggestions(null);
@@ -1833,6 +1875,7 @@ export default function ResumeBuilder({
                 setRejectedIds(new Set());
                 setSuggestResearchQueries([]);
                 setSuggestResearchSources([]);
+                setSuggestResearchDigest("");
               }}
             />
           )}
@@ -1869,7 +1912,12 @@ export default function ResumeBuilder({
                   </>
                 ) : (
                   <>
-                    Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing. Any <strong>extra</strong> live web search during this step is optional; your suggestion list already used a first research pass when you clicked &ldquo;Get suggestions.&rdquo;
+                    Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing.{" "}
+                    {reusingSuggestWebForPdf ? (
+                      <>Web context from <strong>Get suggestions</strong> is reused for this PDF — there is <strong>no</strong> second live search.</>
+                    ) : (
+                      <>A live web search may still run during this step if there was no research digest from suggestions (for example if you skipped Get suggestions or research failed).</>
+                    )}
                   </>
                 )}
               </p>
@@ -1898,7 +1946,12 @@ export default function ResumeBuilder({
                 borderRadius: 10, padding: "14px 16px",
                 fontSize: 12, color: "var(--dim)", lineHeight: 1.55,
               }}>
-                {hasSuggestResearch ? (
+                {reusingSuggestWebForPdf ? (
+                  <>
+                    Web context from <strong>Get suggestions</strong> is embedded in this PDF request — there is no second search.
+                    {!hasSuggestResearch && " (No query list was returned, but the digest is still applied on the server.)"}
+                  </>
+                ) : hasSuggestResearch ? (
                   <>No additional live searches have appeared in this PDF pass yet. Your <strong>suggestions</strong> step already captured web queries and sources above.</>
                 ) : (
                   <>This panel only updates if the model runs a live search during PDF generation. Your résumé can still finish normally.</>
@@ -1907,7 +1960,7 @@ export default function ResumeBuilder({
             </div>
           )}
 
-          {/* Live web search during PDF generation (SSE) — optional second pass */}
+          {/* Live web search during PDF generation (SSE), or the same queries/sources reused from suggestions */}
           {hasWebResearch && !result && !studioHandoff && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
@@ -1922,16 +1975,34 @@ export default function ResumeBuilder({
                   letterSpacing: 0, textTransform: "none",
                   display: "inline-flex", alignItems: "center", gap: 5,
                 }}>
-                  <span style={{
-                    width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
-                    animation: "pulse-bg 1.4s ease-in-out infinite",
-                  }} />
-                  {generating ? "Researching the web" : "Research used"}
+                  {reusingSuggestWebForPdf ? (
+                    <>
+                      <span style={{
+                        width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
+                      }} />
+                      Reused from suggestions
+                    </>
+                  ) : (
+                    <>
+                      <span style={{
+                        width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
+                        animation: generating ? "pulse-bg 1.4s ease-in-out infinite" : undefined,
+                      }} />
+                      {generating ? "Researching the web" : "Research used"}
+                    </>
+                  )}
                 </span>
               </div>
               <p style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, margin: "0 0 10px", letterSpacing: -0.05 }}>
-                {hasSuggestResearch ? (
-                  <>These queries and citations are from the <strong style={{ color: "var(--text)" }}>Generate PDF</strong> step — an optional second pass on top of the research already shown above your suggestions.</>
+                {reusingSuggestWebForPdf ? (
+                  <>
+                    These queries and sources are the same pass as <strong style={{ color: "var(--text)" }}>Get suggestions</strong>.
+                    PDF generation applies that digest again and does <strong>not</strong> run an extra web search.
+                  </>
+                ) : hasSuggestResearch ? (
+                  <>
+                    These queries and citations are from the <strong style={{ color: "var(--text)" }}>Generate PDF</strong> step — an additional live pass beyond the research shown above your suggestions.
+                  </>
                 ) : (
                   <>These queries and citations are from the <strong style={{ color: "var(--text)" }}>Generate PDF</strong> step (streaming), not from the earlier &ldquo;Get suggestions&rdquo; call.</>
                 )}
@@ -2796,9 +2867,16 @@ export default function ResumeBuilder({
 
 /* ── Resume paper preview (plain text → paper-style render) ─────────────── */
 
-function buildResumeHighlightMatcher(highlightOriginals: string[]): (line: string) => boolean {
+function buildResumeHighlightMatcher(
+  highlightOriginals: string[],
+  combinedByLineIndex: string[],
+): (lineIndex: number) => boolean {
   const originals = highlightOriginals.map((o) => o.trim()).filter(Boolean);
-  return (line: string) => originals.some((o) => resumeLineMatchesSuggestionOriginal(line, o));
+  return (lineIndex: number) => {
+    const block = (combinedByLineIndex[lineIndex] ?? "").trim();
+    if (!block) return false;
+    return originals.some((o) => resumeLineMatchesSuggestionOriginal(block, o));
+  };
 }
 
 /** First suggestion in list order whose `original` matches the résumé line (same rules as highlight). */
@@ -3684,6 +3762,18 @@ function stripeStyleForSuggestion(sug: Suggestion | null, all: Suggestion[]): CS
   };
 }
 
+/** HTML paper: space before glued `**`, month tokens; render `**x**` as <strong> */
+function paperLineDisplayContent(text: string): ReactNode {
+  let s = text.replace(/([A-Za-z0-9)])(\*\*)/g, "$1 $2");
+  s = s.replace(/([A-Za-z])(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/gi, "$1 $2");
+  const parts = s.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, idx) => {
+    const m = /^\*\*(.+)\*\*$/.exec(part);
+    if (m) return <strong key={idx}>{m[1]}</strong>;
+    return <span key={idx}>{part}</span>;
+  });
+}
+
 function ResumePaperView({
   text,
   highlightOriginals,
@@ -3717,11 +3807,21 @@ function ResumePaperView({
     isMalta || isHarshibar
       ? "'Inter', 'Helvetica Neue', Arial, sans-serif"
       : "'Georgia', 'Times New Roman', serif";
-  const lines = text.split("\n");
-  const lineMatchesHighlight = buildResumeHighlightMatcher(highlightOriginals);
+  const { paperLines, combinedMatchByLine } = useMemo(() => {
+    const raw = text.split("\n");
+    const paperLines = dedupeRepeatedLeadingResumeHeader(raw);
+    return {
+      paperLines,
+      combinedMatchByLine: computeCombinedMatchTextByLineIndex(paperLines),
+    };
+  }, [text]);
+  const lineMatchesHighlight = useMemo(
+    () => buildResumeHighlightMatcher(highlightOriginals, combinedMatchByLine),
+    [highlightOriginals, combinedMatchByLine],
+  );
   const ic = interactiveSuggestions;
 
-  const { nameLineIndex, subtitleLineIndex } = nameAndSubtitleLineIndices(lines);
+  const { nameLineIndex, subtitleLineIndex } = nameAndSubtitleLineIndices(paperLines);
 
   const isAllCaps = (t: string) => t.length > 2 && t === t.toUpperCase() && /[A-Z]/.test(t) && !/^[•\-–*\u2022\u00b7]/.test(t);
   const isBullet  = (t: string) => /^[•\-–*\u2022\u00b7]/.test(t);
@@ -3765,19 +3865,20 @@ function ResumePaperView({
       color: "#1e293b",
       minHeight: 480,
     }}>
-      {lines.map((line, i) => {
+      {paperLines.map((line, i) => {
         const t = line.trim();
         if (!t) return <div key={i} style={{ height: 7 }} />;
         if (isPlaceholderResumeHeaderLine(line) && i !== nameLineIndex) return null;
 
+        const matchText = (combinedMatchByLine[i] ?? "").trim() || t;
         const acceptedSug = ic
-          ? firstSuggestionMatchingLine(line, ic.suggestions, s => ic.acceptedIds.has(s.id))
+          ? firstSuggestionMatchingLine(matchText, ic.suggestions, s => ic.acceptedIds.has(s.id))
           : null;
         const linkSug = ic
-          ? firstSuggestionMatchingLine(line, ic.suggestions, s => !ic.rejectedIds.has(s.id))
+          ? firstSuggestionMatchingLine(matchText, ic.suggestions, s => !ic.rejectedIds.has(s.id))
           : null;
         const pendingHighlight = ic && linkSug && !ic.acceptedIds.has(linkSug.id);
-        const highlightedPlain = !ic && lineMatchesHighlight(line);
+        const highlightedPlain = !ic && lineMatchesHighlight(i);
 
         const amber: React.CSSProperties = {
           background: "rgba(245,158,11,0.12)",
@@ -3802,7 +3903,7 @@ function ResumePaperView({
           if (nameCenteredCaps) {
             return (
               <div key={i} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5, marginBottom: 2, textAlign: "center", textTransform: "uppercase" }}>
-                {t}
+                {paperLineDisplayContent(t)}
               </div>
             );
           }
@@ -3821,14 +3922,14 @@ function ResumePaperView({
                 textTransform: "none",
               }}
             >
-              {t}
+              {paperLineDisplayContent(t)}
             </div>
           );
         }
         if (subtitleLineIndex >= 0 && i === subtitleLineIndex && !isAllCaps(t)) {
           return (
             <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: nameCenteredCaps ? "center" : "left", marginBottom: 8 }}>
-              {t}
+              {paperLineDisplayContent(t)}
             </div>
           );
         }
@@ -3852,14 +3953,14 @@ function ResumePaperView({
           return (
             <div key={i} {...p} {...lineMark}>
               <span style={{ flexShrink: 0, marginTop: 1 }}>•</span>
-              <span>{innerFromAccepted}</span>
+              <span>{paperLineDisplayContent(innerFromAccepted)}</span>
             </div>
           );
         }
         const base: React.CSSProperties = { marginBottom: 2, ...hlStyle };
         const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
         const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
-        return <div key={i} {...p} {...lineMark}>{acceptedSug ? innerFromAccepted : t}</div>;
+        return <div key={i} {...p} {...lineMark}>{acceptedSug ? paperLineDisplayContent(innerFromAccepted) : paperLineDisplayContent(t)}</div>;
       })}
     </div>
   );
@@ -4021,6 +4122,7 @@ function SuggestionsPanel({
   selectedSuggestionId, onSelectSuggestionCard,
   onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, error, onBackToInputs,
   styleReferenceFolder, setStyleReferenceFolder,
+  previewSectionAccentHex,
 }: {
   summary: string;
   suggestions: Suggestion[];
@@ -4045,6 +4147,7 @@ function SuggestionsPanel({
   onBackToInputs: () => void;
   styleReferenceFolder: string;
   setStyleReferenceFolder: (folder: string) => void;
+  previewSectionAccentHex: string;
 }) {
   const [resumePreviewTab, setResumePreviewTab] = useState<"pdf" | "text">(() => (pdfBlobUrl ? "pdf" : "text"));
 
@@ -4345,6 +4448,8 @@ function SuggestionsPanel({
                     selectedSuggestionId,
                     onLineSelectSuggestion: id => onSelectSuggestionCard(id),
                   }}
+                  templateFolder={styleReferenceFolder}
+                  sectionAccentColor={previewSectionAccentHex}
                 />
               </div>
             </>

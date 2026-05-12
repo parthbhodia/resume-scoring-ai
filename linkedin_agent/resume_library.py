@@ -2179,6 +2179,88 @@ def _resume_bullets(full_text: str, parsed: Optional[Dict]) -> List[str]:
     return out[:100]
 
 
+_US_PHONE_INLINE = re.compile(
+    r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b",
+)
+
+
+def _bullet_looks_like_contact_or_latex_noise(b: str) -> bool:
+    """PDF bullet heuristics often swallow the header row (email, LaTeX). Skip for metrics."""
+    low = b.lower()
+    if "@" in b or "mailto:" in low or "linkedin.com" in low or "github.com" in low:
+        return True
+    if "href" in low or "http://" in low or "https://" in low or "www." in low:
+        return True
+    if "\\" in b or "{" in b:
+        return True
+    if _US_PHONE_INLINE.search(b):
+        return True
+    return False
+
+
+def _token_is_long_bare_id_or_phone(token: str) -> bool:
+    """7+ digit runs without %, $, or k/m/b scale are almost never résumé impact metrics."""
+    if re.search(r"[%$]", token) or re.search(r"[kKmMbB]", token):
+        return False
+    if re.search(r"\d\s*x\b", token, re.I):
+        return False
+    core = re.sub(r"[^\d]", "", token.split("+", 1)[0])
+    return bool(core.isdigit() and len(core) >= 7)
+
+
+def _pick_strongest_metric_snippet(bullets: List[str]) -> str:
+    """Pick a number that reads like an accomplishment metric — not longest digit substring."""
+    best_key: Tuple[int, float] = (-1, -1.0)
+    best_snip = ""
+
+    for b in bullets:
+        if _bullet_looks_like_contact_or_latex_noise(b):
+            continue
+        for mm in _ATS_NUMBER_RE.finditer(b):
+            tok = mm.group(0).strip()
+            if _token_is_long_bare_id_or_phone(tok):
+                continue
+            prio = 1
+            tie = 0.0
+            if "%" in tok:
+                prio = 5
+                try:
+                    tie = float(re.sub(r"[^\d.]", "", tok.split("%", 1)[0] or "0"))
+                except ValueError:
+                    tie = 0.0
+            elif re.match(r"^\$", tok):
+                prio = 4
+                try:
+                    tie = float(re.sub(r"[^\d.]", "", tok.replace(",", "")))
+                except ValueError:
+                    tie = 0.0
+            elif re.search(r"\d+\s*x\b", tok, re.I):
+                prio = 3
+                try:
+                    tie = float(re.sub(r"[^\d.]", "", re.split(r"(?i)x", tok)[0] or "0"))
+                except ValueError:
+                    tie = 0.0
+            elif re.search(r"[kKmMbB]", tok, re.I):
+                prio = 2
+                mscale = re.search(r"([\d.,]+)\s*[kKmMbB]", tok, re.I)
+                if mscale:
+                    try:
+                        tie = float(mscale.group(1).replace(",", ""))
+                    except ValueError:
+                        tie = 0.0
+            else:
+                try:
+                    parts = re.split(r"\s+", tok.strip(), 1)
+                    tie = float(re.sub(r"[^\d.]", "", parts[0] or "0"))
+                except ValueError:
+                    tie = 0.0
+                prio = 2 if "+" in tok else 1
+            if (prio, tie) > best_key:
+                best_key = (prio, tie)
+                best_snip = tok + " — " + b[:100]
+    return best_snip
+
+
 def _summary_excerpt(lower_text: str, full_text: str) -> str:
     """Best-effort summary/objective region from PDF text."""
     markers = ("summary", "profile", "objective", "about me")
@@ -2447,14 +2529,14 @@ def ats_check(
         "detail": f"email={'✓' if has_email else '✗'}  phone={'✓' if has_phone else '✗'}  url={'✓' if has_url else '✗'}",
     })
 
-    wc_ok = 200 <= word_count <= 1400
+    wc_ok = 200 <= word_count <= 1000
     checks.append({
         "id":     "word_count",
-        "name":   "Word count in a healthy range (about 200–1,400)",
+        "name":   "Word count in a healthy range (about 200–1,000)",
         "pass":   wc_ok,
         "detail": f"{word_count:,} words "
                   + ("(too short — add detail)" if word_count < 200 else
-                     "(trim fluff)" if word_count > 1400 else "(OK)"),
+                     "(likely too long — trim to ~1–2 pages; most résumés stay under ~1,000 words)" if word_count > 1000 else "(OK)"),
     })
 
     has_objective = bool(re.search(r"\bobjective\b", lower_text)) or bool(
@@ -2668,19 +2750,14 @@ def ats_check(
     skills_line = ""
     m_sk = re.search(r"(?i)skills[^\n]*\n([^\n]{10,240})", full_text)
     if m_sk:
-        skills_line = m_sk.group(1).strip()[:200]
+        cand = m_sk.group(1).strip()[:200]
+        if "," in cand or "|" in cand or cand.count(" ") >= 2 or "•" in cand or " / " in cand:
+            skills_line = cand
     edu_line = ""
     m_edu = re.search(r"(?i)\b(B\.?S\.?|M\.?S\.?|B\.?A\.?|M\.?A\.?|Ph\.?D\.?)[^\n]{0,120}", full_text)
     if m_edu:
         edu_line = m_edu.group(0).strip()[:160]
-    strongest_metric = ""
-    best_num = -1
-    for b in bullets:
-        for mm in _ATS_NUMBER_RE.finditer(b):
-            val = len(mm.group(0))
-            if val > best_num:
-                best_num = val
-                strongest_metric = mm.group(0) + " — " + b[:100]
+    strongest_metric = _pick_strongest_metric_snippet(bullets)
 
     recruiter_scan = {
         "name": scan_name or "(not detected from PDF text)",
@@ -3259,6 +3336,7 @@ def generate_latex_resume(
         reference_tex,
         candidate_profile=cp_prompt,
         accepted_suggestions=None,
+        reference_folder=ref_folder,
     )
 
     logger.info(f"Calling {model} for resume generation (Google Search grounding enabled)...")
@@ -3436,6 +3514,63 @@ def _latex_tailor_system_instruction() -> str:
     )
 
 
+def _latex_tailor_system_instruction_no_live_search() -> str:
+    """Same tailor rules as the grounded path, but no live Google Search / tool calls in this request."""
+    return (
+        "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
+        "for professional roles (engineering, analytics, business, operations, etc.). "
+        "You will generate a LaTeX resume body tailored for a specific job.\n\n"
+        "RESEARCH CONTEXT (no live search in this step): The user message includes a **JOB & MARKET CONTEXT** block "
+        "from live web research that already ran **before** PDF generation (the same pass as résumé suggestions). "
+        "Use that block plus the job description for **wording, acronym decoding, bullet order, section emphasis, and "
+        "honest keyword overlap** with skills and domains already evidenced in the CANDIDATE PROFILE (or current résumé body). "
+        "**Hard boundary:** employers, job titles, employment dates, schools, degrees, projects, certifications, and "
+        "**all numbers and metrics** about the applicant must still come **only** from the CANDIDATE PROFILE and any "
+        "CURRENT RESUME BODY supplied — never invented or inferred from the digest alone.\n\n"
+        "CANDIDATE BIOGRAPHY — NON-NEGOTIABLE (fraudulent if violated):\n"
+        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named "
+        "in the CANDIDATE PROFILE (or in the supplied current résumé body when that line is clearly sourced there). "
+        "Do NOT add, infer, rename, or substitute any other employer or company name.\n"
+        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear "
+        "are those explicitly stated in the CANDIDATE PROFILE (or supplied résumé body). Do NOT round up, extrapolate, "
+        "or invent new figures.\n"
+        "3. EXPERIENCE & ACHIEVEMENT SUBSTANCE: Rephrase bullets for ATS/JD fit **within** each role or section. "
+        "Do **not** add new roles, clients, tools used in a role, or responsibilities that are not supported by the profile or pasted résumé. "
+        "Keep **section order and entry grouping** per STRUCTURE rules below — do not reorder whole sections into a different archetype. "
+        "You **may** align phrasing with the JD when it clearly matches work already described (e.g. say "
+        "\"distributed systems\" if the profile describes equivalent work without that exact phrase).\n"
+        "4. BIOGRAPHICAL CHECK: Before each experience, education, or project bullet, confirm the substance is backed "
+        "by the profile or current résumé body. If not, omit it.\n"
+        "5. Use the exact LaTeX macro vocabulary from the REFERENCE only. Examples: "
+        "\\resumeSubheading, \\resumeProjectHeading, \\resumeItem, \\resumeSubHeadingListStart, \\resumeItemListStart "
+        "OR (other templates) \\resumeQuadHeading, \\resumeTrioHeading — use whichever commands actually appear in the "
+        "reference snippet. Never mix incompatible macro sets.\n"
+        "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
+        "7. To bold the most relevant skills and technologies for this job, use the LaTeX command \\textbf{...} ONLY. "
+        "Never use Markdown bold syntax like **word** — pdflatex prints those asterisks literally instead of rendering bold text.\n"
+        "8. EDUCATION SECTION LOCK: Reproduce the EDUCATION section EXACTLY as it appears in the CANDIDATE PROFILE. "
+        "Do NOT rephrase, reorder, abbreviate, change degree names, university names, dates, or locations. "
+        "Same institutions, same degree names, same dates, same order — verbatim copy.\n"
+        "GPA in education: include only if explicitly stated in the CANDIDATE PROFILE and the profile is consistent "
+        "with UMBC guidance (typically list GPA when 3.00 or above).\n"
+        "9. RESUME STRUCTURE LOCK (this overrides generic career-center templates): The CANDIDATE PROFILE (and any "
+        "CURRENT RESUME BODY) reflects how **this applicant** already organized their résumé. You MUST preserve: "
+        "(a) the same **major section headings** (use \\section{...} titles that match or closely match the profile); "
+        "(b) the same **top-to-bottom order** of sections; (c) the same **grouping** of employers, schools, and projects "
+        "under those headings. Use the REFERENCE snippet **only** for LaTeX macro syntax (e.g. \\resumeSubheading, "
+        "\\resumeItem) — **not** to impose a different document shape. Do **not** convert the CV into a software-default "
+        "or UMBC-style outline. Do **not** add Objective, Summary, or multi-tier Skills sections that are **absent** "
+        "from the profile. If the profile is linear text from a PDF, keep that narrative flow. Tailoring = stronger "
+        "wording and honest JD keywords **inside** existing lines; not a new layout.\n"
+        "10. PLACEMENT: After the contact/header block, follow the profile's section order — do not force Objective or "
+        "Summary before experience if the profile leads with Experience or another section.\n"
+        "11. LENGTH: Prefer one page when the profile fits; tighten wording before dropping real sections or employers.\n"
+        "12. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
+        "13. CITATIONS: Never output Markdown footnotes, bracketed citation markers, or raw URLs in the LaTeX. "
+        "The résumé must read as a clean PDF."
+    )
+
+
 def _user_prompt_research_tail(company: str, role: str) -> str:
     """Encourage Google Search for company/JD context (not for inventing candidate facts)."""
     c = (company or "").strip() or "the target company"
@@ -3445,6 +3580,15 @@ def _user_prompt_research_tail(company: str, role: str) -> str:
         f"searches early (e.g. {c!r} engineering blog, {c!r} careers {r!r}, {c!r} product engineering, or look up "
         "opaque acronyms from the JD). Briefly use what you learn for terminology, emphasis, and honest keyword fit "
         "with the candidate's stated skills — **not** to add employers, schools, dates, projects, or metrics for the applicant.\n\n"
+    )
+
+
+def _user_prompt_tail_pre_researched() -> str:
+    """User-message tail when web research was already run before suggestions (no second search this step)."""
+    return (
+        "---\nWEB RESEARCH: A live search pass **already ran** before suggestions; the JOB & MARKET CONTEXT block above "
+        "is that digest. Do **not** assume you can run additional web searches in this step — rely on that block, the JD, "
+        "and the profile only.\n\n"
     )
 
 
@@ -3516,6 +3660,23 @@ def _accepted_suggestions_prompt_block(items: List[Dict]) -> str:
     return "\n".join(lines)
 
 
+def _reference_folder_layout_hint(reference_folder: Optional[str]) -> str:
+    """Extra LaTeX rules when the client selected a known gallery reference folder."""
+    f = (reference_folder or "").strip()
+    if f == "Harshibar_Template1":
+        return (
+            "\n---\nLAYOUT — HARSHIBAR (this run uses the Harshibar reference folder): Follow the REFERENCE’s "
+            "\\resumeSubheading / \\resumeProjectHeading / \\resumeItem / list macros (sans tgheros stack). "
+            "For SKILLS, use \\resumeItemListStart … \\resumeItem{…} … \\resumeItemListEnd. Put each skill category in its own "
+            "\\resumeItem, e.g. \\resumeItem{\\textbf{Programming \\& query languages:} SQL, Python, R} — never glue a word "
+            "directly to \\textbf (bad: `Languages\\textbf{{SQL}}`; good: `Languages: \\textbf{{SQL}}, …` or separate \\resumeItem rows). "
+            "Separate tokens with commas, middle dots (·), or ` | `. Do not output Markdown asterisk-bold; use LaTeX \\textbf{{}} only. "
+            "On \\resumeSubheading lines, keep a visible space between the employer name and the month/date "
+            "(e.g. `Morgan Stanley` then `Dec 2023`, not `Morgan StanleyDec 2023`).\n"
+        )
+    return ""
+
+
 def _build_prompts(
     company,
     role,
@@ -3524,9 +3685,30 @@ def _build_prompts(
     reference_tex,
     candidate_profile=None,
     accepted_suggestions: Optional[List] = None,
+    pre_research_digest: Optional[str] = None,
+    system_instruction: Optional[str] = None,
+    reference_folder: Optional[str] = None,
 ):
     """Shared prompt builder used by both stream and non-stream paths."""
-    system_prompt = _latex_tailor_system_instruction()
+    system_prompt = (
+        system_instruction
+        if system_instruction is not None
+        else _latex_tailor_system_instruction()
+    )
+    digest_d = (pre_research_digest or "").strip()
+    digest_block = ""
+    if digest_d:
+        digest_block = (
+            "\n---\nJOB & MARKET CONTEXT (from live web search before PDF generation — same research pass as "
+            "suggestions; use for terminology, JD vocabulary, and honest keyword overlap only; do NOT add employers, "
+            "degrees, dates, or metrics not already in the résumé or JD):\n"
+            f"{digest_d[:4500]}\n\n"
+        )
+    research_tail = (
+        _user_prompt_tail_pre_researched()
+        if digest_d
+        else _user_prompt_research_tail(company, role)
+    )
     base_section = ""
     if base_body:
         base_section = (
@@ -3559,6 +3741,8 @@ def _build_prompts(
             "without changing the profile's section order or inventing new sections."
         )
 
+    ref_hint = _reference_folder_layout_hint(reference_folder)
+
     user_prompt = (
         f"Generate a tailored LaTeX resume body for this application:\n\n"
         f"TARGET ROLE: {role}\nTARGET COMPANY: {company}\n\n"
@@ -3567,9 +3751,11 @@ def _build_prompts(
         f"{profile_section}"
         f"{structure_block}"
         f"{base_section}"
+        f"{digest_block}"
         f"{approved_block}"
         f"---\nREFERENCE LaTeX SYNTAX (typeset the profile's sections using these commands only — do not copy this file's section order or content as your outline):\n{reference_tex[:6500]}\n\n"
-        f"{_user_prompt_research_tail(company, role)}"
+        f"{ref_hint}"
+        f"{research_tail}"
         f"{closing}"
     )
     return system_prompt, user_prompt
@@ -3731,6 +3917,7 @@ def stream_latex_resume(
     user_id: Optional[str] = None,
     layout_compile: bool = False,
     accepted_suggestions: Optional[List] = None,
+    pre_research_digest: Optional[str] = None,
 ):
     """
     Generator that yields SSE-style event dicts while generating the resume.
@@ -3748,6 +3935,10 @@ def stream_latex_resume(
 
     Optional ``accepted_suggestions`` is a list of dicts from the client
     ``{id, section, original, suggested, reason}`` — user-approved bullet edits applied in the prompt before LaTeX is generated.
+
+    Optional ``pre_research_digest`` is plain text from the suggest-changes web-research pass. When non-empty
+    (and this is not ``layout_compile``), live Google Search / Grok web_search is **skipped** for PDF generation
+    and the digest is injected into the user prompt instead — one research pass for both suggestions and PDF.
     """
     try:
         t_start = time.time()
@@ -3769,6 +3960,14 @@ def stream_latex_resume(
         n_approved = len(_sanitize_accepted_suggestions(accepted_suggestions))
         if n_approved:
             logger.info(f"Structured user-approved edits  |  {n_approved} item(s)")
+        digest_for_prompt = ((pre_research_digest or "").strip() if not layout_compile else "")
+        skip_live_web = bool(digest_for_prompt)
+        if skip_live_web:
+            logger.info(
+                "PDF stream: reusing pre-suggestion web digest — disabling live Google Search / Grok web_search "
+                f"({len(digest_for_prompt)} chars)"
+            )
+        system_inst = _latex_tailor_system_instruction_no_live_search() if skip_live_web else None
         system_prompt, user_prompt = _build_prompts(
             company,
             role,
@@ -3777,6 +3976,9 @@ def stream_latex_resume(
             reference_tex,
             candidate_profile=candidate_profile,
             accepted_suggestions=accepted_suggestions,
+            pre_research_digest=digest_for_prompt or None,
+            system_instruction=system_inst,
+            reference_folder=ref_folder,
         )
 
         _fallback_models = _model_chain(model)
@@ -3804,7 +4006,7 @@ def stream_latex_resume(
                     # yields typed event dicts: text deltas, search queries, and
                     # citation sources — fire each onto the same SSE stream the
                     # frontend already handles for Gemini grounding.
-                    for ev in _stream_grok(_m, system_prompt, user_prompt, 0.2, web_search=not layout_compile):
+                    for ev in _stream_grok(_m, system_prompt, user_prompt, 0.2, web_search=not layout_compile and not skip_live_web):
                         et = ev.get("type")
                         if et == "text":
                             delta = ev.get("delta") or ""
@@ -3831,7 +4033,7 @@ def stream_latex_resume(
                         best_grounding_candidates = None
                         best_grounding_score = -1
                         try:
-                            if layout_compile:
+                            if layout_compile or skip_live_web:
                                 _gem_cfg = types.GenerateContentConfig(
                                     system_instruction=system_prompt,
                                     temperature=0.2,
