@@ -27,6 +27,19 @@ from google.genai import types
 logger = logging.getLogger(__name__)
 
 
+def _google_gemini_api_key() -> str:
+    """API key for Google AI Studio / Gemini (either env name accepted)."""
+    return (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+
+
+def _optional_gemini_client():
+    """``genai.Client`` when a Gemini key exists; ``None`` for Grok-only Railway deploys."""
+    k = _google_gemini_api_key()
+    if not k:
+        return None
+    return genai.Client(api_key=k)
+
+
 def primary_gemini_flash_model(explicit: Optional[str] = None) -> str:
     """Default Gemini Flash text model for stream/generate/JD/suggest paths.
 
@@ -128,17 +141,45 @@ def _run_tailor_research_job_context_gemini(job_description: str) -> Tuple[str, 
         f"JOB DESCRIPTION:\n{jd[:4000]}"
     )
     client = genai.Client(api_key=api_key)
-    resp = client.models.generate_content(
-        model=primary_gemini_flash_model(),
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.25,
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-        ),
+    primary = primary_gemini_flash_model()
+    gemini_models: List[str] = []
+    _seen_g: set[str] = set()
+    for m in (primary,) + _GEMINI_FALLBACK_MODELS:
+        if m not in _seen_g:
+            _seen_g.add(m)
+            gemini_models.append(m)
+
+    cfg = types.GenerateContentConfig(
+        temperature=0.25,
+        tools=[types.Tool(google_search=types.GoogleSearch())],
     )
-    text = (getattr(resp, "text", None) or "").strip()
-    queries, sources = _extract_grounding_from_gemini_response(resp)
-    return text, queries, sources
+    last_exc: Optional[BaseException] = None
+    for model in gemini_models:
+        try:
+            resp = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=cfg,
+            )
+            text = (getattr(resp, "text", None) or "").strip()
+            queries, sources = _extract_grounding_from_gemini_response(resp)
+            if model != primary:
+                logger.info(
+                    "tailor research (Gemini+Search): succeeded on %s (primary was %s)", model, primary
+                )
+            return text, queries, sources
+        except Exception as exc:
+            last_exc = exc
+            if _transient_provider_error(exc):
+                logger.warning(
+                    "tailor research Gemini %s transient failure (%s); trying next model", model, exc
+                )
+                _backoff_if_rate_limited(exc)
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Gemini+Search research: no models produced a response")
 
 
 def _run_tailor_research_job_context_grok(job_description: str) -> Tuple[str, List[str], List[dict]]:
@@ -181,28 +222,84 @@ def run_tailor_research_job_context(job_description: str) -> Tuple[str, List[str
     return _run_tailor_research_job_context_gemini(job_description)
 
 
+def _coach_suggestions_via_grok(model: str, prompt: str) -> str:
+    client = _get_xai_client()
+    r = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+    return (r.choices[0].message.content or "").strip()
+
+
 def coach_suggestions_llm(prompt: str) -> str:
     """Return raw JSON text for the résumé coach (``/api/suggest-changes`` body) — Grok or Gemini."""
     if grok_preferred_for_throughput():
         model = primary_llm_model_for_resume_workloads()
-        client = _get_xai_client()
-        r = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            response_format={"type": "json_object"},
-        )
-        return (r.choices[0].message.content or "").strip()
+        return _coach_suggestions_via_grok(model, prompt)
+
     api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
     if not api_key:
-        raise RuntimeError("GOOGLE_API_KEY or GEMINI_API_KEY is required when LLM_PROVIDER=gemini (or unset without XAI_API_KEY)")
+        if (os.environ.get("XAI_API_KEY") or "").strip():
+            m = (os.environ.get("GROK_MODEL") or _GROK_FALLBACK_MODELS[0]).strip() or str(_GROK_FALLBACK_MODELS[0])
+            logger.warning(
+                "coach_suggestions_llm: no Gemini API key — using Grok-only fallback (%s)", m
+            )
+            return _coach_suggestions_via_grok(m, prompt)
+        raise RuntimeError(
+            "GOOGLE_API_KEY or GEMINI_API_KEY is required when LLM_PROVIDER=gemini (or unset without XAI_API_KEY)"
+        )
+
+    primary = primary_gemini_flash_model()
+    chain = _model_chain(primary)
     client = genai.Client(api_key=api_key)
-    resp = client.models.generate_content(
-        model=primary_gemini_flash_model(),
-        contents=prompt,
-        config=types.GenerateContentConfig(temperature=0.2),
-    )
-    return (getattr(resp, "text", None) or "").strip()
+    last_exc: Optional[BaseException] = None
+
+    for model in chain:
+        if _is_grok(model):
+            try:
+                text = _coach_suggestions_via_grok(model, prompt)
+                if text:
+                    logger.info(
+                        "coach_suggestions_llm: used Grok (%s) after Gemini chain did not return text",
+                        model,
+                    )
+                    return text
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("coach_suggestions_llm: Grok fallback %s failed: %s", model, exc)
+            continue
+
+        try:
+            resp = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.2),
+            )
+            text = (getattr(resp, "text", None) or "").strip()
+            if text:
+                if model != primary:
+                    logger.info("coach_suggestions_llm: succeeded on Gemini model %s (primary was %s)", model, primary)
+                return text
+            logger.warning("coach_suggestions_llm: Gemini %s returned empty text; trying next model", model)
+            continue
+        except Exception as exc:
+            last_exc = exc
+            if _transient_provider_error(exc):
+                logger.warning(
+                    "coach_suggestions_llm: Gemini %s transient failure (%s); trying next model",
+                    model,
+                    exc,
+                )
+                _backoff_if_rate_limited(exc)
+                continue
+            logger.warning("coach_suggestions_llm: Gemini %s failed: %s", model, exc)
+            continue
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("coach_suggestions_llm: empty response from all configured models")
 
 
 def _error_probe_text(exc: BaseException) -> str:
@@ -1205,7 +1302,7 @@ def _fix_tex_contact_pipe_spacing(tex: str) -> str:
 
 
 _LEADING_BODY_JUNK = re.compile(
-    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*0\s*(?:in|pt)\s*$",
+    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*(?:=\s*)?0\s*(?:in|pt)\s*(?:\\\\|&|,)*\s*$",
     re.I,
 )
 
@@ -1239,7 +1336,7 @@ def _strip_tex_leading_body_junk(tex: str) -> str:
 
 
 _METRIC_NOISE_LINE = re.compile(
-    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*0\s*(?:in|pt)\s*$",
+    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*(?:=\s*)?0\s*(?:in|pt)\s*(?:\\\\|&|,)*\s*$",
     re.I,
 )
 
@@ -1259,6 +1356,18 @@ def _strip_metric_noise_lines_after_begin_document(tex: str) -> str:
             continue
         kept.append(ln)
     return head + "".join(kept)
+
+
+# ``\resumeItem{sep 0in}`` (LLM echoed enumitem keys as bullet text) — remove whole line.
+_RESUMEITEM_METRIC_JUNK_LINE = re.compile(
+    r"(?m)^\s*\\resumeItem\{\s*(?:(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*(?:=\s*)?"
+    r"0\s*(?:in|pt)\s*;?\s*)+\}\s*$",
+    re.I,
+)
+
+
+def _strip_resumeitem_metric_junk_lines(tex: str) -> str:
+    return _RESUMEITEM_METRIC_JUNK_LINE.sub("", tex)
 
 
 # Contact masthead duplicates after % RESUME-CONTACT-BLOCK-END are stripped in
@@ -1340,6 +1449,7 @@ def _sanitize_full_resume_tex(full_tex: str) -> str:
     """Last-mile fixes on assembled .tex before write (run-ons, contact pipes, stray text)."""
     t = _strip_tex_leading_body_junk(full_tex)
     t = _strip_metric_noise_lines_after_begin_document(t)
+    t = _strip_resumeitem_metric_junk_lines(t)
     t = _strip_llm_duplicate_header_tabular_after_contact(t)
     t = _fix_tex_runon_employer_month(t)
     t = _fix_tex_contact_pipe_spacing(t)
@@ -2198,8 +2308,9 @@ def ai_rewrite_bullet(bullet_text: str, instruction: str, jd_snippet: str = "") 
         + "REWRITTEN BULLET:"
     )
 
-    # Try Gemini first (fast + free), fall back to Grok if configured.
+    # Try configured primary (Grok-first when XAI key + LLM_PROVIDER), then fallbacks.
     last_err: Optional[BaseException] = None
+    _gem = _optional_gemini_client()
     for model in _model_chain(primary_llm_model_for_resume_workloads()):
         try:
             if _is_grok(model):
@@ -2207,15 +2318,15 @@ def ai_rewrite_bullet(bullet_text: str, instruction: str, jd_snippet: str = "") 
                 pieces: List[str] = []
                 for ev in _stream_grok(model, "You rewrite resume bullets.", prompt, temperature=0.3):
                     if isinstance(ev, dict) and ev.get("type") == "text":
-                        pieces.append(ev.get("text", ""))
+                        pieces.append(ev.get("delta") or "")
                 out = "".join(pieces).strip()
                 if out:
                     return out.strip().strip('"').strip("'")
                 continue
             # Gemini path
-            from google import genai  # type: ignore
-            client = genai.Client()
-            resp = client.models.generate_content(model=model, contents=prompt)
+            if _gem is None:
+                continue
+            resp = _gem.models.generate_content(model=model, contents=prompt)
             out = (getattr(resp, "text", "") or "").strip()
             if out:
                 return out.strip().strip('"').strip("'")
@@ -2245,18 +2356,19 @@ def ai_generate_skills(role: str, existing_skills: Optional[List[str]] = None) -
 
     import json as _json
     last_err: Optional[BaseException] = None
+    _gem = _optional_gemini_client()
     for model in _model_chain(primary_llm_model_for_resume_workloads()):
         try:
             if _is_grok(model):
                 pieces: List[str] = []
                 for ev in _stream_grok(model, "You generate resume skills lists.", prompt, temperature=0.4):
                     if isinstance(ev, dict) and ev.get("type") == "text":
-                        pieces.append(ev.get("text", ""))
+                        pieces.append(ev.get("delta") or "")
                 raw = "".join(pieces).strip()
             else:
-                from google import genai  # type: ignore
-                client = genai.Client()
-                resp = client.models.generate_content(model=model, contents=prompt)
+                if _gem is None:
+                    continue
+                resp = _gem.models.generate_content(model=model, contents=prompt)
                 raw = (getattr(resp, "text", "") or "").strip()
 
             # Strip markdown fences if the model ignored instructions
@@ -3629,6 +3741,7 @@ def _rating_explain_model_chain() -> List[str]:
 
 
 def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Optional[Dict]:
+    # ``client`` may be ``None`` when only xAI is configured — Gemini slots in the chain are skipped.
     prompt = (
         "You are a coach giving the candidate an honest, direct read on their fit for a job. Write the assessment in "
         "SECOND-PERSON voice — address the candidate directly with 'you', 'your', 'you have', 'you built'. Never refer to "
@@ -3677,6 +3790,8 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
                 if not result:
                     continue
             else:
+                if client is None:
+                    continue
                 # Enable thinking for Gemini 2.5 models
                 thinking_cfg = (
                     types.ThinkingConfig(thinking_budget=8000)
@@ -3781,6 +3896,8 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
                 if not data:
                     continue
             else:
+                if client is None:
+                    continue
                 thinking_cfg = (
                     types.ThinkingConfig(thinking_budget=5000)
                     if "2.5" in m else None
@@ -3884,7 +4001,7 @@ def generate_latex_resume(
         base_body = _extract_body(base_tex)
         logger.info(f"Base resume loaded  |  {base_folder}  ({len(base_body)} chars)")
 
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    gemini_client = _optional_gemini_client()
 
     cp_prompt = (candidate_profile or "").strip() or None
     system_prompt, user_prompt = _build_prompts(
@@ -3899,20 +4016,33 @@ def generate_latex_resume(
         post_suggestion_coach_run=False,
     )
 
-    logger.info(f"Calling {model} for resume generation (Google Search grounding enabled)...")
     t1 = time.time()
-    response = client.models.generate_content(
-        model=model,
-        contents=user_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            temperature=0.2,
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-        ),
-    )
-    logger.info(f"LLM response  |  {time.time() - t1:.1f}s")
-
-    latex_body = (response.text or "").strip()
+    latex_body = ""
+    if _is_grok(model):
+        logger.info(f"Calling {model} for resume generation (Grok + web search)…")
+        for ev in _stream_grok(model, system_prompt, user_prompt, 0.2, web_search=True):
+            if isinstance(ev, dict) and ev.get("type") == "text":
+                latex_body += ev.get("delta") or ""
+        latex_body = latex_body.strip()
+        logger.info(f"LLM response (Grok)  |  {time.time() - t1:.1f}s")
+    else:
+        if not gemini_client:
+            raise RuntimeError(
+                "GOOGLE_API_KEY or GEMINI_API_KEY is required for Gemini resume generation. "
+                "For Grok-only, set XAI_API_KEY and LLM_PROVIDER=grok."
+            )
+        logger.info(f"Calling {model} for resume generation (Google Search grounding enabled)...")
+        response = gemini_client.models.generate_content(
+            model=model,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.2,
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        )
+        logger.info(f"LLM response  |  {time.time() - t1:.1f}s")
+        latex_body = (getattr(response, "text", None) or "").strip()
     if latex_body.startswith("```"):
         latex_body = re.sub(r"^```[a-z]*\n?", "", latex_body)
         latex_body = re.sub(r"\n?```$", "", latex_body)
@@ -3944,7 +4074,7 @@ def generate_latex_resume(
     # ── Ratings ───────────────────────────────────────────────────────────────
     logger.info("Calling Gemini for ratings...")
     t2 = time.time()
-    ratings = _rate_resume(client, model, latex_body, job_description[:1500])
+    ratings = _rate_resume(gemini_client, model, latex_body, job_description[:1500])
     logger.info(f"Ratings  |  {time.time() - t2:.1f}s  |  {ratings}")
 
     # ── Assemble + save ───────────────────────────────────────────────────────
@@ -4632,7 +4762,7 @@ def stream_latex_resume(
             logger.info(f"Base resume  |  {base_folder}  ({len(base_body)} chars)")
             yield {"event": "base", "folder": base_folder, "loaded": bool(base_body), "chars": len(base_body)}
 
-        client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+        gemini_client = _optional_gemini_client()
         n_approved = len(_sanitize_accepted_suggestions(accepted_suggestions))
         if n_approved:
             logger.info(f"Structured user-approved edits  |  {n_approved} item(s)")
@@ -4732,89 +4862,96 @@ def stream_latex_resume(
                     else:
                         # Gemini path — Google Search grounding (retry same model on
                         # transient 503 UNAVAILABLE / "high demand" before fallback chain).
-                        _gemini_stream_attempts = 3
-                        for _gem_attempt in range(_gemini_stream_attempts):
-                            best_grounding_candidates = None
-                            best_grounding_score = -1
-                            try:
-                                if layout_compile or skip_live_web:
-                                    _gem_cfg = types.GenerateContentConfig(
-                                        system_instruction=system_prompt,
-                                        temperature=0.2,
+                        if gemini_client is None:
+                            logger.warning(
+                                "stream_latex_resume: skipping Gemini model %s — no GOOGLE_API_KEY "
+                                "or GEMINI_API_KEY (Grok-only deploy)",
+                                _m,
+                            )
+                        else:
+                            _gemini_stream_attempts = 3
+                            for _gem_attempt in range(_gemini_stream_attempts):
+                                best_grounding_candidates = None
+                                best_grounding_score = -1
+                                try:
+                                    if layout_compile or skip_live_web:
+                                        _gem_cfg = types.GenerateContentConfig(
+                                            system_instruction=system_prompt,
+                                            temperature=0.2,
+                                        )
+                                    else:
+                                        _gem_cfg = types.GenerateContentConfig(
+                                            system_instruction=system_prompt,
+                                            temperature=0.2,
+                                            tools=[types.Tool(google_search=types.GoogleSearch())],
+                                        )
+                                    stream = gemini_client.models.generate_content_stream(
+                                        model=_m,
+                                        contents=user_prompt,
+                                        config=_gem_cfg,
                                     )
-                                else:
-                                    _gem_cfg = types.GenerateContentConfig(
-                                        system_instruction=system_prompt,
-                                        temperature=0.2,
-                                        tools=[types.Tool(google_search=types.GoogleSearch())],
+                                    for chunk in stream:
+                                        if getattr(chunk, "candidates", None):
+                                            last_candidates = chunk.candidates
+                                            sc = _grounding_signal_score(chunk.candidates)
+                                            if sc > best_grounding_score:
+                                                best_grounding_score = sc
+                                                best_grounding_candidates = chunk.candidates
+                                            # Surface Google Search activity live as Gemini
+                                            # issues queries / discovers sources mid-generation.
+                                            new_q, new_s = _extract_grounding_live(chunk.candidates)
+                                            for q in new_q:
+                                                if q not in seen_queries:
+                                                    seen_queries.add(q)
+                                                    logger.info(f"🔍 Google search  |  {q}")
+                                                    yield {"event": "search_query", "query": q}
+                                            for s in new_s:
+                                                u = s.get("url")
+                                                if u and u not in seen_source_urls:
+                                                    seen_source_urls.add(u)
+                                                    yield {"event": "search_source", "title": s.get("title"), "url": u}
+                                        text = getattr(chunk, "text", None)
+                                        if text:
+                                            latex_body += text
+                                            yield {"event": "chunk", "text": text}
+
+                                    # Gemini often attaches the richest grounding_metadata only on
+                                    # a late chunk; earlier chunks may have empty metadata. Flush
+                                    # from the chunk we saw with the most queries + citation URLs
+                                    # so the UI still gets search_query / search_source SSE events.
+                                    _flush_cands = (
+                                        best_grounding_candidates
+                                        if best_grounding_score > 0
+                                        else (last_candidates if last_candidates else None)
                                     )
-                                stream = client.models.generate_content_stream(
-                                    model=_m,
-                                    contents=user_prompt,
-                                    config=_gem_cfg,
-                                )
-                                for chunk in stream:
-                                    if getattr(chunk, "candidates", None):
-                                        last_candidates = chunk.candidates
-                                        sc = _grounding_signal_score(chunk.candidates)
-                                        if sc > best_grounding_score:
-                                            best_grounding_score = sc
-                                            best_grounding_candidates = chunk.candidates
-                                        # Surface Google Search activity live as Gemini
-                                        # issues queries / discovers sources mid-generation.
-                                        new_q, new_s = _extract_grounding_live(chunk.candidates)
-                                        for q in new_q:
+                                    if _flush_cands:
+                                        fq, fs = _extract_grounding_live(_flush_cands)
+                                        for q in fq:
                                             if q not in seen_queries:
                                                 seen_queries.add(q)
-                                                logger.info(f"🔍 Google search  |  {q}")
+                                                logger.info(f"🔍 Google search (post-stream)  |  {q}")
                                                 yield {"event": "search_query", "query": q}
-                                        for s in new_s:
+                                        for s in fs:
                                             u = s.get("url")
                                             if u and u not in seen_source_urls:
                                                 seen_source_urls.add(u)
                                                 yield {"event": "search_source", "title": s.get("title"), "url": u}
-                                    text = getattr(chunk, "text", None)
-                                    if text:
-                                        latex_body += text
-                                        yield {"event": "chunk", "text": text}
-    
-                                # Gemini often attaches the richest grounding_metadata only on
-                                # a late chunk; earlier chunks may have empty metadata. Flush
-                                # from the chunk we saw with the most queries + citation URLs
-                                # so the UI still gets search_query / search_source SSE events.
-                                _flush_cands = (
-                                    best_grounding_candidates
-                                    if best_grounding_score > 0
-                                    else (last_candidates if last_candidates else None)
-                                )
-                                if _flush_cands:
-                                    fq, fs = _extract_grounding_live(_flush_cands)
-                                    for q in fq:
-                                        if q not in seen_queries:
-                                            seen_queries.add(q)
-                                            logger.info(f"🔍 Google search (post-stream)  |  {q}")
-                                            yield {"event": "search_query", "query": q}
-                                    for s in fs:
-                                        u = s.get("url")
-                                        if u and u not in seen_source_urls:
-                                            seen_source_urls.add(u)
-                                            yield {"event": "search_source", "title": s.get("title"), "url": u}
-                                break
-                            except Exception as _gem_e:
-                                if (
-                                    _gem_attempt + 1 < _gemini_stream_attempts
-                                    and _transient_provider_error(_gem_e)
-                                ):
-                                    logger.warning(
-                                        f"Gemini stream attempt {_gem_attempt + 1}/{_gemini_stream_attempts} "
-                                        f"failed (transient): {_gem_e}"
-                                    )
-                                    yield {"event": "status", "msg": "AI is busy — retrying shortly…"}
-                                    latex_body = ""
-                                    last_candidates = []
-                                    _backoff_if_rate_limited(_gem_e)
-                                    continue
-                                raise
+                                    break
+                                except Exception as _gem_e:
+                                    if (
+                                        _gem_attempt + 1 < _gemini_stream_attempts
+                                        and _transient_provider_error(_gem_e)
+                                    ):
+                                        logger.warning(
+                                            f"Gemini stream attempt {_gem_attempt + 1}/{_gemini_stream_attempts} "
+                                            f"failed (transient): {_gem_e}"
+                                        )
+                                        yield {"event": "status", "msg": "AI is busy — retrying shortly…"}
+                                        latex_body = ""
+                                        last_candidates = []
+                                        _backoff_if_rate_limited(_gem_e)
+                                        continue
+                                    raise
     
                     if latex_body:
                         break  # got real content — exit fallback loop
@@ -4873,7 +5010,7 @@ def stream_latex_resume(
             if not identical_to_base:
                 yield {"event": "status", "msg": "Explaining changes…"}
                 try:
-                    explanations = _explain_changes(client, model, base_body, latex_body, job_description[:1500])
+                    explanations = _explain_changes(gemini_client, model, base_body, latex_body, job_description[:1500])
                     if explanations:
                         logger.info(f"Change rationales  |  {len(explanations)} items")
                         yield {"event": "rationales", "data": explanations}
@@ -4882,7 +5019,7 @@ def stream_latex_resume(
 
         if not layout_compile:
             yield {"event": "status", "msg": "Rating resume against JD…"}
-            ratings = _rate_resume(client, model, latex_body, job_description[:1500])
+            ratings = _rate_resume(gemini_client, model, latex_body, job_description[:1500])
             if ratings:
                 logger.info(f"Ratings  |  {ratings}")
                 yield {"event": "ratings", "data": ratings}
@@ -5069,7 +5206,7 @@ def _fetch_via_browser(url: str, timeout: int = 25) -> str:
 
 
 def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optional[Dict]:
-    """Use Gemini to pull out company / role / cleaned JD from the scraped page text."""
+    """Use Grok or Gemini to pull out company / role / cleaned JD from the scraped page text."""
     prompt = (
         "You are given the raw visible text of a job posting page. Extract the job posting fields.\n\n"
         "Return ONLY valid JSON (no markdown, no fences):\n"
@@ -5095,6 +5232,8 @@ def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optio
                 data = _json_grok(m, prompt, temperature=0.1)
                 if data and isinstance(data, dict):
                     return data
+                continue
+            if client is None:
                 continue
             r = client.models.generate_content(
                 model=m,
@@ -5152,8 +5291,8 @@ def extract_jd_from_url(url: str, model: Optional[str] = None) -> Dict:
     if len(raw_text) < 200:
         raise ValueError("Could not extract readable content from the page. It may be JS-rendered or auth-gated.")
 
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-    data = _structure_jd_with_llm(client, model, url, raw_text)
+    gemini_client = _optional_gemini_client()
+    data = _structure_jd_with_llm(gemini_client, model, url, raw_text)
     if not data or data.get("error"):
         raise ValueError(data.get("error") if data else "Failed to parse job posting")
 

@@ -24,6 +24,32 @@ class TestSanitizeFullResumeTex(unittest.TestCase):
         self.assertNotIn("topsep 0pt", out)
         self.assertIn("\\section{Summary}", out)
 
+    def test_strips_metric_noise_with_latex_linebreak_suffix(self):
+        tex = (
+            "\\begin{document}\n"
+            "sep 0in \\\\\n"
+            "sep=0in\\\\\n"
+            "\\section{Summary}\n"
+            "\\end{document}\n"
+        )
+        out = _sanitize_full_resume_tex(tex)
+        self.assertNotIn("sep 0in", out)
+        self.assertNotIn("sep=0in", out)
+        self.assertIn("\\section{Summary}", out)
+
+    def test_strips_resumeitem_wrapping_only_metric_junk(self):
+        tex = (
+            "\\begin{document}\n"
+            "% RESUME-CONTACT-BLOCK-END\n"
+            "\\resumeItem{sep 0in}\n"
+            "\\section{SUMMARY}\n"
+            "Hello.\n"
+            "\\end{document}\n"
+        )
+        out = _sanitize_full_resume_tex(tex)
+        self.assertNotIn("sep 0in", out)
+        self.assertIn("\\section{SUMMARY}", out)
+
     def test_strips_duplicate_contact_tabular_after_marker(self):
         tail = (
             "\\begin{tabular*}{\\textwidth}[t]{l@{\\extracolsep{\\fill}}r}\n"
