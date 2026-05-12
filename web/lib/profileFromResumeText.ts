@@ -42,7 +42,7 @@ function pipeCount(line: string): number {
  * Heuristic: structured résumé job/experience rows (title | org | place | dates).
  * Avoid using these for headline, school, degree, or loose graduation.
  */
-function looksLikeStructuredEmploymentLine(line: string): boolean {
+export function looksLikeStructuredEmploymentLine(line: string): boolean {
   const pipes = pipeCount(line);
   if (pipes >= 2) return true;
   if (pipes >= 1 && /\b(20\d{2}|19\d{2})\s*[-–]\s*(present|current|now)\b/i.test(line)) return true;

@@ -7,6 +7,7 @@ import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
   bulletMatchesAnalysisCategory,
 } from "@/lib/analysisCategoryMatch";
+import { looksLikeStructuredEmploymentLine } from "@/lib/profileFromResumeText";
 
 export interface LiveBulletItem {
   originalBullet: string;
@@ -83,6 +84,13 @@ export function findBulletIndexForLine(
   line: string,
   bulletAnalysis: LiveBulletItem[],
 ): number {
+  const trimmed = normalizeExtractLine(line);
+  if (trimmed.length < 4) return -1;
+  /* Experience metadata must stay in paragraph / EntryHeader rows — not bulletAnalysis rows. */
+  if (looksLikeEntryHeader(trimmed)) return -1;
+  if (looksLikeStructuredEmploymentLine(trimmed)) return -1;
+  if (looksLikeLoneJobTitleLine(trimmed)) return -1;
+
   const ln = normalizeForMatch(line);
   if (ln.length < 4) return -1;
 
@@ -368,6 +376,31 @@ function renderInline(text: string): ReactNode[] {
     if (/^\*\*.+\*\*$/.test(p)) return <strong key={k}>{p.slice(2, -2)}</strong>;
     return <span key={k}>{p}</span>;
   });
+}
+
+/**
+ * Single-line job title under an employer row (no dates, no pipes) — must not map to bulletAnalysis
+ * or it is rendered as a scored bullet (e.g. "Financial Analyst" after "Morgan Stanley …").
+ */
+function looksLikeLoneJobTitleLine(line: string): boolean {
+  const t = normalizeExtractLine(line);
+  if (t.length < 4 || t.length > 96) return false;
+  if (lineLooksLikeBulletLead(line)) return false;
+  if (t.includes("|") || /@/.test(t) || /\d{4}/.test(t)) return false;
+  if (KNOWN_SECTIONS.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 1 || words.length > 10) return false;
+  const roleTail =
+    /\b(Analyst|Engineer|Developer|Architect|Scientist|Designer|Consultant|Specialist|Manager|Director|Lead|Intern|Associate|Executive|Coordinator|Representative|Officer|Administrator|Planner|Strategist|Researcher|Partner)\b/i;
+  const execAbbr = /\b(VP|SVP|EVP|CEO|CTO|CFO|COO|PM|SDE)\b/i;
+  if (!roleTail.test(t) && !execAbbr.test(t)) return false;
+  const lowerSmall = new Set(["and", "of", "the", "in", "for", "to", "at", "ii", "iii", "iv", "i", "v"]);
+  for (const w of words) {
+    const lw = w.toLowerCase().replace(/[^a-z]/g, "");
+    if (!lw || lowerSmall.has(lw)) continue;
+    if (!/^[A-Z]/.test(w)) return false;
+  }
+  return true;
 }
 
 /** True if a line looks like a job/education entry header (title | company | date). */
