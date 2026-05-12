@@ -22,6 +22,7 @@ import {
   setProfileAutofillFromUpload,
 } from "@/lib/profileStorage";
 import { extractProfileHintsFromResumeText } from "@/lib/profileFromResumeText";
+import { resumeLineMatchesSuggestionOriginal } from "@/lib/suggestionResumeMatch";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { nameAndSubtitleLineIndices, isPlaceholderResumeHeaderLine } from "@/lib/resumePreviewNameLine";
 
@@ -712,6 +713,13 @@ export default function ResumeBuilder({
     }
   }, [jd, candidateProfile, studioHandoff]);
 
+  const patchSuggestionSuggested = useCallback((id: string, suggested: string) => {
+    setSuggestions((prev) => {
+      if (!prev) return prev;
+      return prev.map((s) => (s.id === id ? { ...s, suggested } : s));
+    });
+  }, []);
+
   const mergeProfileFromLastExtract = useCallback(() => {
     const text = lastResumeExtractRef.current.trim();
     if (!text) return;
@@ -1176,7 +1184,7 @@ export default function ResumeBuilder({
                   fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
                   marginBottom: 28, maxWidth: 520, letterSpacing: -0.1,
                 }}>
-                  Upload your résumé, paste the job description, review JD-aligned suggestions, then generate a tailored LaTeX résumé and ATS-safe PDF. Layout uses our default professional template — change layout only from{" "}
+                  Upload your résumé, paste the job description, review JD-aligned suggestions, then generate a tailored LaTeX résumé and ATS-safe PDF. Suggestions compare your text to the posting only (no live web search). If the model runs web research, that happens while generating your PDF, not while listing suggestions. Layout uses our default professional template — change layout only from{" "}
                   <strong style={{ color: "var(--text)" }}>Résumé Builder → Template &amp; PDF</strong>{" "}
                   (template studio).
                 </p>
@@ -1772,7 +1780,7 @@ export default function ResumeBuilder({
               </button>
               {!suggestLoading && (
                 <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
-                  JD-focused edits only — you choose what to apply before generating the PDF.
+                  JD-focused edits from your résumé + pasted posting only. Optional live web research runs later, when you generate the PDF.
                 </p>
               )}
             </>
@@ -1810,6 +1818,7 @@ export default function ResumeBuilder({
                 setRejectedIds(new Set());
               }}
               onClearAccepts={() => setAcceptedIds(new Set())}
+              onEditSuggested={patchSuggestionSuggested}
               onGenerate={generate}
               generating={generating}
               error={error}
@@ -1856,9 +1865,7 @@ export default function ResumeBuilder({
                   </>
                 ) : (
                   <>
-                    Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing. When this run
-                    uses live web research, search queries and sources show up in the web research panel as they arrive (sometimes only after a
-                    short delay).
+                    Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing. Live web search (if any) runs in this same generate step — after your suggestion list was built — and queries appear in the panel below as they arrive.
                   </>
                 )}
               </p>
@@ -1887,7 +1894,7 @@ export default function ResumeBuilder({
                 borderRadius: 10, padding: "14px 16px",
                 fontSize: 12, color: "var(--dim)", lineHeight: 1.55,
               }}>
-                This panel only updates if the model runs a live search. For résumé + JD tailoring, that often doesn’t happen — your PDF can still finish normally.
+                This panel only updates if the model runs a live search during PDF generation (after suggestions). For résumé + JD tailoring, that often doesn’t happen — your PDF can still finish normally.
               </div>
             </div>
           )}
@@ -1914,6 +1921,9 @@ export default function ResumeBuilder({
                   {generating ? "Researching the web" : "Research used"}
                 </span>
               </div>
+              <p style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, margin: "0 0 10px", letterSpacing: -0.05 }}>
+                This is part of <strong style={{ color: "var(--text)" }}>Generate PDF</strong>, not the earlier &ldquo;Get suggestions&rdquo; step. Suggestions were built from your résumé and the job text only.
+              </p>
               <div style={{
                 background: "var(--surface)", border: "1px solid var(--border)",
                 borderRadius: 10, padding: "12px 14px",
@@ -2774,39 +2784,9 @@ export default function ResumeBuilder({
 
 /* ── Resume paper preview (plain text → paper-style render) ─────────────── */
 
-/** Align resume lines with suggestion `original` strings (bullets / spacing often differ). */
-function normalizeResumeLineKey(s: string): string {
-  return s
-    .trim()
-    .toLowerCase()
-    .replace(/^[\s\u2022\u00b7\u2023\u2024\u2043\u2219\-\–\—\*‧·.]+/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function buildResumeHighlightMatcher(highlightOriginals: string[]): (line: string) => boolean {
-  const keys = new Set<string>();
-  const normOriginals: string[] = [];
-  for (const o of highlightOriginals) {
-    const ot = o.trim();
-    if (!ot) continue;
-    keys.add(ot.toLowerCase());
-    const nk = normalizeResumeLineKey(ot);
-    keys.add(nk);
-    normOriginals.push(nk);
-  }
-  return (line: string) => {
-    const t = line.trim();
-    if (!t) return false;
-    const raw = t.toLowerCase();
-    const normLine = normalizeResumeLineKey(t);
-    if (keys.has(raw) || keys.has(normLine)) return true;
-    for (const on of normOriginals) {
-      if (on.length < 12) continue;
-      if (normLine.includes(on) || on.includes(normLine)) return true;
-    }
-    return false;
-  };
+  const originals = highlightOriginals.map((o) => o.trim()).filter(Boolean);
+  return (line: string) => originals.some((o) => resumeLineMatchesSuggestionOriginal(line, o));
 }
 
 /** First suggestion in list order whose `original` matches the résumé line (same rules as highlight). */
@@ -2817,7 +2797,7 @@ function firstSuggestionMatchingLine(
 ): Suggestion | null {
   for (const s of suggestions) {
     if (!predicate(s)) continue;
-    if (buildResumeHighlightMatcher([s.original])(line)) return s;
+    if (resumeLineMatchesSuggestionOriginal(line, s.original)) return s;
   }
   return null;
 }
@@ -3892,7 +3872,7 @@ function SuggestionsPanel({
   summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
   pdfBlobUrl, pdfFileName, pdfDocumentKey,
   selectedSuggestionId, onSelectSuggestionCard,
-  onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onGenerate, generating, error, onBackToInputs,
+  onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, error, onBackToInputs,
 }: {
   summary: string;
   suggestions: Suggestion[];
@@ -3910,12 +3890,13 @@ function SuggestionsPanel({
   onToggleReject: (id: string) => void;
   onAcceptAll: () => void;
   onClearAccepts: () => void;
+  onEditSuggested: (id: string, suggested: string) => void;
   onGenerate: () => void | Promise<unknown>;
   generating: boolean;
   error: string | null;
   onBackToInputs: () => void;
 }) {
-  const [leftPreviewTab, setLeftPreviewTab] = useState<"pdf" | "text">(() => (pdfBlobUrl ? "pdf" : "text"));
+  const [resumePreviewTab, setResumePreviewTab] = useState<"pdf" | "text">(() => (pdfBlobUrl ? "pdf" : "text"));
 
   const accepted = suggestions.filter(s => acceptedIds.has(s.id));
   const highlightOriginals = suggestions.map(s => s.original);
@@ -3935,14 +3916,14 @@ function SuggestionsPanel({
       /* ignore invalid selector */
     }
     document.getElementById(`rb-sug-${selectedSuggestionId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [selectedSuggestionId, leftPreviewTab]);
+  }, [selectedSuggestionId, resumePreviewTab]);
 
   return (
     <div className="fade-in" style={{ marginBottom: 32 }}>
       <style>{`
         .rb-suggestions-grid {
           display: grid;
-          grid-template-columns: minmax(260px, 1.15fr) minmax(280px, 1fr);
+          grid-template-columns: minmax(300px, 1fr) minmax(280px, 1.08fr);
           gap: 20px;
           align-items: start;
         }
@@ -3987,111 +3968,10 @@ function SuggestionsPanel({
         </div>
       )}
 
-      {/* Two-panel layout (View 5 — Phase 2); stacks on narrow screens */}
+      {/* Two-panel layout: suggestions left, résumé preview right */}
       <div className="rb-suggestions-grid">
 
-        {/* Left: scanned PDF (when available) or extracted-text paper */}
-        <div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-              marginBottom: 8,
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase" }}>
-              Your résumé
-            </div>
-            {pdfBlobUrl ? (
-              <div style={{ display: "flex", gap: 4, background: "var(--surface2)", padding: 3, borderRadius: 10, border: "1px solid var(--border)" }}>
-                <button
-                  type="button"
-                  onClick={() => setLeftPreviewTab("pdf")}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    fontFamily: "inherit",
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "none",
-                    cursor: "pointer",
-                    background: leftPreviewTab === "pdf" ? "var(--surface)" : "transparent",
-                    color: leftPreviewTab === "pdf" ? "var(--text)" : "var(--muted)",
-                    boxShadow: leftPreviewTab === "pdf" ? "var(--shadow-sm)" : "none",
-                  }}
-                >
-                  Scanned PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLeftPreviewTab("text")}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    fontFamily: "inherit",
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "none",
-                    cursor: "pointer",
-                    background: leftPreviewTab === "text" ? "var(--surface)" : "transparent",
-                    color: leftPreviewTab === "text" ? "var(--text)" : "var(--muted)",
-                    boxShadow: leftPreviewTab === "text" ? "var(--shadow-sm)" : "none",
-                  }}
-                >
-                  Extracted text
-                </button>
-              </div>
-            ) : (
-              <span style={{ fontSize: 10, color: "var(--dim)" }}>Text preview — upload a PDF to unlock scanned view</span>
-            )}
-          </div>
-          {pdfBlobUrl && leftPreviewTab === "pdf" ? (
-            <div
-              style={{
-                overflow: "hidden",
-                maxHeight: panelScrollMax,
-                borderRadius: 10,
-                border: "1px solid var(--border)",
-                background: "#fff",
-              }}
-            >
-              <BuilderPdfSuggestionHighlights
-                key={pdfDocumentKey}
-                pdfBlobUrl={pdfBlobUrl}
-                filename={pdfFileName ?? "resume.pdf"}
-                suggestions={suggestions.map(s => ({ id: s.id, original: s.original }))}
-                acceptedIds={acceptedIds}
-                rejectedIds={rejectedIds}
-                selectedSuggestionId={selectedSuggestionId}
-                onSelectSuggestion={id => onSelectSuggestionCard(id)}
-              />
-            </div>
-          ) : (
-            <>
-              <div style={{ fontSize: 10, color: "var(--dim)", marginBottom: 6, lineHeight: 1.45 }}>
-                Tinted lines match cards on the right — click a line to focus the matching suggestion.
-              </div>
-              <div ref={textPreviewScrollRef} style={{ overflowY: "auto", maxHeight: panelScrollMax }}>
-                <ResumePaperView
-                  text={candidateProfile}
-                  highlightOriginals={highlightOriginals}
-                  interactiveSuggestions={{
-                    suggestions,
-                    acceptedIds,
-                    rejectedIds,
-                    selectedSuggestionId,
-                    onLineSelectSuggestion: id => onSelectSuggestionCard(id),
-                  }}
-                />
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Right: suggestion cards */}
+        {/* Left: suggestion cards */}
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
             {suggestions.length} suggested improvements
@@ -4119,10 +3999,9 @@ function SuggestionsPanel({
                   cursor: "pointer",
                 }}
                 >
-                  {/* Header row */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                     <span
-                      title="Same color as the matching line in the preview"
+                      title="Same color as the matching line in the résumé preview"
                       aria-hidden
                       style={{
                         width: 5,
@@ -4141,19 +4020,52 @@ function SuggestionsPanel({
                     <span style={{ fontSize: 10.5, color: "var(--dim)", letterSpacing: -0.1 }}>{s.section}</span>
                   </div>
 
-                  {/* Original → Suggested */}
                   <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6, lineHeight: 1.5, fontStyle: "italic", textDecoration: isAccepted ? "line-through" : "none", opacity: isAccepted ? 0.6 : 1, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                     {s.original}
                   </div>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 8 }}>
-                    <span style={{ color: "var(--green)", fontSize: 11, flexShrink: 0, marginTop: 2 }} aria-hidden>→</span>
-                    <span style={{ fontSize: 11.5, color: "var(--text)", lineHeight: 1.5, fontWeight: isAccepted ? 500 : 400, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{s.suggested}</span>
+                  <div
+                    style={{ marginBottom: 8 }}
+                    onClick={e => { e.stopPropagation(); }}
+                    onKeyDown={e => { e.stopPropagation(); }}
+                    role="presentation"
+                  >
+                    <label
+                      htmlFor={`rb-sug-edit-${s.id}`}
+                      style={{ fontSize: 10, fontWeight: 600, color: "var(--dim)", display: "block", marginBottom: 4, letterSpacing: 0.02 }}
+                    >
+                      Suggested text (editable)
+                    </label>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                      <span style={{ color: "var(--green)", fontSize: 11, flexShrink: 0, marginTop: 8 }} aria-hidden>→</span>
+                      <textarea
+                        id={`rb-sug-edit-${s.id}`}
+                        value={s.suggested}
+                        onChange={e => { onEditSuggested(s.id, e.target.value); }}
+                        onClick={e => { e.stopPropagation(); }}
+                        rows={4}
+                        style={{
+                          flex: 1,
+                          minHeight: 88,
+                          resize: "vertical",
+                          fontSize: 12,
+                          lineHeight: 1.45,
+                          fontFamily: "inherit",
+                          color: "var(--text)",
+                          fontWeight: isAccepted ? 500 : 400,
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          border: "1px solid var(--border)",
+                          background: "var(--bg)",
+                          boxSizing: "border-box",
+                          width: "100%",
+                        }}
+                      />
+                    </div>
                   </div>
                   <div style={{ fontSize: 10.5, color: "var(--dim)", lineHeight: 1.45, marginBottom: 10, paddingLeft: 14, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                     {s.reason}
                   </div>
 
-                  {/* Accept / Reject — min 44px tap height (HIG / Material touch) */}
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
                       type="button"
@@ -4186,6 +4098,107 @@ function SuggestionsPanel({
               );
             })}
           </div>
+        </div>
+
+        {/* Right: scanned PDF or extracted-text résumé */}
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              marginBottom: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase" }}>
+              Your résumé
+            </div>
+            {pdfBlobUrl ? (
+              <div style={{ display: "flex", gap: 4, background: "var(--surface2)", padding: 3, borderRadius: 10, border: "1px solid var(--border)" }}>
+                <button
+                  type="button"
+                  onClick={() => setResumePreviewTab("pdf")}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    cursor: "pointer",
+                    background: resumePreviewTab === "pdf" ? "var(--surface)" : "transparent",
+                    color: resumePreviewTab === "pdf" ? "var(--text)" : "var(--muted)",
+                    boxShadow: resumePreviewTab === "pdf" ? "var(--shadow-sm)" : "none",
+                  }}
+                >
+                  Scanned PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResumePreviewTab("text")}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    cursor: "pointer",
+                    background: resumePreviewTab === "text" ? "var(--surface)" : "transparent",
+                    color: resumePreviewTab === "text" ? "var(--text)" : "var(--muted)",
+                    boxShadow: resumePreviewTab === "text" ? "var(--shadow-sm)" : "none",
+                  }}
+                >
+                  Extracted text
+                </button>
+              </div>
+            ) : (
+              <span style={{ fontSize: 10, color: "var(--dim)" }}>Text preview — upload a PDF to unlock scanned view</span>
+            )}
+          </div>
+          {pdfBlobUrl && resumePreviewTab === "pdf" ? (
+            <div
+              style={{
+                overflow: "hidden",
+                maxHeight: panelScrollMax,
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: "#fff",
+              }}
+            >
+              <BuilderPdfSuggestionHighlights
+                key={pdfDocumentKey}
+                pdfBlobUrl={pdfBlobUrl}
+                filename={pdfFileName ?? "resume.pdf"}
+                suggestions={suggestions.map(s => ({ id: s.id, original: s.original }))}
+                acceptedIds={acceptedIds}
+                rejectedIds={rejectedIds}
+                selectedSuggestionId={selectedSuggestionId}
+                onSelectSuggestion={id => onSelectSuggestionCard(id)}
+              />
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 10, color: "var(--dim)", marginBottom: 6, lineHeight: 1.45 }}>
+                Tinted lines match cards on the left — click a line to focus the matching suggestion.
+              </div>
+              <div ref={textPreviewScrollRef} style={{ overflowY: "auto", maxHeight: panelScrollMax }}>
+                <ResumePaperView
+                  text={candidateProfile}
+                  highlightOriginals={highlightOriginals}
+                  interactiveSuggestions={{
+                    suggestions,
+                    acceptedIds,
+                    rejectedIds,
+                    selectedSuggestionId,
+                    onLineSelectSuggestion: id => onSelectSuggestionCard(id),
+                  }}
+                />
+              </div>
+            </>
+          )}
         </div>
       </div>
 

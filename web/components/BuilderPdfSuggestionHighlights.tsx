@@ -43,10 +43,16 @@ function escapeAttr(s: string): string {
 
 /** Heuristic: PDF text layer span vs suggestion original (same family as PdfViewerWithHighlights). */
 function spanMatchesSuggestion(spanNorm: string, bulletNorm: string): boolean {
-  if (spanNorm.length < 8 || bulletNorm.length < 8) return false;
-  if (bulletNorm.includes(spanNorm) && spanNorm.length >= 10) return true;
-  if (spanNorm.length >= 15 && bulletNorm.startsWith(spanNorm.slice(0, Math.min(25, spanNorm.length)))) return true;
-  if (bulletNorm.length >= 12 && spanNorm.includes(bulletNorm.slice(0, Math.min(40, bulletNorm.length)))) return true;
+  if (bulletNorm.length < 6 || spanNorm.length < 4) return false;
+  if (spanNorm === bulletNorm) return true;
+  if (bulletNorm.includes(spanNorm) && spanNorm.length >= 8) return true;
+  if (spanNorm.length >= 10 && bulletNorm.startsWith(spanNorm.slice(0, Math.min(30, spanNorm.length)))) return true;
+  if (bulletNorm.length >= 10 && spanNorm.includes(bulletNorm.slice(0, Math.min(45, bulletNorm.length)))) return true;
+  if (spanNorm.length >= 12 && bulletNorm.length >= 12) {
+    const a = spanNorm.slice(0, 40);
+    const b = bulletNorm.slice(0, 40);
+    if (a.startsWith(b.slice(0, 14)) || b.startsWith(a.slice(0, 14))) return true;
+  }
   return false;
 }
 
@@ -99,7 +105,7 @@ export default function BuilderPdfSuggestionHighlights({
       const raw = s.original.trim();
       if (!raw) continue;
       const norm = normalizeForMatch(raw).toLowerCase();
-      if (norm.length < 12) continue;
+      if (norm.length < 6) continue;
       const accepted = acceptedIds.has(s.id);
       const pal = STRIPE_PALETTE[visualIdx % STRIPE_PALETTE.length];
       visualIdx += 1;

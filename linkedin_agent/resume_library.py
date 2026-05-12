@@ -3333,7 +3333,8 @@ def _latex_tailor_system_instruction() -> str:
     """System instruction for LaTeX body generation (Gemini + Google Search)."""
     return (
         "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
-        "for software engineers. You will generate a complete LaTeX resume body tailored for a specific job.\n\n"
+        "for professional roles (engineering, analytics, business, operations, etc.). "
+        "You will generate a LaTeX resume body tailored for a specific job.\n\n"
         "GOOGLE SEARCH — REQUIRED EARLY: You have Google Search enabled. You MUST issue at least "
         "2 `google_search` tool calls early in the run before producing the LaTeX body. "
         "Use queries to learn how the target company describes products/engineering, public careers "
@@ -3350,8 +3351,9 @@ def _latex_tailor_system_instruction() -> str:
         "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear "
         "are those explicitly stated in the CANDIDATE PROFILE (or supplied résumé body). Do NOT round up, extrapolate, "
         "or invent new figures.\n"
-        "3. EXPERIENCE & ACHIEVEMENT SUBSTANCE: Rephrase and reorder for ATS fit. Do **not** add new roles, clients, "
-        "tools used in a role, or responsibilities that are not supported by the profile or pasted résumé. "
+        "3. EXPERIENCE & ACHIEVEMENT SUBSTANCE: Rephrase bullets for ATS/JD fit **within** each role or section. "
+        "Do **not** add new roles, clients, tools used in a role, or responsibilities that are not supported by the profile or pasted résumé. "
+        "Keep **section order and entry grouping** per STRUCTURE rules below — do not reorder whole sections into a different archetype. "
         "You **may** align phrasing with the JD when it clearly matches work already described (e.g. say "
         "\"distributed systems\" if the profile describes equivalent work without that exact phrase).\n"
         "4. BIOGRAPHICAL CHECK: Before each experience, education, or project bullet, confirm the substance is backed "
@@ -3368,30 +3370,19 @@ def _latex_tailor_system_instruction() -> str:
         "Same institutions, same degree names, same dates, same order — verbatim copy.\n"
         "GPA in education: include only if explicitly stated in the CANDIDATE PROFILE and the profile is consistent "
         "with UMBC guidance (typically list GPA when 3.00 or above).\n"
-        "9. FORMAT (UMBC Career Center Resume Guidelines — "
-        "https://careers.umbc.edu/wp-content/uploads/sites/221/2015/06/Resume-Guidelines.pdf): "
-        "Mirror section titles and content shape when profile facts exist. Header/contact per REFERENCE (name; "
-        "address, city, state, zip, email, phone as in profile). Optional \\section{Objective} — one concise "
-        "statement linking skills/education/career goals to the target role. Optional \\section{Summary} — "
-        "two to five \\resumeItem bullets of greatest strengths from the profile (UMBC: Objective and Summary "
-        "are optional when space is tight; do not require both; avoid redundant long Objective plus long Summary). "
-        "\\section{Education} verbatim per rule 8; GPA line only if explicitly in profile and above 3.00; "
-        "community-college line only if in profile. Certifications/Licenses section or lines only from profile "
-        "(title + date). Research, Publications and Presentations: for each item include title; venue or organization; "
-        "type (poster, paper, oral, etc.); date — profile facts only. Relevant Projects: heading with project/class title "
-        "without course number plus semester/year; one to two \\resumeItem bullets per project (role, actions, results; "
-        "tools/techniques; learning) from profile only. Relevant Coursework: optional; bullets; at most about three lines; "
-        "courses relevant to this role. Skills: \\section{Skills} with subcategories — e.g. Laboratory / Computer / "
-        "Quantitative/Analytic / Interpersonal, OR Technical Skills with Programming / Operating Systems / Software / "
-        "Design (Advanced/Proficient/Novice tiers when appropriate) and LANGUAGES with proficiency level. "
-        "Professional Experience (or job-focused Experience): each role — position, organization, city, state, dates on "
-        "header; two to five achievement bullets; never start bullets with a date range. Additional Experience: "
-        "one to three bullets per role for less-targeted paid work when profile distinguishes it; role-aligned activities "
-        "may stay under Professional Experience. Honors and Awards; Activities/Interests (one to three achievement bullets "
-        "per activity); Service/Community Engagement — only if in profile.\n"
-        "10. PLACEMENT: Put \\section{Objective} or \\section{Summary} immediately after the contact block and before "
-        "experience sections when used. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
-        "11. Keep to 1 page when possible — optional lead section + professional + additional (if any) + projects + education + skills + optional tails"
+        "9. RESUME STRUCTURE LOCK (this overrides generic career-center templates): The CANDIDATE PROFILE (and any "
+        "CURRENT RESUME BODY) reflects how **this applicant** already organized their résumé. You MUST preserve: "
+        "(a) the same **major section headings** (use \\section{...} titles that match or closely match the profile); "
+        "(b) the same **top-to-bottom order** of sections; (c) the same **grouping** of employers, schools, and projects "
+        "under those headings. Use the REFERENCE snippet **only** for LaTeX macro syntax (e.g. \\resumeSubheading, "
+        "\\resumeItem) — **not** to impose a different document shape. Do **not** convert the CV into a software-default "
+        "or UMBC-style outline. Do **not** add Objective, Summary, or multi-tier Skills sections that are **absent** "
+        "from the profile. If the profile is linear text from a PDF, keep that narrative flow. Tailoring = stronger "
+        "wording and honest JD keywords **inside** existing lines; not a new layout.\n"
+        "10. PLACEMENT: After the contact/header block, follow the profile's section order — do not force Objective or "
+        "Summary before experience if the profile leads with Experience or another section.\n"
+        "11. LENGTH: Prefer one page when the profile fits; tighten wording before dropping real sections or employers.\n"
+        "12. Do not invent high school entries unless they appear in the CANDIDATE PROFILE."
     )
 
 
@@ -3474,11 +3465,17 @@ def _build_prompts(
     base_section = ""
     if base_body:
         base_section = (
-            f"\n---\nCURRENT RESUME BODY (use as starting point, tailor for {role} at {company}):\n"
-            f"{base_body[:2500]}\n"
+            f"\n---\nCURRENT RESUME BODY (LaTeX body from a prior save — preserve its section skeleton when tailoring for {role} at {company}):\n"
+            f"{base_body[:5500]}\n"
         )
 
     profile_section = _profile_section_for_tailor_prompt(candidate_profile)
+    structure_block = (
+        "---\nSTRUCTURE — the CANDIDATE PROFILE text is the source-of-truth outline:\n"
+        "- Keep the **same major sections, same vertical order, and same employer/school/project grouping** as in that text.\n"
+        "- The REFERENCE LaTeX block teaches **macro syntax only**; do not treat it as a document to imitate section-by-section.\n"
+        "- Do not replace the applicant's layout with a generic career-center or engineer-default template.\n\n"
+    )
     approved = _sanitize_accepted_suggestions(accepted_suggestions)
     approved_block = _accepted_suggestions_prompt_block(approved) if approved else ""
 
@@ -3488,9 +3485,13 @@ def _build_prompts(
     if approved:
         closing += (
             " Honor USER-APPROVED STRUCTURED EDITS first, then align other bullets with the JD where it does not conflict."
+            " Keep the same section layout as the CANDIDATE PROFILE unless an approved edit explicitly changes it."
         )
     else:
-        closing += f" Tailor bullet points to emphasize what matters most for {role} at {company}."
+        closing += (
+            f" Tailor bullet points to emphasize what matters most for {role} at {company}, "
+            "without changing the profile's section order or inventing new sections."
+        )
 
     user_prompt = (
         f"Generate a tailored LaTeX resume body for this application:\n\n"
@@ -3498,9 +3499,10 @@ def _build_prompts(
         f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
         f"---\nCANDIDATE PROFILE (biographical facts for this applicant — do not contradict or extend with the web):\n\n"
         f"{profile_section}"
+        f"{structure_block}"
         f"{base_section}"
         f"{approved_block}"
-        f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:6500]}\n\n"
+        f"---\nREFERENCE LaTeX SYNTAX (typeset the profile's sections using these commands only — do not copy this file's section order or content as your outline):\n{reference_tex[:6500]}\n\n"
         f"{_user_prompt_research_tail(company, role)}"
         f"{closing}"
     )
