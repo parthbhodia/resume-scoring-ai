@@ -1208,7 +1208,7 @@ export default function ResumeBuilder({
                     marginBottom: 28, maxWidth: 560, letterSpacing: -0.1,
                   }}>
                     Upload your résumé, paste the job description, review suggestions (with an optional web-research pass), then generate an ATS-friendly PDF.
-                    This path <strong style={{ color: "var(--text)" }}>rebuilds</strong> your content in the <strong style={{ color: "var(--text)" }}>output template</strong> you choose in step 3 — it will not look identical to your uploaded PDF.
+                    This path <strong style={{ color: "var(--text)" }}>rebuilds</strong> your content using the <strong style={{ color: "var(--text)" }}>template style</strong> you select under Your résumé — it will not look identical to your uploaded PDF.
                     To pick a <strong style={{ color: "var(--text)" }}>visible gallery layout</strong> first and keep that structure, use <strong style={{ color: "var(--text)" }}>Match my layout</strong> above, then return here if you still want tailoring.
                   </p>
                   <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1503,11 +1503,25 @@ export default function ResumeBuilder({
                 No resume? We&apos;ll use a default profile to generate a starting point.
               </div>
             )}
+
+            {!studioHandoff && (
+              <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", letterSpacing: -0.2, marginBottom: 4 }}>
+                  Template style
+                </div>
+                <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+                  LaTeX reference for your tailored PDF — pick before you get suggestions or generate.
+                </p>
+                <ResumeStyleTemplateGrid
+                  styleReferenceFolder={styleReferenceFolder}
+                  setStyleReferenceFolder={setStyleReferenceFolder}
+                />
+              </div>
+            )}
           </StepCard>
 
-          {/* ── Target job + output template (JD tailor flow only) ── */}
+          {/* ── Target job (JD tailor flow only) ── */}
           {!studioHandoff && (
-          <>
           <StepCard
             step={2}
             title="Target job"
@@ -1569,17 +1583,6 @@ export default function ResumeBuilder({
               </Field>
             )}
           </StepCard>
-          <StepCard
-            step={3}
-            title="Output template"
-            subtitle="Choose LaTeX layout (typography and macros) for your tailored PDF before suggestions or generate."
-          >
-            <ResumeStyleTemplateGrid
-              styleReferenceFolder={styleReferenceFolder}
-              setStyleReferenceFolder={setStyleReferenceFolder}
-            />
-          </StepCard>
-          </>
           )}
 
           {/* Base resume indicator */}
@@ -4361,7 +4364,7 @@ function SuggestionsPanel({
         }}
       >
         <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
-          Output template (before generate)
+          Template style (before generate)
         </div>
         <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
           Your selection is sent to the server as the LaTeX reference for this run. You can change it here without going back to the form.
@@ -4487,7 +4490,7 @@ function BuilderStartPathChooser({ active }: { active: "tailor" | "layout" }) {
               Tailor to a job posting
             </div>
             <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
-              JD-aware suggestions and AI edits. Output uses the <strong style={{ color: "var(--text)" }}>output template</strong> you pick in step 3 — not a pixel match to your uploaded PDF.
+              JD-aware suggestions and AI edits. Output uses the <strong style={{ color: "var(--text)" }}>template style</strong> under Your résumé — not a pixel match to your uploaded PDF.
             </p>
           </div>
         ) : (
