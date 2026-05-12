@@ -279,7 +279,7 @@ export default function ResumeBuilder({
   const [role,       setRoleRaw]       = useState<string>(String(draft0.role ?? ""));
   const [jd,         setJdRaw]         = useState<string>(String(draft0.jd ?? ""));
   const [jobUrl,     setJobUrlRaw]     = useState<string>(String(draft0.jobUrl ?? ""));
-  const model = "gemini-2.5-flash";
+  const model = (process.env.NEXT_PUBLIC_GEMINI_FLASH_MODEL ?? "").trim() || "gemini-2.5-flash";
   const [baseFolder, setBaseFolder] = useState<string | null>(() => {
     const fromUrl = (initialBaseFolder ?? "").trim() || null;
     if (fromUrl) return fromUrl;

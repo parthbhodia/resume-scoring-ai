@@ -26,9 +26,23 @@ from google.genai import types
 
 logger = logging.getLogger(__name__)
 
+
+def primary_gemini_flash_model(explicit: Optional[str] = None) -> str:
+    """Default Gemini Flash text model for stream/generate/JD/suggest paths.
+
+    Set ``GEMINI_FLASH_MODEL`` (e.g. ``gemini-2.5-flash-lite``) when AI Studio shows
+    **gemini-2.5-flash** RPM/RPD tight — Lite is often a separate per-model pool.
+    """
+    if explicit and str(explicit).strip():
+        return str(explicit).strip()
+    return (os.environ.get("GEMINI_FLASH_MODEL") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+
+
 # Extra models to try when the primary hits quota errors (free tier is per-model).
 # gemini-1.5-* are retired on the v1beta endpoint; including them just adds 404 noise.
+# Prefer 2.5 Flash-Lite before older 2.0 models when 2.5 Flash is exhausted.
 _GEMINI_FALLBACK_MODELS = (
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
 )
@@ -1666,7 +1680,7 @@ def ai_rewrite_bullet(bullet_text: str, instruction: str, jd_snippet: str = "") 
 
     # Try Gemini first (fast + free), fall back to Grok if configured.
     last_err: Optional[BaseException] = None
-    for model in _model_chain("gemini-2.5-flash"):
+    for model in _model_chain(primary_gemini_flash_model()):
         try:
             if _is_grok(model):
                 # _stream_grok yields events; we just need the final text.
@@ -1711,7 +1725,7 @@ def ai_generate_skills(role: str, existing_skills: Optional[List[str]] = None) -
 
     import json as _json
     last_err: Optional[BaseException] = None
-    for model in _model_chain("gemini-2.5-flash"):
+    for model in _model_chain(primary_gemini_flash_model()):
         try:
             if _is_grok(model):
                 pieces: List[str] = []
@@ -3104,7 +3118,7 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         f"RESUME BODY (LaTeX — ignore formatting commands, read only the content. This is the ONLY source of truth about the candidate's experience):\n{latex_body[:6000]}"
     )
     # Use reasoning models for ratings: pro → flash → grok-4 (reasoning) → grok fast
-    reasoning_chain: list[str] = [_REASONING_MODEL_GEMINI, "gemini-2.5-flash"]
+    reasoning_chain: list[str] = [_REASONING_MODEL_GEMINI, primary_gemini_flash_model()]
     if os.environ.get("XAI_API_KEY"):
         reasoning_chain += [_REASONING_MODEL_GROK, "grok-4-1-fast-non-reasoning"]
 
@@ -3211,7 +3225,7 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         f"OLD RESUME (LaTeX):\n{old_body[:4500]}\n\n"
         f"NEW RESUME (LaTeX):\n{new_body[:4500]}"
     )
-    analysis_chain: list[str] = [_REASONING_MODEL_GEMINI, "gemini-2.5-flash"]
+    analysis_chain: list[str] = [_REASONING_MODEL_GEMINI, primary_gemini_flash_model()]
     if os.environ.get("XAI_API_KEY"):
         analysis_chain += [_REASONING_MODEL_GROK, "grok-4-1-fast-non-reasoning"]
     for i, m in enumerate(analysis_chain):
@@ -3291,7 +3305,7 @@ def generate_latex_resume(
     job_description: str,
     reference_folder: Optional[str] = None,
     compile_pdf: bool = True,
-    model: str = "gemini-2.5-flash",
+    model: Optional[str] = None,
     base_folder: Optional[str] = None,
     candidate_profile: Optional[str] = None,
 ) -> Dict:
@@ -3308,6 +3322,7 @@ def generate_latex_resume(
         base_folder:        Existing resume folder — content body to tailor; style comes from reference_folder when set
         candidate_profile: Multiline profile from the app (name, contact, experience); used for PDF header + LLM facts
     """
+    model = primary_gemini_flash_model(model)
     t_start = time.time()
     logger.info("=" * 60)
     logger.info(f"START  |  {role} @ {company}")
@@ -3919,7 +3934,7 @@ def stream_latex_resume(
     job_description: str,
     reference_folder: Optional[str] = None,
     compile_pdf: bool = True,
-    model: str = "gemini-2.5-flash",
+    model: Optional[str] = None,
     base_folder: Optional[str] = None,
     candidate_profile: Optional[str] = None,
     user_id: Optional[str] = None,
@@ -3949,6 +3964,7 @@ def stream_latex_resume(
     and the digest is injected into the user prompt instead — one research pass for both suggestions and PDF.
     """
     try:
+        model = primary_gemini_flash_model(model)
         t_start = time.time()
         logger.info("=" * 60)
         logger.info(f"STREAM  |  {role} @ {company}  |  model={model}")
@@ -4412,7 +4428,7 @@ def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optio
     return None
 
 
-def extract_jd_from_url(url: str, model: str = "gemini-2.5-flash") -> Dict:
+def extract_jd_from_url(url: str, model: Optional[str] = None) -> Dict:
     """
     Public entry point used by the /api/extract-jd route.
     Returns: {"company": str, "role": str, "location": str, "job_description": str}
@@ -4423,6 +4439,8 @@ def extract_jd_from_url(url: str, model: str = "gemini-2.5-flash") -> Dict:
         raise ValueError("URL must start with http:// or https://")
 
     url = _normalize_job_url(url)
+
+    model = primary_gemini_flash_model(model)
 
     t0 = time.time()
     raw_text = ""

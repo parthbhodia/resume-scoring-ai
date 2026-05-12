@@ -2,6 +2,7 @@
 
 const MODELS = [
   { label: "Recommended", value: "gemini-2.5-flash" },
+  { label: "Flash Lite", value: "gemini-2.5-flash-lite" },
   { label: "Balanced", value: "gemini-2.0-flash" },
   { label: "Light", value: "gemini-2.0-flash-lite" },
 ];

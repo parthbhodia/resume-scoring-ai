@@ -58,6 +58,7 @@ from resume_library import (
     ai_generate_skills,
     ats_check,
     doctor_check_resume,
+    primary_gemini_flash_model,
 )
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
@@ -127,7 +128,7 @@ async def api_generate_stream(request: Request):
     company           = (body.get("company") or "").strip()
     role              = (body.get("role") or "").strip()
     jd                = (body.get("job_description") or "").strip()
-    model             = (body.get("model") or "gemini-2.5-flash").strip()
+    model             = (body.get("model") or "").strip() or primary_gemini_flash_model()
     # LLM_PROVIDER=grok in .env flips the default primary model to Grok without
     # redeploying. Useful when Gemini free-tier is rate-limited and an xAI
     # balance is available. Explicit model param in the body still wins.
@@ -1911,7 +1912,7 @@ Return ONLY this JSON (no markdown fences, no explanation):
 
 
 def _llm_json_call(prompt: str) -> Optional[dict]:
-    """Call Gemini 2.5 Flash (primary) or Grok (fallback) for a JSON response."""
+    """Call configured Gemini Flash (primary) or Grok (fallback) for a JSON response."""
     import time
 
     google_key = os.environ.get("GOOGLE_API_KEY")
@@ -1925,7 +1926,7 @@ def _llm_json_call(prompt: str) -> Optional[dict]:
                 temperature=0.2,
             )
             r = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=primary_gemini_flash_model(),
                 contents=prompt,
                 config=cfg,
             )
@@ -2309,7 +2310,7 @@ def _run_tailor_research_job_context(job_description: str) -> Tuple[str, List[st
         f"JOB DESCRIPTION:\n{jd[:4000]}"
     )
     resp = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=primary_gemini_flash_model(),
         contents=prompt,
         config=_gtypes.GenerateContentConfig(
             temperature=0.25,
@@ -2393,7 +2394,7 @@ async def api_suggest_changes(request: Request):
         from google.genai import types as _gtypes  # type: ignore
         client = _genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
         resp = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=primary_gemini_flash_model(),
             contents=prompt,
             config=_gtypes.GenerateContentConfig(temperature=0.2),
         )
