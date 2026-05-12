@@ -19,7 +19,7 @@ import re
 import sys
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import pdfplumber
 
@@ -2268,11 +2268,61 @@ async def api_rewrite_role(request: Request):
     return JSONResponse({"bullets": rewritten})
 
 
+def _extract_grounding_from_gemini_response(resp) -> Tuple[List[str], List[dict]]:
+    """Pull web_search_queries and cited URLs from a non-streaming Gemini response."""
+    queries: List[str] = []
+    sources: List[dict] = []
+    seen_urls: set = set()
+    for cand in getattr(resp, "candidates", None) or []:
+        gm = getattr(cand, "grounding_metadata", None)
+        if not gm:
+            continue
+        for q in getattr(gm, "web_search_queries", None) or []:
+            qs = (q if isinstance(q, str) else str(q)).strip()
+            if qs:
+                queries.append(qs)
+        for chunk in getattr(gm, "grounding_chunks", None) or []:
+            web = getattr(chunk, "web", None)
+            uri = getattr(web, "uri", None) if web else None
+            if uri and uri not in seen_urls:
+                seen_urls.add(uri)
+                title = getattr(web, "title", None) or uri
+                sources.append({"title": title, "url": uri})
+    return queries, sources
+
+
+def _run_tailor_research_job_context(job_description: str) -> Tuple[str, List[str], List[dict]]:
+    """Gemini + Google Search: public employer/JD/domain context before résumé suggestions."""
+    from google import genai as _genai  # type: ignore
+    from google.genai import types as _gtypes  # type: ignore
+    client = _genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    jd = (job_description or "").strip()
+    prompt = (
+        "You have Google Search enabled. Run **3–6 searches** to gather **public** context useful for tailoring "
+        "a candidate's résumé to this **specific job posting**: the hiring organization or product line, industry norms, "
+        "acronyms and domain terms in the posting, and vocabulary employers use for this role type. "
+        "Output **plain text only**: short bullet points (max ~700 words). No JSON. No markdown code fences. "
+        "Do not invent private facts about any person. Do not write résumé edits — only background context.\n\n"
+        f"JOB DESCRIPTION:\n{jd[:4000]}"
+    )
+    resp = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=_gtypes.GenerateContentConfig(
+            temperature=0.25,
+            tools=[_gtypes.Tool(google_search=_gtypes.GoogleSearch())],
+        ),
+    )
+    text = (getattr(resp, "text", None) or "").strip()
+    queries, sources = _extract_grounding_from_gemini_response(resp)
+    return text, queries, sources
+
+
 async def api_suggest_changes(request: Request):
     """POST /api/suggest-changes — analyze resume vs JD and return per-bullet suggestions.
 
     Body: { "candidate_profile": str, "job_description": str }
-    Returns: { "summary": str, "suggestions": [{ id, section, original, suggested, reason, priority }] }
+    Returns: { "summary", "suggestions", optional "research_queries", "research_sources", "research_digest" }
     """
     try:
         body = await request.json()
@@ -2287,11 +2337,32 @@ async def api_suggest_changes(request: Request):
     if not job_description:
         return JSONResponse({"error": "job_description required"}, status_code=400)
 
+    loop = asyncio.get_event_loop()
+    digest = ""
+    research_queries: List[str] = []
+    research_sources: List[dict] = []
+    try:
+        digest, research_queries, research_sources = await loop.run_in_executor(
+            None, _run_tailor_research_job_context, job_description
+        )
+    except Exception as exc:
+        logger.warning("pre-suggestion web research failed (suggestions will use resume+JD only): %s", exc)
+
+    digest_block = ""
+    if digest.strip():
+        digest_block = (
+            "\n---\nJOB & MARKET CONTEXT (from live web search before this analysis — use for terminology, "
+            "JD vocabulary, and honest keyword overlap only; do NOT add employers, degrees, dates, or metrics "
+            "not already in the résumé or JD):\n"
+            f"{digest.strip()[:4500]}\n\n"
+        )
+
     prompt = (
         "You are an expert resume coach. Analyze this resume against the job description "
         "and return 5-8 specific, actionable improvements for individual bullets or sections.\n\n"
         f"RESUME:\n{candidate_profile[:6000]}\n\n"
-        f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
+        f"JOB DESCRIPTION:\n{job_description[:3000]}\n"
+        f"{digest_block}"
         "Return a JSON object with this exact structure:\n"
         '{\n'
         '  "summary": "One sentence: the most important gap between this resume and the JD.",\n'
@@ -2309,6 +2380,7 @@ async def api_suggest_changes(request: Request):
         "Rules:\n"
         "- Only suggest changes to bullets that EXIST in the resume — quote them exactly.\n"
         "- Do NOT invent metrics, employers, or facts not in the resume.\n"
+        "- When JOB & MARKET CONTEXT is present, use it only to sharpen **wording** and JD-aligned phrasing for facts already in the résumé.\n"
         "- Priority: 'high' = missing critical JD keyword; 'medium' = wording improvement; 'low' = polish.\n"
         "- Return ONLY the JSON object, no markdown fences."
     )
@@ -2324,13 +2396,17 @@ async def api_suggest_changes(request: Request):
         )
         return (resp.text or "").strip()
 
-    loop = asyncio.get_event_loop()
     try:
         text = await loop.run_in_executor(None, _call)
         if text.startswith("```"):
             text = re.sub(r"^```[a-z]*\n?", "", text)
             text = re.sub(r"\n?```$", "", text)
         data = json.loads(text)
+        if isinstance(data, dict):
+            data["research_queries"] = research_queries
+            data["research_sources"] = research_sources
+            if digest.strip():
+                data["research_digest"] = digest.strip()[:2500]
         return JSONResponse(data)
     except json.JSONDecodeError as exc:
         logger.error(f"suggest-changes JSON parse error: {exc}  raw={text[:200]}")

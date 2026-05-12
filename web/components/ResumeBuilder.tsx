@@ -284,6 +284,10 @@ export default function ResumeBuilder({
   const [jdKeywords, setJdKeywords] = useState<string[]>([]);
   const [searchQueries, setSearchQueries] = useState<string[]>([]);
   const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
+  /** Grounding from POST /api/suggest-changes (live search runs before the coach JSON). */
+  const [suggestResearchQueries, setSuggestResearchQueries] = useState<string[]>([]);
+  const [suggestResearchSources, setSuggestResearchSources] = useState<{ title: string | null; url: string }[]>([]);
+  const hasSuggestResearch = suggestResearchQueries.length > 0 || suggestResearchSources.length > 0;
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
   /** Right-panel “Save to library” re-upsert (compile already upserts; this is explicit retry). */
   const [libraryReSaveBusy, setLibraryReSaveBusy] = useState(false);
@@ -299,7 +303,7 @@ export default function ResumeBuilder({
   const [suggestSummary, setSuggestSummary] = useState(() => builderSession0?.suggestSummary ?? "");
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError,   setSuggestError]   = useState<string | null>(null);
-  /** Phased checklist while suggestions API runs: 0 → 1 → 2 (timed), then hidden when done. */
+  /** Phased checklist while suggestions API runs: 0 → 1 → 2 → 3 (timed), then hidden when done. */
   const [suggestLoaderStepsDone, setSuggestLoaderStepsDone] = useState(0);
   const [suggestLoaderTipIdx, setSuggestLoaderTipIdx] = useState(0);
   const [acceptedIds,    setAcceptedIds]    = useState<Set<string>>(
@@ -400,8 +404,9 @@ export default function ResumeBuilder({
     const phaseTicker = setInterval(() => {
       const elapsed = Date.now() - t0;
       setSuggestLoaderStepsDone(prev => {
-        if (elapsed >= 2800) return Math.max(prev, 2);
-        if (elapsed >= 1400) return Math.max(prev, 1);
+        if (elapsed >= 4500) return Math.max(prev, 3);
+        if (elapsed >= 3000) return Math.max(prev, 2);
+        if (elapsed >= 1500) return Math.max(prev, 1);
         return prev;
       });
     }, 100);
@@ -694,6 +699,8 @@ export default function ResumeBuilder({
     setSuggestions(null);
     setAcceptedIds(new Set());
     setRejectedIds(new Set());
+    setSuggestResearchQueries([]);
+    setSuggestResearchSources([]);
 
     try {
       const resp = await fetch(apiUrl("/api/suggest-changes"), {
@@ -701,10 +708,24 @@ export default function ResumeBuilder({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ candidate_profile: candidateProfile, job_description: effJd }),
       });
-      const json = await parseJsonOrThrow<{ error?: string; summary?: string; suggestions?: Suggestion[] }>(resp);
+      const json = await parseJsonOrThrow<{
+        error?: string;
+        summary?: string;
+        suggestions?: Suggestion[];
+        research_queries?: string[];
+        research_sources?: { title?: string | null; url?: string }[];
+      }>(resp);
       if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "Could not get suggestions."));
       setSuggestions(json.suggestions ?? []);
       setSuggestSummary(json.summary ?? "");
+      const rq = Array.isArray(json.research_queries) ? json.research_queries.filter((q): q is string => typeof q === "string") : [];
+      const rs = Array.isArray(json.research_sources)
+        ? json.research_sources
+            .filter((s): s is { title?: string | null; url: string } => s && typeof (s as { url?: unknown }).url === "string")
+            .map(s => ({ title: s.title ?? null, url: s.url }))
+        : [];
+      setSuggestResearchQueries(rq);
+      setSuggestResearchSources(rs);
       // User explicitly accepts suggestions before generate — nothing pre-selected.
     } catch (e: unknown) {
       setSuggestError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
@@ -870,7 +891,7 @@ export default function ResumeBuilder({
           company: effCompany, role: effRole, job_description: effJd,
           model, base_folder: baseFolder,
           // JD tailor flow uses one fixed ATS layout on the server — layout choice is only for template / PDF studio.
-          reference_folder: studioHandoff ? styleReferenceFolder : DEFAULT_REFERENCE_FOLDER,
+          reference_folder: styleReferenceFolder,
           candidate_profile: candidateProfile ?? "",
           accepted_suggestions: acceptedList.length > 0 ? acceptedList : undefined,
           user_id: user?.id ?? null,
@@ -1151,69 +1172,72 @@ export default function ResumeBuilder({
 
           {/* ── Hero (pre-generation) ── */}
           {showBuilderInputs && (
-            studioHandoff ? (
-              <div
-                style={{
-                  marginBottom: 22,
-                  padding: "14px 18px",
-                  borderRadius: 12,
-                  border: "1px solid var(--border)",
-                  background: "var(--surface2)",
-                }}
-              >
-                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 6, letterSpacing: -0.2 }}>
-                  Template &amp; PDF — layout only
+            <>
+              <BuilderStartPathChooser active={studioHandoff ? "layout" : "tailor"} />
+              {studioHandoff ? (
+                <div
+                  style={{
+                    marginBottom: 22,
+                    padding: "14px 18px",
+                    borderRadius: 12,
+                    border: "1px solid var(--border)",
+                    background: "var(--surface2)",
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 6, letterSpacing: -0.2 }}>
+                    Template &amp; PDF — layout only
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
+                    Choose the <strong style={{ color: "var(--text)" }}>output layout</strong> (LaTeX style: sections, typography, spacing on the server).
+                    This path is <strong style={{ color: "var(--text)" }}>not</strong> for job-description tailoring — no JD analysis here.
+                    Upload or confirm your content, then compile. For fonts/header fine-tuning beyond these presets, use the gallery editor, then return here.
+                  </p>
                 </div>
-                <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
-                  Choose the <strong style={{ color: "var(--text)" }}>output layout</strong> (LaTeX style: sections, typography, spacing on the server).
-                  This path is <strong style={{ color: "var(--text)" }}>not</strong> for job-description tailoring — no JD analysis here.
-                  Upload or confirm your content, then compile. For fonts/header fine-tuning beyond these presets, use the gallery editor, then return here.
-                </p>
-              </div>
-            ) : (
-              <div style={{ marginBottom: 40 }} className="rb-hero">
-                <div className="fade-in rb-hero-title" style={{
-                  fontSize: 52, fontWeight: 800, lineHeight: 1.05,
-                  letterSpacing: -2, marginBottom: 14, color: "var(--text)",
-                }}>
-                  Tailor your résumé to{" "}
-                  <span style={{ color: "var(--accent)" }}>any</span>
-                  <br />job description.
+              ) : (
+                <div style={{ marginBottom: 40 }} className="rb-hero">
+                  <div className="fade-in rb-hero-title" style={{
+                    fontSize: 52, fontWeight: 800, lineHeight: 1.05,
+                    letterSpacing: -2, marginBottom: 14, color: "var(--text)",
+                  }}>
+                    Tailor your résumé to{" "}
+                    <span style={{ color: "var(--accent)" }}>any</span>
+                    <br />job description.
+                  </div>
+                  <p className="fade-in stagger-1" style={{
+                    fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
+                    marginBottom: 28, maxWidth: 560, letterSpacing: -0.1,
+                  }}>
+                    Upload your résumé, paste the job description, review suggestions (with an optional web-research pass), then generate an ATS-friendly PDF.
+                    This path <strong style={{ color: "var(--text)" }}>rebuilds</strong> your content in the <strong style={{ color: "var(--text)" }}>output template</strong> you choose in step 3 — it will not look identical to your uploaded PDF.
+                    To pick a <strong style={{ color: "var(--text)" }}>visible gallery layout</strong> first and keep that structure, use <strong style={{ color: "var(--text)" }}>Match my layout</strong> above, then return here if you still want tailoring.
+                  </p>
+                  <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {[
+                      { n: 1, label: "Upload résumé" },
+                      { n: 2, label: "Paste job posting" },
+                      { n: 3, label: "Review JD suggestions" },
+                      { n: 4, label: "Generate PDF" },
+                    ].map(({ n, label }) => (
+                      <div key={n} style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "6px 12px 6px 8px",
+                        background: "var(--surface)", border: "1px solid var(--border)",
+                        borderRadius: 24, fontSize: 12.5, color: "var(--muted)",
+                        letterSpacing: -0.1,
+                      }}>
+                        <span style={{
+                          width: 20, height: 20, borderRadius: "50%",
+                          background: "var(--accent)",
+                          display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0,
+                        }}>{n}</span>
+                        {label}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <p className="fade-in stagger-1" style={{
-                  fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
-                  marginBottom: 28, maxWidth: 520, letterSpacing: -0.1,
-                }}>
-                  Upload your résumé, paste the job description, review JD-aligned suggestions, then generate a tailored LaTeX résumé and ATS-safe PDF. Suggestions compare your text to the posting only (no live web search). If the model runs web research, that happens while generating your PDF, not while listing suggestions. Layout uses our default professional template — change layout only from{" "}
-                  <strong style={{ color: "var(--text)" }}>Résumé Builder → Template &amp; PDF</strong>{" "}
-                  (template studio).
-                </p>
-                <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {[
-                    { n: 1, label: "Upload résumé" },
-                    { n: 2, label: "Paste job posting" },
-                    { n: 3, label: "Review JD suggestions" },
-                    { n: 4, label: "Generate PDF" },
-                  ].map(({ n, label }) => (
-                    <div key={n} style={{
-                      display: "flex", alignItems: "center", gap: 8,
-                      padding: "6px 12px 6px 8px",
-                      background: "var(--surface)", border: "1px solid var(--border)",
-                      borderRadius: 24, fontSize: 12.5, color: "var(--muted)",
-                      letterSpacing: -0.1,
-                    }}>
-                      <span style={{
-                        width: 20, height: 20, borderRadius: "50%",
-                        background: "var(--accent)",
-                        display: "inline-flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0,
-                      }}>{n}</span>
-                      {label}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )
+              )}
+            </>
           )}
 
           {/* ── Inputs (hidden once results are shown, or while reviewing suggestions) ── */}
@@ -1227,129 +1251,10 @@ export default function ResumeBuilder({
             title="Output layout"
             subtitle="Sections, typography, and spacing for your PDF (pdflatex). Layout only — not job-description tailoring."
           >
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                {distinctStyleTemplates().map((t) => {
-                  const selected = styleReferenceFolder === t.referenceFolder;
-                  const isAts = true; // all current templates are ATS-safe
-                  const isModern = t.id === "harshibar-ats";
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setStyleReferenceFolder(t.referenceFolder)}
-                      style={{
-                        flex: "1 1 160px",
-                        textAlign: "left",
-                        padding: 0,
-                        borderRadius: 10,
-                        border: selected ? "2.5px solid var(--accent)" : "1.5px solid var(--border)",
-                        background: "var(--surface2)",
-                        cursor: "pointer",
-                        fontFamily: "inherit",
-                        overflow: "hidden",
-                        boxShadow: selected ? "0 0 0 3px rgba(47,129,247,0.15)" : "none",
-                        transition: "border-color 0.15s, box-shadow 0.15s",
-                      }}
-                    >
-                      {/* Mini resume thumbnail */}
-                      <div style={{
-                        background: "#f8fafc",
-                        borderBottom: "1px solid var(--border)",
-                        padding: "8px 8px 0",
-                      }}>
-                        <div style={{
-                          background: "#fff",
-                          borderRadius: "2px 2px 0 0",
-                          boxShadow: "0 1px 4px rgba(15,23,42,0.10)",
-                          overflow: "hidden",
-                          aspectRatio: "8.5 / 11",
-                        }}>
-                          {isModern ? (
-                            <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
-                              <rect width="200" height="260" fill="#fff" />
-                              <text x="12" y="21" fontSize="10.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">John A. Smith</text>
-                              <text x="12" y="31" fontSize="5.5" fill="#475569" fontFamily="Arial,sans-serif">john@email.com · (555) 123-4567 · San Francisco</text>
-                              <line x1="12" y1="36" x2="188" y2="36" stroke="#0f172a" strokeWidth="0.8" />
-                              <text x="12" y="47" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EXPERIENCE</text>
-                              <line x1="12" y1="50" x2="188" y2="50" stroke="#cbd5e1" strokeWidth="0.4" />
-                              <text x="12" y="59" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">Software Engineer</text>
-                              <text x="188" y="59" fontSize="5.5" fill="#64748b" fontFamily="Arial,sans-serif" textAnchor="end">2022–Present</text>
-                              <text x="12" y="67" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Google, Inc. · Mountain View, CA</text>
-                              <rect x="16" y="72" width="164" height="3" rx="1" fill="#e2e8f0" />
-                              <rect x="16" y="77" width="148" height="3" rx="1" fill="#e2e8f0" />
-                              <text x="12" y="90" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EDUCATION</text>
-                              <line x1="12" y1="93" x2="188" y2="93" stroke="#cbd5e1" strokeWidth="0.4" />
-                              <text x="12" y="102" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">B.S. Computer Science</text>
-                              <text x="12" y="110" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Stanford University</text>
-                              <text x="12" y="123" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">SKILLS</text>
-                              <line x1="12" y1="126" x2="188" y2="126" stroke="#cbd5e1" strokeWidth="0.4" />
-                              <rect x="12" y="132" width="40" height="7" rx="2" fill="#dbeafe" />
-                              <rect x="56" y="132" width="35" height="7" rx="2" fill="#dbeafe" />
-                              <rect x="95" y="132" width="45" height="7" rx="2" fill="#dbeafe" />
-                            </svg>
-                          ) : (
-                            <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
-                              <rect width="200" height="260" fill="#fff" />
-                              <text x="100" y="20" fontSize="11" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="1">JENNIFER SMITH</text>
-                              <text x="100" y="29" fontSize="5.5" fill="#475569" fontFamily="Georgia,serif" textAnchor="middle">jennifer@email.com · (555) 010-2030 · New York</text>
-                              <rect x="12" y="34" width="176" height="1.2" fill="#0f172a" />
-                              <text x="100" y="45" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="0.8">PROFESSIONAL SUMMARY</text>
-                              <rect x="12" y="49" width="176" height="3" rx="0.5" fill="#e2e8f0" />
-                              <rect x="12" y="54" width="160" height="3" rx="0.5" fill="#e2e8f0" />
-                              <text x="12" y="67" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">WORK EXPERIENCE</text>
-                              <rect x="12" y="70" width="176" height="0.8" fill="#0f172a" />
-                              <text x="12" y="79" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">Senior Product Designer</text>
-                              <text x="188" y="79" fontSize="5.5" fill="#64748b" fontFamily="Georgia,serif" textAnchor="end">2021–Present</text>
-                              <text x="12" y="87" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">Acme Labs, San Francisco, CA</text>
-                              <rect x="16" y="92" width="160" height="2.8" rx="0.5" fill="#e2e8f0" />
-                              <rect x="16" y="97" width="148" height="2.8" rx="0.5" fill="#e2e8f0" />
-                              <text x="12" y="110" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">EDUCATION</text>
-                              <rect x="12" y="113" width="176" height="0.8" fill="#0f172a" />
-                              <text x="12" y="122" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">BFA, Graphic Design</text>
-                              <text x="12" y="130" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">State University, Boston</text>
-                            </svg>
-                          )}
-                        </div>
-                      </div>
-                      {/* Card footer */}
-                      <div style={{ padding: "9px 12px 10px", display: "flex", alignItems: "center", gap: 8 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {t.label}
-                          </div>
-                        </div>
-                        {isAts && (
-                          <span style={{
-                            flexShrink: 0,
-                            padding: "2px 6px", borderRadius: 99,
-                            border: "1px solid rgba(52,211,153,0.35)",
-                            background: "rgba(52,211,153,0.08)",
-                            color: "var(--green)",
-                            fontSize: 9, fontWeight: 700, letterSpacing: 0.2,
-                          }}>ATS</span>
-                        )}
-                        {selected && (
-                          <div style={{
-                            width: 16, height: 16, borderRadius: "50%",
-                            background: "var(--accent)", flexShrink: 0,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                          }}>
-                            <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                              <path d="M1.5 4l1.8 1.8L6.5 2.5" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.5 }}>
-                More layouts: register a folder in{" "}
-                <code style={{ fontSize: 10 }}>web/lib/resumeTemplates.ts</code>.
-              </div>
-            </div>
+            <ResumeStyleTemplateGrid
+              styleReferenceFolder={styleReferenceFolder}
+              setStyleReferenceFolder={setStyleReferenceFolder}
+            />
           </StepCard>
           </>
           )}
@@ -1600,8 +1505,9 @@ export default function ResumeBuilder({
             )}
           </StepCard>
 
-          {/* ── Target job (JD tailor flow only) ── */}
+          {/* ── Target job + output template (JD tailor flow only) ── */}
           {!studioHandoff && (
+          <>
           <StepCard
             step={2}
             title="Target job"
@@ -1663,6 +1569,17 @@ export default function ResumeBuilder({
               </Field>
             )}
           </StepCard>
+          <StepCard
+            step={3}
+            title="Output template"
+            subtitle="Choose LaTeX layout (typography and macros) for your tailored PDF before suggestions or generate."
+          >
+            <ResumeStyleTemplateGrid
+              styleReferenceFolder={styleReferenceFolder}
+              setStyleReferenceFolder={setStyleReferenceFolder}
+            />
+          </StepCard>
+          </>
           )}
 
           {/* Base resume indicator */}
@@ -1780,13 +1697,94 @@ export default function ResumeBuilder({
               </button>
               {!suggestLoading && (
                 <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
-                  JD-focused edits from your résumé + pasted posting only. Optional live web research runs later, when you generate the PDF.
+                  The first pass runs live web research on the posting, then compares your résumé to the job and lists edits. If the model runs
+                  extra searches while generating your PDF, they appear in the lower panel then.
                 </p>
               )}
             </>
           )}
 
           </>)} {/* end !result && !generating inputs block */}
+
+          {/* ── Web research used for suggestions (API runs search before coach JSON) ── */}
+          {!studioHandoff && hasSuggestResearch && suggestions && !result && (suggestionsReviewMode || generating) && (
+            <div style={{ marginBottom: 16 }} className="fade-in">
+              <div style={{
+                display: "flex", alignItems: "center", gap: 8,
+                fontSize: 11, fontWeight: 600, color: "var(--dim)",
+                letterSpacing: -0.1, marginBottom: 8, textTransform: "uppercase",
+              }}>
+                <span>Live web research</span>
+                <span style={{
+                  fontSize: 9, padding: "2px 7px", borderRadius: 999,
+                  background: "rgba(52,211,153,0.12)", color: "var(--green)",
+                  letterSpacing: 0, textTransform: "none",
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
+                  }} />
+                  Used before suggestions
+                </span>
+              </div>
+              <p style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, margin: "0 0 10px", letterSpacing: -0.05 }}>
+                Public employer and role wording gathered <strong style={{ color: "var(--text)" }}>before</strong> your suggestion cards were built. The coach still only edits facts that appear in your résumé.
+              </p>
+              <div style={{
+                background: "var(--surface)", border: "1px solid var(--border)",
+                borderRadius: 10, padding: "12px 14px",
+                maxHeight: 220, overflow: "auto",
+                display: "flex", flexDirection: "column", gap: 10,
+              }}>
+                {suggestResearchQueries.map((q, i) => (
+                  <div key={`srq-${i}`} style={{
+                    display: "flex", alignItems: "flex-start", gap: 8,
+                    fontSize: 12, color: "var(--text)", lineHeight: 1.45,
+                  }}>
+                    <span style={{ flexShrink: 0, marginTop: 1 }}>🔍</span>
+                    <span>
+                      <span style={{ color: "var(--dim)" }}>Searching:</span>{" "}
+                      <span style={{ color: "var(--text)", fontWeight: 500 }}>&ldquo;{q}&rdquo;</span>
+                    </span>
+                  </div>
+                ))}
+                {suggestResearchSources.length > 0 && (
+                  <div style={{
+                    borderTop: suggestResearchQueries.length ? "1px solid var(--border)" : "none",
+                    paddingTop: suggestResearchQueries.length ? 10 : 0,
+                    display: "flex", flexDirection: "column", gap: 6,
+                  }}>
+                    <div style={{ fontSize: 10, color: "var(--dim)", letterSpacing: 0.3, textTransform: "uppercase", fontWeight: 600 }}>
+                      Citing
+                    </div>
+                    {suggestResearchSources.map((s, i) => {
+                      let domain = s.url;
+                      try { domain = new URL(s.url).hostname.replace(/^www\./, ""); } catch { /* leave */ }
+                      return (
+                        <a
+                          key={`srs-${i}`}
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: "flex", alignItems: "flex-start", gap: 8,
+                            fontSize: 11, color: "var(--accent)",
+                            textDecoration: "none", lineHeight: 1.45,
+                          }}
+                        >
+                          <span style={{ flexShrink: 0, marginTop: 1, color: "var(--dim)" }}>↳</span>
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <span style={{ color: "var(--text)" }}>{s.title || domain}</span>
+                            <span style={{ color: "var(--dim)" }}> — {domain}</span>
+                          </span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* ── Suggestions review panel (JD tailor flow only) ── */}
           {!studioHandoff && suggestions && !generating && !result && (
@@ -1822,6 +1820,8 @@ export default function ResumeBuilder({
               onGenerate={generate}
               generating={generating}
               error={error}
+              styleReferenceFolder={styleReferenceFolder}
+              setStyleReferenceFolder={setStyleReferenceFolder}
               onBackToInputs={() => {
                 setSelectedSuggestionId(null);
                 setSuggestions(null);
@@ -1829,6 +1829,8 @@ export default function ResumeBuilder({
                 setSuggestError(null);
                 setAcceptedIds(new Set());
                 setRejectedIds(new Set());
+                setSuggestResearchQueries([]);
+                setSuggestResearchSources([]);
               }}
             />
           )}
@@ -1865,7 +1867,7 @@ export default function ResumeBuilder({
                   </>
                 ) : (
                   <>
-                    Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing. Live web search (if any) runs in this same generate step — after your suggestion list was built — and queries appear in the panel below as they arrive.
+                    Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing. Any <strong>extra</strong> live web search during this step is optional; your suggestion list already used a first research pass when you clicked &ldquo;Get suggestions.&rdquo;
                   </>
                 )}
               </p>
@@ -1894,12 +1896,16 @@ export default function ResumeBuilder({
                 borderRadius: 10, padding: "14px 16px",
                 fontSize: 12, color: "var(--dim)", lineHeight: 1.55,
               }}>
-                This panel only updates if the model runs a live search during PDF generation (after suggestions). For résumé + JD tailoring, that often doesn’t happen — your PDF can still finish normally.
+                {hasSuggestResearch ? (
+                  <>No additional live searches have appeared in this PDF pass yet. Your <strong>suggestions</strong> step already captured web queries and sources above.</>
+                ) : (
+                  <>This panel only updates if the model runs a live search during PDF generation. Your résumé can still finish normally.</>
+                )}
               </div>
             </div>
           )}
 
-          {/* Live web search — hide after results appear so Phase 3 isn’t stacked under streaming chrome */}
+          {/* Live web search during PDF generation (SSE) — optional second pass */}
           {hasWebResearch && !result && !studioHandoff && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
@@ -1922,7 +1928,11 @@ export default function ResumeBuilder({
                 </span>
               </div>
               <p style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, margin: "0 0 10px", letterSpacing: -0.05 }}>
-                This is part of <strong style={{ color: "var(--text)" }}>Generate PDF</strong>, not the earlier &ldquo;Get suggestions&rdquo; step. Suggestions were built from your résumé and the job text only.
+                {hasSuggestResearch ? (
+                  <>These queries and citations are from the <strong style={{ color: "var(--text)" }}>Generate PDF</strong> step — an optional second pass on top of the research already shown above your suggestions.</>
+                ) : (
+                  <>These queries and citations are from the <strong style={{ color: "var(--text)" }}>Generate PDF</strong> step (streaming), not from the earlier &ldquo;Get suggestions&rdquo; call.</>
+                )}
               </p>
               <div style={{
                 background: "var(--surface)", border: "1px solid var(--border)",
@@ -3868,11 +3878,147 @@ function priorityLabel(p: Suggestion["priority"]): string {
   return "LOW";
 }
 
+function ResumeStyleTemplateGrid({
+  styleReferenceFolder,
+  setStyleReferenceFolder,
+}: {
+  styleReferenceFolder: string;
+  setStyleReferenceFolder: (folder: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        {distinctStyleTemplates().map((t) => {
+          const selected = styleReferenceFolder === t.referenceFolder;
+          const isAts = true;
+          const isModern = t.id === "harshibar-ats";
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setStyleReferenceFolder(t.referenceFolder)}
+              style={{
+                flex: "1 1 160px",
+                textAlign: "left",
+                padding: 0,
+                borderRadius: 10,
+                border: selected ? "2.5px solid var(--accent)" : "1.5px solid var(--border)",
+                background: "var(--surface2)",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                overflow: "hidden",
+                boxShadow: selected ? "0 0 0 3px rgba(47,129,247,0.15)" : "none",
+                transition: "border-color 0.15s, box-shadow 0.15s",
+              }}
+            >
+              <div style={{
+                background: "#f8fafc",
+                borderBottom: "1px solid var(--border)",
+                padding: "8px 8px 0",
+              }}
+              >
+                <div style={{
+                  background: "#fff",
+                  borderRadius: "2px 2px 0 0",
+                  boxShadow: "0 1px 4px rgba(15,23,42,0.10)",
+                  overflow: "hidden",
+                  aspectRatio: "8.5 / 11",
+                }}
+                >
+                  {isModern ? (
+                    <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="200" height="260" fill="#fff" />
+                      <text x="12" y="21" fontSize="10.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">John A. Smith</text>
+                      <text x="12" y="31" fontSize="5.5" fill="#475569" fontFamily="Arial,sans-serif">john@email.com · (555) 123-4567 · San Francisco</text>
+                      <line x1="12" y1="36" x2="188" y2="36" stroke="#0f172a" strokeWidth="0.8" />
+                      <text x="12" y="47" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EXPERIENCE</text>
+                      <line x1="12" y1="50" x2="188" y2="50" stroke="#cbd5e1" strokeWidth="0.4" />
+                      <text x="12" y="59" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">Software Engineer</text>
+                      <text x="188" y="59" fontSize="5.5" fill="#64748b" fontFamily="Arial,sans-serif" textAnchor="end">2022–Present</text>
+                      <text x="12" y="67" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Google, Inc. · Mountain View, CA</text>
+                      <rect x="16" y="72" width="164" height="3" rx="1" fill="#e2e8f0" />
+                      <rect x="16" y="77" width="148" height="3" rx="1" fill="#e2e8f0" />
+                      <text x="12" y="90" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EDUCATION</text>
+                      <line x1="12" y1="93" x2="188" y2="93" stroke="#cbd5e1" strokeWidth="0.4" />
+                      <text x="12" y="102" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">B.S. Computer Science</text>
+                      <text x="12" y="110" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Stanford University</text>
+                      <text x="12" y="123" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">SKILLS</text>
+                      <line x1="12" y1="126" x2="188" y2="126" stroke="#cbd5e1" strokeWidth="0.4" />
+                      <rect x="12" y="132" width="40" height="7" rx="2" fill="#dbeafe" />
+                      <rect x="56" y="132" width="35" height="7" rx="2" fill="#dbeafe" />
+                      <rect x="95" y="132" width="45" height="7" rx="2" fill="#dbeafe" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="200" height="260" fill="#fff" />
+                      <text x="100" y="20" fontSize="11" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="1">JENNIFER SMITH</text>
+                      <text x="100" y="29" fontSize="5.5" fill="#475569" fontFamily="Georgia,serif" textAnchor="middle">jennifer@email.com · (555) 010-2030 · New York</text>
+                      <rect x="12" y="34" width="176" height="1.2" fill="#0f172a" />
+                      <text x="100" y="45" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="0.8">PROFESSIONAL SUMMARY</text>
+                      <rect x="12" y="49" width="176" height="3" rx="0.5" fill="#e2e8f0" />
+                      <rect x="12" y="54" width="160" height="3" rx="0.5" fill="#e2e8f0" />
+                      <text x="12" y="67" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">WORK EXPERIENCE</text>
+                      <rect x="12" y="70" width="176" height="0.8" fill="#0f172a" />
+                      <text x="12" y="79" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">Senior Product Designer</text>
+                      <text x="188" y="79" fontSize="5.5" fill="#64748b" fontFamily="Georgia,serif" textAnchor="end">2021–Present</text>
+                      <text x="12" y="87" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">Acme Labs, San Francisco, CA</text>
+                      <rect x="16" y="92" width="160" height="2.8" rx="0.5" fill="#e2e8f0" />
+                      <rect x="16" y="97" width="148" height="2.8" rx="0.5" fill="#e2e8f0" />
+                      <text x="12" y="110" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">EDUCATION</text>
+                      <rect x="12" y="113" width="176" height="0.8" fill="#0f172a" />
+                      <text x="12" y="122" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">BFA, Graphic Design</text>
+                      <text x="12" y="130" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">State University, Boston</text>
+                    </svg>
+                  )}
+                </div>
+              </div>
+              <div style={{ padding: "9px 12px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {t.label}
+                  </div>
+                </div>
+                {isAts && (
+                  <span style={{
+                    flexShrink: 0,
+                    padding: "2px 6px", borderRadius: 99,
+                    border: "1px solid rgba(52,211,153,0.35)",
+                    background: "rgba(52,211,153,0.08)",
+                    color: "var(--green)",
+                    fontSize: 9, fontWeight: 700, letterSpacing: 0.2,
+                  }}>ATS</span>
+                )}
+                {selected && (
+                  <div style={{
+                    width: 16, height: 16, borderRadius: "50%",
+                    background: "var(--accent)", flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                      <path d="M1.5 4l1.8 1.8L6.5 2.5" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.5 }}>
+        More layouts: register a folder in{" "}
+        <code style={{ fontSize: 10 }}>web/lib/resumeTemplates.ts</code>.
+      </div>
+    </div>
+  );
+}
+
 function SuggestionsPanel({
   summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
   pdfBlobUrl, pdfFileName, pdfDocumentKey,
   selectedSuggestionId, onSelectSuggestionCard,
   onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, error, onBackToInputs,
+  styleReferenceFolder, setStyleReferenceFolder,
 }: {
   summary: string;
   suggestions: Suggestion[];
@@ -3895,6 +4041,8 @@ function SuggestionsPanel({
   generating: boolean;
   error: string | null;
   onBackToInputs: () => void;
+  styleReferenceFolder: string;
+  setStyleReferenceFolder: (folder: string) => void;
 }) {
   const [resumePreviewTab, setResumePreviewTab] = useState<"pdf" | "text">(() => (pdfBlobUrl ? "pdf" : "text"));
 
@@ -4202,6 +4350,30 @@ function SuggestionsPanel({
         </div>
       </div>
 
+      <div
+        style={{
+          marginTop: 20,
+          padding: "14px 16px",
+          borderRadius: 12,
+          border: "1px solid var(--border)",
+          background: "var(--surface)",
+          boxShadow: "var(--shadow-card)",
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
+          Output template (before generate)
+        </div>
+        <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+          Your selection is sent to the server as the LaTeX reference for this run. You can change it here without going back to the form.
+        </p>
+        <div style={{ maxHeight: "min(320px, 40vh)", overflowY: "auto" }}>
+          <ResumeStyleTemplateGrid
+            styleReferenceFolder={styleReferenceFolder}
+            setStyleReferenceFolder={setStyleReferenceFolder}
+          />
+        </div>
+      </div>
+
       {/* Generate CTA */}
       {error && (
         <div role="alert" style={{ marginTop: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
@@ -4264,13 +4436,97 @@ function SuggestionsPanel({
         </button>
       </div>
       <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginTop: 8, lineHeight: 1.5 }}>
-        {accepted.length} of {suggestions.length} accepted — the profile text stays unchanged; accepted rows are passed as a separate structured list to the model before LaTeX is written.
+        {accepted.length} of {suggestions.length} accepted — structured edits are sent to the model before LaTeX is written.
+        {" "}
+        <strong style={{ color: "var(--text)" }}>Empty suggested text</strong> counts as a <strong style={{ color: "var(--text)" }}>delete</strong> (that bullet is omitted from the PDF).
       </p>
     </div>
   );
 }
 
 /* ── Sub-components ─────────────────────────────────────── */
+
+/** Two-path entry: JD tailor (default ATS body) vs template gallery (chosen LaTeX layout). */
+function BuilderStartPathChooser({ active }: { active: "tailor" | "layout" }) {
+  const tailorHref = "/?view=builder&flow=tailor&intent=job";
+  const templateHref = "/?view=builder&flow=template";
+
+  const cardStyle = (isActive: boolean): CSSProperties => ({
+    flex: "1 1 min(260px, 100%)",
+    textAlign: "left",
+    borderRadius: 14,
+    padding: "16px 18px",
+    border: isActive ? "2px solid var(--accent)" : "1.5px solid var(--border)",
+    background: isActive ? "var(--accent-bg)" : "var(--surface)",
+    boxShadow: isActive ? "0 0 0 3px rgba(47,129,247,0.12), var(--shadow-card)" : "var(--shadow-card)",
+    textDecoration: "none",
+    color: "inherit",
+    display: "block",
+    transition: "border-color 0.15s, box-shadow 0.15s",
+    boxSizing: "border-box",
+    cursor: isActive ? "default" : "pointer",
+  });
+
+  return (
+    <div
+      className="fade-in"
+      role="region"
+      aria-label="Choose résumé builder path"
+      style={{ marginBottom: 22 }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
+        Choose your start
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "stretch" }}>
+        {active === "tailor" ? (
+          <div style={cardStyle(true)} aria-current="page">
+            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", color: "var(--accent)", marginBottom: 6 }}>
+              Current path
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.35, color: "var(--text)", marginBottom: 6 }}>
+              Tailor to a job posting
+            </div>
+            <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
+              JD-aware suggestions and AI edits. Output uses the <strong style={{ color: "var(--text)" }}>output template</strong> you pick in step 3 — not a pixel match to your uploaded PDF.
+            </p>
+          </div>
+        ) : (
+          <Link href={tailorHref} prefetch={false} style={cardStyle(false)}>
+            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.35, color: "var(--text)", marginBottom: 6 }}>
+              Tailor to a job posting →
+            </div>
+            <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
+              Switch to job description, suggestions, and a tailored PDF in the default ATS layout.
+            </p>
+          </Link>
+        )}
+
+        {active === "layout" ? (
+          <div style={cardStyle(true)} aria-current="page">
+            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", color: "var(--accent)", marginBottom: 6 }}>
+              Current path
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.35, color: "var(--text)", marginBottom: 6 }}>
+              Match my layout (template gallery)
+            </div>
+            <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
+              Pick a visible layout, then compile — the PDF follows that LaTeX style with your extracted text (not a raster copy of your file).
+            </p>
+          </div>
+        ) : (
+          <Link href={templateHref} prefetch={false} style={cardStyle(false)}>
+            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.35, color: "var(--text)", marginBottom: 6 }}>
+              Match my layout (template gallery) →
+            </div>
+            <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
+              Open the gallery to choose typography and structure first, then return here for PDF only.
+            </p>
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function StepCard({ step, title, subtitle, children }: {
   step: number; title: string; subtitle: string; children: React.ReactNode;
@@ -4453,7 +4709,8 @@ function BuilderSuggestAnalysisLoader({ stepsDone, tipIdx }: { stepsDone: number
         <div style={{ marginBottom: 14 }}>
           {stepRow("Read your résumé text", 0, false)}
           {stepRow("Read the job posting", 1, false)}
-          {stepRow("Build tailored suggestions", 2, true)}
+          {stepRow("Live web research on the role", 2, false)}
+          {stepRow("Build tailored suggestions", 3, true)}
         </div>
         <div
           key={tipIdx}

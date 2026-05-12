@@ -306,6 +306,52 @@ def _markdown_to_latex_bold(text: str) -> Tuple[str, int]:
     return new_text, n
 
 
+# Gemini / Chat-style grounding footnotes that must never reach pdflatex.
+_MD_GEMINI_FOOTNOTE_RE = re.compile(r"\s*\[\[\d+\]\]\([^)]*\)")
+_MD_GEMINI_FOOTNOTE_BARE_RE = re.compile(r"\s*\[\[\d+\]\]")
+
+
+def _strip_llm_markdown_citations(text: str) -> str:
+    """Remove [[n]](url) / [[n]] artifacts from model output before saving .tex."""
+    if "[[" not in text:
+        return text
+    text = _MD_GEMINI_FOOTNOTE_RE.sub("", text)
+    text = _MD_GEMINI_FOOTNOTE_BARE_RE.sub("", text)
+    return text
+
+
+def _is_removal_suggestion(suggested: str) -> bool:
+    """True when the user (or coach JSON) indicates delete/omit with no replacement prose."""
+    t = (suggested or "").strip().lower()
+    if not t:
+        return True
+    if t in {
+        "(remove)",
+        "remove",
+        "—",
+        "-",
+        "n/a",
+        "[remove]",
+        "omit",
+        "(omit)",
+        "deleted",
+        "(deleted)",
+    }:
+        return True
+    if t.startswith("(remove") or t.startswith("(omit") or t.startswith("[remove"):
+        return True
+    for phrase in (
+        "delete this bullet",
+        "remove this bullet",
+        "omit this bullet",
+        "remove this line",
+        "delete this line",
+    ):
+        if t == phrase or t.startswith(phrase + " ") or t.startswith(phrase + "."):
+            return True
+    return False
+
+
 LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", "")
 
 # Prefer the system pdflatex (cross-platform); the binary must be on PATH or
@@ -3233,6 +3279,7 @@ def generate_latex_resume(
         latex_body = re.sub(r"^```[a-z]*\n?", "", latex_body)
         latex_body = re.sub(r"\n?```$", "", latex_body)
     latex_body, _ = _markdown_to_latex_bold(latex_body)
+    latex_body = _strip_llm_markdown_citations(latex_body)
     logger.info(f"LaTeX body  |  {len(latex_body)} chars")
 
     # ── Diff ──────────────────────────────────────────────────────────────────
@@ -3382,7 +3429,10 @@ def _latex_tailor_system_instruction() -> str:
         "10. PLACEMENT: After the contact/header block, follow the profile's section order — do not force Objective or "
         "Summary before experience if the profile leads with Experience or another section.\n"
         "11. LENGTH: Prefer one page when the profile fits; tighten wording before dropping real sections or employers.\n"
-        "12. Do not invent high school entries unless they appear in the CANDIDATE PROFILE."
+        "12. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
+        "13. CITATIONS: Never output Markdown footnotes, bracketed citation markers, or raw URLs used for web "
+        "grounding (for example `[[1]](https://...)` or `[[2]]`). The résumé must read as a clean PDF — "
+        "search is for your reasoning only, not for visible references in the LaTeX."
     )
 
 
@@ -3404,9 +3454,9 @@ def _profile_section_for_tailor_prompt(candidate_profile: Optional[str]) -> str:
     return _get_candidate_profile_block()
 
 
-def _sanitize_accepted_suggestions(raw: Optional[List]) -> List[Dict[str, str]]:
+def _sanitize_accepted_suggestions(raw: Optional[List]) -> List[Dict]:
     """Normalize client `accepted_suggestions` JSON for tailor prompts (structured layer before LaTeX)."""
-    out: List[Dict[str, str]] = []
+    out: List[Dict] = []
     if not raw or not isinstance(raw, list):
         return out
     for item in raw[:24]:
@@ -3417,7 +3467,10 @@ def _sanitize_accepted_suggestions(raw: Optional[List]) -> List[Dict[str, str]]:
         orig = str(item.get("original") or "").strip()[:2000]
         sugg = str(item.get("suggested") or "").strip()[:2000]
         why = str(item.get("reason") or "").strip()[:500]
-        if not orig or not sugg:
+        if not orig:
+            continue
+        remove = _is_removal_suggestion(sugg)
+        if not remove and not sugg:
             continue
         out.append(
             {
@@ -3426,25 +3479,37 @@ def _sanitize_accepted_suggestions(raw: Optional[List]) -> List[Dict[str, str]]:
                 "original": orig,
                 "suggested": sugg,
                 "reason": why,
+                "remove": remove,
             }
         )
     return out
 
 
-def _accepted_suggestions_prompt_block(items: List[Dict[str, str]]) -> str:
+def _accepted_suggestions_prompt_block(items: List[Dict]) -> str:
     lines = [
         "\n---\nUSER-APPROVED STRUCTURED EDITS (the candidate explicitly accepted these in the app — implement every one):\n",
     ]
     for i, it in enumerate(items, 1):
-        lines.append(
-            f"{i}. Section: {it['section']}\n"
-            f"   FIND (verbatim or closest matching line in the resume body): {it['original']}\n"
-            f"   REPLACE WITH: {it['suggested']}\n"
-            f"   Rationale: {it['reason']}\n"
-        )
+        if it.get("remove"):
+            lines.append(
+                f"{i}. Section: {it['section']}\n"
+                f"   DELETE ENTIRELY (remove the matching bullet or line — no replacement, no empty bullet, no placeholder):\n"
+                f"   TARGET TEXT (verbatim or closest matching line in the resume body): {it['original']}\n"
+                f"   Rationale: {it['reason']}\n"
+            )
+        else:
+            lines.append(
+                f"{i}. Section: {it['section']}\n"
+                f"   FIND (verbatim or closest matching line in the resume body): {it['original']}\n"
+                f"   REPLACE WITH: {it['suggested']}\n"
+                f"   Rationale: {it['reason']}\n"
+            )
     lines.append(
         "Rules for the block above:\n"
-        "- Apply each edit in LaTeX using the same \\resumeItem / heading style as the reference; do not skip any numbered item.\n"
+        "- DELETE: remove the full \\resumeItem{...} (or equivalent bullet macro) for that line — do not leave URLs, "
+        "footnotes, or blank bullets.\n"
+        "- REPLACE: apply each edit in LaTeX using the same \\resumeItem / heading style as the reference; "
+        "do not skip any numbered item.\n"
         "- Preserve facts, employers, dates, and metrics unless the replacement text explicitly changes them.\n"
         "- Do not invent additional bullet rewrites beyond these approvals and light JD alignment elsewhere.\n"
     )
@@ -3484,7 +3549,8 @@ def _build_prompts(
     )
     if approved:
         closing += (
-            " Honor USER-APPROVED STRUCTURED EDITS first, then align other bullets with the JD where it does not conflict."
+            " Honor USER-APPROVED STRUCTURED EDITS first — including every DELETE (omit that bullet entirely from LaTeX) — "
+            "then align other bullets with the JD where it does not conflict."
             " Keep the same section layout as the CANDIDATE PROFILE unless an approved edit explicitly changes it."
         )
     else:
@@ -3875,6 +3941,7 @@ def stream_latex_resume(
         latex_body, n_md_bold = _markdown_to_latex_bold(latex_body)
         if n_md_bold:
             logger.info(f"Markdown→LaTeX bold rewrites  |  {n_md_bold}")
+        latex_body = _strip_llm_markdown_citations(latex_body)
 
         # Sources — from whichever provider actually ran
         sources = _extract_sources(last_candidates) or grok_sources

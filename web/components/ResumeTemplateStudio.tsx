@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   DEFAULT_REFERENCE_FOLDER,
@@ -591,6 +592,58 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
         overflow: "hidden",
       }}
     >
+      {!fromResume ? (
+        <div
+          role="region"
+          aria-label="Choose résumé builder path"
+          style={{
+            flexShrink: 0,
+            padding: "12px 24px 14px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--surface2)",
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 8 }}>
+            Choose your start
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <Link
+              href="/?view=builder&flow=tailor&intent=job"
+              prefetch={false}
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--accent)",
+                textDecoration: "none",
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
+                fontFamily: "inherit",
+              }}
+            >
+              Tailor to a job posting →
+            </Link>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--text)",
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "2px solid var(--accent)",
+                background: "var(--accent-bg)",
+                fontFamily: "inherit",
+              }}
+            >
+              Match my layout (current)
+            </span>
+          </div>
+          <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.5, maxWidth: 720 }}>
+            Pick a template here so your compiled PDF follows that LaTeX layout. The job-tailor path uses a fixed ATS layout instead.
+          </p>
+        </div>
+      ) : null}
       {fromResume ? (
         <div
           role="region"
