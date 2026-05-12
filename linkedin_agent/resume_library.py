@@ -48,19 +48,40 @@ _REASONING_MODEL_GEMINI = "gemini-2.5-pro"
 _REASONING_MODEL_GROK   = os.environ.get("GROK_REASONING_MODEL", "grok-4")
 
 
+def _error_probe_text(exc: BaseException) -> str:
+    """All text used to classify provider errors (str + repr; some SDKs hide detail in repr)."""
+    parts: list[str] = []
+    try:
+        parts.append(str(exc))
+    except Exception:
+        parts.append("error")
+    try:
+        r = repr(exc)
+        if r not in parts:
+            parts.append(r)
+    except Exception:
+        pass
+    return " ".join(parts)
+
+
 def _sse_friendly_error(exc: BaseException) -> str:
     """User-visible SSE error line — avoid dumping raw provider JSON blobs."""
-    if _transient_provider_error(exc):
+    probe = _error_probe_text(exc).lower()
+    if _transient_provider_error_from_text(probe):
         return (
-            "AI hit a temporary capacity limit. Wait a minute and try again, "
-            "or press retry — the server already retries when the provider is busy."
+            "The AI service is temporarily busy. Please wait a minute and try again — "
+            "demand spikes are usually short-lived."
         )
-    return str(exc)
+    raw = str(exc).strip()
+    if len(raw) > 280 and ("'error'" in raw or '"error"' in raw):
+        return (
+            "Something went wrong while contacting the AI service. Please try again in a moment."
+        )
+    return raw if raw else "Something went wrong. Please try again."
 
 
-def _transient_provider_error(exc: BaseException) -> bool:
-    """True for quota/capacity errors where a short wait + retry often succeeds."""
-    m = str(exc).lower()
+def _transient_provider_error_from_text(m: str) -> bool:
+    """True when `m` is already lowercased / normalized probe text."""
     return any(
         n in m
         for n in (
@@ -70,11 +91,20 @@ def _transient_provider_error(exc: BaseException) -> bool:
             "unavailable",
             "service unavailable",
             "high demand",
+            "spikes in demand",
             "overloaded",
             "try again later",
             "deadline exceeded",
+            "too many requests",
+            "rate limit",
+            "quota exceeded",
         )
     )
+
+
+def _transient_provider_error(exc: BaseException) -> bool:
+    """True for quota/capacity errors where a short wait + retry often succeeds."""
+    return _transient_provider_error_from_text(_error_probe_text(exc).lower())
 
 
 def _backoff_if_rate_limited(exc: BaseException, default_wait: float = 5.0) -> None:

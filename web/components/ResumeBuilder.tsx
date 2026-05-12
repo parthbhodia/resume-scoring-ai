@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale, ParsedSection } from "@/lib/types";
 import { apiUrl, parseJsonOrThrow, scoreColor } from "@/lib/utils";
+import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD, TAILOR_PREFILL_COMPANY, TAILOR_PREFILL_ROLE } from "@/lib/tailorPrefill";
 import type { User } from "@supabase/supabase-js";
@@ -513,7 +514,7 @@ export default function ResumeBuilder({
         body: JSON.stringify({ url }),
       });
       const json = await parseJsonOrThrow<{ error?: string; company?: string; role?: string; job_description?: string }>(resp);
-      if (!resp.ok) throw new Error(json.error ?? "Couldn't extract JD from that URL.");
+      if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "Couldn't extract JD from that URL."));
       if (json.company) setCompany(json.company);
       if (json.role)    setRole(json.role);
       if (json.job_description) setJd(json.job_description);
@@ -639,7 +640,7 @@ export default function ResumeBuilder({
         }),
       });
       const json = await parseJsonOrThrow<AtsResult & { error?: string }>(resp);
-      if (!resp.ok) throw new Error(json.error ?? "ATS check failed.");
+      if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "ATS check failed."));
       setAtsResult(json);
     } catch (e: unknown) {
       setAtsError(e instanceof Error ? e.message : String(e));
@@ -693,12 +694,12 @@ export default function ResumeBuilder({
         body: JSON.stringify({ candidate_profile: candidateProfile, job_description: effJd }),
       });
       const json = await parseJsonOrThrow<{ error?: string; summary?: string; suggestions?: Suggestion[] }>(resp);
-      if (!resp.ok) throw new Error(json.error ?? "Could not get suggestions.");
+      if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "Could not get suggestions."));
       setSuggestions(json.suggestions ?? []);
       setSuggestSummary(json.summary ?? "");
       // User explicitly accepts suggestions before generate — nothing pre-selected.
     } catch (e: unknown) {
-      setSuggestError(e instanceof Error ? e.message : String(e));
+      setSuggestError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
     } finally {
       setSuggestLoading(false);
     }
@@ -725,7 +726,7 @@ export default function ResumeBuilder({
       formData.append("file", file);
       const resp = await fetch(apiUrl("/api/upload-resume"), { method: "POST", body: formData });
       const json = await parseJsonOrThrow<{ error?: string; text?: string }>(resp);
-      if (!resp.ok) throw new Error(json.error ?? "Upload failed");
+      if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "Upload failed"));
       const text = json.text ?? "";
       setCandidateProfile(text);
       setUploadedFileName(file.name);
@@ -862,7 +863,16 @@ export default function ResumeBuilder({
         }),
       });
 
-      if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
+      if (!resp.ok) {
+        let msg = `HTTP ${resp.status}`;
+        try {
+          const t = await resp.clone().text();
+          if (t.trim()) msg = t;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(toUserFriendlyErrorMessage(msg));
+      }
       if (!resp.body)  throw new Error("No response body");
 
       const reader  = resp.body.getReader();
@@ -947,7 +957,7 @@ export default function ResumeBuilder({
               setGenerating(false);
               setStatusMsg("");
               break;
-            case "error": throw new Error(ev.msg);
+            case "error": throw new Error(toUserFriendlyErrorMessage(typeof ev.msg === "string" ? ev.msg : String(ev.msg ?? "")));
           }
         }
       }
@@ -959,7 +969,7 @@ export default function ResumeBuilder({
       }
       return null;
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
       setGenerating(false);
       setStatusMsg("");
       return null;
@@ -2697,7 +2707,7 @@ export default function ResumeBuilder({
                           setLibraryToast("Saved to your account.");
                           window.setTimeout(() => setLibraryToast(null), 6000);
                         } catch (e: unknown) {
-                          setError(e instanceof Error ? e.message : String(e));
+                          setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
                         } finally {
                           setLibraryReSaveBusy(false);
                         }

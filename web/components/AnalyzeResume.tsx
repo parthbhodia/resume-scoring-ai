@@ -10,6 +10,7 @@ import {
   inferPrimaryCategoryFromBullet,
 } from "@/lib/analysisCategoryMatch";
 import { apiUrl } from "@/lib/utils";
+import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
 import {
   loadAnalyzeEditDraft,
@@ -415,7 +416,7 @@ export default function AnalyzeResume() {
       bindSourcePdf(file);
       persistResult(file.name.replace(/\.pdf$/i, ""), resWithMeta, draftId);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Unknown error"));
       lastPdfRef.current = null;
       bindSourcePdf(null);
     } finally {
@@ -456,7 +457,7 @@ export default function AnalyzeResume() {
       setBuilderLinkReady(true);
       persistResult(folder, resWithMeta, draftId);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Unknown error"));
     } finally {
       setLoading(false);
     }
@@ -651,7 +652,7 @@ export default function AnalyzeResume() {
       } catch { /* quota */ }
       router.push(`/?view=builder&flow=template&fromAnalyze=1${styleQ}`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Could not open Résumé Builder.");
+      setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Could not open Résumé Builder."));
     } finally {
       setBuilderOpening(false);
     }

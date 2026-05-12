@@ -5,6 +5,14 @@ import { useRouter } from "next/navigation";
 
 const PROFILE_KEY = "rn_builder_profile_prefill";
 
+export type ManualResumeFormProps = {
+  /** When set, finish saves text and calls this instead of navigating to the builder. */
+  variant?: "page" | "embedded";
+  onCompleted?: (profileText: string) => void;
+  /** First-step Back when `variant` is embedded (e.g. return to upload vs manual choice). */
+  onCancelToParent?: () => void;
+};
+
 /* ── Types ──────────────────────────────────────────────────────────── */
 
 interface WorkEntry {
@@ -498,8 +506,13 @@ function StepBar({ current, onGoto }: { current: Step; onGoto: (s: Step) => void
 
 /* ── Main component ─────────────────────────────────────────────────── */
 
-export default function ManualResumeForm() {
+export default function ManualResumeForm({
+  variant = "page",
+  onCompleted,
+  onCancelToParent,
+}: ManualResumeFormProps) {
   const router = useRouter();
+  const embedded = variant === "embedded";
   const [step, setStep] = useState<Step>("personal");
   const [personal, setPersonal] = useState<Record<string, string>>({});
   const [work, setWork] = useState<WorkEntry[]>([newWork()]);
@@ -529,40 +542,49 @@ export default function ManualResumeForm() {
   }, [currentIdx]);
 
   const handleSubmit = useCallback(() => {
-    try { sessionStorage.setItem(PROFILE_KEY, profileText.trim()); } catch { /* quota */ }
+    const trimmed = profileText.trim();
+    try { sessionStorage.setItem(PROFILE_KEY, trimmed); } catch { /* quota */ }
+    if (onCompleted) {
+      onCompleted(trimmed);
+      return;
+    }
     const q = new URLSearchParams();
     q.set("view", "builder");
     q.set("flow", "tailor");
     q.set("fromTemplateStudio", "1");
     router.push(`/?${q.toString()}`);
-  }, [router, profileText]);
+  }, [router, profileText, onCompleted]);
 
   const isLast = step === "review";
 
   return (
     <div
       style={{
-        flex: 1,
-        minHeight: 0,
+        flex: embedded ? 1 : undefined,
+        minHeight: embedded ? 0 : undefined,
         overflowY: "auto",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        padding: "48px 24px 80px",
+        padding: embedded ? "12px 16px 40px" : "48px 24px 80px",
         background: "var(--bg)",
       }}
     >
       <div style={{ width: "100%", maxWidth: 640 }}>
         {/* Header */}
-        <div style={{ marginBottom: 32, textAlign: "center" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-            Step 3 of 3 — Write Manually
-          </div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--text)", letterSpacing: -0.5, margin: 0 }}>
-            Tell us about yourself
+        <div style={{ marginBottom: embedded ? 20 : 32, textAlign: "center" }}>
+          {!embedded ? (
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+              Step 3 of 3 — Write Manually
+            </div>
+          ) : null}
+          <h1 style={{ fontSize: embedded ? 20 : 24, fontWeight: 700, color: "var(--text)", letterSpacing: -0.5, margin: 0 }}>
+            {embedded ? "Add your résumé (step by step)" : "Tell us about yourself"}
           </h1>
           <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 8, lineHeight: 1.6 }}>
-            Fill in what you have — the AI will polish and format everything.
+            {embedded
+              ? "We’ll use your answers in the layout you picked. You can tune spacing and margins next."
+              : "Fill in what you have — the AI will polish and format everything."}
           </p>
         </div>
 
@@ -639,7 +661,7 @@ export default function ManualResumeForm() {
             onMouseLeave={e => { e.currentTarget.style.background = "var(--accent)"; }}
           >
             {isLast ? (
-              <>Build my resume<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.5h8M7 3l3.5 3.5L7 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></>
+              <>{embedded ? "Continue to layout" : "Build my resume"}<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.5h8M7 3l3.5 3.5L7 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></>
             ) : (
               <>Next<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 6.5h8M7 3l3.5 3.5L7 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></>
             )}

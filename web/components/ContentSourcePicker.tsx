@@ -20,7 +20,8 @@ function formatDate(iso: string) {
 
 /* ── Upload card state ──────────────────────────────────────────────── */
 
-function UploadOption({ onDone }: { onDone: (profileText: string) => void }) {
+/** PDF → `/api/upload-resume`; reusable from Template Studio without leaving the page. */
+export function UploadResumePdfPanel({ onDone }: { onDone: (profileText: string) => void }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -389,7 +390,7 @@ export default function ContentSourcePicker() {
                 {isActive && (
                   <div style={{ padding: "0 20px 20px" }}>
                     <div style={{ height: 1, background: "var(--border)", marginBottom: 16 }} />
-                    {opt.key === "upload" && <UploadOption onDone={text => goToBuilder(text)} />}
+                    {opt.key === "upload" && <UploadResumePdfPanel onDone={text => goToBuilder(text)} />}
                     {opt.key === "history" && <HistoryOption onSelectFolder={handleSelectFolder} />}
                     {opt.key === "manual" && <ManualOption onStart={handleManualStart} />}
                   </div>

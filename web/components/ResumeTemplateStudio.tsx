@@ -15,6 +15,8 @@ import {
   type LineSpacingChoice,
   type MarginInchesChoice,
 } from "@/lib/resumeTemplateStudioPrefs";
+import { UploadResumePdfPanel } from "@/components/ContentSourcePicker";
+import ManualResumeForm from "@/components/ManualResumeForm";
 import { nameAndSubtitleLineIndices, isPlaceholderResumeHeaderLine } from "@/lib/resumePreviewNameLine";
 
 const PROFILE_KEY = "rn_builder_profile_prefill";
@@ -493,6 +495,19 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
   const [profileText, setProfileText] = useState<string | null>(null);
   const [useSample, setUseSample] = useState(false);
 
+  type StudioPhase = "pick" | "content" | "customize";
+  const [phase, setPhase] = useState<StudioPhase>(() => (fromResume ? "customize" : "pick"));
+  const [contentSubview, setContentSubview] = useState<"choice" | "manual">("choice");
+
+  useEffect(() => {
+    if (fromResume) return;
+    try {
+      if (sessionStorage.getItem(PROFILE_KEY)?.trim()) setPhase("customize");
+    } catch {
+      /* ignore */
+    }
+  }, [fromResume]);
+
   useEffect(() => {
     try {
       const p = sessionStorage.getItem(PROFILE_KEY);
@@ -524,6 +539,24 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
     router.push("/?view=analyze");
   }, [router]);
 
+  const applyProfileFromApi = useCallback((text: string) => {
+    const t = text.trim();
+    setProfileText(t || null);
+    setUseSample(!t);
+    try {
+      if (t) sessionStorage.setItem(PROFILE_KEY, t);
+      else sessionStorage.removeItem(PROFILE_KEY);
+    } catch { /* quota */ }
+    setContentSubview("choice");
+    setPhase("customize");
+  }, []);
+
+  const onPickNext = useCallback(() => {
+    persistTemplateStyleChoice(styleFolder);
+    setContentSubview("choice");
+    setPhase("content");
+  }, [styleFolder]);
+
   const onContinue = useCallback(() => {
     try {
       persistTemplateStyleChoice(styleFolder);
@@ -544,6 +577,8 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
     setStyleFolder(folder);
     persistTemplateStyleChoice(folder);
   }, []);
+
+  const showLayoutTuning = fromResume || phase === "customize";
 
   return (
     <div
@@ -613,22 +648,75 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
           flexWrap: "wrap",
         }}
       >
-        <Segmented<LineSpacingChoice>
-          label="Line spacing"
-          options={["1", "1.15", "1.5"] as const}
-          value={lineSpacing}
-          onChange={setLineSpacing}
-          formatLabel={(v) => v === "1" ? "1.0 Single" : v === "1.15" ? "1.15 Default" : "1.5 More space"}
-        />
-        <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0 }} />
-        <Segmented<MarginInchesChoice>
-          label="Margins"
-          options={["0.5", "0.75", "1"] as const}
-          value={marginIn}
-          onChange={setMarginIn}
-          formatLabel={(v) => `${v}" ${v === "0.5" ? "Narrow" : v === "0.75" ? "Normal" : "Wide"}`}
-        />
+        {!fromResume && phase === "content" ? (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setPhase("pick");
+                setContentSubview("choice");
+              }}
+              style={{
+                background: "none",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                padding: "7px 14px",
+                fontSize: 12,
+                fontWeight: 600,
+                color: "var(--text)",
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              ← Template
+            </button>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2 }}>
+              Add your résumé
+            </span>
+          </>
+        ) : null}
+        {showLayoutTuning ? (
+          <>
+            <Segmented<LineSpacingChoice>
+              label="Line spacing"
+              options={["1", "1.15", "1.5"] as const}
+              value={lineSpacing}
+              onChange={setLineSpacing}
+              formatLabel={(v) => v === "1" ? "1.0 Single" : v === "1.15" ? "1.15 Default" : "1.5 More space"}
+            />
+            <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0 }} />
+            <Segmented<MarginInchesChoice>
+              label="Margins"
+              options={["0.5", "0.75", "1"] as const}
+              value={marginIn}
+              onChange={setMarginIn}
+              formatLabel={(v) => `${v}" ${v === "0.5" ? "Narrow" : v === "0.75" ? "Normal" : "Wide"}`}
+            />
+          </>
+        ) : null}
         <div style={{ flex: 1 }} />
+        {!fromResume && phase === "customize" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setPhase("content");
+              setContentSubview("choice");
+            }}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--accent)",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              textDecoration: "underline",
+              textUnderlineOffset: 2,
+            }}
+          >
+            Edit content
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onReset}
@@ -641,33 +729,132 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
         >
           Reset &amp; start over
         </button>
-        <button
-          type="button"
-          onClick={onContinue}
-          style={{
-            padding: "8px 20px",
-            borderRadius: 8,
-            border: "none",
-            background: "var(--accent)",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            letterSpacing: -0.2,
-            display: "flex", alignItems: "center", gap: 6,
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = "var(--accent-h)"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "var(--accent)"; }}
-        >
-          Continue
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <path d="M2.5 6.5h8M7 3l3.5 3.5L7 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        {!fromResume && phase === "pick" ? (
+          <button
+            type="button"
+            onClick={onPickNext}
+            style={{
+              padding: "8px 20px",
+              borderRadius: 8,
+              border: "none",
+              background: "var(--accent)",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              letterSpacing: -0.2,
+              display: "flex", alignItems: "center", gap: 6,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--accent-h)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "var(--accent)"; }}
+          >
+            Next: add your résumé
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <path d="M2.5 6.5h8M7 3l3.5 3.5L7 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : null}
+        {showLayoutTuning ? (
+          <button
+            type="button"
+            onClick={onContinue}
+            style={{
+              padding: "8px 20px",
+              borderRadius: 8,
+              border: "none",
+              background: "var(--accent)",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              letterSpacing: -0.2,
+              display: "flex", alignItems: "center", gap: 6,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--accent-h)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "var(--accent)"; }}
+          >
+            Continue
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <path d="M2.5 6.5h8M7 3l3.5 3.5L7 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : null}
       </div>
 
-      {/* ── Body: template grid + live preview ──────────────── */}
+      {phase === "content" ? (
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            background: "var(--bg)",
+            overflow: "hidden",
+          }}
+        >
+          {contentSubview === "manual" ? (
+            <ManualResumeForm
+              variant="embedded"
+              onCompleted={applyProfileFromApi}
+              onCancelToParent={() => setContentSubview("choice")}
+            />
+          ) : (
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                WebkitOverflowScrolling: "touch",
+                padding: "32px 24px 48px",
+              }}
+            >
+              <div style={{ maxWidth: 520, margin: "0 auto" }}>
+                <h2 style={{
+                  fontSize: 18, fontWeight: 700, letterSpacing: -0.4,
+                  color: "var(--text)", margin: "0 0 8px", lineHeight: 1.25,
+                }}>
+                  Load your résumé text
+                </h2>
+                <p style={{ margin: "0 0 24px", fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
+                  Upload a PDF — we extract the text on the server — or use the same step-by-step form as elsewhere.
+                  Then you&apos;ll adjust spacing, margins, and preview before opening the builder to generate your PDF.
+                </p>
+                <UploadResumePdfPanel onDone={applyProfileFromApi} />
+                <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "24px 0" }}>
+                  <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.6 }}>OR</span>
+                  <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setContentSubview("manual")}
+                  style={{
+                    width: "100%",
+                    padding: "12px 20px",
+                    borderRadius: 10,
+                    border: "1px solid var(--border)",
+                    background: "var(--surface)",
+                    color: "var(--text)",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    letterSpacing: -0.2,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "var(--accent-bg)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--surface)"; }}
+                >
+                  Enter my résumé manually
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+      <>
+      {/* Body: template grid + live preview */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row", overflow: "hidden" }}>
 
         {/* Template gallery */}
@@ -690,7 +877,9 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
               Select a template
             </h1>
             <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
-              Pick a layout — preview updates live on the right. Spacing and margins apply to the final PDF.
+              {phase === "pick"
+                ? "Choose a layout, then add your résumé text. You can change the template later while you tune the PDF."
+                : "Pick a layout — preview updates live on the right. Spacing and margins apply to the final PDF."}
             </p>
           </div>
 
@@ -761,7 +950,11 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
                 disabled={!hasExtract}
               />
               Sample text
-              {!hasExtract ? <span style={{ fontSize: 10, color: "var(--dim)" }}>(upload or analyze first)</span> : null}
+              {!hasExtract ? (
+                <span style={{ fontSize: 10, color: "var(--dim)" }}>
+                  {phase === "pick" ? "(add résumé on next step)" : "(upload or analyze first)"}
+                </span>
+              ) : null}
             </label>
           </div>
 
@@ -789,6 +982,8 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
           </div>
         </section>
       </div>
+      </>
+      )}
     </div>
   );
 }
