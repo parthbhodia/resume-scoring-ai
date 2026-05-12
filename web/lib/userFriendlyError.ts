@@ -17,10 +17,23 @@ export function messageForNonJsonApiFailure(status: number, bodySnippet: string)
   const hint = bodySnippet.replace(/\s+/g, " ").trim().slice(0, 120);
 
   if (status === 404) {
+    const looksHtml =
+      /^</.test(hint.trim()) ||
+      /<!doctype/i.test(hint) ||
+      (hint.length > 20 && /<html/i.test(hint));
+    if (looksHtml) {
+      return (
+        `HTTP 404 from ${base}, but the body looks like a normal web page (HTML), not the Python API. ` +
+        `NEXT_PUBLIC_API_URL is probably pointing at your Next/marketing host instead of Starlette, ` +
+        `or you are viewing an export built without the API URL. Fix: set NEXT_PUBLIC_API_URL in web/.env.local ` +
+        `to http://127.0.0.1:8765 (or your deployed API), stop and run npm run dev again, then hard-refresh. ` +
+        `In DevTools → Network, failed calls should hit port 8765 and return JSON, not HTML.`
+      );
+    }
     return (
-      `Nothing answered at ${base} — the résumé API is missing or the URL is wrong. ` +
-      `Local: from the project root run python resume_gui/app.py (default port 8765). ` +
-      `Hosted: set NEXT_PUBLIC_API_URL to your API base URL and rebuild the web app.`
+      `HTTP 404 from ${base} — no matching /api route (plain “Not Found”). ` +
+      `Start the backend from the project root: python resume_gui/app.py (port 8765). ` +
+      `If it is running, confirm DevTools → Network shows the full URL as ${base}/api/… and that nothing else is bound to that port.`
     );
   }
   if (status === 502 || status === 503 || status === 504) {

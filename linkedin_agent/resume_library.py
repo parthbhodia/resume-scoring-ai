@@ -3106,6 +3106,30 @@ def _find_company_reference(company: str) -> Optional[str]:
     return best
 
 
+def _rating_explain_model_chain() -> List[str]:
+    """Models for post-stream ratings and change explanations.
+
+    When ``grok_preferred_for_throughput()`` (XAI key set, ``LLM_PROVIDER`` not ``gemini``),
+    try Grok **before** Gemini so production does not burn free-tier Flash/Pro on every
+    generate after Grok already produced the résumé body.
+    """
+    gemini_models: List[str] = [_REASONING_MODEL_GEMINI, primary_gemini_flash_model()]
+    grok_models: List[str] = []
+    if (os.environ.get("XAI_API_KEY") or "").strip():
+        fast = (os.environ.get("GROK_MODEL") or "grok-4-1-fast-non-reasoning").strip() or "grok-4-1-fast-non-reasoning"
+        grok_models = [_REASONING_MODEL_GROK, fast]
+        seen_g: Set[str] = set()
+        grok_models = [m for m in grok_models if m not in seen_g and not seen_g.add(m)]
+
+    if grok_preferred_for_throughput() and grok_models:
+        merged = grok_models + gemini_models
+    else:
+        merged = gemini_models + grok_models
+
+    seen_all: Set[str] = set()
+    return [m for m in merged if m not in seen_all and not seen_all.add(m)]
+
+
 def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Optional[Dict]:
     prompt = (
         "You are a coach giving the candidate an honest, direct read on their fit for a job. Write the assessment in "
@@ -3144,10 +3168,7 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
         f"RESUME BODY (LaTeX — ignore formatting commands, read only the content. This is the ONLY source of truth about the candidate's experience):\n{latex_body[:6000]}"
     )
-    # Use reasoning models for ratings: pro → flash → grok-4 (reasoning) → grok fast
-    reasoning_chain: list[str] = [_REASONING_MODEL_GEMINI, primary_gemini_flash_model()]
-    if os.environ.get("XAI_API_KEY"):
-        reasoning_chain += [_REASONING_MODEL_GROK, "grok-4-1-fast-non-reasoning"]
+    reasoning_chain = _rating_explain_model_chain()
 
     for i, m in enumerate(reasoning_chain):
         if i > 0:
@@ -3252,9 +3273,7 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         f"OLD RESUME (LaTeX):\n{old_body[:4500]}\n\n"
         f"NEW RESUME (LaTeX):\n{new_body[:4500]}"
     )
-    analysis_chain: list[str] = [_REASONING_MODEL_GEMINI, primary_gemini_flash_model()]
-    if os.environ.get("XAI_API_KEY"):
-        analysis_chain += [_REASONING_MODEL_GROK, "grok-4-1-fast-non-reasoning"]
+    analysis_chain = _rating_explain_model_chain()
     for i, m in enumerate(analysis_chain):
         if i > 0:
             time.sleep(1)
