@@ -16,6 +16,16 @@ export function isPlaceholderResumeHeaderLine(raw: string): boolean {
   return false;
 }
 
+export function isBareLocationLabelLine(raw: string): boolean {
+  const s = raw.trim();
+  return /^location\s*:\s*$/i.test(s);
+}
+
+/** "Jane Doe Location:" with nothing after the colon — strip for display. */
+export function stripBareLocationSuffixFromNameLine(raw: string): string {
+  return raw.replace(/\s+Location:\s*$/i, "").trim();
+}
+
 /** First meaningful name line + following line for subtitle/contact styling (original line indices). */
 export function nameAndSubtitleLineIndices(lines: string[]): { nameLineIndex: number; subtitleLineIndex: number } {
   const nonEmptyIndices = lines.reduce<number[]>((acc, line, i) => {
@@ -26,8 +36,15 @@ export function nameAndSubtitleLineIndices(lines: string[]): { nameLineIndex: nu
   const namePos = nonEmptyIndices.findIndex(i => !isPlaceholderResumeHeaderLine(lines[i]));
   const nameLineIndex = namePos >= 0 ? nonEmptyIndices[namePos] : nonEmptyIndices[0];
   const posInList = nonEmptyIndices.indexOf(nameLineIndex);
-  const subtitleLineIndex =
-    posInList >= 0 && posInList + 1 < nonEmptyIndices.length ? nonEmptyIndices[posInList + 1] : -1;
+  let subtitleLineIndex = -1;
+  if (posInList >= 0) {
+    for (let k = posInList + 1; k < nonEmptyIndices.length; k++) {
+      const idx = nonEmptyIndices[k];
+      if (isBareLocationLabelLine(lines[idx])) continue;
+      subtitleLineIndex = idx;
+      break;
+    }
+  }
   return { nameLineIndex, subtitleLineIndex };
 }
 

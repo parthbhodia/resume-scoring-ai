@@ -24,7 +24,13 @@ import {
 import { extractProfileHintsFromResumeText } from "@/lib/profileFromResumeText";
 import { resumeLineMatchesSuggestionOriginal, computeCombinedMatchTextByLineIndex } from "@/lib/suggestionResumeMatch";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
-import { nameAndSubtitleLineIndices, isPlaceholderResumeHeaderLine, dedupeRepeatedLeadingResumeHeader } from "@/lib/resumePreviewNameLine";
+import {
+  nameAndSubtitleLineIndices,
+  isPlaceholderResumeHeaderLine,
+  dedupeRepeatedLeadingResumeHeader,
+  stripBareLocationSuffixFromNameLine,
+  isBareLocationLabelLine,
+} from "@/lib/resumePreviewNameLine";
 
 import ScoreRing    from "./ScoreRing";
 import MatchBreakdownCards from "./MatchBreakdownCards";
@@ -3956,7 +3962,7 @@ function ResumePaperView({
           if (nameCenteredCaps) {
             return (
               <div key={i} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5, marginBottom: 2, textAlign: "center", textTransform: "uppercase" }}>
-                {paperLineDisplayContent(t)}
+                {paperLineDisplayContent(stripBareLocationSuffixFromNameLine(t))}
               </div>
             );
           }
@@ -3975,11 +3981,12 @@ function ResumePaperView({
                 textTransform: "none",
               }}
             >
-              {paperLineDisplayContent(t)}
+              {paperLineDisplayContent(stripBareLocationSuffixFromNameLine(t))}
             </div>
           );
         }
         if (subtitleLineIndex >= 0 && i === subtitleLineIndex && !isAllCaps(t)) {
+          if (isBareLocationLabelLine(t)) return null;
           return (
             <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: nameCenteredCaps ? "center" : "left", marginBottom: 8 }}>
               {paperLineDisplayContent(t)}
@@ -4016,6 +4023,22 @@ function ResumePaperView({
         const mergedPrevLine = i > 0 ? (combinedMatchByLine[i - 1] ?? "").trim() : "";
         if (acceptedSug && i > 0 && mergedCur !== "" && mergedCur === mergedPrevLine) {
           return <div key={i} style={{ display: "none" }} aria-hidden />;
+        }
+
+        /* Wrapped bullet row where a later physical line lost the bullet glyph (PDF extract). */
+        const mergedSameAsPrev = i > 0 && mergedCur !== "" && mergedCur === mergedPrevLine;
+        if (!isBullet(t) && mergedSameAsPrev && isBullet(mergedCur) && !isAllCaps(t)) {
+          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 4, paddingLeft: 6, ...hlStyle };
+          const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
+          const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
+          return (
+            <div key={i} {...p} {...lineMark}>
+              <span style={{ flexShrink: 0, marginTop: 1, visibility: "hidden", userSelect: "none" }} aria-hidden>
+                •
+              </span>
+              <span>{paperLineDisplayContent(innerFromAccepted)}</span>
+            </div>
+          );
         }
 
         if (isBullet(t)) {

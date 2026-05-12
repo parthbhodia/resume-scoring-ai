@@ -97,6 +97,23 @@ export function computeCombinedMatchTextByLineIndex(lines: string[]): string[] {
     i = j + 1;
   }
 
+  /* PDF extracts sometimes drop the bullet on wrapped lines — a lowercase continuation
+     sits in its own merge group and loses suggestion / bullet styling (orphan line).
+     Attach those rows to the merged block of the nearest preceding bullet line. */
+  for (let i = 0; i < lines.length - 1; i++) {
+    const prevOut = (out[i] ?? "").trim();
+    const nextOut = (out[i + 1] ?? "").trim();
+    if (!prevOut || prevOut === nextOut) continue;
+    const rawNext = lines[i + 1];
+    const nextT = rawNext.trim();
+    if (!nextT) continue;
+    if (isBulletLine(rawNext) || isAllCapsSectionLine(nextT) || isPlaceholderResumeHeaderLine(rawNext)) continue;
+    if (!/^[a-z]/.test(nextT)) continue;
+    const rawCur = lines[i];
+    const prevIsBulletRow = isBulletLine(rawCur) || isBulletLine(prevOut);
+    if (prevIsBulletRow) out[i + 1] = out[i];
+  }
+
   return out;
 }
 
