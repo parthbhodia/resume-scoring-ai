@@ -2735,20 +2735,6 @@ export default function ResumeBuilder({
                         PDF preview appears when the compile step finishes.
                       </div>
                     )}
-                    {result.pdfUrl ? (
-                      <p style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
-                        If the preview is blank,{" "}
-                        <a
-                          href={result.pdfUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ color: "var(--accent)", fontWeight: 600 }}
-                        >
-                          open the PDF
-                        </a>
-                        .
-                      </p>
-                    ) : null}
                   </div>
 
                   <div
