@@ -863,15 +863,44 @@ def _inject_latex_packages_before_document(pre: str, packages: List[str]) -> str
     return pre.rstrip() + "\n" + "\n".join(packages) + "\n"
 
 
+def _tweak_harshibar_reference_textheight(pre_doc: str) -> str:
+    """Match github.com/harshibar/resume (+1.0in textheight); forks often keep +1.5in and spill to a second page."""
+    return re.sub(
+        r"\\addtolength\{\\textheight\}\{1\.5in\}",
+        r"\\addtolength{\\textheight}{1.0in}",
+        pre_doc,
+        count=1,
+    )
+
+
+def _harshibar_compact_preamble_suffix() -> str:
+    """Tight itemize + raggedbottom like canonical Harshibar; requires enumitem (present in Harshibar reference)."""
+    return (
+        "\n% === resume-scoring-ai: Harshibar compact (canonical harshibar/resume vertical density) ===\n"
+        "\\makeatletter\n"
+        "\\raggedbottom\n"
+        "\\@ifpackageloaded{enumitem}{%\n"
+        "  \\AtBeginDocument{%\n"
+        "    \\setlist[itemize]{nosep,topsep=0pt,itemsep=1pt,parsep=0pt,partopsep=0pt}%\n"
+        "  }%\n"
+        "}{}%\n"
+        "\\makeatother\n"
+        "\\setlength{\\parskip}{0pt}\n"
+        "% === end Harshibar compact ===\n"
+    )
+
+
 def _build_export_preamble(
     reference_tex: Optional[str],
     role: str,
     company: str,
     contact: Optional[Dict[str, str]],
+    reference_folder: Optional[str] = None,
 ) -> str:
     """Use the selected reference template preamble when possible; always emit a filled contact block."""
     frag = _canonical_contact_fragment()
     rt = (reference_tex or "").strip()
+    harshibar = (reference_folder or "").strip() == "Harshibar_Template1"
     if rt and "\\begin{document}" in rt and frag:
         pre_doc, sep, _rest = rt.partition("\\begin{document}")
         if sep:
@@ -883,6 +912,9 @@ def _build_export_preamble(
             if "ulem" not in low:
                 adds.append("\\usepackage[normalem]{ulem}")
             pre_doc = _inject_latex_packages_before_document(pre_doc, adds)
+            if harshibar:
+                pre_doc = _tweak_harshibar_reference_textheight(pre_doc)
+                pre_doc = pre_doc.rstrip() + _harshibar_compact_preamble_suffix()
             combined = pre_doc + "\\begin{document}\n" + frag
             return _apply_preamble_subs(combined, role, company, contact)
     return _apply_preamble_subs(_LATEX_PREAMBLE, role, company, contact)
@@ -3523,7 +3555,9 @@ def generate_latex_resume(
 
     # ── Assemble + save ───────────────────────────────────────────────────────
     contact_hints = _contact_from_candidate_profile(candidate_profile) if candidate_profile else {}
-    preamble = _build_export_preamble(reference_tex, role, company, contact_hints)
+    preamble = _build_export_preamble(
+        reference_tex, role, company, contact_hints, reference_folder=ref_folder
+    )
     full_tex = preamble + "\n" + latex_body + _LATEX_FOOTER
     full_tex = _sanitize_full_resume_tex(full_tex)
 
@@ -3831,7 +3865,9 @@ def _reference_folder_layout_hint(reference_folder: Optional[str]) -> str:
             "On \\resumeSubheading / quad heading lines, keep a visible space between the employer name and the month/date "
             "(e.g. `Morgan Stanley` then `Dec 2023`, not `Morgan StanleyDec 2023`). "
             "Put the job title in the heading row (\\resumeTrioHeading or \\resumeQuadHeading italics line) — not as the first "
-            "\\resumeItem bullet. First \\resumeItem under each role must be an accomplishment, not the title alone.\n"
+            "\\resumeItem bullet. First \\resumeItem under each role must be an accomplishment, not the title alone. "
+            "Keep vertical density like github.com/harshibar/resume (one page): avoid extra \\vspace between blocks; "
+            "do not pad sections with blank lines or large \\\\vspace.\n"
         )
     if f == "MaltaCV_Modern":
         return (
@@ -4021,10 +4057,13 @@ def _save_and_compile(
     compile_pdf=True,
     reference_tex: Optional[str] = None,
     candidate_profile: Optional[str] = None,
+    reference_folder: Optional[str] = None,
 ):
     """Assemble full .tex, save to library, optionally compile PDF. Returns result dict."""
     contact_hints = _contact_from_candidate_profile(candidate_profile) if candidate_profile else {}
-    preamble = _build_export_preamble(reference_tex, role, company, contact_hints)
+    preamble = _build_export_preamble(
+        reference_tex, role, company, contact_hints, reference_folder=reference_folder
+    )
     full_tex  = preamble + "\n" + latex_body + _LATEX_FOOTER
     full_tex = _sanitize_full_resume_tex(full_tex)
 
@@ -4409,6 +4448,7 @@ def stream_latex_resume(
             compile_pdf,
             reference_tex=reference_tex,
             candidate_profile=candidate_profile,
+            reference_folder=ref_folder,
         )
         yield {"event": "saved", "folder": saved["folder"], "tex_path": saved["tex_path"]}
 

@@ -3880,6 +3880,9 @@ function ResumePaperView({
   const folder = templateFolder ?? "";
   const isMalta = folder === "MaltaCV_Modern";
   const isHarshibar = folder === "Harshibar_Template1";
+  /** Match canonical Harshibar PDF density in the HTML paper preview (github.com/harshibar/resume). */
+  const harshibarCompactPreview = isHarshibar;
+  const resolvedLineHeight = harshibarCompactPreview ? Math.min(lineHeight, 1.42) : lineHeight;
   const nameCenteredCaps = !isMalta && !isHarshibar;
   const fontFamily =
     isMalta || isHarshibar
@@ -3939,13 +3942,13 @@ function ResumePaperView({
       padding: `${paperPaddingY}px ${paperPaddingX}px ${Math.max(28, paperPaddingY + 18)}px`,
       fontFamily,
       fontSize: baseFontPx,
-      lineHeight,
+      lineHeight: resolvedLineHeight,
       color: "#1e293b",
       minHeight: 480,
     }}>
       {paperLines.map((line, i) => {
         const t = line.trim();
-        if (!t) return <div key={i} style={{ height: 7 }} />;
+        if (!t) return <div key={i} style={{ height: harshibarCompactPreview ? 4 : 7 }} />;
         if (isPlaceholderResumeHeaderLine(line) && i !== nameLineIndex) return null;
 
         const matchText = (combinedMatchByLine[i] ?? "").trim() || t;
@@ -4007,15 +4010,15 @@ function ResumePaperView({
         if (subtitleLineIndex >= 0 && i === subtitleLineIndex && !isAllCaps(t)) {
           if (isBareLocationLabelLine(t)) return null;
           return (
-            <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: nameCenteredCaps ? "center" : "left", marginBottom: 8 }}>
+            <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: nameCenteredCaps ? "center" : "left", marginBottom: harshibarCompactPreview ? 5 : 8 }}>
               {paperLineDisplayContent(t)}
             </div>
           );
         }
         if (isAllCaps(t)) {
           return (
-            <div key={i} style={{ marginTop: 14, marginBottom: 4 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: sectionAccentColor, marginBottom: 5 }}>{t}</div>
+            <div key={i} style={{ marginTop: harshibarCompactPreview ? 9 : 14, marginBottom: harshibarCompactPreview ? 3 : 4 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: sectionAccentColor, marginBottom: harshibarCompactPreview ? 3 : 5 }}>{t}</div>
               <div
                 role="presentation"
                 aria-hidden
@@ -4024,7 +4027,7 @@ function ResumePaperView({
                   background: sectionAccentColor,
                   opacity: 0.5,
                   borderRadius: 1,
-                  marginBottom: 10,
+                  marginBottom: harshibarCompactPreview ? 6 : 10,
                 }}
               />
             </div>
@@ -4047,7 +4050,7 @@ function ResumePaperView({
         /* Wrapped bullet row where a later physical line lost the bullet glyph (PDF extract). */
         const mergedSameAsPrev = i > 0 && mergedCur !== "" && mergedCur === mergedPrevLine;
         if (!isBullet(t) && mergedSameAsPrev && isBullet(mergedCur) && !isAllCaps(t)) {
-          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 4, paddingLeft: 6, ...hlStyle };
+          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: harshibarCompactPreview ? 2 : 4, paddingLeft: 6, ...hlStyle };
           const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
           const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
           return (
@@ -4061,7 +4064,7 @@ function ResumePaperView({
         }
 
         if (isBullet(t)) {
-          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 4, paddingLeft: 6, ...hlStyle };
+          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: harshibarCompactPreview ? 2 : 4, paddingLeft: 6, ...hlStyle };
           const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
           const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
           return (
@@ -4071,7 +4074,7 @@ function ResumePaperView({
             </div>
           );
         }
-        const base: React.CSSProperties = { marginBottom: 4, ...hlStyle };
+        const base: React.CSSProperties = { marginBottom: harshibarCompactPreview ? 2 : 4, ...hlStyle };
         const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
         const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
         return <div key={i} {...p} {...lineMark}>{acceptedSug ? paperLineDisplayContent(innerFromAccepted) : paperLineDisplayContent(t)}</div>;
