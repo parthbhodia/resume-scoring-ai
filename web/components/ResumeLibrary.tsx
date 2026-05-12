@@ -15,6 +15,7 @@ import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
 import type { ResumeRecord } from "@/lib/types";
 import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
 import { fetchResumes, getSupabaseClient } from "@/lib/supabase";
+import { RESUME_LIBRARY_CHANGED_EVENT } from "@/lib/resumeLibraryEvents";
 
 type SortKey = "recent" | "score" | "company";
 
@@ -68,9 +69,19 @@ export default function ResumeLibrary({ onUseAsBase }: {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
       void syncLibrary();
     });
+
+    const onRemoteResumeWrite = () => {
+      void syncLibrary();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener(RESUME_LIBRARY_CHANGED_EVENT, onRemoteResumeWrite);
+    }
     return () => {
       cancelled = true;
       subscription.unsubscribe();
+      if (typeof window !== "undefined") {
+        window.removeEventListener(RESUME_LIBRARY_CHANGED_EVENT, onRemoteResumeWrite);
+      }
     };
   }, []);
 

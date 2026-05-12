@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { ResumeRecord, Criterion, RatingsData } from "./types";
 import { type ProfileFormState, EMPTY_PROFILE } from "./profileStorage";
+import { dispatchResumeLibraryChanged } from "./resumeLibraryEvents";
 
 /* ── Analyze-history types ───────────────────────────────────── */
 // result is typed as Record<string,unknown> here because the DB stores raw
@@ -53,6 +54,30 @@ export async function fetchResumes(): Promise<ResumeRecord[]> {
   return rows;
 }
 
+function formatSupabaseWriteError(err: { message?: string; details?: string; hint?: string }): string {
+  const parts = [err.message, err.details, err.hint].filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+  return parts.join(" — ") || "Database request failed.";
+}
+
+/** Coerce match score for `resumes.score` (int column). */
+function coerceResumeScore(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(Math.min(100, Math.max(0, n)));
+}
+
+/** Coerce verdict / any model field to plain text for `resumes.verdict`. */
+function coerceVerdictText(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v.trim() || null;
+  try {
+    return String(v).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function upsertResume(
   folder: string,
   company: string,
@@ -74,38 +99,74 @@ export async function upsertResume(
     );
   }
 
-  const { data, error } = await db
+  const row = {
+    folder: folder.trim(),
+    company: (company ?? "").trim() || "—",
+    role: (role ?? "").trim() || "—",
+    model_used: (model ?? "").trim() || null,
+    tex_path: (texPath ?? "").trim() || null,
+    pdf_url: pdfUrl && String(pdfUrl).trim() ? String(pdfUrl).trim() : null,
+    score: coerceResumeScore(ratings?.match_score),
+    verdict: coerceVerdictText(ratings?.verdict),
+    job_description: jobDescription?.trim() || null,
+    user_id,
+  };
+
+  /**
+   * Prefer explicit select → update / insert over `.upsert(..., onConflict: "user_id,folder")`.
+   * Some PostgREST / constraint setups return 400 on composite upsert even when a matching unique index exists.
+   */
+  const { data: existing, error: selErr } = await db
     .from("resumes")
-    .upsert(
-      {
-        folder,
-        company,
-        role,
-        model_used: model,
-        tex_path: texPath,
-        pdf_url: pdfUrl,
-        score: ratings?.match_score ?? null,
-        verdict: ratings?.verdict ?? null,
-        job_description: jobDescription?.trim() || null,
-        user_id,
-      },
-      { onConflict: "user_id,folder" },
-    )
     .select("id")
-    .single();
+    .eq("user_id", user_id)
+    .eq("folder", row.folder)
+    .maybeSingle();
 
-  if (error) throw error;
-  const resumeId: string = data.id;
+  if (selErr) {
+    throw new Error(`Library save failed: ${formatSupabaseWriteError(selErr)}`);
+  }
 
+  let resumeId: string;
+  if (existing?.id) {
+    const { data: upd, error: upErr } = await db
+      .from("resumes")
+      .update(row)
+      .eq("id", existing.id as string)
+      .select("id")
+      .single();
+    if (upErr) {
+      throw new Error(`Library save failed: ${formatSupabaseWriteError(upErr)}`);
+    }
+    resumeId = upd!.id as string;
+  } else {
+    const { data: ins, error: inErr } = await db
+      .from("resumes")
+      .insert(row)
+      .select("id")
+      .single();
+    if (inErr) {
+      throw new Error(`Library save failed: ${formatSupabaseWriteError(inErr)}`);
+    }
+    resumeId = ins!.id as string;
+  }
+
+  const { error: delCritAll } = await db.from("criteria").delete().eq("resume_id", resumeId);
+  if (delCritAll) {
+    throw new Error(`Library save failed (criteria): ${formatSupabaseWriteError(delCritAll)}`);
+  }
   if (ratings?.criteria?.length) {
     const rows = ratings.criteria.map((c: Criterion) => ({
       resume_id: resumeId,
       name: c.name,
       weight: c.weight,
-      score: c.score,
-      notes: c.notes,
+      score: typeof c.score === "number" && Number.isFinite(c.score) ? Math.round(c.score) : null,
+      notes: typeof c.notes === "string" ? c.notes : coerceVerdictText(c.notes),
     }));
-    await db.from("criteria").upsert(rows, { onConflict: "resume_id,name" });
+    const { error: insCrit } = await db.from("criteria").insert(rows);
+    if (insCrit) {
+      throw new Error(`Library save failed (criteria): ${formatSupabaseWriteError(insCrit)}`);
+    }
   }
 
   if (ratings) {
@@ -115,10 +176,14 @@ export async function upsertResume(
     ];
     if (signals.length) {
       await db.from("resume_signals").delete().eq("resume_id", resumeId);
-      await db.from("resume_signals").insert(signals);
+      const { error: sigErr } = await db.from("resume_signals").insert(signals);
+      if (sigErr) {
+        throw new Error(`Library save failed (signals): ${formatSupabaseWriteError(sigErr)}`);
+      }
     }
   }
 
+  dispatchResumeLibraryChanged();
   return resumeId;
 }
 

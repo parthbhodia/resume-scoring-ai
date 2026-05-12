@@ -3,8 +3,35 @@
 import Link from "next/link";
 import type { Criterion } from "@/lib/types";
 import { scoreColor, weightColor } from "@/lib/utils";
+import {
+  inferProfileSectionFromCriterionName,
+  profileSectionDomId,
+  storeProfileFocusContext,
+} from "@/lib/profileFocusFromMatch";
 
-export default function MatchBreakdownCards({ criteria }: { criteria: Criterion[] }) {
+function sectionButtonLabel(section: ReturnType<typeof inferProfileSectionFromCriterionName>): string {
+  switch (section) {
+    case "education":
+      return "Open Education in profile";
+    case "contact":
+      return "Open contact & links";
+    case "roles":
+      return "Open job preferences";
+    case "tailoring":
+      return "Open tailoring defaults";
+    default:
+      return "Open headline in profile";
+  }
+}
+
+export default function MatchBreakdownCards({
+  criteria,
+  hasLineDiff,
+}: {
+  criteria: Criterion[];
+  /** When the tailor run produced a diff, link users to the line-by-line block on the same page. */
+  hasLineDiff?: boolean;
+}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {criteria.map((c, i) => {
@@ -12,6 +39,9 @@ export default function MatchBreakdownCards({ criteria }: { criteria: Criterion[
         const wc = weightColor(c.weight);
         const weak = c.score <= 3;
         const notes = (c.notes ?? "").replace(/^\s+/, "").trimEnd();
+        const section = inferProfileSectionFromCriterionName(c.name);
+        const profileHash = profileSectionDomId(section);
+        const profileHref = `/?view=profile&prefill=1#${profileHash}`;
         return (
           <div
             key={i}
@@ -89,7 +119,14 @@ export default function MatchBreakdownCards({ criteria }: { criteria: Criterion[
             ) : null}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
               <Link
-                href="/?view=profile"
+                href={profileHref}
+                onClick={() =>
+                  storeProfileFocusContext({
+                    criterion: c.name,
+                    notes: notes || "",
+                    section,
+                  })
+                }
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -104,8 +141,29 @@ export default function MatchBreakdownCards({ criteria }: { criteria: Criterion[
                   fontFamily: "inherit",
                 }}
               >
-                Add detail in profile
+                {sectionButtonLabel(section)}
               </Link>
+              {hasLineDiff ? (
+                <a
+                  href="#rb-results-diff"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    padding: "6px 12px",
+                    minHeight: 36,
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--surface)",
+                    color: "var(--text)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  View line-by-line changes
+                </a>
+              ) : null}
             </div>
           </div>
         );

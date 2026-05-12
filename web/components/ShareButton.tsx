@@ -22,7 +22,32 @@ interface ShareResp {
   pdf_url?: string;
   views?:   number;
   reused?:  boolean;
-  error?:   string;
+  /** Backend may send a string or structured validation payload — never pass raw objects to `new Error()`. */
+  error?: unknown;
+}
+
+/** Avoid `new Error(object)` → message `"[object Object]"` in the share popover. */
+function toUserFacingShareError(x: unknown): string {
+  if (x == null || x === "") return "";
+  if (typeof x === "string") return x;
+  if (typeof x === "number" || typeof x === "boolean") return String(x);
+  if (Array.isArray(x)) {
+    const parts = x.map(toUserFacingShareError).filter(Boolean);
+    return parts.length ? parts.join("; ") : "";
+  }
+  if (typeof x === "object") {
+    const o = x as Record<string, unknown>;
+    if (typeof o.detail === "string") return o.detail;
+    if (Array.isArray(o.detail)) return toUserFacingShareError(o.detail);
+    if (typeof o.message === "string") return o.message;
+    if (typeof o.error === "string") return o.error;
+    try {
+      return JSON.stringify(x);
+    } catch {
+      return "Request failed.";
+    }
+  }
+  return String(x);
 }
 
 export default function ShareButton({ folder, pdfUrl, userId, ensureLibraryRow }: {
@@ -93,7 +118,7 @@ export default function ShareButton({ folder, pdfUrl, userId, ensureLibraryRow }
         });
       let resp = await postShare();
       let json = await parseJsonOrThrow<ShareResp>(resp);
-      const errMsg = (typeof json.error === "string" ? json.error : "").toLowerCase();
+      const errMsg = toUserFacingShareError(json.error).toLowerCase();
       const needsSync =
         (!resp.ok || !json.shortid) &&
         ensureLibraryRow &&
@@ -103,8 +128,13 @@ export default function ShareButton({ folder, pdfUrl, userId, ensureLibraryRow }
         resp = await postShare();
         json = await parseJsonOrThrow<ShareResp>(resp);
       }
-      if (!resp.ok || !json.shortid) throw new Error(json.error ?? "Share failed.");
-      setShortid(json.shortid);
+      if (!resp.ok || !json.shortid) {
+        const msg = toUserFacingShareError(json.error) || "Share failed.";
+        throw new Error(msg);
+      }
+      const sid = typeof json.shortid === "string" ? json.shortid : "";
+      if (!sid) throw new Error("Share response missing link id.");
+      setShortid(sid);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -173,9 +203,11 @@ export default function ShareButton({ folder, pdfUrl, userId, ensureLibraryRow }
         <div style={{ fontSize: 12, color: "var(--dim)" }}>Generating link…</div>
       )}
 
-      {error && (
-        <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 8 }}>{error}</div>
-      )}
+      {error ? (
+        <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 8, lineHeight: 1.45, wordBreak: "break-word" }}>
+          {toUserFacingShareError(error)}
+        </div>
+      ) : null}
 
       {shortid && (
         <>

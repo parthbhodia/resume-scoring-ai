@@ -99,6 +99,15 @@ flowchart LR
 - **Responsive**: Analyze uses split grid on wide viewports and collapsible preview on narrow; respect existing breakpoints when adding panes.
 - **Accessibility**: Interactive elements need visible focus; prefer native semantics (`button`, `details/summary`) before custom widgets.
 
+### 4.7 Template customize: live HTML + LaTeX PDF
+
+After a successful **template / studio** generate (`studioHandoff`), the builder shows **two** previews:
+
+1. **Live preview (HTML)** — `ResumePaperView` with Style tab controls (accent, font size, spacing). Updates **client-side only**.
+2. **LaTeX PDF (exported)** — iframe of the last compiled PDF from the server. Updates only after **Recompile PDF** (or the initial generate) finishes.
+
+See **[LIVE_EDITOR_AND_LATEX.md](./LIVE_EDITOR_AND_LATEX.md)** for rationale, code pointers, and copy guidelines.
+
 ---
 
 ## 5. Backend (`resume_gui/`)
@@ -168,3 +177,4 @@ Exact signatures evolve — **grep `Route(` in `app.py`** when wiring new client
 ## 8. Related docs
 
 - [Analyze: live preview column](./analyze-preview-flow.md) — Zustand, highlights, synthetic extract, PDF export limits.
+- [Live editor vs LaTeX export](./LIVE_EDITOR_AND_LATEX.md) — template customize dual preview, `ResumePaperView`, when to recompile.

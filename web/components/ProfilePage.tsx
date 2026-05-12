@@ -22,6 +22,12 @@ import {
   profileHasMeaningfulData,
   profileLooksSparse,
 } from "@/lib/profileStorage";
+import {
+  clearProfileFocusContext,
+  profileSectionDomId,
+  readProfileFocusContext,
+  type ProfileFocusContext,
+} from "@/lib/profileFocusFromMatch";
 
 export type { ProfileFormState };
 
@@ -205,13 +211,17 @@ function Card({
   title,
   badge,
   children,
+  domId,
 }: {
   title: string;
   badge?: string;
   children: React.ReactNode;
+  /** Stable anchor for deep-links from match breakdown → profile. */
+  domId?: string;
 }) {
   return (
     <section
+      id={domId}
       style={{
         borderRadius: "var(--radius-xl)",
         border: "1px solid var(--border)",
@@ -346,6 +356,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<"email" | "linkedin" | "portfolio", string>>>({});
   const obFileRef = useRef<HTMLInputElement>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
+  const [matchCoach, setMatchCoach] = useState<ProfileFocusContext | null>(null);
 
   const dismissEmptyHint = useCallback(() => {
     setEmptyHintDismissed(true);
@@ -413,9 +424,52 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
     }
   }, [prefill]);
 
+  /** Match breakdown → profile deep-link: show coach banner + scroll to section. */
+  useEffect(() => {
+    if (initPhase !== "form") return;
+    setMatchCoach(readProfileFocusContext());
+  }, [initPhase]);
+
+  useEffect(() => {
+    if (initPhase !== "form" || typeof window === "undefined") return;
+    const fromHash = window.location.hash.replace(/^#/, "").trim();
+    const targetId =
+      fromHash.startsWith("rn-profile-") ? fromHash : matchCoach ? profileSectionDomId(matchCoach.section) : "";
+    if (!targetId) return;
+    const t = window.setTimeout(() => {
+      const el = document.getElementById(targetId);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const focusable = el?.querySelector<HTMLElement>("input, textarea, select");
+      focusable?.focus({ preventScroll: true });
+    }, 160);
+    return () => window.clearTimeout(t);
+  }, [initPhase, matchCoach]);
+
   const patch = useCallback((p: Partial<ProfileFormState>) => {
     setForm(prev => ({ ...prev, ...p }));
   }, []);
+
+  const dismissMatchCoach = useCallback(() => {
+    clearProfileFocusContext();
+    setMatchCoach(null);
+    if (typeof window !== "undefined" && window.location.hash.startsWith("#rn-profile-")) {
+      try {
+        const u = new URL(window.location.href);
+        u.hash = "";
+        window.history.replaceState(null, "", u.pathname + u.search);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  const applyNoteToHeadline = useCallback(() => {
+    if (!matchCoach?.notes.trim()) return;
+    const next = matchCoach.notes.replace(/\s+/g, " ").trim().slice(0, 140);
+    if (!next) return;
+    if (typeof window !== "undefined" && !window.confirm("Replace your one-line headline with this analyst note? You can undo with Discard until you leave the page.")) return;
+    patch({ headline: next });
+  }, [matchCoach, patch]);
 
   const save = useCallback(async () => {
     if (saving) return;
@@ -726,6 +780,73 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           </p>
         </header>
 
+        {matchCoach ? (
+          <div
+            role="region"
+            aria-label="Match criterion context"
+            style={{
+              marginBottom: 22,
+              padding: "16px 18px",
+              borderRadius: "var(--radius-xl)",
+              border: "1px solid rgba(47,129,247,0.28)",
+              background: "var(--accent-bg)",
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 8, letterSpacing: 0.02 }}>
+              From match breakdown: <span style={{ color: "var(--accent)" }}>{matchCoach.criterion}</span>
+            </div>
+            <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--muted)", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+              {matchCoach.notes.trim() || "—"}
+            </p>
+            <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>
+              The section below is scrolled into view — edit those fields so your <strong style={{ color: "var(--text)" }}>next</strong> tailor run picks up the changes.
+              Experience and project bullets still come from your uploaded résumé; update the PDF on Analyze or re-upload here when you change jobs.
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+              {matchCoach.section === "headline" && matchCoach.notes.trim() ? (
+                <button
+                  type="button"
+                  className="rn-btn-secondary"
+                  onClick={applyNoteToHeadline}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: "10px 16px",
+                    minHeight: 40,
+                    borderRadius: "var(--radius)",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface)",
+                    color: "var(--text)",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Replace headline with this note
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="rn-btn-secondary"
+                onClick={dismissMatchCoach}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: "10px 16px",
+                  minHeight: 40,
+                  borderRadius: "var(--radius)",
+                  border: "1px solid var(--border)",
+                  background: "var(--surface2)",
+                  color: "var(--muted)",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {profileLooksSparse(form) && !emptyHintDismissed && (
           <div
             style={{
@@ -936,7 +1057,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
           </div>
 
           <div>
-            <Card title="Contact & links">
+            <Card title="Contact & links" domId="rn-profile-contact">
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }} className="rn-profile-two-col">
                 <Field
                   label="Email"
@@ -1013,7 +1134,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
               </div>
             </Card>
 
-            <Card title="Résumé tagline">
+            <Card title="Résumé tagline" domId="rn-profile-headline">
               <label style={{ display: "block", marginBottom: 6 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2, marginBottom: 6 }}>
                   One-line headline
@@ -1057,7 +1178,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
               </label>
             </Card>
 
-            <Card title="Job preferences">
+            <Card title="Job preferences" domId="rn-profile-roles">
               <p style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, margin: "-4px 0 14px" }}>
                 What kinds of roles and locations you&apos;re searching for. Used to focus tailoring and (soon) auto-apply.
               </p>
@@ -1069,7 +1190,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
               </Field>
             </Card>
 
-            <Card title="Education">
+            <Card title="Education" domId="rn-profile-education">
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }} className="rn-profile-two-col">
                 <Field label="School">
                   <input
@@ -1096,7 +1217,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
               </div>
             </Card>
 
-            <Card title="Tailoring defaults" badge="Preview">
+            <Card title="Tailoring defaults" badge="Preview" domId="rn-profile-tailoring">
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }} className="rn-profile-two-col">
                 <Field label="Default tone">
                   <select

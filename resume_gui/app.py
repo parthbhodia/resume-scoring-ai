@@ -11,6 +11,7 @@ Deploy on Railway:
 
 import asyncio
 import io
+from functools import partial
 import json
 import logging
 import os
@@ -156,6 +157,8 @@ async def api_generate_stream(request: Request):
         # Supabase Storage when the matching "pdf" event fires.
         saved_folder: Optional[str] = None
         saved_tex_path: Optional[str] = None
+        # "local" = anonymous / no Supabase user — do not write under that prefix in Storage.
+        storage_user = user_id if user_id and user_id != "local" else ""
 
         for event in stream_latex_resume(
             company, role, jd,
@@ -169,9 +172,9 @@ async def api_generate_stream(request: Request):
                 saved_tex_path = event.get("tex_path")
                 # Upload the .tex source straight away — even if pdflatex fails
                 # later, we still want the source preserved for diff/use-as-base.
-                if user_id and saved_folder and saved_tex_path:
+                if storage_user and saved_folder and saved_tex_path:
                     try:
-                        tex_url = upload_tex(user_id, saved_folder, saved_tex_path)
+                        tex_url = upload_tex(storage_user, saved_folder, saved_tex_path)
                         if tex_url:
                             asyncio.run_coroutine_threadsafe(queue.put({
                                 "event": "storage",
@@ -195,7 +198,7 @@ async def api_generate_stream(request: Request):
                             "reason": str(exc),
                         }), loop).result()
 
-            elif ev_name == "pdf" and user_id and saved_folder:
+            elif ev_name == "pdf" and storage_user and saved_folder:
                 # The library emits a relative URL like "/pdf/<folder>/<file>.pdf".
                 # Resolve the local file path, push to Supabase Storage, and
                 # rewrite the event so the frontend gets a durable absolute URL.
@@ -204,7 +207,7 @@ async def api_generate_stream(request: Request):
                 if filename:
                     pdf_path = os.path.join(LIBRARY_ROOT, saved_folder, filename)
                     try:
-                        public = upload_pdf(user_id, saved_folder, pdf_path)
+                        public = upload_pdf(storage_user, saved_folder, pdf_path)
                         if public and public.startswith(("http://", "https://")):
                             event = {**event, "url": public}
                             asyncio.run_coroutine_threadsafe(queue.put({
@@ -291,6 +294,8 @@ async def api_resume_parsed(request: Request):
     """
     folder  = request.path_params["folder"]
     user_id = (request.query_params.get("user_id") or "").strip()
+    if user_id == "local":
+        user_id = ""
     if ".." in folder or "/" in folder:
         return JSONResponse({"error": "invalid folder"}, status_code=400)
 
@@ -322,14 +327,15 @@ async def api_resume_save(request: Request):
         return JSONResponse({"error": "invalid json"}, status_code=400)
 
     user_id = (body.get("user_id") or "").strip() or "local"
+    storage_user = user_id if user_id != "local" else ""
     parsed  = body.get("parsed") or {}
     if not isinstance(parsed, dict) or "sections" not in parsed:
         return JSONResponse({"error": "missing parsed.sections"}, status_code=400)
 
     # Source .tex — same fallback chain as the GET endpoint.
     raw_tex = parsed.get("rawTex") or get_resume_tex(folder)
-    if not raw_tex and user_id:
-        raw_tex = download_tex(user_id, folder)
+    if not raw_tex and storage_user:
+        raw_tex = download_tex(storage_user, folder)
     if not raw_tex:
         return JSONResponse({"error": "source .tex not found"}, status_code=404)
 
@@ -349,13 +355,13 @@ async def api_resume_save(request: Request):
     # new PDF and future GET /api/resume/{folder} reads see the new bullets.
     pdf_url: Optional[str] = None
     try:
-        if result.get("pdf_path"):
-            pdf_url = upload_pdf(user_id, folder, result["pdf_path"])
+        if storage_user and result.get("pdf_path"):
+            pdf_url = upload_pdf(storage_user, folder, result["pdf_path"])
     except Exception as exc:
         logger.warning(f"upload_pdf (post-edit) failed: {exc}")
     try:
-        if result.get("tex_path"):
-            upload_tex(user_id, folder, result["tex_path"])
+        if storage_user and result.get("tex_path"):
+            upload_tex(storage_user, folder, result["tex_path"])
     except Exception as exc:
         logger.warning(f"upload_tex (post-edit) failed: {exc}")
 
@@ -418,11 +424,12 @@ async def api_generate_skills(request: Request):
 
 
 async def api_ats_check(request: Request):
-    """POST /api/ats-check/{folder} — run ATS readiness analysis on the
-    compiled PDF. Body: {"jd": "...", "user_id": "..."}.
+    """POST /api/ats-check/{folder} — ATS + JD alignment on the compiled PDF.
 
-    Heavy lifting (pdfplumber text extraction + layout analysis) runs in the
-    default executor so the event loop stays responsive.
+    Body JSON: ``jd`` (optional), ``user_id`` (**required** — authenticated Supabase user; rejects ``local`` or empty),
+      ``target_role`` / ``role``, optional ``parsed`` sections for bullet metrics.
+
+    Runs pdfplumber extraction and rule-based alignment in a thread-pool executor.
     """
     folder = request.path_params["folder"]
     if ".." in folder or "/" in folder:
@@ -433,11 +440,18 @@ async def api_ats_check(request: Request):
     except Exception:
         body = {}
     jd      = (body.get("jd") or "").strip()
-    user_id = (body.get("user_id") or "").strip() or "local"
+    user_id = (body.get("user_id") or "").strip()
+    if not user_id or user_id == "local":
+        return JSONResponse({"error": "authentication required"}, status_code=401)
+    target_role = (body.get("target_role") or body.get("role") or "").strip()
+    parsed = body.get("parsed") if isinstance(body.get("parsed"), dict) else None
 
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(None, ats_check, folder, jd, user_id, None)
+        result = await loop.run_in_executor(
+            None,
+            partial(ats_check, folder, jd, user_id, None, target_role=target_role, parsed=parsed),
+        )
     except FileNotFoundError as exc:
         return JSONResponse({"error": str(exc)}, status_code=404)
     except Exception as exc:
@@ -523,6 +537,17 @@ def _analysis_tips(ats: dict, sections: list, issues: dict) -> tuple[list, dict]
             "detail": "Include this term naturally in experience bullets where factual.",
         })
 
+    jd_match = ats.get("jdMatch") or {}
+    for s in (jd_match.get("missingRequiredSkills") or [])[:3]:
+        title = f"JD skill to cover if true: {s}"
+        if any(t.get("title") == title for t in tips):
+            continue
+        tips.append({
+            "severity": "optional",
+            "title": title,
+            "detail": "Mirror the job language only where it matches your real experience.",
+        })
+
     warn_total = sum(1 for arr in issues.values() for it in arr if it.get("severity") == "warn")
     if warn_total >= 4:
         tips.append({
@@ -565,7 +590,10 @@ async def api_resume_analysis(request: Request):
         body = {}
 
     jd = (body.get("jd") or "").strip()
-    user_id = (body.get("user_id") or "").strip() or "local"
+    user_id = (body.get("user_id") or "").strip()
+    if not user_id or user_id == "local":
+        return JSONResponse({"error": "authentication required"}, status_code=401)
+    target_role = (body.get("target_role") or body.get("role") or "").strip()
     parsed = body.get("parsed") if isinstance(body.get("parsed"), dict) else None
 
     if parsed is None:
@@ -578,7 +606,10 @@ async def api_resume_analysis(request: Request):
 
     loop = asyncio.get_event_loop()
     try:
-        ats = await loop.run_in_executor(None, ats_check, folder, jd, user_id, None)
+        ats = await loop.run_in_executor(
+            None,
+            partial(ats_check, folder, jd, user_id, None, target_role=target_role, parsed=parsed),
+        )
         issues = doctor_check_resume(parsed)
     except FileNotFoundError as exc:
         return JSONResponse({"error": str(exc)}, status_code=404)

@@ -2,7 +2,7 @@
 import { useState, useCallback, useRef, useEffect, useId, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale } from "@/lib/types";
+import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale, ParsedSection } from "@/lib/types";
 import { apiUrl, parseJsonOrThrow, scoreColor } from "@/lib/utils";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD, TAILOR_PREFILL_COMPANY, TAILOR_PREFILL_ROLE } from "@/lib/tailorPrefill";
@@ -251,6 +251,7 @@ export default function ResumeBuilder({
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
   /** Right-panel “Save to library” re-upsert (compile already upserts; this is explicit retry). */
   const [libraryReSaveBusy, setLibraryReSaveBusy] = useState(false);
+  const [libraryToast, setLibraryToast] = useState<string | null>(null);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
@@ -272,7 +273,7 @@ export default function ResumeBuilder({
   /** Linked selection: click a highlighted résumé line → scroll/highlight matching suggestion card (Analyze-style). */
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
 
-  /** Template handoff — post-compile “Customize preview” (layout-only; preview tweaks do not recompile PDF). */
+  /** Template handoff — post-compile UI: HTML live paper (instant Style tab) + LaTeX PDF export; Recompile PDF regenerates `.tex` / PDF. */
   const [customizeTab, setCustomizeTab] = useState<"style" | "sections" | "add">("style");
   const [previewAccentHex, setPreviewAccentHex] = useState("#1d4ed8");
   const [previewFontSize, setPreviewFontSize] = useState<"small" | "standard" | "large">("standard");
@@ -422,6 +423,7 @@ export default function ResumeBuilder({
   const [atsResult,    setAtsResult]    = useState<AtsResult | null>(null);
   const [atsLoading,   setAtsLoading]   = useState(false);
   const [atsError,     setAtsError]     = useState<string | null>(null);
+  const [atsOAuthBusy, setAtsOAuthBusy] = useState(false);
 
   const importFromUrl = useCallback(async (): Promise<{ company?: string; role?: string; job_description?: string } | null> => {
     const url = jobUrl.trim();
@@ -453,6 +455,8 @@ export default function ResumeBuilder({
   }, [jobUrl]);
 
   const [user, setUser] = useState<User | null>(null);
+  /** After first getSession completes — avoids auto-ATS racing before user is known. */
+  const [authReady, setAuthReady] = useState(false);
   const [styleReferenceFolder, setStyleReferenceFolderState] = useState(DEFAULT_REFERENCE_FOLDER);
 
   const setStyleReferenceFolder = useCallback((folder: string) => {
@@ -485,18 +489,78 @@ export default function ResumeBuilder({
 
   useEffect(() => {
     const supabase = getSupabaseClient();
-    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_ev, s) => setUser(s?.user ?? null));
-    return () => subscription.unsubscribe();
+    let cancelled = false;
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!cancelled) setUser(data.session?.user ?? null);
+      })
+      .finally(() => {
+        if (!cancelled) setAuthReady(true);
+      });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_ev, s) => setUser(s?.user ?? null));
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const signInForAts = useCallback(async () => {
+    setAtsOAuthBusy(true);
+    setAtsError(null);
+    try {
+      const redirectTo =
+        typeof window !== "undefined"
+          ? window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH ?? "")
+          : undefined;
+      const { error } = await getSupabaseClient().auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo },
+      });
+      if (error) setAtsError(error.message);
+    } catch (e: unknown) {
+      setAtsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAtsOAuthBusy(false);
+    }
   }, []);
 
   const runAtsCheck = useCallback(async (folder: string) => {
-    setAtsLoading(true); setAtsError(null);
+    if (!user?.id) {
+      setAtsError("Sign in to run ATS and job match.");
+      return;
+    }
+    setAtsLoading(true);
+    setAtsError(null);
     try {
+      let parsedSlim: { sections: ParsedSection[] } | undefined;
+      try {
+        const uid = user.id;
+        const parseUrl =
+          apiUrl(`/api/resume/${encodeURIComponent(folder)}`) +
+          `?user_id=${encodeURIComponent(uid)}`;
+        const pr = await fetch(parseUrl);
+        if (pr.ok) {
+          const parsed = await parseJsonOrThrow<{ sections?: ParsedSection[]; error?: string }>(pr);
+          if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
+            parsedSlim = { sections: parsed.sections };
+          }
+        }
+      } catch {
+        /* optional — ATS falls back to PDF line heuristics for bullets */
+      }
+
       const resp = await fetch(apiUrl(`/api/ats-check/${encodeURIComponent(folder)}`), {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ jd: jd.slice(0, 8000), user_id: user?.id ?? "local" }),
+        body:    JSON.stringify({
+          jd: jd.slice(0, 8000),
+          user_id: user.id,
+          target_role: role.trim(),
+          ...(parsedSlim ? { parsed: parsedSlim } : {}),
+        }),
       });
       const json = await parseJsonOrThrow<AtsResult & { error?: string }>(resp);
       if (!resp.ok) throw new Error(json.error ?? "ATS check failed.");
@@ -506,13 +570,22 @@ export default function ResumeBuilder({
     } finally {
       setAtsLoading(false);
     }
-  }, [jd, user]);
+  }, [jd, user, role]);
 
-  // Auto-run ATS after generation completes
+  // Drop ATS when signed out (API requires a real user id).
   useEffect(() => {
-    if (!result?.folder || atsLoading || atsResult || atsError) return;
+    if (!authReady) return;
+    if (!user?.id) {
+      setAtsResult(null);
+      setAtsError(null);
+    }
+  }, [authReady, user?.id]);
+
+  // Auto-run ATS after generation completes (signed-in users only).
+  useEffect(() => {
+    if (!authReady || !user?.id || !result?.folder || atsLoading || atsResult || atsError) return;
     void runAtsCheck(result.folder);
-  }, [result?.folder, atsLoading, atsResult, atsError, runAtsCheck]);
+  }, [authReady, user?.id, result?.folder, atsLoading, atsResult, atsError, runAtsCheck]);
 
   // Reset ATS when a new generation starts
   useEffect(() => {
@@ -656,7 +729,12 @@ export default function ResumeBuilder({
 
     setGenerating(true);
     setError(null);
-    setResult(null);
+    // Clearing `result` here used to unmount the template customize screen entirely (because the
+    // results branch is `result ? … : inputs`). Keep the last successful payload visible during
+    // studioHandoff recompiles so PDF/controls stay on-screen while SSE runs.
+    if (!studioHandoff) {
+      setResult(null);
+    }
     setPreview("");
     setStatusMsg("Connecting…");
     setJdKeywords(extractJdKeywords(effJd));
@@ -674,7 +752,18 @@ export default function ResumeBuilder({
       effProfile = `${effProfile}\n\n---\nACCEPTED IMPROVEMENTS TO APPLY:\n${instructions}`;
     }
 
-    const acc: GenerationResult = { ...EMPTY_RESULT, baseFolder, baseLoaded: baseFolder ? null : false };
+    const acc: GenerationResult =
+      studioHandoff && result?.folder
+        ? {
+            ...result,
+            latexPreview: "",
+            diff: [],
+            adds: 0,
+            removes: 0,
+            rationales: [],
+            sources: [],
+          }
+        : { ...EMPTY_RESULT, baseFolder, baseLoaded: baseFolder ? null : false };
 
     try {
       const resp = await fetch(apiUrl("/api/generate-stream"), {
@@ -784,7 +873,7 @@ export default function ResumeBuilder({
       setGenerating(false);
       setStatusMsg("");
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result]);
 
   /** Re-upsert library row so POST /api/share/{folder} finds resumes (fixes race or retry after a hiccup). */
   const syncLibraryRowForShare = useCallback(async () => {
@@ -1765,8 +1854,11 @@ export default function ResumeBuilder({
                 customizePaperFont={customizePaperFont}
                 customizePaperLH={customizePaperLH}
                 customizePaperPadY={customizePaperPadY}
+                styleReferenceFolder={styleReferenceFolder}
                 candidateProfile={candidateProfile}
                 user={user}
+                signInForAts={signInForAts}
+                atsOAuthBusy={atsOAuthBusy}
                 storageFailures={storageFailures}
                 generate={generate}
                 ensureLibraryRow={syncLibraryRowForShare}
@@ -1966,7 +2058,7 @@ export default function ResumeBuilder({
                         View gaps
                       </a>
                       <Link
-                        href="/?view=builder&flow=template"
+                        href="/?view=builder&flow=template&fromResume=1"
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
@@ -2071,15 +2163,22 @@ export default function ResumeBuilder({
                     Match breakdown
                   </div>
                   <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>
-                    Each card is one JD requirement. Low scores are normal — use <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> above to iterate, then download when you are happy.
+                    Each card is one JD requirement. For edits the model already made to your résumé text, use{" "}
+                    <a href="#rb-results-diff" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                      line-by-line changes
+                    </a>{" "}
+                    below. To improve what we send next time, open the matching{" "}
+                    <strong style={{ color: "var(--text)" }}>Profile</strong> section from a card — then run{" "}
+                    <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> again.
                   </p>
-                  <MatchBreakdownCards criteria={ratings.criteria} />
+                  <MatchBreakdownCards criteria={ratings.criteria} hasLineDiff={result.diff.length > 0} />
                 </div>
               )}
 
               {/* Inline diff — line-by-line edits below analysis */}
               {result.diff.length > 0 && (
                 <div
+                  id="rb-results-diff"
                   style={{
                     marginBottom: 16,
                     borderRadius: "var(--radius-xl)",
@@ -2087,6 +2186,7 @@ export default function ResumeBuilder({
                     background: "var(--surface)",
                     boxShadow: "var(--shadow-card)",
                     padding: "18px 20px 20px",
+                    scrollMarginTop: 24,
                   }}
                 >
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
@@ -2154,16 +2254,20 @@ export default function ResumeBuilder({
                 }}
               >
                 <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
-                  ATS check{atsResult ? ` — ${atsResult.score}` : ""}
+                  ATS &amp; job match{user?.id && atsResult ? ` — ${atsResult.score}` : ""}
                 </div>
+                {!user?.id ? (
+                  <ResumeBuilderAtsSignInPrompt oauthBusy={atsOAuthBusy} onSignInWithGoogle={signInForAts} />
+                ) : (
+                  <>
                 {atsLoading && (
                   <div style={{ padding: 20, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
-                    Running ATS check…
+                    Running ATS &amp; job match…
                   </div>
                 )}
                 {atsError && !atsLoading && (
                   <div style={{ padding: 12, color: "var(--red)", fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
-                    Couldn&apos;t run ATS check: {atsError}
+                    Couldn&apos;t run ATS analysis: {atsError}
                     {result.folder && (
                       <button
                         type="button"
@@ -2181,6 +2285,8 @@ export default function ResumeBuilder({
                 )}
                 {atsResult && !atsLoading && (
                   <AtsPanel result={atsResult} rechecking={atsLoading} onRecheck={() => result.folder && runAtsCheck(result.folder)} />
+                )}
+                  </>
                 )}
               </div>
 
@@ -2323,17 +2429,32 @@ export default function ResumeBuilder({
                   >
                     <div
                       style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: "var(--dim)",
-                        letterSpacing: 0.35,
-                        textTransform: "uppercase",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 2,
                       }}
                     >
-                      Actions
+                      <svg width="15" height="15" viewBox="0 0 13 13" fill="none" aria-hidden style={{ flexShrink: 0, color: "var(--accent)" }}>
+                        <circle cx="3" cy="6.5" r="1.7" stroke="currentColor" strokeWidth="1.4" />
+                        <circle cx="10" cy="3" r="1.7" stroke="currentColor" strokeWidth="1.4" />
+                        <circle cx="10" cy="10" r="1.7" stroke="currentColor" strokeWidth="1.4" />
+                        <path d="M4.5 5.6 L8.5 3.7  M4.5 7.4 L8.5 9.3" stroke="currentColor" strokeWidth="1.4" />
+                      </svg>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: "var(--dim)",
+                          letterSpacing: 0.35,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Actions
+                      </span>
                     </div>
                     <Link
-                      href="/?view=builder&flow=template"
+                      href="/?view=builder&flow=template&fromResume=1"
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -2399,8 +2520,11 @@ export default function ResumeBuilder({
                         }
                         setLibraryReSaveBusy(true);
                         setError(null);
+                        setLibraryToast(null);
                         try {
                           await syncLibraryRowForShare();
+                          setLibraryToast("Saved to your account.");
+                          window.setTimeout(() => setLibraryToast(null), 6000);
                         } catch (e: unknown) {
                           setError(e instanceof Error ? e.message : String(e));
                         } finally {
@@ -2427,6 +2551,14 @@ export default function ResumeBuilder({
                     >
                       {libraryReSaveBusy ? "Saving…" : "Save to library"}
                     </button>
+                    {libraryToast ? (
+                      <p style={{ margin: 0, fontSize: 12, color: "var(--green)", lineHeight: 1.45 }}>
+                        {libraryToast}{" "}
+                        <Link href="/?view=library" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                          Open Library →
+                        </Link>
+                      </p>
+                    ) : null}
                   </div>
 
                   {result.folder && result.pdfUrl && !generating ? (
@@ -2502,6 +2634,52 @@ function firstSuggestionMatchingLine(
   return null;
 }
 
+/** Signed-out gate for ATS — API requires a real Supabase `user_id`. */
+function ResumeBuilderAtsSignInPrompt({
+  oauthBusy,
+  onSignInWithGoogle,
+  compact,
+}: {
+  oauthBusy: boolean;
+  onSignInWithGoogle: () => void | Promise<void>;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        padding: compact ? "4px 0 2px" : "4px 0 8px",
+        fontSize: 13,
+        color: "var(--muted)",
+        lineHeight: 1.55,
+      }}
+    >
+      <p style={{ margin: "0 0 12px", color: "var(--text)" }}>
+        ATS and job match requires a signed-in account — the server ties your PDF and source to your user id.
+      </p>
+      <button
+        type="button"
+        onClick={() => void onSignInWithGoogle()}
+        disabled={oauthBusy}
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          padding: "10px 18px",
+          minHeight: 44,
+          borderRadius: "var(--radius)",
+          border: "1px solid var(--border)",
+          background: "var(--accent)",
+          color: "#fff",
+          cursor: oauthBusy ? "wait" : "pointer",
+          fontFamily: "inherit",
+          opacity: oauthBusy ? 0.7 : 1,
+        }}
+      >
+        {oauthBusy ? "Opening Google…" : "Sign in with Google"}
+      </button>
+    </div>
+  );
+}
+
 /** Template-studio handoff — post-compile screen aligned with Resunova “Customize preview” (Figma). */
 function TemplateCustomizePostResult({
   generating,
@@ -2529,8 +2707,11 @@ function TemplateCustomizePostResult({
   customizePaperFont,
   customizePaperLH,
   customizePaperPadY,
+  styleReferenceFolder,
   candidateProfile,
   user,
+  signInForAts,
+  atsOAuthBusy,
   storageFailures,
   generate,
   ensureLibraryRow,
@@ -2560,8 +2741,11 @@ function TemplateCustomizePostResult({
   customizePaperFont: number;
   customizePaperLH: number;
   customizePaperPadY: number;
+  styleReferenceFolder: string;
   candidateProfile: string | null;
   user: User | null;
+  signInForAts: () => Promise<void>;
+  atsOAuthBusy: boolean;
   storageFailures: { artifact: "pdf" | "tex"; reason: string }[];
   generate: () => void;
   ensureLibraryRow: () => Promise<void>;
@@ -2794,7 +2978,7 @@ function TemplateCustomizePostResult({
             Template: <strong style={{ color: "var(--text)", fontWeight: 600 }}>{selectedTemplateLabel}</strong>
           </span>
         </div>
-        <span style={{ fontSize: 12, color: "var(--dim)" }}>Changes update the preview instantly</span>
+        <span style={{ fontSize: 12, color: "var(--dim)" }}>Style controls update the live paper instantly</span>
       </div>
 
       <div className="rb-template-customize-grid">
@@ -2809,53 +2993,91 @@ function TemplateCustomizePostResult({
                 letterSpacing: 0.4,
               }}
             >
-              Live preview
+              Live preview (HTML)
             </span>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>100% zoom</span>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Accent, size, spacing</span>
           </div>
-          {result.pdfUrl ? (
-            <div
-              style={{
-                borderRadius: 12,
-                overflow: "hidden",
-                border: `1px solid ${previewAccentHex}33`,
-                background: "#525659",
-                boxShadow: "0 8px 28px rgba(15,23,42,0.12)",
-                aspectRatio: "8.5 / 11",
-                maxHeight: 580,
-                minHeight: 320,
-              }}
-            >
-              <iframe
-                title="Résumé PDF preview"
-                src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
-                loading="lazy"
-                style={{ width: "100%", height: "100%", minHeight: 420, border: "none", display: "block" }}
-              />
-            </div>
-          ) : (
+          <div
+            style={{
+              borderRadius: 12,
+              overflow: "auto",
+              maxHeight: 580,
+              border: `1px solid ${previewAccentHex}33`,
+              background: "#f1f5f9",
+              boxShadow: "0 8px 28px rgba(15,23,42,0.08)",
+            }}
+          >
             <ResumePaperView
               text={(candidateProfile ?? "").trim() || "—"}
               highlightOriginals={[]}
+              templateFolder={styleReferenceFolder}
               baseFontPx={customizePaperFont}
               lineHeight={customizePaperLH}
               paperPaddingY={customizePaperPadY}
               sectionAccentColor={previewAccentHex}
             />
-          )}
+          </div>
           <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
-            {result.pdfUrl ? (
-              <>
-                If the preview is blank,{" "}
-                <a href={result.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8", fontWeight: 600 }}>
-                  open the PDF in a new tab
-                </a>
-                .
-              </>
-            ) : (
-              "PDF preview appears when the compile step finishes."
-            )}
+            This paper reflects your Style tab (fast, client-side). It is not pixel-identical to LaTeX.
           </p>
+
+          {result.pdfUrl ? (
+            <div style={{ marginTop: 20 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  marginBottom: 10,
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  LaTeX PDF (exported)
+                </span>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>Last compile</span>
+              </div>
+              <div
+                style={{
+                  borderRadius: 12,
+                  overflow: "hidden",
+                  border: "1px solid #e2e8f0",
+                  background: "#525659",
+                  boxShadow: "0 4px 16px rgba(15,23,42,0.1)",
+                  aspectRatio: "8.5 / 11",
+                  maxHeight: 520,
+                  minHeight: 280,
+                }}
+              >
+                <iframe
+                  title="Résumé PDF — LaTeX export"
+                  src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
+                  loading="lazy"
+                  style={{ width: "100%", height: "100%", minHeight: 360, border: "none", display: "block" }}
+                />
+              </div>
+              <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
+                If the PDF is blank,{" "}
+                <a href={result.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8", fontWeight: 600 }}>
+                  open it in a new tab
+                </a>
+                . Use <strong style={{ color: "var(--text)" }}>Recompile PDF</strong> to refresh this file after profile or template changes.
+              </p>
+            </div>
+          ) : (
+            <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
+              The LaTeX PDF appears below when the compile step finishes.
+            </p>
+          )}
         </div>
 
         <aside
@@ -3102,8 +3324,9 @@ function TemplateCustomizePostResult({
               </div>
 
               <p style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.45, margin: "16px 0 0" }}>
-                Preview typography and spacing are for on-screen review. The exported PDF follows your LaTeX template; re-run generate after
-                changing template in Templates.
+                <strong style={{ color: "var(--text)" }}>Live paper</strong> (left) updates instantly from the Style tab.{" "}
+                <strong style={{ color: "var(--text)" }}>LaTeX PDF</strong> is the real export — use{" "}
+                <strong style={{ color: "var(--text)" }}>Recompile PDF</strong> after changing profile text or switching template in Templates.
               </p>
             </div>
           )}
@@ -3162,18 +3385,27 @@ function TemplateCustomizePostResult({
             <button
               type="button"
               onClick={() => void generate()}
-              disabled={generating || !(candidateProfile ?? "").trim()}
+              disabled={
+                generating
+                || (!(candidateProfile ?? "").trim() && !result.folder)
+              }
               style={{
                 width: "100%",
                 padding: "12px 16px",
                 minHeight: 44,
                 borderRadius: 10,
                 border: "none",
-                background: generating || !(candidateProfile ?? "").trim() ? "#e2e8f0" : "var(--surface2)",
+                background:
+                  generating || (!(candidateProfile ?? "").trim() && !result.folder)
+                    ? "#e2e8f0"
+                    : "var(--surface2)",
                 color: "var(--text)",
                 fontSize: 13,
                 fontWeight: 600,
-                cursor: generating || !(candidateProfile ?? "").trim() ? "not-allowed" : "pointer",
+                cursor:
+                  generating || (!(candidateProfile ?? "").trim() && !result.folder)
+                    ? "not-allowed"
+                    : "pointer",
                 fontFamily: "inherit",
               }}
             >
@@ -3240,14 +3472,18 @@ function TemplateCustomizePostResult({
         }}
       >
         <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
-          ATS check{atsResult ? ` — ${atsResult.score}` : ""}
+          ATS &amp; job match{user?.id && atsResult ? ` — ${atsResult.score}` : ""}
         </div>
+        {!user?.id ? (
+          <ResumeBuilderAtsSignInPrompt oauthBusy={atsOAuthBusy} onSignInWithGoogle={signInForAts} compact />
+        ) : (
+          <>
         {atsLoading && (
-          <div style={{ padding: 12, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>Running ATS check…</div>
+          <div style={{ padding: 12, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>Running ATS &amp; job match…</div>
         )}
         {atsError && !atsLoading && (
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, fontSize: 12, color: "var(--red)" }}>
-            Couldn&apos;t run ATS check: {atsError}
+            Couldn&apos;t run ATS analysis: {atsError}
             {result.folder ? (
               <button
                 type="button"
@@ -3273,6 +3509,8 @@ function TemplateCustomizePostResult({
         {atsResult && !atsLoading && (
           <AtsPanel result={atsResult} rechecking={atsLoading} onRecheck={() => result.folder && runAtsCheck(result.folder)} />
         )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -3290,6 +3528,7 @@ function ResumePaperView({
   text,
   highlightOriginals,
   interactiveSuggestions,
+  templateFolder,
   baseFontPx = 10.5,
   lineHeight = 1.55,
   paperPaddingY = 28,
@@ -3300,6 +3539,8 @@ function ResumePaperView({
   highlightOriginals: string[];
   /** When set, paper mirrors Analyze: clickable rows, accepted text replaces line, accent ring on linked card. */
   interactiveSuggestions?: BuilderPaperInteractive;
+  /** LaTeX `reference_folder` — selects sans vs serif and name treatment to approximate the gallery template. */
+  templateFolder?: string | null;
   /** Optional typography for template “Customize preview” (does not affect exported PDF). */
   baseFontPx?: number;
   lineHeight?: number;
@@ -3308,6 +3549,14 @@ function ResumePaperView({
   /** Section titles + rules (accent swatch in customize preview). */
   sectionAccentColor?: string;
 }) {
+  const folder = templateFolder ?? "";
+  const isMalta = folder === "MaltaCV_Modern";
+  const isHarshibar = folder === "Harshibar_Template1";
+  const nameCenteredCaps = !isMalta && !isHarshibar;
+  const fontFamily =
+    isMalta || isHarshibar
+      ? "'Inter', 'Helvetica Neue', Arial, sans-serif"
+      : "'Georgia', 'Times New Roman', serif";
   const lines = text.split("\n");
   const lineMatchesHighlight = buildResumeHighlightMatcher(highlightOriginals);
   const ic = interactiveSuggestions;
@@ -3349,7 +3598,7 @@ function ResumePaperView({
       borderRadius: 6,
       boxShadow: "0 2px 16px rgba(0,0,0,0.10)",
       padding: `${paperPaddingY}px ${paperPaddingX}px`,
-      fontFamily: "'Georgia', serif",
+      fontFamily,
       fontSize: baseFontPx,
       lineHeight,
       color: "#1e293b",
@@ -3387,10 +3636,38 @@ function ResumePaperView({
         else if (pendingHighlight || highlightedPlain) hlStyle = amber;
 
         if (i === firstNonEmpty) {
-          return <div key={i} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5, marginBottom: 2, textAlign: "center", textTransform: "uppercase" }}>{t}</div>;
+          if (nameCenteredCaps) {
+            return (
+              <div key={i} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5, marginBottom: 2, textAlign: "center", textTransform: "uppercase" }}>
+                {t}
+              </div>
+            );
+          }
+          const nameSize = isMalta ? 18 : 19;
+          return (
+            <div
+              key={i}
+              style={{
+                fontSize: nameSize,
+                fontWeight: 700,
+                letterSpacing: -0.35,
+                marginBottom: 2,
+                lineHeight: 1.15,
+                textAlign: "left",
+                color: "#0f172a",
+                textTransform: "none",
+              }}
+            >
+              {t}
+            </div>
+          );
         }
         if (i === firstNonEmpty + 1 && !isAllCaps(t)) {
-          return <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: "center", marginBottom: 8 }}>{t}</div>;
+          return (
+            <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: nameCenteredCaps ? "center" : "left", marginBottom: 8 }}>
+              {t}
+            </div>
+          );
         }
         if (isAllCaps(t)) {
           return (

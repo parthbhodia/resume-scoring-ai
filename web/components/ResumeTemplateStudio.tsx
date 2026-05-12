@@ -17,6 +17,21 @@ import {
 
 const PROFILE_KEY = "rn_builder_profile_prefill";
 const STYLE_REF_KEY = "rn_builder_style_ref";
+/** Same key as `ResumeBuilder` draft — keeps layout choice in sync when returning from the gallery. */
+const RN_BUILDER_DRAFT_KEY = "rn_builder_draft";
+
+function persistTemplateStyleChoice(folder: string): void {
+  try {
+    sessionStorage.setItem(STYLE_REF_KEY, folder);
+    const prev = JSON.parse(sessionStorage.getItem(RN_BUILDER_DRAFT_KEY) ?? "{}");
+    sessionStorage.setItem(
+      RN_BUILDER_DRAFT_KEY,
+      JSON.stringify({ ...prev, styleReferenceFolder: folder }),
+    );
+  } catch {
+    /* quota / private mode */
+  }
+}
 
 const SAMPLE_PREVIEW = `Jennifer Jobscan
 Product Designer · jennifer@example.com · (555) 010-2030 · San Francisco, CA
@@ -461,6 +476,7 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
   const router = useRouter();
   const params = useSearchParams();
   const base = (initialBaseFolder ?? params?.get("base") ?? "").trim();
+  const fromResume = (params?.get("fromResume") ?? "").trim() === "1";
 
   const templates = useMemo(() => distinctStyleTemplates(), []);
   const [styleFolder, setStyleFolder] = useState(() => {
@@ -509,7 +525,7 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
   const onContinue = useCallback(() => {
     // Store style prefs — profile text is collected on the next screen
     try {
-      sessionStorage.setItem(STYLE_REF_KEY, styleFolder);
+      persistTemplateStyleChoice(styleFolder);
       sessionStorage.setItem(RN_LINE_SPACING_KEY, lineSpacing);
       sessionStorage.setItem(RN_MARGIN_IN_KEY, marginIn);
     } catch { /* quota */ }
@@ -518,6 +534,11 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
     if (base) q.set("base", base);
     router.push(`/?${q.toString()}`);
   }, [router, styleFolder, lineSpacing, marginIn, base]);
+
+  const selectStyleFolder = useCallback((folder: string) => {
+    setStyleFolder(folder);
+    persistTemplateStyleChoice(folder);
+  }, []);
 
   return (
     <div
@@ -530,6 +551,50 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
         overflow: "hidden",
       }}
     >
+      {fromResume ? (
+        <div
+          role="region"
+          aria-label="How template changes apply"
+          style={{
+            flexShrink: 0,
+            padding: "12px 24px",
+            borderBottom: "1px solid var(--border)",
+            background: "rgba(59, 130, 246, 0.08)",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 12,
+            justifyContent: "space-between",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.5, maxWidth: 720 }}>
+            <strong>Layout gallery</strong> — the preview on the right shows typography for the selected layout.
+            Your <strong>exported PDF</strong> updates only after you return to the résumé builder and run{" "}
+            <strong>Generate PDF</strong> again with this layout selected.
+          </p>
+          <button
+            type="button"
+            onClick={() => router.push("/?view=builder&flow=tailor")}
+            style={{
+              flexShrink: 0,
+              padding: "10px 18px",
+              minHeight: 44,
+              borderRadius: 10,
+              border: "none",
+              background: "var(--accent)",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              letterSpacing: -0.2,
+            }}
+          >
+            Back to my résumé
+          </button>
+        </div>
+      ) : null}
+
       {/* ── Top bar ─────────────────────────────────────────── */}
       <div
         style={{
@@ -639,7 +704,7 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
                 key={t.id}
                 template={t}
                 selected={styleFolder === t.referenceFolder}
-                onClick={() => setStyleFolder(t.referenceFolder)}
+                onClick={() => selectStyleFolder(t.referenceFolder)}
               />
             ))}
           </div>
@@ -714,7 +779,7 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
                 padding: pad,
               }}
             >
-              <FormattedResumePreview text={previewBody} lineHeight={lh} styleFolder={styleFolder} />
+              <FormattedResumePreview key={styleFolder} text={previewBody} lineHeight={lh} styleFolder={styleFolder} />
             </div>
           </div>
         </section>
