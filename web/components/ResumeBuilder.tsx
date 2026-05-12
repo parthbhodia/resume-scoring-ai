@@ -3825,6 +3825,11 @@ function normalizePaperLineDisplayString(raw: string): string {
     /([a-z])(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?=\d|[\s,;–—]|$)/gi,
     "$1 $2",
   );
+  s = s.replace(
+    /([A-Z])(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?=\d|[\s,;–—]|$)/g,
+    "$1 $2",
+  );
+  s = s.replace(/([a-z])(May)(?=\d)/gi, "$1 $2");
   // Year run into school name (2024University)
   s = s.replace(/(\d{4})(University|College|School|Institute)\b/gi, "$1 $2");
   // CountyBaltimore-style glue; skip McDonald (single lc after uppercase)
@@ -3833,6 +3838,7 @@ function normalizePaperLineDisplayString(raw: string): string {
     if (/[A-Z]/.test(prev) && a.length === 1) return m;
     return `${a} ${b}`;
   });
+  s = s.replace(/\|(?=[A-Za-z])/g, "| ");
   return s;
 }
 

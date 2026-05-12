@@ -939,7 +939,73 @@ def _apply_preamble_subs(preamble: str, role: str, company: str, contact: Option
         out,
     )
     out = _strip_contact_block_empty_hrefs(out)
+    if not (merged.get("location") or "").strip():
+        n1 = re.sub(
+            r"(?m)^(\s*)\\textbf\{\\Huge\s+(.+?)\\vspace\{2pt\}\}\s*&\s*\n\s*Location:\s*\\\\",
+            r"\1\\multicolumn{2}{l}{\\textbf{\\Huge \2\\vspace{2pt}}} \\\\",
+            out,
+            count=1,
+        )
+        if n1 != out:
+            out = n1
+        else:
+            out = re.sub(
+                r"(?m)^(\s*)\\textbf\{\\Huge\s+([^&\n]+)\}\s*&\s*\n\s*Location:\s*\\\\",
+                r"\1\\multicolumn{2}{l}{\\textbf{\\Huge \2}} \\\\",
+                out,
+                count=1,
+            )
     return out
+
+
+def _fix_tex_runon_employer_month_line(line: str) -> str:
+    """Insert missing space when PDF/LLM glued a company token to a month abbrev (AccentureNov, ONEJan)."""
+    out = line
+    _m_ci = r"((?i:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec))"
+    _tail = r"(?=[\s\d,;–—\\]|$|\}|%|\]|\|)"
+    for _ in range(6):
+        nxt = re.sub(rf"([a-z]){_m_ci}{_tail}", r"\1 \2", out)
+        nxt = re.sub(rf"([A-Z]){_m_ci}{_tail}", r"\1 \2", nxt)
+        nxt = re.sub(r"([A-Za-z])(May)(?=\d)", r"\1 \2", nxt)
+        if nxt == out:
+            break
+        out = nxt
+    return out
+
+
+def _fix_tex_runon_employer_month(tex: str) -> str:
+    out_lines: List[str] = []
+    for ln in tex.splitlines():
+        low = ln.lower()
+        if "tabular" in low or "usepackage" in low or "begin{picture}" in low:
+            out_lines.append(ln)
+            continue
+        out_lines.append(_fix_tex_runon_employer_month_line(ln))
+    return "\n".join(out_lines)
+
+
+def _fix_tex_contact_pipe_spacing(tex: str) -> str:
+    """`|Mobile` / `|Email` in contact block — add space after pipe for readability."""
+    start = tex.find("% RESUME-CONTACT-BLOCK-START")
+    end = tex.find("% RESUME-CONTACT-BLOCK-END")
+    if start == -1 or end == -1 or end <= start:
+        return tex
+    head = tex[: start + len("% RESUME-CONTACT-BLOCK-START")]
+    mid = tex[start + len("% RESUME-CONTACT-BLOCK-START") : end]
+    tail = tex[end:]
+    fixed: List[str] = []
+    for ln in mid.splitlines():
+        if any(k in ln for k in ("Email:", "Mobile:", "LinkedIn", "Github", "GitHub")):
+            fixed.append(re.sub(r"(?<!\$)\|(?=[A-Za-z])", r"| ", ln))
+        else:
+            fixed.append(ln)
+    return head + "\n".join(fixed) + tail
+
+
+def _sanitize_full_resume_tex(full_tex: str) -> str:
+    """Last-mile fixes on assembled .tex before write (run-ons, contact pipes)."""
+    t = _fix_tex_runon_employer_month(full_tex)
+    return _fix_tex_contact_pipe_spacing(t)
 
 
 # ============================================================================
@@ -3459,6 +3525,7 @@ def generate_latex_resume(
     contact_hints = _contact_from_candidate_profile(candidate_profile) if candidate_profile else {}
     preamble = _build_export_preamble(reference_tex, role, company, contact_hints)
     full_tex = preamble + "\n" + latex_body + _LATEX_FOOTER
+    full_tex = _sanitize_full_resume_tex(full_tex)
 
     folder_name = _make_folder_name(company, role)
     folder_path = os.path.join(LIBRARY_ROOT, folder_name)
@@ -3564,6 +3631,11 @@ def _latex_tailor_system_instruction() -> str:
         "When you lay out each education row in LaTeX, insert **visible spaces** or column/tabular breaks between "
         "degree text, date ranges, school names, and city/state so nothing runs together (wrong: `ScienceAug` or "
         "`CountyBaltimore`; right: separate tokens with ` `, `&`, `\\\\`, or `\\hfill` as the template does). "
+        "Apply the **same spacing rule to EXPERIENCE / WORK rows**: never run an employer or school name into a "
+        "month abbreviation (wrong: `AccentureNov`, `CAPITAL ONEJan`; right: `Accenture Nov`, `CAPITAL ONE Jan`). "
+        "Put the **job title in a heading macro** (e.g. `\\resumeTrioHeading` arg #1, or the italic row of "
+        "`\\resumeQuadHeading`) — **never** as the first `\\resumeItem` under that employer; the first `\\resumeItem` "
+        "must be a real accomplishment bullet, not the role title alone. "
         "Add a small vertical gap after education blocks (e.g. `\\\\[4pt]` or `\\vspace{4pt}`) so the section rule "
         "does not crowd the last line.\n"
         "GPA in education: include only if explicitly stated in the CANDIDATE PROFILE and the profile is consistent "
@@ -3627,6 +3699,11 @@ def _latex_tailor_system_instruction_no_live_search() -> str:
         "When you lay out each education row in LaTeX, insert **visible spaces** or column/tabular breaks between "
         "degree text, date ranges, school names, and city/state so nothing runs together (wrong: `ScienceAug` or "
         "`CountyBaltimore`; right: separate tokens with ` `, `&`, `\\\\`, or `\\hfill` as the template does). "
+        "Apply the **same spacing rule to EXPERIENCE / WORK rows**: never run an employer or school name into a "
+        "month abbreviation (wrong: `AccentureNov`, `CAPITAL ONEJan`; right: `Accenture Nov`, `CAPITAL ONE Jan`). "
+        "Put the **job title in a heading macro** (e.g. `\\resumeTrioHeading` arg #1, or the italic row of "
+        "`\\resumeQuadHeading`) — **never** as the first `\\resumeItem` under that employer; the first `\\resumeItem` "
+        "must be a real accomplishment bullet, not the role title alone. "
         "Add a small vertical gap after education blocks (e.g. `\\\\[4pt]` or `\\vspace{4pt}`) so the section rule "
         "does not crowd the last line.\n"
         "GPA in education: include only if explicitly stated in the CANDIDATE PROFILE and the profile is consistent "
@@ -3751,8 +3828,10 @@ def _reference_folder_layout_hint(reference_folder: Optional[str]) -> str:
             "\\resumeItem, e.g. \\resumeItem{\\textbf{Programming \\& query languages:} SQL, Python, R} — never glue a word "
             "directly to \\textbf (bad: `Languages\\textbf{{SQL}}`; good: `Languages: \\textbf{{SQL}}, …` or separate \\resumeItem rows). "
             "Separate tokens with commas, middle dots (·), or ` | `. Do not output Markdown asterisk-bold; use LaTeX \\textbf{{}} only. "
-            "On \\resumeSubheading lines, keep a visible space between the employer name and the month/date "
-            "(e.g. `Morgan Stanley` then `Dec 2023`, not `Morgan StanleyDec 2023`).\n"
+            "On \\resumeSubheading / quad heading lines, keep a visible space between the employer name and the month/date "
+            "(e.g. `Morgan Stanley` then `Dec 2023`, not `Morgan StanleyDec 2023`). "
+            "Put the job title in the heading row (\\resumeTrioHeading or \\resumeQuadHeading italics line) — not as the first "
+            "\\resumeItem bullet. First \\resumeItem under each role must be an accomplishment, not the title alone.\n"
         )
     if f == "MaltaCV_Modern":
         return (
@@ -3947,6 +4026,7 @@ def _save_and_compile(
     contact_hints = _contact_from_candidate_profile(candidate_profile) if candidate_profile else {}
     preamble = _build_export_preamble(reference_tex, role, company, contact_hints)
     full_tex  = preamble + "\n" + latex_body + _LATEX_FOOTER
+    full_tex = _sanitize_full_resume_tex(full_tex)
 
     folder_name = _make_folder_name(company, role)
     folder_path = os.path.join(LIBRARY_ROOT, folder_name)

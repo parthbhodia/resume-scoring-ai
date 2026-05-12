@@ -69,15 +69,37 @@ export function normalizeForMatch(s: string): string {
  * and add a space after punctuation when missing (does not change stored bullets).
  */
 export function softenRunOnExtractLine(s: string): string {
-  const t = s.trim();
-  if (t.length < 36) return s;
+  const t0 = s.trim();
+  const glueFix = (u: string) => {
+    let y = u;
+    y = y.replace(
+      /([a-z])(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?=\d|[\s,;–—]|$)/gi,
+      "$1 $2",
+    );
+    y = y.replace(
+      /([A-Z])(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?=\d|[\s,;–—]|$)/g,
+      "$1 $2",
+    );
+    y = y.replace(/([A-Za-z])(May)(?=\d)/g, "$1 $2");
+    y = y.replace(/\|(?=[A-Za-z])/g, "| ");
+    return y;
+  };
+  let t = glueFix(t0);
+  if (t.length < 36) {
+    return t !== t0 ? (s.includes(t0) ? s.replace(t0, t) : t) : s;
+  }
   const spaceCount = (t.match(/\s/g) ?? []).length;
-  if (spaceCount / t.length > 0.035) return s;
+  if (spaceCount / t.length > 0.035) {
+    return t !== t0 ? (s.includes(t0) ? s.replace(t0, t) : t) : s;
+  }
   let x = t;
   x = x.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
   x = x.replace(/([,;:])([^\s\d])/g, "$1 $2");
   x = x.replace(/\s{2,}/g, " ");
-  return x;
+  if (x !== t0) {
+    return s.includes(t0) ? s.replace(t0, x) : x;
+  }
+  return s;
 }
 
 export function findBulletIndexForLine(
