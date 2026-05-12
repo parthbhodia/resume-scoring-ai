@@ -22,7 +22,7 @@ import {
 import { extractProfileHintsFromResumeText } from "@/lib/profileFromResumeText";
 
 import ScoreRing    from "./ScoreRing";
-import CriteriaTable from "./CriteriaTable";
+import MatchBreakdownCards from "./MatchBreakdownCards";
 import DiffView     from "./DiffView";
 import SourcesPanel from "./SourcesPanel";
 import AtsPanel, { type AtsResult } from "./AtsPanel";
@@ -249,6 +249,8 @@ export default function ResumeBuilder({
   const [searchQueries, setSearchQueries] = useState<string[]>([]);
   const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
+  /** Right-panel “Save to library” re-upsert (compile already upserts; this is explicit retry). */
+  const [libraryReSaveBusy, setLibraryReSaveBusy] = useState(false);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
@@ -799,6 +801,15 @@ export default function ResumeBuilder({
     );
   }, [user?.id, result, company, role, model, jd]);
 
+  /** Clear result and re-run JD suggestions so user can iterate before re-downloading. */
+  const improveResumeAfterResult = useCallback(() => {
+    setResult(null);
+    setPreview("");
+    setSelectedSuggestionId(null);
+    setSuggestError(null);
+    void getSuggestions();
+  }, [getSuggestions]);
+
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
 
@@ -844,7 +855,7 @@ export default function ResumeBuilder({
           className="rb-page"
           style={{
             padding: "clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh)",
-            maxWidth: result && studioHandoff ? 1180 : result ? 960 : suggestionsReviewMode ? 1180 : studioHandoff ? 920 : 820,
+            maxWidth: result ? 1180 : suggestionsReviewMode ? 1180 : studioHandoff ? 920 : 820,
             margin: "0 auto",
             width: "100%",
             boxSizing: "border-box",
@@ -1792,150 +1803,82 @@ export default function ResumeBuilder({
                 </div>
               )}
 
-              <header style={{ marginBottom: 22 }}>
-                <h2 id="rb-results-heading" style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.75, color: "var(--text)", marginBottom: 6 }}>
-                  Your tailored résumé
-                </h2>
-                <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.5, letterSpacing: -0.15 }}>
-                  {[company, role].map(s => s.trim()).filter(Boolean).join(" · ") || "Match results for this run"}
-                </p>
-              </header>
-
-              {/* Results header row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 22, flexWrap: "wrap" }}>
-                <div style={{ flex: 1, height: 1, background: "var(--border)", minWidth: 40 }} />
-                <span style={{ fontSize: 11, color: "var(--dim)", letterSpacing: 0.45, textTransform: "uppercase", fontWeight: 700 }}>
-                  Match &amp; export
-                </span>
-                <div style={{ flex: 1, height: 1, background: "var(--border)", minWidth: 40 }} />
+              <header
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 14,
+                  marginBottom: 20,
+                }}
+              >
+                <div style={{ minWidth: 0, flex: "1 1 240px" }}>
+                  <h2 id="rb-results-heading" style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.75, color: "var(--text)", marginBottom: 6, lineHeight: 1.15 }}>
+                    Your tailored résumé is ready
+                  </h2>
+                  <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.5, letterSpacing: -0.15 }}>
+                    {[role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Match results for this run"}
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--dim)", margin: "8px 0 0", lineHeight: 1.45 }}>
+                    Review match quality and gaps on the left, keep the preview visible while you scroll, then export or share.
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => setResult(null)}
                   style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    padding: "10px 16px", minHeight: 44, borderRadius: "var(--radius)",
-                    background: "var(--surface)", border: "1px solid var(--border)",
-                    color: "var(--muted)", fontSize: 12, fontWeight: 600,
-                    cursor: "pointer", fontFamily: "inherit", letterSpacing: -0.2,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "10px 16px",
+                    minHeight: 44,
+                    borderRadius: "var(--radius)",
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    color: "var(--muted)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    letterSpacing: -0.2,
                     whiteSpace: "nowrap",
                     boxShadow: "var(--shadow-sm)",
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.color = "var(--muted)"; }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "var(--surface2)";
+                    e.currentTarget.style.color = "var(--text)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "var(--surface)";
+                    e.currentTarget.style.color = "var(--muted)";
+                  }}
                 >
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
                     <path d="M1 6a5 5 0 109.9-1M1 6V2m0 4h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                   Try another job
                 </button>
-              </div>
+              </header>
 
-              {/* View 5 Phase 3 — same two-column rhythm as suggestions: preview + metrics (Analyze-style clarity) */}
               <style>{`
                 .rb-results-phase3 {
                   display: grid;
-                  grid-template-columns: minmax(300px, 1.58fr) minmax(240px, 0.92fr);
-                  gap: 20px;
+                  grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
+                  gap: 24px;
                   align-items: start;
                 }
-                .rb-results-phase3-detail { order: 1; }
-                .rb-results-phase3-preview { order: 2; }
-                @media (max-width: 920px) {
+                .rb-results-phase3-preview {
+                  position: sticky;
+                  top: 12px;
+                  align-self: start;
+                }
+                @media (max-width: 960px) {
                   .rb-results-phase3 { grid-template-columns: 1fr; }
-                  .rb-results-phase3-detail { order: 1; }
-                  .rb-results-phase3-preview { order: 2; }
+                  .rb-results-phase3-preview { position: static; }
                 }
               `}</style>
               <section className="rb-results-phase3" aria-labelledby="rb-results-heading">
-                <div className="rb-results-phase3-preview" style={{ minWidth: 0 }}>
-                  <div style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    marginBottom: 8,
-                  }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase" }}>
-                      Résumé preview
-                    </div>
-                    {result.pdfUrl ? (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                        {result.folder ? (
-                          <ShareButton
-                            folder={result.folder}
-                            pdfUrl={result.pdfUrl}
-                            userId={user?.id ?? null}
-                            ensureLibraryRow={syncLibraryRowForShare}
-                          />
-                        ) : null}
-                        <a
-                          href={result.pdfUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            padding: "8px 14px",
-                            minHeight: 40,
-                            background: "var(--accent)",
-                            borderRadius: 9,
-                            color: "#fff",
-                            textDecoration: "none",
-                            fontSize: 12,
-                            fontWeight: 600,
-                            letterSpacing: -0.25,
-                            whiteSpace: "nowrap",
-                            fontFamily: "inherit",
-                          }}
-                        >
-                          <svg width="12" height="12" viewBox="0 0 13 13" fill="none" aria-hidden>
-                            <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                            <path d="M2 11h9" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
-                          </svg>
-                          Download PDF
-                        </a>
-                      </div>
-                    ) : null}
-                  </div>
-                  {result.pdfUrl ? (
-                    <div style={{
-                      borderRadius: "var(--radius-xl)",
-                      overflow: "hidden",
-                      border: "1px solid var(--border)",
-                      background: "#3d3d3d",
-                      boxShadow: "var(--shadow-card)",
-                      aspectRatio: "8.5 / 11",
-                      maxHeight: 560,
-                      minHeight: 280,
-                    }}>
-                      <iframe
-                        title="Tailored résumé PDF preview"
-                        src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
-                        loading="lazy"
-                        style={{ width: "100%", height: "100%", minHeight: 400, border: "none", display: "block", background: "#525659" }}
-                      />
-                    </div>
-                  ) : (
-                    <div style={{ maxHeight: 560, overflow: "auto", borderRadius: "var(--radius-xl)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
-                      <ResumePaperView text={(candidateProfile ?? "").trim() || "—"} highlightOriginals={[]} />
-                    </div>
-                  )}
-                  <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
-                    {result.pdfUrl ? (
-                      <>
-                        If the preview is blank,{" "}
-                        <a href={result.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600 }}>
-                          open the PDF
-                        </a>
-                        {" "}— you can also use Download above or in the match card.
-                      </>
-                    ) : (
-                      "PDF preview appears when the compile step finishes."
-                    )}
-                  </p>
-                </div>
                 <div className="rb-results-phase3-detail" style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
               {/* Score hero card */}
               <div className="rb-score-card" style={{
@@ -1952,81 +1895,125 @@ export default function ResumeBuilder({
                   borderRadius: "50%", pointerEvents: "none",
                 }} />
 
-                <div className="rb-score-row" style={{ display: "flex", alignItems: "flex-start", gap: 24, position: "relative", flexWrap: "wrap" }}>
+                <div className="rb-score-row" style={{ display: "flex", alignItems: "flex-start", gap: 20, position: "relative", flexWrap: "wrap" }}>
                   {ratings ? (
-                    <ScoreRing score={score} size={130} />
+                    <ScoreRing score={score} size={120} />
                   ) : (
-                    <div style={{ width: 130, height: 130, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <div style={{ width: 120, height: 120, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       <Spinner size={28} />
                     </div>
                   )}
 
-                  <div style={{ flex: 1, paddingTop: 4 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 }}>
-                      {company} · {role}
-                    </div>
+                  <div style={{ flex: 1, minWidth: 200, paddingTop: 2 }}>
                     {ratings ? (
                       <>
-                        <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.6, color: scoreColor(score), marginBottom: 8, lineHeight: 1.3 }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.65, color: scoreColor(score), marginBottom: 4, lineHeight: 1.2 }}>
                           {score >= 80 ? "Strong match" : score >= 65 ? "Good match" : score >= 50 ? "Moderate match" : "Needs work"}
                         </div>
-                        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
+                          Match score · {score}/100
+                        </div>
+                        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: "0 0 16px", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                           {ratings.verdict}
                         </p>
                       </>
                     ) : (
                       <div style={{ fontSize: 13, color: "var(--dim)" }}>Analysing match…</div>
                     )}
-                  </div>
-
-                  {/* PDF download + share */}
-                  {result.pdfUrl && (
-                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                      {result.folder && (
-                        <ShareButton
-                          folder={result.folder}
-                          pdfUrl={result.pdfUrl}
-                          userId={user?.id ?? null}
-                          ensureLibraryRow={syncLibraryRowForShare}
-                        />
-                      )}
-                      <a
-                        href={result.pdfUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        onClick={improveResumeAfterResult}
                         style={{
-                          display: "flex", alignItems: "center", gap: 7,
-                          padding: "9px 16px",
-                          background: "var(--accent)", borderRadius: 9,
-                          color: "#fff", textDecoration: "none",
-                          fontSize: 13, fontWeight: 500, letterSpacing: -0.3,
-                          whiteSpace: "nowrap",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          padding: "12px 20px",
+                          minHeight: 46,
+                          borderRadius: 10,
+                          border: "none",
+                          background: "var(--accent)",
+                          color: "#fff",
+                          fontSize: 14,
+                          fontWeight: 700,
+                          letterSpacing: -0.35,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          boxShadow: "var(--shadow-sm)",
                         }}
                       >
-                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                          <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                          <path d="M2 11h9" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
-                        </svg>
-                        Download PDF
+                        Improve this résumé
+                        <span aria-hidden style={{ fontSize: 16 }}>→</span>
+                      </button>
+                      <a
+                        href="#rb-results-gaps"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          padding: "10px 16px",
+                          minHeight: 44,
+                          borderRadius: 10,
+                          border: "1px solid var(--border)",
+                          background: "var(--surface2)",
+                          color: "var(--text)",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          textDecoration: "none",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        View gaps
                       </a>
+                      <Link
+                        href="/?view=builder&flow=template"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          padding: "10px 16px",
+                          minHeight: 44,
+                          borderRadius: 10,
+                          border: "1px solid var(--border)",
+                          color: "var(--accent)",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          textDecoration: "none",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        Customize template
+                      </Link>
+                      {result.pdfUrl ? (
+                        <a
+                          href={result.pdfUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "10px 16px",
+                            minHeight: 44,
+                            borderRadius: 10,
+                            border: "1px solid var(--border)",
+                            color: "var(--muted)",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            textDecoration: "none",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          Download PDF
+                        </a>
+                      ) : null}
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
 
-              {result.folder && result.pdfUrl && !generating ? (
-                <ResumePublicLinkSettings
-                  folder={result.folder}
-                  userId={user?.id ?? null}
-                  templateFlow={studioHandoff}
-                  collapseAsDetails
-                  ensureLibraryRow={syncLibraryRowForShare}
-                />
-              ) : null}
-
               {/* Strengths + Gaps */}
               {ratings && (ratings.whats_working?.length > 0 || ratings.gaps?.length > 0) && (
-                <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+                <div id="rb-results-gaps" className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
                   {ratings.whats_working?.length > 0 && (
                     <div style={{
                       background: "var(--surface)", border: "1px solid rgba(52,211,153,0.2)",
@@ -2080,10 +2067,13 @@ export default function ResumeBuilder({
                     padding: "18px 20px 20px",
                   }}
                 >
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
                     Match breakdown
                   </div>
-                  <CriteriaTable criteria={ratings.criteria} />
+                  <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>
+                    Each card is one JD requirement. Low scores are normal — use <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> above to iterate, then download when you are happy.
+                  </p>
+                  <MatchBreakdownCards criteria={ratings.criteria} />
                 </div>
               )}
 
@@ -2233,6 +2223,222 @@ export default function ResumeBuilder({
                 </button>
               </div>
                 </div>
+
+                <aside
+                  className="rb-results-phase3-preview"
+                  aria-label="Résumé preview and export"
+                  style={{
+                    minWidth: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 14,
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "var(--surface)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-xl)",
+                      padding: "16px 16px 14px",
+                      boxShadow: "var(--shadow-card)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--dim)",
+                        letterSpacing: 0.35,
+                        textTransform: "uppercase",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Résumé preview
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 12, letterSpacing: -0.2 }}>
+                      {selectedTemplateLabel}
+                    </div>
+                    {result.pdfUrl ? (
+                      <div
+                        style={{
+                          borderRadius: 12,
+                          overflow: "hidden",
+                          border: "1px solid var(--border)",
+                          background: "#525659",
+                          boxShadow: "var(--shadow-sm)",
+                          aspectRatio: "8.5 / 11",
+                          maxHeight: 520,
+                          minHeight: 280,
+                        }}
+                      >
+                        <iframe
+                          title="Résumé PDF preview"
+                          src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
+                          loading="lazy"
+                          style={{ width: "100%", height: "100%", minHeight: 360, border: "none", display: "block" }}
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          padding: 28,
+                          textAlign: "center",
+                          color: "var(--dim)",
+                          fontSize: 13,
+                          borderRadius: 12,
+                          border: "1px dashed var(--border)",
+                          background: "var(--surface2)",
+                        }}
+                      >
+                        PDF preview appears when the compile step finishes.
+                      </div>
+                    )}
+                    {result.pdfUrl ? (
+                      <p style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
+                        If the preview is blank,{" "}
+                        <a
+                          href={result.pdfUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "var(--accent)", fontWeight: 600 }}
+                        >
+                          open the PDF
+                        </a>
+                        .
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      background: "var(--surface)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-xl)",
+                      padding: "14px 16px 16px",
+                      boxShadow: "var(--shadow-card)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--dim)",
+                        letterSpacing: 0.35,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Actions
+                    </div>
+                    <Link
+                      href="/?view=builder&flow=template"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        padding: "11px 14px",
+                        minHeight: 44,
+                        borderRadius: 10,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface2)",
+                        color: "var(--accent)",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        textDecoration: "none",
+                        fontFamily: "inherit",
+                        textAlign: "center",
+                      }}
+                    >
+                      Customize template
+                    </Link>
+                    {result.pdfUrl ? (
+                      <a
+                        href={result.pdfUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          padding: "11px 14px",
+                          minHeight: 44,
+                          borderRadius: 10,
+                          border: "1px solid var(--border)",
+                          background: "var(--surface2)",
+                          color: "var(--text)",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          textDecoration: "none",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        Download PDF
+                      </a>
+                    ) : null}
+                    {result.folder && result.pdfUrl && !generating ? (
+                      <div style={{ display: "flex", justifyContent: "stretch" }}>
+                        <ShareButton
+                          folder={result.folder}
+                          pdfUrl={result.pdfUrl}
+                          userId={user?.id ?? null}
+                          ensureLibraryRow={syncLibraryRowForShare}
+                        />
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={libraryReSaveBusy || !user?.id || !result.folder}
+                      onClick={async () => {
+                        if (!user?.id) {
+                          setError("Sign in to save this résumé to your library.");
+                          return;
+                        }
+                        setLibraryReSaveBusy(true);
+                        setError(null);
+                        try {
+                          await syncLibraryRowForShare();
+                        } catch (e: unknown) {
+                          setError(e instanceof Error ? e.message : String(e));
+                        } finally {
+                          setLibraryReSaveBusy(false);
+                        }
+                      }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        padding: "11px 14px",
+                        minHeight: 44,
+                        borderRadius: 10,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface2)",
+                        color: "var(--text)",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: libraryReSaveBusy || !user?.id || !result.folder ? "not-allowed" : "pointer",
+                        fontFamily: "inherit",
+                        opacity: !user?.id || !result.folder ? 0.55 : 1,
+                      }}
+                    >
+                      {libraryReSaveBusy ? "Saving…" : "Save to library"}
+                    </button>
+                  </div>
+
+                  {result.folder && result.pdfUrl && !generating ? (
+                    <ResumePublicLinkSettings
+                      folder={result.folder}
+                      userId={user?.id ?? null}
+                      templateFlow={studioHandoff}
+                      collapseAsDetails
+                      ensureLibraryRow={syncLibraryRowForShare}
+                    />
+                  ) : null}
+                </aside>
               </section>
             </div>
             )
