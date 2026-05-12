@@ -2464,15 +2464,9 @@ export default function ResumeBuilder({
                     Match breakdown
                   </div>
                   <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>
-                    Each card is one JD requirement. For edits the model already made to your résumé text, use{" "}
-                    <a href="#rb-results-diff" style={{ color: "var(--accent)", fontWeight: 600 }}>
-                      line-by-line changes
-                    </a>{" "}
-                    below. To improve what we send next time, open the matching{" "}
-                    <strong style={{ color: "var(--text)" }}>Profile</strong> section from a card — then run{" "}
-                    <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> again.
+                    Each card is one JD requirement compared to your profile and the latest generated résumé.
                   </p>
-                  <MatchBreakdownCards criteria={ratings.criteria} hasLineDiff={result.diff.length > 0} />
+                  <MatchBreakdownCards criteria={ratings.criteria} />
                 </div>
               )}
 
