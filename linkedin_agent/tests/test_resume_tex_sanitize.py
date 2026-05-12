@@ -43,6 +43,25 @@ class TestSanitizeFullResumeTex(unittest.TestCase):
         self.assertNotIn("Dup", out)
         self.assertIn("\\section{SUMMARY}", out)
 
+    def test_strips_two_duplicate_mastheads_after_end_linewidth(self):
+        dup = (
+            "\\begin{tabular*}{\\linewidth}{l@{\\extracolsep{\\fill}}r}\n"
+            "  \\textbf{\\Huge Dup} & Location: X \\\\\n"
+            "  Email: a@b.com & \\\\\n"
+            "\\end{tabular*}\n"
+        )
+        tex = (
+            "\\begin{document}\n"
+            "% RESUME-CONTACT-BLOCK-END\n"
+            + dup
+            + dup
+            + "\\section{SUMMARY}\n"
+            "\\end{document}\n"
+        )
+        out = _sanitize_full_resume_tex(tex)
+        self.assertNotIn("Dup", out)
+        self.assertIn("\\section{SUMMARY}", out)
+
     def test_fixes_runon_employer_month(self):
         tex = (
             "\\begin{document}\n"

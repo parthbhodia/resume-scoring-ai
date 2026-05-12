@@ -1261,35 +1261,55 @@ def _strip_metric_noise_lines_after_begin_document(tex: str) -> str:
     return head + "".join(kept)
 
 
-# Contact header uses this tabular; duplicates may add optional [t] before the column spec.
-_CONTACT_TABULAR_HEAD_RE = re.compile(
-    r"^\\begin\{tabular\*\}\{\\textwidth\}(?:\[[^\]]*\])?\{l@\{\\extracolsep\{\\fill\}\}r\}"
-)
+# Contact masthead duplicates after % RESUME-CONTACT-BLOCK-END are stripped in
+# ``_strip_llm_duplicate_header_tabular_after_contact`` (tabular* or plain tabular).
 
 
 def _strip_llm_duplicate_header_tabular_after_contact(tex: str) -> str:
-    """Remove a second name/contact tabular the LLM often pastes immediately after our canonical contact block."""
+    """Remove pasted name/contact ``tabular*`` / ``tabular`` block(s) after our canonical contact block.
+
+    The model often repeats the masthead even though ``% RESUME-CONTACT-BLOCK-START`` … ``END`` already
+    emitted one. We strip conservatively: only blocks that look like contact rows (``\\Huge``, Email,
+    Location, mailto, Mobile).
+    """
     end_tag = "% RESUME-CONTACT-BLOCK-END"
     i = tex.find(end_tag)
     if i < 0:
         return tex
     prefix = tex[: i + len(end_tag)]
     rest = tex[i + len(end_tag) :]
-    rest_l = rest.lstrip()
-    off = len(rest) - len(rest_l)
-    if not _CONTACT_TABULAR_HEAD_RE.match(rest_l):
-        return tex
-    block_start = off
-    chunk = rest[block_start:]
-    end_m = re.search(r"\\end\{tabular\*\}", chunk)
-    if not end_m:
-        return tex
-    inner = chunk[: end_m.end()]
-    if "\\Huge" not in inner and "Location:" not in inner and "Email:" not in inner:
-        return tex
-    tail = rest[block_start + end_m.end() :].lstrip("\n")
-    nl = "\n" if tail and not tail.startswith("\n") else ""
-    return prefix + nl + tail
+    _masthead_inner = re.compile(
+        r"\\Huge|Email:|Location:|\\href\{mailto:|Mobile:|LinkedIn",
+        re.I,
+    )
+    for _ in range(6):
+        rest_l = rest.lstrip()
+        off = len(rest) - len(rest_l)
+        if rest_l.startswith("\\begin{tabular*}"):
+            em = re.search(r"\\end\{tabular\*\}", rest_l)
+            if not em:
+                break
+            inner = rest_l[: em.end()]
+            if "\\Huge" not in inner and "Email:" not in inner and "Location:" not in inner:
+                break
+            if not _masthead_inner.search(inner):
+                break
+            rest = rest[:off] + rest_l[em.end() :].lstrip("\n")
+            continue
+        if rest_l.startswith("\\begin{tabular}"):
+            em0 = re.search(r"\\end\{tabular\}", rest_l)
+            if not em0 or "\\Huge" not in rest_l[: em0.end()]:
+                break
+            inner0 = rest_l[: em0.end()]
+            if not _masthead_inner.search(inner0):
+                break
+            rest = rest[:off] + rest_l[em0.end() :].lstrip("\n")
+            continue
+        break
+    rest = rest.lstrip("\n")
+    if rest and not rest.startswith("\n"):
+        rest = "\n" + rest
+    return prefix + rest
 
 
 _GLUED_RESUME_WORDS = re.compile(
