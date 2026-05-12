@@ -445,6 +445,10 @@ export default function ResumeBuilder({
       if ((fromAnalyze || fromTemplateStudio) && profile) {
         setCandidateProfile(profile);
         setUploadedFileName(fromTemplateStudio ? "From template studio" : "From Analyze");
+        // Previous `result.pdfUrl` is from an older compile (often another résumé / layout).
+        // HTML preview follows Style + profile immediately; keep PDF hidden until they generate again.
+        setResult(null);
+        setPreview("");
       }
       if (jdPre) {
         setJdRaw(jdPre);
@@ -479,6 +483,9 @@ export default function ResumeBuilder({
       router.replace(next);
     } else if (fromTemplateStudio) {
       setStudioHandoff(true);
+      // Even without a profile key (edge), do not show a PDF from a prior builder session.
+      setResult(null);
+      setPreview("");
       try {
         sessionStorage.setItem(RN_BUILDER_LAYOUT_ONLY_KEY, "1");
       } catch { /* ignore */ }
@@ -3086,58 +3093,37 @@ function TemplateCustomizePostResult({
             >
               Back to templates
             </button>
-            {result.pdfUrl ? (
-              <button
-                type="button"
-                disabled={
-                  generating
-                  || (!(candidateProfile ?? "").trim() && !result.folder)
-                }
-                onClick={() => { void onExportLayoutPdf("download"); }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "10px 20px",
-                  minHeight: 44,
-                  borderRadius: 10,
-                  border: "none",
-                  background:
-                    generating || (!(candidateProfile ?? "").trim() && !result.folder)
-                      ? "#94a3b8"
-                      : "#1d4ed8",
-                  color: "#fff",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor:
-                    generating || (!(candidateProfile ?? "").trim() && !result.folder)
-                      ? "not-allowed"
-                      : "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                {generating ? "Working…" : "Download PDF →"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled
-                style={{
-                  padding: "10px 20px",
-                  minHeight: 44,
-                  borderRadius: 10,
-                  border: "none",
-                  background: "#e2e8f0",
-                  color: "var(--muted)",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "not-allowed",
-                  fontFamily: "inherit",
-                }}
-              >
-                Download PDF →
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={
+                generating
+                || (!(candidateProfile ?? "").trim() && !result.folder)
+              }
+              onClick={() => { void onExportLayoutPdf("download"); }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "10px 20px",
+                minHeight: 44,
+                borderRadius: 10,
+                border: "none",
+                background:
+                  generating || (!(candidateProfile ?? "").trim() && !result.folder)
+                    ? "#94a3b8"
+                    : "#1d4ed8",
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor:
+                  generating || (!(candidateProfile ?? "").trim() && !result.folder)
+                    ? "not-allowed"
+                    : "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {generating ? "Working…" : "Download PDF →"}
+            </button>
           </div>
         </div>
       </div>
@@ -3195,7 +3181,9 @@ function TemplateCustomizePostResult({
             Template: <strong style={{ color: "var(--text)", fontWeight: 600 }}>{selectedTemplateLabel}</strong>
           </span>
         </div>
-        <span style={{ fontSize: 12, color: "var(--dim)" }}>Style controls update the live paper instantly</span>
+        <span style={{ fontSize: 12, color: "var(--dim)" }}>
+          Style controls update the live preview instantly. <strong style={{ color: "var(--text)", fontWeight: 600 }}>Download PDF</strong> exports the compiled LaTeX file (not shown here).
+        </span>
       </div>
 
       <div className="rb-template-customize-grid">
@@ -3235,36 +3223,9 @@ function TemplateCustomizePostResult({
             />
           </div>
           <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
-            This paper reflects your Style tab (fast, client-side). It is not pixel-identical to LaTeX.
+            This paper reflects your Style tab (fast, client-side). It is not pixel-identical to LaTeX. Use{" "}
+            <strong style={{ color: "var(--text)" }}>Download PDF</strong> or <strong style={{ color: "var(--text)" }}>Save</strong> for the real exported file.
           </p>
-
-          {result.pdfUrl ? (
-            <div style={{ marginTop: 20 }}>
-              <div
-                style={{
-                  borderRadius: 12,
-                  overflow: "hidden",
-                  border: "1px solid #e2e8f0",
-                  background: "#525659",
-                  boxShadow: "0 4px 16px rgba(15,23,42,0.1)",
-                  width: "100%",
-                  height: "clamp(480px, 80vh, 960px)",
-                  minHeight: 420,
-                }}
-              >
-                <iframe
-                  title="Exported résumé PDF"
-                  src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
-                  loading="lazy"
-                  style={{ width: "100%", height: "100%", border: "none", display: "block" }}
-                />
-              </div>
-            </div>
-          ) : (
-            <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
-              Your PDF will appear here when the compile step finishes.
-            </p>
-          )}
         </div>
 
         <aside
