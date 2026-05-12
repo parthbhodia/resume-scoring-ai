@@ -30,12 +30,13 @@ logger = logging.getLogger(__name__)
 def primary_gemini_flash_model(explicit: Optional[str] = None) -> str:
     """Default Gemini Flash text model for stream/generate/JD/suggest paths.
 
-    Set ``GEMINI_FLASH_MODEL`` (e.g. ``gemini-2.5-flash-lite``) when AI Studio shows
-    **gemini-2.5-flash** RPM/RPD tight — Lite is often a separate per-model pool.
+    Default is **gemini-2.5-flash-lite** — AI Studio free tier often gives ``gemini-2.5-flash``
+    a very low per-day cap; Lite is a separate per-model quota. Override with
+    ``GEMINI_FLASH_MODEL=gemini-2.5-flash`` when you want full Flash.
     """
     if explicit and str(explicit).strip():
         return str(explicit).strip()
-    return (os.environ.get("GEMINI_FLASH_MODEL") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+    return (os.environ.get("GEMINI_FLASH_MODEL") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
 
 
 def grok_preferred_for_throughput() -> bool:
@@ -3111,9 +3112,14 @@ def _rating_explain_model_chain() -> List[str]:
 
     When ``grok_preferred_for_throughput()`` (XAI key set, ``LLM_PROVIDER`` not ``gemini``),
     try Grok **before** Gemini so production does not burn free-tier Flash/Pro on every
-    generate after Grok already produced the résumé body.
+    generate after Grok already produced the résumé body. Gemini fallbacks use **Flash
+    Lite before Pro** so we avoid the tight ``gemini-2.5-flash`` daily cap when Lite suffices.
     """
-    gemini_models: List[str] = [_REASONING_MODEL_GEMINI, primary_gemini_flash_model()]
+    if grok_preferred_for_throughput() and (os.environ.get("XAI_API_KEY") or "").strip():
+        flash_m = primary_gemini_flash_model()
+        gemini_models = [flash_m, _REASONING_MODEL_GEMINI]
+    else:
+        gemini_models = [_REASONING_MODEL_GEMINI, primary_gemini_flash_model()]
     grok_models: List[str] = []
     if (os.environ.get("XAI_API_KEY") or "").strip():
         fast = (os.environ.get("GROK_MODEL") or "grok-4-1-fast-non-reasoning").strip() or "grok-4-1-fast-non-reasoning"

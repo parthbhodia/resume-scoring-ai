@@ -250,7 +250,7 @@
         <div class="field">
           <label>Assistant</label>
           <div class="model-pills">
-            <button class="model-pill active" data-model="gemini-2.5-flash" onclick="selectModel(this)">Recommended <span class="pill-tag">smart</span></button>
+            <button class="model-pill active" data-model="gemini-2.5-flash-lite" onclick="selectModel(this)">Recommended <span class="pill-tag">smart</span></button>
             <button class="model-pill" data-model="gemini-2.0-flash" onclick="selectModel(this)">Balanced <span class="pill-tag">stable</span></button>
             <button class="model-pill" data-model="gemini-2.0-flash-lite" onclick="selectModel(this)">Light <span class="pill-tag">fast</span></button>
           </div>
@@ -360,7 +360,7 @@
   function scoreColor(n)    { return n >= 8 ? "high" : n >= 6 ? "medium" : "low"; }
   function scoreBarColor(n) { return n >= 8 ? "var(--green)" : n >= 6 ? "var(--orange)" : "var(--red)"; }
   function selectModel(el)  { document.querySelectorAll(".model-pill").forEach(p => p.classList.remove("active")); el.classList.add("active"); }
-  function getModel()       { return (document.querySelector(".model-pill.active") || {}).dataset?.model || "gemini-2.5-flash"; }
+  function getModel()       { return (document.querySelector(".model-pill.active") || {}).dataset?.model || "gemini-2.5-flash-lite"; }
 
   // ── Sources panel ─────────────────────────────────────────────────────────
   function toggleSources() {
