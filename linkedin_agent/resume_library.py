@@ -4017,12 +4017,18 @@ def stream_latex_resume(
     accepted_suggestions: Optional[List] = None,
     pre_research_digest: Optional[str] = None,
     post_suggestion_coach_run: bool = False,
+    tailor_body_with_ai: bool = True,
 ):
     """
     Generator that yields SSE-style event dicts while generating the resume.
 
     ``post_suggestion_coach_run``: True when the client already showed JD suggestions for this session
     but may send zero accepted structured edits — prompts stay conservative (no silent new bullets).
+
+    ``tailor_body_with_ai``: When False together with zero approved structured edits and a loaded
+    ``base_body``, the server **skips the LLM** and compiles the existing LaTeX body from the base
+    folder so the PDF matches the saved file (user-controlled). When True, the model rewrites the
+    body for JD fit as usual.
 
     Events:
       {"event": "status",  "msg": "..."}
@@ -4063,32 +4069,22 @@ def stream_latex_resume(
         n_approved = len(_sanitize_accepted_suggestions(accepted_suggestions))
         if n_approved:
             logger.info(f"Structured user-approved edits  |  {n_approved} item(s)")
-        digest_for_prompt = ((pre_research_digest or "").strip() if not layout_compile else "")
-        skip_live_web = bool(digest_for_prompt)
-        if skip_live_web:
-            logger.info(
-                "PDF stream: reusing pre-suggestion web digest — disabling live Google Search / Grok web_search "
-                f"({len(digest_for_prompt)} chars)"
-            )
-        system_inst = _latex_tailor_system_instruction_no_live_search() if skip_live_web else None
-        system_prompt, user_prompt = _build_prompts(
-            company,
-            role,
-            job_description,
-            base_body,
-            reference_tex,
-            candidate_profile=candidate_profile,
-            accepted_suggestions=accepted_suggestions,
-            pre_research_digest=digest_for_prompt or None,
-            system_instruction=system_inst,
-            reference_folder=ref_folder,
-            post_suggestion_coach_run=post_suggestion_coach_run,
+
+        use_body_passthrough = (
+            not layout_compile
+            and post_suggestion_coach_run
+            and not tailor_body_with_ai
+            and n_approved == 0
+            and bool(base_body and len(base_body.strip()) > 80)
         )
+        if use_body_passthrough:
+            logger.info(
+                "PDF stream: LaTeX body passthrough — skipping LLM "
+                "(tailor_body_with_ai=False, no approved structured edits, base_body present)"
+            )
 
-        _fallback_models = _model_chain(model)
-
-        latex_body      = ""
-        last_candidates = []
+        latex_body = ""
+        last_candidates: List = []
 
         # Sources collected from whichever provider wins the fallback race.
         grok_sources: List[Dict] = []
@@ -4097,142 +4093,182 @@ def stream_latex_resume(
         seen_queries: set = set()
         seen_source_urls: set = set()
 
-        for idx, _m in enumerate(_fallback_models):
-            provider = "Grok" if _is_grok(_m) else "Gemini"
-            yield {"event": "status", "msg": "Generating with AI…"}
-            logger.info(f"Starting stream  |  {_m}  |  provider={provider}")
-            t1 = time.time()
-            try:
-                best_grounding_candidates = None
-                best_grounding_score = -1
-                if _is_grok(_m):
-                    # xAI Responses API path with web_search tool. _stream_grok
-                    # yields typed event dicts: text deltas, search queries, and
-                    # citation sources — fire each onto the same SSE stream the
-                    # frontend already handles for Gemini grounding.
-                    for ev in _stream_grok(_m, system_prompt, user_prompt, 0.2, web_search=not layout_compile and not skip_live_web):
-                        et = ev.get("type")
-                        if et == "text":
-                            delta = ev.get("delta") or ""
-                            if delta:
-                                latex_body += delta
-                                yield {"event": "chunk", "text": delta}
-                        elif et == "query":
-                            q = ev.get("query") or ""
-                            if q and q not in seen_queries:
-                                seen_queries.add(q)
-                                logger.info(f"🔍 Grok web_search  |  {q}")
-                                yield {"event": "search_query", "query": q}
-                        elif et == "source":
-                            u = ev.get("url")
-                            if u and u not in seen_source_urls:
-                                seen_source_urls.add(u)
-                                grok_sources.append({"title": ev.get("title"), "url": u})
-                                yield {"event": "search_source", "title": ev.get("title"), "url": u}
-                else:
-                    # Gemini path — Google Search grounding (retry same model on
-                    # transient 503 UNAVAILABLE / "high demand" before fallback chain).
-                    _gemini_stream_attempts = 3
-                    for _gem_attempt in range(_gemini_stream_attempts):
-                        best_grounding_candidates = None
-                        best_grounding_score = -1
-                        try:
-                            if layout_compile or skip_live_web:
-                                _gem_cfg = types.GenerateContentConfig(
-                                    system_instruction=system_prompt,
-                                    temperature=0.2,
+        t_stream0 = time.time()
+
+        if use_body_passthrough:
+            yield {
+                "event": "status",
+                "msg": "Compiling your base résumé as saved — no AI rewrite to the LaTeX body.",
+            }
+            latex_body = base_body.strip()
+            _chunk_sz = 8000
+            for _off in range(0, len(latex_body), _chunk_sz):
+                yield {"event": "chunk", "text": latex_body[_off : _off + _chunk_sz]}
+            logger.info(f"Passthrough body streamed  |  {len(latex_body)} chars  |  {time.time() - t_stream0:.1f}s")
+        else:
+            digest_for_prompt = ((pre_research_digest or "").strip() if not layout_compile else "")
+            skip_live_web = bool(digest_for_prompt)
+            if skip_live_web:
+                logger.info(
+                    "PDF stream: reusing pre-suggestion web digest — disabling live Google Search / Grok web_search "
+                    f"({len(digest_for_prompt)} chars)"
+                )
+            system_inst = _latex_tailor_system_instruction_no_live_search() if skip_live_web else None
+            system_prompt, user_prompt = _build_prompts(
+                company,
+                role,
+                job_description,
+                base_body,
+                reference_tex,
+                candidate_profile=candidate_profile,
+                accepted_suggestions=accepted_suggestions,
+                pre_research_digest=digest_for_prompt or None,
+                system_instruction=system_inst,
+                reference_folder=ref_folder,
+                post_suggestion_coach_run=post_suggestion_coach_run,
+            )
+
+            _fallback_models = _model_chain(model)
+
+            for idx, _m in enumerate(_fallback_models):
+                provider = "Grok" if _is_grok(_m) else "Gemini"
+                yield {"event": "status", "msg": "Generating with AI…"}
+                logger.info(f"Starting stream  |  {_m}  |  provider={provider}")
+                t1 = time.time()
+                try:
+                    best_grounding_candidates = None
+                    best_grounding_score = -1
+                    if _is_grok(_m):
+                        # xAI Responses API path with web_search tool. _stream_grok
+                        # yields typed event dicts: text deltas, search queries, and
+                        # citation sources — fire each onto the same SSE stream the
+                        # frontend already handles for Gemini grounding.
+                        for ev in _stream_grok(_m, system_prompt, user_prompt, 0.2, web_search=not layout_compile and not skip_live_web):
+                            et = ev.get("type")
+                            if et == "text":
+                                delta = ev.get("delta") or ""
+                                if delta:
+                                    latex_body += delta
+                                    yield {"event": "chunk", "text": delta}
+                            elif et == "query":
+                                q = ev.get("query") or ""
+                                if q and q not in seen_queries:
+                                    seen_queries.add(q)
+                                    logger.info(f"🔍 Grok web_search  |  {q}")
+                                    yield {"event": "search_query", "query": q}
+                            elif et == "source":
+                                u = ev.get("url")
+                                if u and u not in seen_source_urls:
+                                    seen_source_urls.add(u)
+                                    grok_sources.append({"title": ev.get("title"), "url": u})
+                                    yield {"event": "search_source", "title": ev.get("title"), "url": u}
+                    else:
+                        # Gemini path — Google Search grounding (retry same model on
+                        # transient 503 UNAVAILABLE / "high demand" before fallback chain).
+                        _gemini_stream_attempts = 3
+                        for _gem_attempt in range(_gemini_stream_attempts):
+                            best_grounding_candidates = None
+                            best_grounding_score = -1
+                            try:
+                                if layout_compile or skip_live_web:
+                                    _gem_cfg = types.GenerateContentConfig(
+                                        system_instruction=system_prompt,
+                                        temperature=0.2,
+                                    )
+                                else:
+                                    _gem_cfg = types.GenerateContentConfig(
+                                        system_instruction=system_prompt,
+                                        temperature=0.2,
+                                        tools=[types.Tool(google_search=types.GoogleSearch())],
+                                    )
+                                stream = client.models.generate_content_stream(
+                                    model=_m,
+                                    contents=user_prompt,
+                                    config=_gem_cfg,
                                 )
-                            else:
-                                _gem_cfg = types.GenerateContentConfig(
-                                    system_instruction=system_prompt,
-                                    temperature=0.2,
-                                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                                for chunk in stream:
+                                    if getattr(chunk, "candidates", None):
+                                        last_candidates = chunk.candidates
+                                        sc = _grounding_signal_score(chunk.candidates)
+                                        if sc > best_grounding_score:
+                                            best_grounding_score = sc
+                                            best_grounding_candidates = chunk.candidates
+                                        # Surface Google Search activity live as Gemini
+                                        # issues queries / discovers sources mid-generation.
+                                        new_q, new_s = _extract_grounding_live(chunk.candidates)
+                                        for q in new_q:
+                                            if q not in seen_queries:
+                                                seen_queries.add(q)
+                                                logger.info(f"🔍 Google search  |  {q}")
+                                                yield {"event": "search_query", "query": q}
+                                        for s in new_s:
+                                            u = s.get("url")
+                                            if u and u not in seen_source_urls:
+                                                seen_source_urls.add(u)
+                                                yield {"event": "search_source", "title": s.get("title"), "url": u}
+                                    text = getattr(chunk, "text", None)
+                                    if text:
+                                        latex_body += text
+                                        yield {"event": "chunk", "text": text}
+    
+                                # Gemini often attaches the richest grounding_metadata only on
+                                # a late chunk; earlier chunks may have empty metadata. Flush
+                                # from the chunk we saw with the most queries + citation URLs
+                                # so the UI still gets search_query / search_source SSE events.
+                                _flush_cands = (
+                                    best_grounding_candidates
+                                    if best_grounding_score > 0
+                                    else (last_candidates if last_candidates else None)
                                 )
-                            stream = client.models.generate_content_stream(
-                                model=_m,
-                                contents=user_prompt,
-                                config=_gem_cfg,
-                            )
-                            for chunk in stream:
-                                if getattr(chunk, "candidates", None):
-                                    last_candidates = chunk.candidates
-                                    sc = _grounding_signal_score(chunk.candidates)
-                                    if sc > best_grounding_score:
-                                        best_grounding_score = sc
-                                        best_grounding_candidates = chunk.candidates
-                                    # Surface Google Search activity live as Gemini
-                                    # issues queries / discovers sources mid-generation.
-                                    new_q, new_s = _extract_grounding_live(chunk.candidates)
-                                    for q in new_q:
+                                if _flush_cands:
+                                    fq, fs = _extract_grounding_live(_flush_cands)
+                                    for q in fq:
                                         if q not in seen_queries:
                                             seen_queries.add(q)
-                                            logger.info(f"🔍 Google search  |  {q}")
+                                            logger.info(f"🔍 Google search (post-stream)  |  {q}")
                                             yield {"event": "search_query", "query": q}
-                                    for s in new_s:
+                                    for s in fs:
                                         u = s.get("url")
                                         if u and u not in seen_source_urls:
                                             seen_source_urls.add(u)
                                             yield {"event": "search_source", "title": s.get("title"), "url": u}
-                                text = getattr(chunk, "text", None)
-                                if text:
-                                    latex_body += text
-                                    yield {"event": "chunk", "text": text}
-
-                            # Gemini often attaches the richest grounding_metadata only on
-                            # a late chunk; earlier chunks may have empty metadata. Flush
-                            # from the chunk we saw with the most queries + citation URLs
-                            # so the UI still gets search_query / search_source SSE events.
-                            _flush_cands = (
-                                best_grounding_candidates
-                                if best_grounding_score > 0
-                                else (last_candidates if last_candidates else None)
-                            )
-                            if _flush_cands:
-                                fq, fs = _extract_grounding_live(_flush_cands)
-                                for q in fq:
-                                    if q not in seen_queries:
-                                        seen_queries.add(q)
-                                        logger.info(f"🔍 Google search (post-stream)  |  {q}")
-                                        yield {"event": "search_query", "query": q}
-                                for s in fs:
-                                    u = s.get("url")
-                                    if u and u not in seen_source_urls:
-                                        seen_source_urls.add(u)
-                                        yield {"event": "search_source", "title": s.get("title"), "url": u}
-                            break
-                        except Exception as _gem_e:
-                            if (
-                                _gem_attempt + 1 < _gemini_stream_attempts
-                                and _transient_provider_error(_gem_e)
-                            ):
-                                logger.warning(
-                                    f"Gemini stream attempt {_gem_attempt + 1}/{_gemini_stream_attempts} "
-                                    f"failed (transient): {_gem_e}"
-                                )
-                                yield {"event": "status", "msg": "AI is busy — retrying shortly…"}
-                                latex_body = ""
-                                last_candidates = []
-                                _backoff_if_rate_limited(_gem_e)
-                                continue
-                            raise
-
-                if latex_body:
-                    break  # got real content — exit fallback loop
-                else:
-                    logger.warning(f"Model {_m} returned empty body — trying next fallback")
-                    yield {"event": "status", "msg": "AI returned an empty response — trying again…"}
+                                break
+                            except Exception as _gem_e:
+                                if (
+                                    _gem_attempt + 1 < _gemini_stream_attempts
+                                    and _transient_provider_error(_gem_e)
+                                ):
+                                    logger.warning(
+                                        f"Gemini stream attempt {_gem_attempt + 1}/{_gemini_stream_attempts} "
+                                        f"failed (transient): {_gem_e}"
+                                    )
+                                    yield {"event": "status", "msg": "AI is busy — retrying shortly…"}
+                                    latex_body = ""
+                                    last_candidates = []
+                                    _backoff_if_rate_limited(_gem_e)
+                                    continue
+                                raise
+    
+                    if latex_body:
+                        break  # got real content — exit fallback loop
+                    else:
+                        logger.warning(f"Model {_m} returned empty body — trying next fallback")
+                        yield {"event": "status", "msg": "AI returned an empty response — trying again…"}
+                        last_candidates = []
+                except Exception as _e:
+                    logger.warning(f"Model {_m} failed: {_e} — trying next fallback")
+                    yield {"event": "status", "msg": "AI temporarily unavailable — trying again…"}
+                    latex_body = ""
                     last_candidates = []
-            except Exception as _e:
-                logger.warning(f"Model {_m} failed: {_e} — trying next fallback")
-                yield {"event": "status", "msg": "AI temporarily unavailable — trying again…"}
-                latex_body = ""
-                last_candidates = []
-                grok_sources = []
-                _backoff_if_rate_limited(_e)
-            if idx + 1 < len(_fallback_models) and not latex_body:
-                time.sleep(2)
+                    grok_sources = []
+                    _backoff_if_rate_limited(_e)
+                if idx + 1 < len(_fallback_models) and not latex_body:
+                    time.sleep(2)
 
-        logger.info(f"Stream complete  |  {time.time()-t1:.1f}s  |  {len(latex_body)} chars")
+        logger.info(
+            f"LaTeX body pipeline  |  {len(latex_body)} chars  |  passthrough={use_body_passthrough}  |  "
+            f"{time.time() - t_stream0:.1f}s"
+        )
 
         # Strip accidental fences
         latex_body = latex_body.strip()
@@ -4240,13 +4276,11 @@ def stream_latex_resume(
             latex_body = re.sub(r"^```[a-z]*\n?", "", latex_body)
             latex_body = re.sub(r"\n?```$", "", latex_body)
 
-        # Defensive: convert Markdown bold (**word**) → \textbf{word}.
-        # The prompt forbids this, but Grok in particular tends to default to
-        # Markdown formatting; without this rewrite pdflatex prints the literal
-        # asterisks (rule 7 violation surfaced as "**word**" in the rendered PDF).
-        latex_body, n_md_bold = _markdown_to_latex_bold(latex_body)
-        if n_md_bold:
-            logger.info(f"Markdown→LaTeX bold rewrites  |  {n_md_bold}")
+        # Defensive: convert Markdown bold (**word**) → \textbf{word} — LLM output only.
+        if not use_body_passthrough:
+            latex_body, n_md_bold = _markdown_to_latex_bold(latex_body)
+            if n_md_bold:
+                logger.info(f"Markdown→LaTeX bold rewrites  |  {n_md_bold}")
         latex_body = _strip_llm_markdown_citations(latex_body)
 
         # Sources — from whichever provider actually ran
@@ -4259,6 +4293,8 @@ def stream_latex_resume(
             yield {"event": "error", "msg": "AI could not produce content. Please retry."}
             return
 
+        identical_to_base = bool(base_body) and base_body.strip() == latex_body.strip()
+
         # Diff + JD ratings — skipped for template/layout-only compiles (no JD tailoring UX).
         if not layout_compile and base_body:
             yield {"event": "status", "msg": "Computing changes…"}
@@ -4267,14 +4303,15 @@ def stream_latex_resume(
             yield {"event": "diff", "data": diff_lines, "adds": adds, "removes": removes}
 
             # Human-readable change explanations (why each edit was made vs the JD)
-            yield {"event": "status", "msg": "Explaining changes…"}
-            try:
-                explanations = _explain_changes(client, model, base_body, latex_body, job_description[:1500])
-                if explanations:
-                    logger.info(f"Change rationales  |  {len(explanations)} items")
-                    yield {"event": "rationales", "data": explanations}
-            except Exception as exc:
-                logger.warning(f"Rationale generation failed: {exc}")
+            if not identical_to_base:
+                yield {"event": "status", "msg": "Explaining changes…"}
+                try:
+                    explanations = _explain_changes(client, model, base_body, latex_body, job_description[:1500])
+                    if explanations:
+                        logger.info(f"Change rationales  |  {len(explanations)} items")
+                        yield {"event": "rationales", "data": explanations}
+                except Exception as exc:
+                    logger.warning(f"Rationale generation failed: {exc}")
 
         if not layout_compile:
             yield {"event": "status", "msg": "Rating resume against JD…"}

@@ -345,6 +345,11 @@ export default function ResumeBuilder({
   );
   /** Linked selection: click a highlighted résumé line → scroll/highlight matching suggestion card (Analyze-style). */
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
+  /**
+   * When false (default), Generate after the coach uses the base library LaTeX body as-is (no model rewrite)
+   * unless the user ticks structured edits. When true, the model may reword for the JD even with zero ticks.
+   */
+  const [aiJobFitWithoutTicks, setAiJobFitWithoutTicks] = useState(false);
 
   /** Template handoff — post-compile UI: HTML live paper (instant Style tab) + exported PDF; Save / Download run a fresh compile. */
   const [customizeTab, setCustomizeTab] = useState<"style" | "sections" | "add">("style");
@@ -734,6 +739,7 @@ export default function ResumeBuilder({
     setSuggestLoading(true);
     setSuggestError(null);
     setSuggestions(null);
+    setAiJobFitWithoutTicks(false);
     setAcceptedIds(new Set());
     setRejectedIds(new Set());
     setSuggestResearchQueries([]);
@@ -766,7 +772,7 @@ export default function ResumeBuilder({
       setSuggestResearchQueries(rq);
       setSuggestResearchSources(rs);
       setSuggestResearchDigest(typeof json.research_digest === "string" ? json.research_digest : "");
-      // User explicitly accepts suggestions before generate — nothing pre-selected.
+      // Nothing is pre-selected; user ticks cards (or uses compile-as-is) before Generate.
     } catch (e: unknown) {
       setSuggestError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
     } finally {
@@ -915,6 +921,7 @@ export default function ResumeBuilder({
       suggested: s.suggested,
       reason: s.reason,
     }));
+    const tailorBodyWithAi = acceptedList.length > 0 || aiJobFitWithoutTicks;
 
     const acc: GenerationResult =
       studioHandoff && result?.folder
@@ -943,7 +950,8 @@ export default function ResumeBuilder({
           user_id: user?.id ?? null,
           layout_compile: studioHandoff,
           ...(digestTrim ? { suggest_research_digest: suggestResearchDigest } : {}),
-          post_suggestion_coach_run: Array.isArray(suggestions) && suggestions.length > 0,
+          post_suggestion_coach_run: !studioHandoff && Array.isArray(suggestions) && suggestions.length > 0,
+          tailor_body_with_ai: tailorBodyWithAi,
         }),
       });
 
@@ -1064,7 +1072,7 @@ export default function ResumeBuilder({
       setStatusMsg("");
       return null;
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources, aiJobFitWithoutTicks]);
 
   /** Template customize: run full compile, then optional blob download + toast. */
   const finalizeLayoutPdf = useCallback(
@@ -1879,11 +1887,14 @@ export default function ResumeBuilder({
               styleReferenceFolder={styleReferenceFolder}
               setStyleReferenceFolder={setStyleReferenceFolder}
               previewSectionAccentHex={previewAccentHex}
+              aiJobFitWithoutTicks={aiJobFitWithoutTicks}
+              setAiJobFitWithoutTicks={setAiJobFitWithoutTicks}
               onBackToInputs={() => {
                 setSelectedSuggestionId(null);
                 setSuggestions(null);
                 setSuggestSummary("");
                 setSuggestError(null);
+                setAiJobFitWithoutTicks(false);
                 setAcceptedIds(new Set());
                 setRejectedIds(new Set());
                 setSuggestResearchQueries([]);
@@ -2201,6 +2212,7 @@ export default function ResumeBuilder({
                     setSuggestResearchDigest("");
                     setSuggestResearchQueries([]);
                     setSuggestResearchSources([]);
+                    setAiJobFitWithoutTicks(false);
                     setAcceptedIds(new Set());
                     setRejectedIds(new Set());
                     setSelectedSuggestionId(null);
@@ -2625,6 +2637,7 @@ export default function ResumeBuilder({
                     setCompany("");
                     setRole("");
                     setPreview("");
+                    setAiJobFitWithoutTicks(false);
                     setAcceptedIds(new Set());
                     setRejectedIds(new Set());
                     setSelectedSuggestionId(null);
@@ -4262,7 +4275,7 @@ function SuggestionsPanel({
   selectedSuggestionId, onSelectSuggestionCard,
   onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, error, onBackToInputs,
   styleReferenceFolder, setStyleReferenceFolder,
-  previewSectionAccentHex,
+  previewSectionAccentHex, aiJobFitWithoutTicks, setAiJobFitWithoutTicks,
 }: {
   summary: string;
   suggestions: Suggestion[];
@@ -4288,6 +4301,8 @@ function SuggestionsPanel({
   styleReferenceFolder: string;
   setStyleReferenceFolder: (folder: string) => void;
   previewSectionAccentHex: string;
+  aiJobFitWithoutTicks: boolean;
+  setAiJobFitWithoutTicks: (v: boolean) => void;
 }) {
   const [resumePreviewTab, setResumePreviewTab] = useState<"pdf" | "text">(() => (pdfBlobUrl ? "pdf" : "text"));
 
@@ -4326,7 +4341,7 @@ function SuggestionsPanel({
       `}</style>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", letterSpacing: -0.1 }}>
-          Accept suggestions first — only accepted items are sent as structured edits to LaTeX generation
+          Tick edits to send them as structured instructions — or compile your saved LaTeX without changing the body (default below).
         </span>
         <button
           type="button"
@@ -4655,6 +4670,31 @@ function SuggestionsPanel({
             Clear accepts
           </button>
         </div>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            fontSize: 12,
+            color: "var(--muted)",
+            lineHeight: 1.45,
+            cursor: generating || accepted.length > 0 ? "default" : "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={aiJobFitWithoutTicks}
+            onChange={e => { setAiJobFitWithoutTicks(e.target.checked); }}
+            disabled={generating || accepted.length > 0}
+            style={{ width: 18, height: 18, minWidth: 18, minHeight: 18, flexShrink: 0, marginTop: 2 }}
+          />
+          <span>
+            <strong style={{ color: "var(--text)", fontWeight: 600 }}>Allow AI job-fit pass</strong> without ticking cards (the model may reword bullets for the JD).
+            {accepted.length > 0
+              ? " Disabled while you have ticked edits — those always run through the model."
+              : " Leave off to compile the LaTeX body from your base library file as-is."}
+          </span>
+        </label>
         <button
           type="button"
           onClick={() => { void onGenerate(); }}
@@ -4678,7 +4718,9 @@ function SuggestionsPanel({
           ) : (
             accepted.length > 0
               ? `Apply ${accepted.length} accepted edit${accepted.length > 1 ? "s" : ""} & generate PDF →`
-              : "Generate PDF (no ticks — light JD pass, no new bullets) →"
+              : aiJobFitWithoutTicks
+                ? "Generate PDF (AI may adjust wording for this job) →"
+                : "Compile PDF from your base LaTeX (no AI body rewrite) →"
           )}
         </button>
       </div>
@@ -4687,7 +4729,8 @@ function SuggestionsPanel({
         {accepted.length === 0 ? (
           <>
             {" "}
-            With none ticked, the model is instructed to keep your existing bullets and only tighten wording for the JD (not add new lines). Use <strong style={{ color: "var(--text)" }}>Accept all</strong> or individual checkmarks to apply specific rewrites.
+            With none ticked and AI job-fit off, the server skips rewriting and runs pdflatex on your base document body. Use{" "}
+            <strong style={{ color: "var(--text)" }}>Accept all</strong> or the checkbox above when you want the model involved.
           </>
         ) : null}{" "}
         <strong style={{ color: "var(--text)" }}>Empty suggested text</strong> counts as a <strong style={{ color: "var(--text)" }}>delete</strong> (that bullet is omitted from the PDF).

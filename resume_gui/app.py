@@ -138,6 +138,8 @@ async def api_generate_stream(request: Request):
     accepted_suggestions = body.get("accepted_suggestions")
     suggest_research_digest = (body.get("suggest_research_digest") or "").strip() or None
     post_suggestion_coach_run = bool(body.get("post_suggestion_coach_run"))
+    _tb = body.get("tailor_body_with_ai")
+    tailor_body_with_ai = True if _tb is None else bool(_tb)
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
@@ -146,6 +148,7 @@ async def api_generate_stream(request: Request):
         f"|  user={user_id or 'anon'}  |  accepted_suggestions={len(accepted_suggestions) if isinstance(accepted_suggestions, list) else 0}"
         f"  |  reuse_suggest_digest={bool(suggest_research_digest)}"
         f"  |  post_suggestion_coach_run={post_suggestion_coach_run}"
+        f"  |  tailor_body_with_ai={tailor_body_with_ai}"
     )
 
     if not company or not role or not jd:
@@ -172,6 +175,7 @@ async def api_generate_stream(request: Request):
             accepted_suggestions=accepted_suggestions if isinstance(accepted_suggestions, list) else None,
             pre_research_digest=suggest_research_digest,
             post_suggestion_coach_run=post_suggestion_coach_run,
+            tailor_body_with_ai=tailor_body_with_ai,
         ):
             ev_name = event.get("event")
 
