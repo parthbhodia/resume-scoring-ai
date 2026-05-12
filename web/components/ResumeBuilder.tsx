@@ -2657,18 +2657,19 @@ export default function ResumeBuilder({
                           borderRadius: 12,
                           overflow: "hidden",
                           border: "1px solid var(--border)",
-                          background: "#525659",
+                          background: "var(--surface2)",
                           boxShadow: "var(--shadow-sm)",
                           aspectRatio: "8.5 / 11",
                           maxHeight: 520,
                           minHeight: 280,
+                          padding: "8px 8px 20px",
                         }}
                       >
                         <iframe
                           title="Résumé PDF preview"
                           src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
                           loading="lazy"
-                          style={{ width: "100%", height: "100%", minHeight: 360, border: "none", display: "block" }}
+                          style={{ width: "100%", height: "100%", minHeight: 320, border: "none", display: "block", borderRadius: 6, background: "#fff" }}
                         />
                       </div>
                     ) : (
@@ -3768,10 +3769,27 @@ function stripeStyleForSuggestion(sug: Suggestion | null, all: Suggestion[]): CS
   };
 }
 
-/** HTML paper: space before glued `**`, month tokens; render `**x**` as <strong> */
+/** HTML paper: fix glued tokens, space before `**`, render `**x**` as <strong> */
+function normalizePaperLineDisplayString(raw: string): string {
+  let s = raw.replace(/([A-Za-z0-9)])(\*\*)/g, "$1 $2");
+  // Month after lowercase letter (ScienceAug) — word boundary does not sit between e and A.
+  s = s.replace(
+    /([a-z])(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?=\d|[\s,;–—]|$)/gi,
+    "$1 $2",
+  );
+  // Year run into school name (2024University)
+  s = s.replace(/(\d{4})(University|College|School|Institute)\b/gi, "$1 $2");
+  // CountyBaltimore-style glue; skip McDonald (single lc after uppercase)
+  s = s.replace(/([a-z])([A-Z][a-z]{3,})\b/g, (m, a: string, b: string, offset: number, str: string) => {
+    const prev = offset > 0 ? str[offset - 1] : "";
+    if (/[A-Z]/.test(prev) && a.length === 1) return m;
+    return `${a} ${b}`;
+  });
+  return s;
+}
+
 function paperLineDisplayContent(text: string): ReactNode {
-  let s = text.replace(/([A-Za-z0-9)])(\*\*)/g, "$1 $2");
-  s = s.replace(/([A-Za-z])(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/gi, "$1 $2");
+  const s = normalizePaperLineDisplayString(text);
   const parts = s.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, idx) => {
     const m = /^\*\*(.+)\*\*$/.exec(part);
@@ -3864,7 +3882,7 @@ function ResumePaperView({
       background: "#fff",
       borderRadius: 6,
       boxShadow: "0 2px 16px rgba(0,0,0,0.10)",
-      padding: `${paperPaddingY}px ${paperPaddingX}px`,
+      padding: `${paperPaddingY}px ${paperPaddingX}px ${Math.max(28, paperPaddingY + 18)}px`,
       fontFamily,
       fontSize: baseFontPx,
       lineHeight,
@@ -3941,9 +3959,19 @@ function ResumePaperView({
         }
         if (isAllCaps(t)) {
           return (
-            <div key={i} style={{ marginTop: 12, marginBottom: 3 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: sectionAccentColor }}>{t}</div>
-              <div style={{ height: 0.8, background: sectionAccentColor, marginTop: 2 }} />
+            <div key={i} style={{ marginTop: 14, marginBottom: 4 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: sectionAccentColor, marginBottom: 5 }}>{t}</div>
+              <div
+                role="presentation"
+                aria-hidden
+                style={{
+                  height: 1,
+                  background: sectionAccentColor,
+                  opacity: 0.5,
+                  borderRadius: 1,
+                  marginBottom: 10,
+                }}
+              />
             </div>
           );
         }
@@ -3953,7 +3981,7 @@ function ResumePaperView({
           : stripped;
 
         if (isBullet(t)) {
-          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 2, paddingLeft: 6, ...hlStyle };
+          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 4, paddingLeft: 6, ...hlStyle };
           const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
           const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
           return (
@@ -3963,7 +3991,7 @@ function ResumePaperView({
             </div>
           );
         }
-        const base: React.CSSProperties = { marginBottom: 2, ...hlStyle };
+        const base: React.CSSProperties = { marginBottom: 4, ...hlStyle };
         const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
         const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
         return <div key={i} {...p} {...lineMark}>{acceptedSug ? paperLineDisplayContent(innerFromAccepted) : paperLineDisplayContent(t)}</div>;
