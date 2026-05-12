@@ -2495,7 +2495,7 @@ export default function ResumeBuilder({
                     <strong style={{ color: "var(--text)" }}>?</strong> on each card opens &quot;why this change&quot; from the model. To control what
                     goes into the <em>next</em> PDF, use{" "}
                     <strong style={{ color: "var(--text)" }}>Analyze &amp; get suggestions</strong>, tick the edits you want, then{" "}
-                    <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> again. Optional buttons below are only for your notes.
+                    <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> again.
                   </p>
                   <DiffView
                     key={result.folder ?? "diff"}
@@ -2506,8 +2506,6 @@ export default function ResumeBuilder({
                     baseFolder={result.baseFolder}
                     baseLoaded={result.baseLoaded}
                     jdKeywords={jdKeywords}
-                    reviewAcknowledgement
-                    editAnchorHref="#rb-customize-preview"
                   />
                 </div>
               )}
