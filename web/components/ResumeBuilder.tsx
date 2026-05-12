@@ -3981,6 +3981,95 @@ function priorityLabel(p: Suggestion["priority"]): string {
   return "LOW";
 }
 
+/** Thumbnail art matches `referenceFolder` sent to the server — not hardcoded to one style. */
+type TemplateThumbKind = "classic" | "harshibar" | "malta";
+
+function templateThumbKindFromFolder(referenceFolder: string): TemplateThumbKind {
+  if (referenceFolder === "Harshibar_Template1") return "harshibar";
+  if (referenceFolder === "MaltaCV_Modern") return "malta";
+  return "classic";
+}
+
+function TemplateStyleThumbSvg({ kind }: { kind: TemplateThumbKind }) {
+  if (kind === "harshibar") {
+    return (
+      <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
+        <rect width="200" height="260" fill="#fff" />
+        <text x="12" y="21" fontSize="10.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">John A. Smith</text>
+        <text x="12" y="31" fontSize="5.5" fill="#475569" fontFamily="Arial,sans-serif">john@email.com · (555) 123-4567 · San Francisco</text>
+        <line x1="12" y1="36" x2="188" y2="36" stroke="#0f172a" strokeWidth="0.8" />
+        <text x="12" y="47" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EXPERIENCE</text>
+        <line x1="12" y1="50" x2="188" y2="50" stroke="#cbd5e1" strokeWidth="0.4" />
+        <text x="12" y="59" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">Software Engineer</text>
+        <text x="188" y="59" fontSize="5.5" fill="#64748b" fontFamily="Arial,sans-serif" textAnchor="end">2022–Present</text>
+        <text x="12" y="67" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Google, Inc. · Mountain View, CA</text>
+        <rect x="16" y="72" width="164" height="3" rx="1" fill="#e2e8f0" />
+        <rect x="16" y="77" width="148" height="3" rx="1" fill="#e2e8f0" />
+        <text x="12" y="90" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EDUCATION</text>
+        <line x1="12" y1="93" x2="188" y2="93" stroke="#cbd5e1" strokeWidth="0.4" />
+        <text x="12" y="102" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">B.S. Computer Science</text>
+        <text x="12" y="110" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Stanford University</text>
+        <text x="12" y="123" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">SKILLS</text>
+        <line x1="12" y1="126" x2="188" y2="126" stroke="#cbd5e1" strokeWidth="0.4" />
+        <rect x="12" y="132" width="40" height="7" rx="2" fill="#dbeafe" />
+        <rect x="56" y="132" width="35" height="7" rx="2" fill="#dbeafe" />
+        <rect x="95" y="132" width="45" height="7" rx="2" fill="#dbeafe" />
+      </svg>
+    );
+  }
+  if (kind === "malta") {
+    const accent = "#E25822";
+    return (
+      <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
+        <rect width="200" height="260" fill="#fff" />
+        <text x="12" y="22" fontSize="11" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="-0.2">Alex Rivera</text>
+        <text x="12" y="32" fontSize="5.5" fill="#64748b" fontFamily="Arial,sans-serif">alex@email.com · Boston, MA</text>
+        <rect x="12" y="37" width="56" height="2.5" rx="0.5" fill={accent} />
+        <text x="12" y="52" fontSize="6.5" fontWeight="700" fill={accent} fontFamily="Arial,sans-serif" letterSpacing="0.5">EXPERIENCE</text>
+        <rect x="12" y="55" width="176" height="0.9" fill={accent} opacity="0.35" />
+        <text x="12" y="66" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">Product Analyst</text>
+        <text x="188" y="66" fontSize="5.5" fill="#64748b" fontFamily="Arial,sans-serif" textAnchor="end">2019–2023</text>
+        <text x="12" y="74" fontSize="5.8" fill="#555" fontFamily="Arial,sans-serif">Northwind · Remote</text>
+        <rect x="16" y="79" width="152" height="2.8" rx="0.5" fill="#f1f5f9" />
+        <text x="12" y="94" fontSize="6.5" fontWeight="700" fill={accent} fontFamily="Arial,sans-serif" letterSpacing="0.5">SKILLS</text>
+        <rect x="12" y="97" width="176" height="0.9" fill={accent} opacity="0.35" />
+        <rect x="12" y="104" width="82" height="22" rx="3" fill="none" stroke={accent} strokeWidth="0.6" opacity="0.9" />
+        <rect x="98" y="104" width="82" height="22" rx="3" fill="none" stroke={accent} strokeWidth="0.6" opacity="0.9" />
+        <rect x="18" y="110" width="56" height="2.5" rx="0.5" fill="#fed7aa" />
+        <rect x="18" y="115" width="48" height="2.5" rx="0.5" fill="#fed7aa" />
+        <rect x="104" y="110" width="52" height="2.5" rx="0.5" fill="#fed7aa" />
+        <rect x="104" y="115" width="44" height="2.5" rx="0.5" fill="#fed7aa" />
+        <text x="12" y="140" fontSize="6.5" fontWeight="700" fill={accent} fontFamily="Arial,sans-serif" letterSpacing="0.5">EDUCATION</text>
+        <rect x="12" y="143" width="176" height="0.9" fill={accent} opacity="0.35" />
+        <text x="12" y="154" fontSize="6.2" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">B.S. Economics</text>
+        <text x="12" y="162" fontSize="5.8" fill="#555" fontFamily="Arial,sans-serif">State University</text>
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="260" fill="#fff" />
+      <text x="100" y="20" fontSize="11" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="1">JENNIFER SMITH</text>
+      <text x="100" y="29" fontSize="5.5" fill="#475569" fontFamily="Georgia,serif" textAnchor="middle">jennifer@email.com · (555) 010-2030 · New York</text>
+      <rect x="12" y="34" width="176" height="1.2" fill="#0f172a" />
+      <text x="100" y="45" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="0.8">PROFESSIONAL SUMMARY</text>
+      <rect x="12" y="49" width="176" height="3" rx="0.5" fill="#e2e8f0" />
+      <rect x="12" y="54" width="160" height="3" rx="0.5" fill="#e2e8f0" />
+      <text x="12" y="67" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">WORK EXPERIENCE</text>
+      <rect x="12" y="70" width="176" height="0.8" fill="#0f172a" />
+      <text x="12" y="79" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">Senior Product Designer</text>
+      <text x="188" y="79" fontSize="5.5" fill="#64748b" fontFamily="Georgia,serif" textAnchor="end">2021–Present</text>
+      <text x="12" y="87" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">Acme Labs, San Francisco, CA</text>
+      <rect x="16" y="92" width="160" height="2.8" rx="0.5" fill="#e2e8f0" />
+      <rect x="16" y="97" width="148" height="2.8" rx="0.5" fill="#e2e8f0" />
+      <text x="12" y="110" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">EDUCATION</text>
+      <rect x="12" y="113" width="176" height="0.8" fill="#0f172a" />
+      <text x="12" y="122" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">BFA, Graphic Design</text>
+      <text x="12" y="130" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">State University, Boston</text>
+    </svg>
+  );
+}
+
 function ResumeStyleTemplateGrid({
   styleReferenceFolder,
   setStyleReferenceFolder,
@@ -3994,7 +4083,7 @@ function ResumeStyleTemplateGrid({
         {distinctStyleTemplates().map((t) => {
           const selected = styleReferenceFolder === t.referenceFolder;
           const isAts = true;
-          const isModern = t.id === "harshibar-ats";
+          const thumbKind = templateThumbKindFromFolder(t.referenceFolder);
           return (
             <button
               key={t.id}
@@ -4028,51 +4117,7 @@ function ResumeStyleTemplateGrid({
                   aspectRatio: "8.5 / 11",
                 }}
                 >
-                  {isModern ? (
-                    <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
-                      <rect width="200" height="260" fill="#fff" />
-                      <text x="12" y="21" fontSize="10.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">John A. Smith</text>
-                      <text x="12" y="31" fontSize="5.5" fill="#475569" fontFamily="Arial,sans-serif">john@email.com · (555) 123-4567 · San Francisco</text>
-                      <line x1="12" y1="36" x2="188" y2="36" stroke="#0f172a" strokeWidth="0.8" />
-                      <text x="12" y="47" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EXPERIENCE</text>
-                      <line x1="12" y1="50" x2="188" y2="50" stroke="#cbd5e1" strokeWidth="0.4" />
-                      <text x="12" y="59" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">Software Engineer</text>
-                      <text x="188" y="59" fontSize="5.5" fill="#64748b" fontFamily="Arial,sans-serif" textAnchor="end">2022–Present</text>
-                      <text x="12" y="67" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Google, Inc. · Mountain View, CA</text>
-                      <rect x="16" y="72" width="164" height="3" rx="1" fill="#e2e8f0" />
-                      <rect x="16" y="77" width="148" height="3" rx="1" fill="#e2e8f0" />
-                      <text x="12" y="90" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">EDUCATION</text>
-                      <line x1="12" y1="93" x2="188" y2="93" stroke="#cbd5e1" strokeWidth="0.4" />
-                      <text x="12" y="102" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif">B.S. Computer Science</text>
-                      <text x="12" y="110" fontSize="6" fill="#475569" fontFamily="Arial,sans-serif">Stanford University</text>
-                      <text x="12" y="123" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Arial,sans-serif" letterSpacing="1">SKILLS</text>
-                      <line x1="12" y1="126" x2="188" y2="126" stroke="#cbd5e1" strokeWidth="0.4" />
-                      <rect x="12" y="132" width="40" height="7" rx="2" fill="#dbeafe" />
-                      <rect x="56" y="132" width="35" height="7" rx="2" fill="#dbeafe" />
-                      <rect x="95" y="132" width="45" height="7" rx="2" fill="#dbeafe" />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 200 260" width="100%" xmlns="http://www.w3.org/2000/svg">
-                      <rect width="200" height="260" fill="#fff" />
-                      <text x="100" y="20" fontSize="11" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="1">JENNIFER SMITH</text>
-                      <text x="100" y="29" fontSize="5.5" fill="#475569" fontFamily="Georgia,serif" textAnchor="middle">jennifer@email.com · (555) 010-2030 · New York</text>
-                      <rect x="12" y="34" width="176" height="1.2" fill="#0f172a" />
-                      <text x="100" y="45" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" textAnchor="middle" letterSpacing="0.8">PROFESSIONAL SUMMARY</text>
-                      <rect x="12" y="49" width="176" height="3" rx="0.5" fill="#e2e8f0" />
-                      <rect x="12" y="54" width="160" height="3" rx="0.5" fill="#e2e8f0" />
-                      <text x="12" y="67" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">WORK EXPERIENCE</text>
-                      <rect x="12" y="70" width="176" height="0.8" fill="#0f172a" />
-                      <text x="12" y="79" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">Senior Product Designer</text>
-                      <text x="188" y="79" fontSize="5.5" fill="#64748b" fontFamily="Georgia,serif" textAnchor="end">2021–Present</text>
-                      <text x="12" y="87" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">Acme Labs, San Francisco, CA</text>
-                      <rect x="16" y="92" width="160" height="2.8" rx="0.5" fill="#e2e8f0" />
-                      <rect x="16" y="97" width="148" height="2.8" rx="0.5" fill="#e2e8f0" />
-                      <text x="12" y="110" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif" letterSpacing="0.8">EDUCATION</text>
-                      <rect x="12" y="113" width="176" height="0.8" fill="#0f172a" />
-                      <text x="12" y="122" fontSize="6.5" fontWeight="700" fill="#0f172a" fontFamily="Georgia,serif">BFA, Graphic Design</text>
-                      <text x="12" y="130" fontSize="6" fill="#475569" fontFamily="Georgia,serif" fontStyle="italic">State University, Boston</text>
-                    </svg>
-                  )}
+                  <TemplateStyleThumbSvg kind={thumbKind} />
                 </div>
               </div>
               <div style={{ padding: "9px 12px 10px", display: "flex", alignItems: "center", gap: 8 }}>
@@ -4109,7 +4154,7 @@ function ResumeStyleTemplateGrid({
         })}
       </div>
       <div style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.5 }}>
-        More layouts: register a folder in{" "}
+        Each thumbnail matches the <code style={{ fontSize: 10 }}>reference_folder</code> sent when you generate (Harshibar, Malta, or classic). Add more in{" "}
         <code style={{ fontSize: 10 }}>web/lib/resumeTemplates.ts</code>.
       </div>
     </div>
