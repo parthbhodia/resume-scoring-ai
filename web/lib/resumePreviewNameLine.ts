@@ -66,7 +66,7 @@ function isBulletLine(t: string): boolean {
 export function dedupeRepeatedLeadingResumeHeader(lines: string[]): string[] {
   if (lines.length < 2) return lines;
   const { nameLineIndex } = nameAndSubtitleLineIndices(lines);
-  const nameNorm = lines[nameLineIndex]?.trim().toLowerCase() ?? "";
+  const nameNorm = lines[nameLineIndex]?.trim().replace(/\s+/g, " ").toLowerCase() ?? "";
   if (!nameNorm) return lines;
 
   let firstHeaderEnd = nameLineIndex;
@@ -84,7 +84,7 @@ export function dedupeRepeatedLeadingResumeHeader(lines: string[]): string[] {
   for (let i = firstHeaderEnd + 1; i < searchHi; i++) {
     const t = lines[i].trim();
     if (!t) continue;
-    if (t.toLowerCase() === nameNorm) {
+    if (t.replace(/\s+/g, " ").toLowerCase() === nameNorm) {
       dupStart = i;
       break;
     }

@@ -4313,7 +4313,11 @@ function SuggestionsPanel({
   aiJobFitWithoutTicks: boolean;
   setAiJobFitWithoutTicks: (v: boolean) => void;
 }) {
-  const [resumePreviewTab, setResumePreviewTab] = useState<"pdf" | "text">(() => (pdfBlobUrl ? "pdf" : "text"));
+  /** Prefer styled HTML preview: it follows `styleReferenceFolder` and dedupes repeated headers. Raw PDF is the upload as printed (often different fonts / duplicate header blocks). */
+  const [resumePreviewTab, setResumePreviewTab] = useState<"pdf" | "text">(() => {
+    if (!pdfBlobUrl) return "text";
+    return (candidateProfile ?? "").trim().length > 0 ? "text" : "pdf";
+  });
 
   const accepted = suggestions.filter(s => acceptedIds.has(s.id));
   const highlightOriginals = suggestions.map(s => s.original);
@@ -4536,24 +4540,6 @@ function SuggestionsPanel({
               <div style={{ display: "flex", gap: 4, background: "var(--surface2)", padding: 3, borderRadius: 10, border: "1px solid var(--border)" }}>
                 <button
                   type="button"
-                  onClick={() => setResumePreviewTab("pdf")}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    fontFamily: "inherit",
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "none",
-                    cursor: "pointer",
-                    background: resumePreviewTab === "pdf" ? "var(--surface)" : "transparent",
-                    color: resumePreviewTab === "pdf" ? "var(--text)" : "var(--muted)",
-                    boxShadow: resumePreviewTab === "pdf" ? "var(--shadow-sm)" : "none",
-                  }}
-                >
-                  Scanned PDF
-                </button>
-                <button
-                  type="button"
                   onClick={() => setResumePreviewTab("text")}
                   style={{
                     fontSize: 11,
@@ -4567,12 +4553,32 @@ function SuggestionsPanel({
                     color: resumePreviewTab === "text" ? "var(--text)" : "var(--muted)",
                     boxShadow: resumePreviewTab === "text" ? "var(--shadow-sm)" : "none",
                   }}
+                  title="Uses your extracted text with the template selected below (same idea as the generated PDF)."
                 >
-                  Extracted text
+                  Styled preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResumePreviewTab("pdf")}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    cursor: "pointer",
+                    background: resumePreviewTab === "pdf" ? "var(--surface)" : "transparent",
+                    color: resumePreviewTab === "pdf" ? "var(--text)" : "var(--muted)",
+                    boxShadow: resumePreviewTab === "pdf" ? "var(--shadow-sm)" : "none",
+                  }}
+                  title="Your uploaded PDF as printed — layout and fonts match the file, not the LaTeX template."
+                >
+                  Original PDF
                 </button>
               </div>
             ) : (
-              <span style={{ fontSize: 10, color: "var(--dim)" }}>Text preview — upload a PDF to unlock scanned view</span>
+              <span style={{ fontSize: 10, color: "var(--dim)" }}>Styled preview — upload a PDF to add an original-file tab</span>
             )}
           </div>
           {pdfBlobUrl && resumePreviewTab === "pdf" ? (
@@ -4585,6 +4591,19 @@ function SuggestionsPanel({
                 background: "#fff",
               }}
             >
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--muted)",
+                  lineHeight: 1.45,
+                  padding: "10px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  background: "var(--surface2)",
+                }}
+              >
+                This is your <strong style={{ color: "var(--text)" }}>uploaded file</strong> as it was authored (fonts, spacing, duplicate headers). For the same visual language as your selected template and generate step, use{" "}
+                <strong style={{ color: "var(--text)" }}>Styled preview</strong>.
+              </div>
               <BuilderPdfSuggestionHighlights
                 key={pdfDocumentKey}
                 pdfBlobUrl={pdfBlobUrl}
@@ -4599,7 +4618,7 @@ function SuggestionsPanel({
           ) : (
             <>
               <div style={{ fontSize: 10, color: "var(--dim)", marginBottom: 6, lineHeight: 1.45 }}>
-                Tinted lines match cards on the left — click a line to focus the matching suggestion.
+                Same layout family as Generate (Style tab). Tinted lines match cards on the left — click a line to focus the matching suggestion.
               </div>
               <div ref={textPreviewScrollRef} style={{ overflowY: "auto", maxHeight: panelScrollMax }}>
                 <ResumePaperView
