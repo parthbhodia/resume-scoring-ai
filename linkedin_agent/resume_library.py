@@ -823,7 +823,48 @@ def _contact_from_candidate_profile(candidate_profile: Optional[str]) -> Dict[st
                 out["name"] = line
                 break
 
+    if not (out.get("location") or "").strip():
+        _infer_location_from_profile_lines(lines, out)
+
     return out
+
+
+def _infer_location_from_profile_lines(lines: List[str], out: Dict[str, str]) -> None:
+    """Best-effort city/state from header or experience lines when explicit Location: is missing."""
+    if (out.get("location") or "").strip():
+        return
+    # "McLean, VA" / "San Francisco, CA"
+    rx_city_st = re.compile(r"^([A-Z][a-zA-Z .'-]{1,40},\s*[A-Z]{2})\s*$")
+    # "McLean, Virginia"
+    rx_city_state = re.compile(
+        r"^([A-Z][a-zA-Z .'-]{1,35},\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$"
+    )
+    for line in lines[1:24]:
+        t = line.strip()
+        if len(t) < 6 or len(t) > 72:
+            continue
+        if re.match(r"^(experience|education|skills|projects|summary|work|employment)\b", t, re.I):
+            continue
+        if rx_city_st.match(t):
+            out["location"] = t
+            return
+        if rx_city_state.match(t) and not re.match(r"^[A-Z\s,'-]{10,}$", t):
+            out["location"] = t
+            return
+    # "…Present — McLean, Virginia" / hyphen variants (common in PDF extracts)
+    for line in lines[:80]:
+        t = line.strip()
+        if not re.search(r"(?:\d{4}|Present)", t, re.I):
+            continue
+        if "—" not in t and "–" not in t and t.count("-") < 2:
+            continue
+        m = re.search(
+            r"[—–]\s*((?:[A-Z][a-z]+)+,\s*(?:[A-Z]{2}\b|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?))\s*$",
+            t,
+        )
+        if m:
+            out["location"] = m.group(1).strip()
+            return
 
 
 def _strip_contact_block_empty_hrefs(tex: str) -> str:
@@ -991,13 +1032,25 @@ def _apply_preamble_subs(preamble: str, role: str, company: str, contact: Option
 
 
 def _fix_tex_runon_employer_month_line(line: str) -> str:
-    """Insert missing space when PDF/LLM glued a company token to a month abbrev (AccentureNov, ONEJan)."""
+    """Insert missing space when PDF/LLM glued a company token to a month abbrev (CAPITAL ONEJan, AccentureNov)."""
     out = line
-    _m_ci = r"((?i:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec))"
+    _m_ci = r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
+    _m_ci_i = r"(?i:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
     _tail = r"(?=[\s\d,;–—\\]|$|\}|%|\]|\|)"
+    # Long ALL-CAPS token + month (avoid single-letter + Jan false splits inside words).
+    for _ in range(8):
+        nxt = re.sub(
+            rf"\b([A-Z]{{2,}})({_m_ci})\b(?![a-z]){_tail}",
+            r"\1 \2",
+            out,
+            flags=re.I,
+        )
+        if nxt == out:
+            break
+        out = nxt
     for _ in range(6):
-        nxt = re.sub(rf"([a-z]){_m_ci}{_tail}", r"\1 \2", out)
-        nxt = re.sub(rf"([A-Z]){_m_ci}{_tail}", r"\1 \2", nxt)
+        nxt = re.sub(rf"([a-z])({_m_ci_i}){_tail}", r"\1 \2", out)
+        nxt = re.sub(rf"([A-Z])({_m_ci_i}){_tail}", r"\1 \2", nxt)
         nxt = re.sub(r"([A-Za-z])(May)(?=\d)", r"\1 \2", nxt)
         if nxt == out:
             break
@@ -1027,17 +1080,76 @@ def _fix_tex_contact_pipe_spacing(tex: str) -> str:
     tail = tex[end:]
     fixed: List[str] = []
     for ln in mid.splitlines():
-        if any(k in ln for k in ("Email:", "Mobile:", "LinkedIn", "Github", "GitHub")):
-            fixed.append(re.sub(r"(?<!\$)\|(?=[A-Za-z])", r"| ", ln))
-        else:
-            fixed.append(ln)
+        # Whole contact fragment: normalize `|Mobile` / `|Email` even when not on same line as labels.
+        fixed.append(re.sub(r"(?<!\$)\|(?=[A-Za-z])", r"| ", ln))
     return head + "\n".join(fixed) + tail
 
 
+_LEADING_BODY_JUNK = re.compile(
+    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*0(?:in|pt)\s*$",
+    re.I,
+)
+
+
+def _strip_tex_leading_body_junk(tex: str) -> str:
+    """Drop accidental literal lines (enumitem-like keys) immediately after \\begin{document}."""
+    token = "\\begin{document}"
+    i = tex.find(token)
+    if i < 0:
+        return tex
+    head = tex[: i + len(token)]
+    body = tex[i + len(token) :]
+    if not body.startswith("\n"):
+        return tex
+    lines = body.splitlines(keepends=True)
+    k = 0
+    while k < len(lines):
+        raw = lines[k]
+        s = raw.strip()
+        if not s:
+            k += 1
+            continue
+        if _LEADING_BODY_JUNK.match(s):
+            k += 1
+            continue
+        break
+    tail = "".join(lines[k:])
+    if tail and not tail.startswith("\n"):
+        tail = "\n" + tail
+    return head + tail
+
+
+_GLUED_RESUME_WORDS = re.compile(
+    r"(?i)([a-z]{2,22}(?:ing|ed|es|tion|sions?|ments?|ness))"
+    r"((?:ability|ibility|insights|analysis|operations|management|performance|reporting|validation|processing|optimization|alignment|framework|workflows?))"
+    r"(?=\s|$|[,.;)]|to(?:analyze|support|identify|ensure|deliver|improve)\b|for(?:business|data|insights)\b)"
+)
+_TO_VERB_GLUE = re.compile(
+    r"(?i)(?<=[a-z])to(analyze|support|identify|ensure|deliver|improve)\b"
+)
+
+
+def _fix_tex_resumeitem_word_glues_line(ln: str) -> str:
+    if "tabular" in ln.lower() or "@{\\extracolsep" in ln:
+        return ln
+    if "\\resumeItem" not in ln and "\\item" not in ln:
+        return ln
+    out = _GLUED_RESUME_WORDS.sub(r"\1 \2", ln)
+    out = _TO_VERB_GLUE.sub(r" to \1", out)
+    return out
+
+
+def _fix_tex_resumeitem_word_glues(tex: str) -> str:
+    return "\n".join(_fix_tex_resumeitem_word_glues_line(ln) for ln in tex.splitlines())
+
+
 def _sanitize_full_resume_tex(full_tex: str) -> str:
-    """Last-mile fixes on assembled .tex before write (run-ons, contact pipes)."""
-    t = _fix_tex_runon_employer_month(full_tex)
-    return _fix_tex_contact_pipe_spacing(t)
+    """Last-mile fixes on assembled .tex before write (run-ons, contact pipes, stray text)."""
+    t = _strip_tex_leading_body_junk(full_tex)
+    t = _fix_tex_runon_employer_month(t)
+    t = _fix_tex_contact_pipe_spacing(t)
+    t = _fix_tex_resumeitem_word_glues(t)
+    return t
 
 
 # ============================================================================
