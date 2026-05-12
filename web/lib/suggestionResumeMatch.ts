@@ -4,6 +4,11 @@
  */
 
 import { isPlaceholderResumeHeaderLine } from "./resumePreviewNameLine";
+import { looksLikeStructuredEmploymentLine } from "./profileFromResumeText";
+import {
+  looksLikeLoneJobTitleLine,
+  looksLikeEntryHeader,
+} from "./resumeEntryLineHeuristics";
 
 function isAllCapsSectionLine(t: string): boolean {
   const s = t.trim();
@@ -48,6 +53,16 @@ export function computeCombinedMatchTextByLineIndex(lines: string[]): string[] {
       continue;
     }
 
+    if (
+      looksLikeStructuredEmploymentLine(t) ||
+      looksLikeEntryHeader(t) ||
+      looksLikeLoneJobTitleLine(t)
+    ) {
+      out[i] = t;
+      i++;
+      continue;
+    }
+
     if (isBulletLine(t)) {
       const parts: string[] = [t];
       let j = i + 1;
@@ -56,6 +71,9 @@ export function computeCombinedMatchTextByLineIndex(lines: string[]): string[] {
         const u = uRaw.trim();
         if (!u) break;
         if (isBulletLine(u) || isAllCapsSectionLine(u) || isPlaceholderResumeHeaderLine(uRaw)) break;
+        if (looksLikeLoneJobTitleLine(u) || looksLikeEntryHeader(u) || looksLikeStructuredEmploymentLine(u)) {
+          break;
+        }
         parts.push(u);
         j++;
       }
@@ -77,6 +95,9 @@ export function computeCombinedMatchTextByLineIndex(lines: string[]): string[] {
       const u = uRaw.trim();
       if (!u) break;
       if (isBulletLine(u) || isAllCapsSectionLine(u) || isPlaceholderResumeHeaderLine(uRaw)) break;
+      if (looksLikeLoneJobTitleLine(u) || looksLikeEntryHeader(u) || looksLikeStructuredEmploymentLine(u)) {
+        break;
+      }
       if (isPhoneOrStructuredAfterEmail(prev, u)) break;
 
       const fc = u.charAt(0);
