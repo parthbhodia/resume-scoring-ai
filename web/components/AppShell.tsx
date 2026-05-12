@@ -7,6 +7,7 @@
  * Routing (static export):
  *   ?view=builder|library|analyze|profile|jobs  (default: analyze)
  *   ?view=builder&flow=tailor|template
+ *   Template customize may keep flow=tailor; session rn_builder_layout_only=1 → highlight Template gallery.
  *   ?view=library&resume=<folder>
  */
 
@@ -19,6 +20,7 @@ import { CONTACT_EMAIL } from "@/lib/brand";
 import { LogoFull, LogoMark } from "./BrandLogo";
 import ResumeSidebar from "./ResumeSidebar";
 import { useAppBreakpoints } from "@/hooks/useAppBreakpoints";
+import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 
 export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs";
 
@@ -98,6 +100,15 @@ const BADGES: Partial<Record<AppView, string>> = {
   jobs: "Soon",
 };
 
+function readBuilderLayoutOnlyFlag(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return sessionStorage.getItem(RN_BUILDER_LAYOUT_ONLY_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function useAppView(): AppView {
   const params = useSearchParams();
   const raw = (params?.get("view") || "analyze").toLowerCase();
@@ -113,6 +124,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const flowRaw = (searchParams?.get("flow") || "tailor").toLowerCase();
   const builderFlow: "tailor" | "template" =
     flowRaw === "template" ? "template" : "tailor";
+  const [layoutOnlyForNav, setLayoutOnlyForNav] = useState(readBuilderLayoutOnlyFlag);
   const [user, setUser] = useState<User | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, toggleTheme] = useTheme();
@@ -139,6 +151,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
     setBuilderOpen(active === "builder");
   }, [active]);
 
+  useEffect(() => {
+    setLayoutOnlyForNav(readBuilderLayoutOnlyFlag());
+  }, [searchParams?.toString(), active]);
+
   const switchView = (next: AppView) => {
     router.push(`/?view=${next}`);
     setHistoryOpen(false);
@@ -146,7 +162,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
   };
 
   const goBuilderFlow = (flow: "tailor" | "template") => {
-    router.push(`/?view=builder&flow=${flow}`);
+    if (flow === "tailor") {
+      try {
+        sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+      } catch { /* ignore */ }
+    }
+    const intent = flow === "tailor" ? "&intent=job" : "";
+    router.push(`/?view=builder&flow=${flow}${intent}`);
     setHistoryOpen(false);
     setBuilderOpen(false);
   };
@@ -158,6 +180,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   const initial = (user?.email || "?").charAt(0).toUpperCase();
   const builderActive = active === "builder";
+  const navBuilderSubflow: "tailor" | "template" =
+    builderActive && builderFlow === "tailor" && layoutOnlyForNav
+      ? "template"
+      : builderFlow;
 
   const NavRow = ({
     view,
@@ -264,7 +290,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                     { flow: "tailor" as const, label: "Tailor to a job" },
                     { flow: "template" as const, label: "Template gallery" },
                   ].map(({ flow, label }) => {
-                    const subActive = builderActive && builderFlow === flow;
+                    const subActive = builderActive && navBuilderSubflow === flow;
                     return (
                       <button
                         key={flow}
@@ -466,7 +492,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <ResumeSidebar
           activeFolder={null}
           onSelect={folder => {
-            router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}`);
+            try {
+              sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+            } catch { /* ignore */ }
+            router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}&intent=job`);
             setHistoryOpen(false);
           }}
         />

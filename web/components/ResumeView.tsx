@@ -15,6 +15,7 @@ import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
 import { fetchResumes, getSupabaseClient } from "@/lib/supabase";
 import ShareButton from "./ShareButton";
 import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
+import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 
 function scoreBand(score: number): "strong" | "mid" | "weak" {
   if (score >= 70) return "strong";
@@ -64,7 +65,10 @@ export default function ResumeView({ folder }: { folder: string }) {
 
   const useAsBase = () => {
     if (meta) stashTailorPrefillFromLibrary(meta);
-    router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}`);
+    try {
+      sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+    } catch { /* ignore */ }
+    router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}&intent=job`);
   };
 
   const pdfSrc = pdfUrl

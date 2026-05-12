@@ -59,6 +59,23 @@ function formatSupabaseWriteError(err: { message?: string; details?: string; hin
   return parts.join(" — ") || "Database request failed.";
 }
 
+/**
+ * Retry `resumes` write without `job_description` when PostgREST/Postgres rejects that field
+ * (add column: `web/db/migrations/002_resumes_job_description.sql`).
+ */
+function shouldRetryResumeWriteWithoutJobDescription(err: unknown): boolean {
+  const raw =
+    typeof err === "object" && err !== null && "message" in err
+      ? String((err as { message: unknown }).message)
+      : String(err);
+  const msg = raw.toLowerCase();
+  if (!msg.includes("job_description")) return false;
+  if (msg.includes("permission denied") || msg.includes("violates row-level security") || msg.includes(" rls ")) {
+    return false;
+  }
+  return true;
+}
+
 /** Coerce match score for `resumes.score` (int column). */
 function coerceResumeScore(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -127,28 +144,40 @@ export async function upsertResume(
     throw new Error(`Library save failed: ${formatSupabaseWriteError(selErr)}`);
   }
 
-  let resumeId: string;
-  if (existing?.id) {
-    const { data: upd, error: upErr } = await db
-      .from("resumes")
-      .update(row)
-      .eq("id", existing.id as string)
-      .select("id")
-      .single();
-    if (upErr) {
-      throw new Error(`Library save failed: ${formatSupabaseWriteError(upErr)}`);
+  const persistResumeRow = async (payload: Record<string, unknown>): Promise<string> => {
+    if (existing?.id) {
+      const { data: upd, error: upErr } = await db
+        .from("resumes")
+        .update(payload)
+        .eq("id", existing.id as string)
+        .select("id")
+        .single();
+      if (upErr) throw upErr;
+      return upd!.id as string;
     }
-    resumeId = upd!.id as string;
-  } else {
     const { data: ins, error: inErr } = await db
       .from("resumes")
-      .insert(row)
+      .insert(payload)
       .select("id")
       .single();
-    if (inErr) {
-      throw new Error(`Library save failed: ${formatSupabaseWriteError(inErr)}`);
+    if (inErr) throw inErr;
+    return ins!.id as string;
+  };
+
+  let resumeId: string;
+  try {
+    resumeId = await persistResumeRow(row);
+  } catch (first: unknown) {
+    if (shouldRetryResumeWriteWithoutJobDescription(first)) {
+      const { job_description: _jd, ...withoutJobDescription } = row;
+      try {
+        resumeId = await persistResumeRow(withoutJobDescription);
+      } catch (second: unknown) {
+        throw new Error(`Library save failed: ${formatSupabaseWriteError(second as { message?: string })}`);
+      }
+    } else {
+      throw new Error(`Library save failed: ${formatSupabaseWriteError(first as { message?: string })}`);
     }
-    resumeId = ins!.id as string;
   }
 
   const { error: delCritAll } = await db.from("criteria").delete().eq("resume_id", resumeId);

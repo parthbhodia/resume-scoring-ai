@@ -129,9 +129,16 @@ def _get_xai_client():
     return _xai_client
 
 
-def _stream_grok(model: str, system_prompt: str, user_prompt: str, temperature: float = 0.2):
+def _stream_grok(
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.2,
+    *,
+    web_search: bool = True,
+):
     """
-    Stream a Grok generation via the xAI Responses API with the web_search tool.
+    Stream a Grok generation via the xAI Responses API (optionally with the web_search tool).
 
     Yields typed event dicts the caller dispatches on:
       {"type": "text",   "delta": str}                     — incremental text
@@ -148,14 +155,16 @@ def _stream_grok(model: str, system_prompt: str, user_prompt: str, temperature: 
     # Responses API uses `instructions` for the system message and `input` for
     # the user message (or a list of input items for multi-turn). Single-turn
     # is fine here.
-    stream = client.responses.create(
-        model=model,
-        instructions=system_prompt,
-        input=user_prompt,
-        temperature=temperature,
-        tools=[{"type": "web_search"}],
-        stream=True,
-    )
+    _kwargs = {
+        "model": model,
+        "instructions": system_prompt,
+        "input": user_prompt,
+        "temperature": temperature,
+        "stream": True,
+    }
+    if web_search:
+        _kwargs["tools"] = [{"type": "web_search"}]
+    stream = client.responses.create(**_kwargs)
 
     seen_query_ids: set = set()
     seen_source_urls: set = set()
@@ -2979,6 +2988,44 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
     return None
 
 
+def _prose_signature(s: str) -> str:
+    """Normalize prose for comparing LLM-reported before/after (no-op detection)."""
+    if not s or not isinstance(s, str):
+        return ""
+    return re.sub(r"\s+", " ", s.strip())
+
+
+def _sanitize_change_rationales(raw: Optional[List[Dict]]) -> List[Dict]:
+    """Drop invalid entries and rewrote rows where plain before/after are identical."""
+    out: List[Dict] = []
+    for c in raw or []:
+        if not isinstance(c, dict):
+            continue
+        t = c.get("type")
+        if t not in ("added", "removed", "rewrote"):
+            continue
+        why = (c.get("why") or "").strip()
+        if t == "added":
+            txt = (c.get("text") or "").strip()
+            if not txt:
+                continue
+            out.append({"type": "added", "text": txt, "why": why or "Added for JD alignment."})
+        elif t == "removed":
+            txt = (c.get("text") or "").strip()
+            if not txt:
+                continue
+            out.append({"type": "removed", "text": txt, "why": why or "Trimmed for focus."})
+        else:
+            prev = (c.get("previous") or "").strip()
+            txt = (c.get("text") or "").strip()
+            if not prev or not txt:
+                continue
+            if _prose_signature(prev) == _prose_signature(txt):
+                continue
+            out.append({"type": "rewrote", "previous": prev, "text": txt, "why": why or "Reworded for clarity or JD fit."})
+    return out
+
+
 def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippet: str) -> Optional[List[Dict]]:
     """
     Ask the LLM to diff two resume bodies and produce a human-readable change list
@@ -2994,6 +3041,7 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         "• Only report MEANINGFUL content changes — ignore whitespace, LaTeX commands, punctuation, and formatting-only edits.\n"
         "• Strip all LaTeX commands from the text you output (no \\resumeItem{}, \\textbf{}, etc). Return clean prose.\n"
         "• Every bullet must trace to actual content in OLD or NEW — do not invent.\n"
+        "• For type \"rewrote\": NEVER emit an entry if the old and new plain prose are the same — omit it entirely.\n"
         "• Rationale ('why') must be ONE concise sentence (max 20 words) tied to the JOB DESCRIPTION — "
         "e.g. 'JD emphasizes distributed systems, so the bullet now leads with gRPC + Kubernetes experience.'\n"
         "• Skip pure reordering with no wording change.\n\n"
@@ -3039,9 +3087,10 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
                 data = json.loads(text)
             changes = data.get("changes") if isinstance(data, dict) else None
             if isinstance(changes, list):
+                cleaned = _sanitize_change_rationales(changes)
                 if m != model:
                     logger.info(f"Change explanations used fallback model: {m}")
-                return changes
+                return cleaned
         except Exception as exc:
             logger.warning(f"Change explanation failed on {m}: {exc}")
             _backoff_if_rate_limited(exc)
@@ -3133,6 +3182,7 @@ def generate_latex_resume(
         base_body,
         reference_tex,
         candidate_profile=cp_prompt,
+        accepted_suggestions=None,
     )
 
     logger.info(f"Calling {model} for resume generation (Google Search grounding enabled)...")
@@ -3333,7 +3383,62 @@ def _profile_section_for_tailor_prompt(candidate_profile: Optional[str]) -> str:
     return _get_candidate_profile_block()
 
 
-def _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=None):
+def _sanitize_accepted_suggestions(raw: Optional[List]) -> List[Dict[str, str]]:
+    """Normalize client `accepted_suggestions` JSON for tailor prompts (structured layer before LaTeX)."""
+    out: List[Dict[str, str]] = []
+    if not raw or not isinstance(raw, list):
+        return out
+    for item in raw[:24]:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("id") or "").strip()[:64]
+        sec = str(item.get("section") or "").strip()[:120]
+        orig = str(item.get("original") or "").strip()[:2000]
+        sugg = str(item.get("suggested") or "").strip()[:2000]
+        why = str(item.get("reason") or "").strip()[:500]
+        if not orig or not sugg:
+            continue
+        out.append(
+            {
+                "id": sid or f"e{len(out)}",
+                "section": sec or "—",
+                "original": orig,
+                "suggested": sugg,
+                "reason": why,
+            }
+        )
+    return out
+
+
+def _accepted_suggestions_prompt_block(items: List[Dict[str, str]]) -> str:
+    lines = [
+        "\n---\nUSER-APPROVED STRUCTURED EDITS (the candidate explicitly accepted these in the app — implement every one):\n",
+    ]
+    for i, it in enumerate(items, 1):
+        lines.append(
+            f"{i}. Section: {it['section']}\n"
+            f"   FIND (verbatim or closest matching line in the resume body): {it['original']}\n"
+            f"   REPLACE WITH: {it['suggested']}\n"
+            f"   Rationale: {it['reason']}\n"
+        )
+    lines.append(
+        "Rules for the block above:\n"
+        "- Apply each edit in LaTeX using the same \\resumeItem / heading style as the reference; do not skip any numbered item.\n"
+        "- Preserve facts, employers, dates, and metrics unless the replacement text explicitly changes them.\n"
+        "- Do not invent additional bullet rewrites beyond these approvals and light JD alignment elsewhere.\n"
+    )
+    return "\n".join(lines)
+
+
+def _build_prompts(
+    company,
+    role,
+    job_description,
+    base_body,
+    reference_tex,
+    candidate_profile=None,
+    accepted_suggestions: Optional[List] = None,
+):
     """Shared prompt builder used by both stream and non-stream paths."""
     system_prompt = _latex_tailor_system_instruction()
     base_section = ""
@@ -3344,6 +3449,18 @@ def _build_prompts(company, role, job_description, base_body, reference_tex, can
         )
 
     profile_section = _profile_section_for_tailor_prompt(candidate_profile)
+    approved = _sanitize_accepted_suggestions(accepted_suggestions)
+    approved_block = _accepted_suggestions_prompt_block(approved) if approved else ""
+
+    closing = (
+        f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
+    )
+    if approved:
+        closing += (
+            " Honor USER-APPROVED STRUCTURED EDITS first, then align other bullets with the JD where it does not conflict."
+        )
+    else:
+        closing += f" Tailor bullet points to emphasize what matters most for {role} at {company}."
 
     user_prompt = (
         f"Generate a tailored LaTeX resume body for this application:\n\n"
@@ -3352,10 +3469,10 @@ def _build_prompts(company, role, job_description, base_body, reference_tex, can
         f"---\nCANDIDATE PROFILE (biographical facts for this applicant — do not contradict or extend with the web):\n\n"
         f"{profile_section}"
         f"{base_section}"
+        f"{approved_block}"
         f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:6500]}\n\n"
         f"{_user_prompt_research_tail(company, role)}"
-        f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
-        f" Tailor bullet points to emphasize what matters most for {role} at {company}."
+        f"{closing}"
     )
     return system_prompt, user_prompt
 
@@ -3514,6 +3631,8 @@ def stream_latex_resume(
     base_folder: Optional[str] = None,
     candidate_profile: Optional[str] = None,
     user_id: Optional[str] = None,
+    layout_compile: bool = False,
+    accepted_suggestions: Optional[List] = None,
 ):
     """
     Generator that yields SSE-style event dicts while generating the resume.
@@ -3528,6 +3647,9 @@ def stream_latex_resume(
       {"event": "pdf",     "url": "..."}
       {"event": "done"}
       {"event": "error",   "msg": "..."}
+
+    Optional ``accepted_suggestions`` is a list of dicts from the client
+    ``{id, section, original, suggested, reason}`` — user-approved bullet edits applied in the prompt before LaTeX is generated.
     """
     try:
         t_start = time.time()
@@ -3546,7 +3668,18 @@ def stream_latex_resume(
             yield {"event": "base", "folder": base_folder, "loaded": bool(base_body), "chars": len(base_body)}
 
         client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-        system_prompt, user_prompt = _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=candidate_profile)
+        n_approved = len(_sanitize_accepted_suggestions(accepted_suggestions))
+        if n_approved:
+            logger.info(f"Structured user-approved edits  |  {n_approved} item(s)")
+        system_prompt, user_prompt = _build_prompts(
+            company,
+            role,
+            job_description,
+            base_body,
+            reference_tex,
+            candidate_profile=candidate_profile,
+            accepted_suggestions=accepted_suggestions,
+        )
 
         _fallback_models = _model_chain(model)
 
@@ -3573,7 +3706,7 @@ def stream_latex_resume(
                     # yields typed event dicts: text deltas, search queries, and
                     # citation sources — fire each onto the same SSE stream the
                     # frontend already handles for Gemini grounding.
-                    for ev in _stream_grok(_m, system_prompt, user_prompt, 0.2):
+                    for ev in _stream_grok(_m, system_prompt, user_prompt, 0.2, web_search=not layout_compile):
                         et = ev.get("type")
                         if et == "text":
                             delta = ev.get("delta") or ""
@@ -3600,14 +3733,21 @@ def stream_latex_resume(
                         best_grounding_candidates = None
                         best_grounding_score = -1
                         try:
-                            stream = client.models.generate_content_stream(
-                                model=_m,
-                                contents=user_prompt,
-                                config=types.GenerateContentConfig(
+                            if layout_compile:
+                                _gem_cfg = types.GenerateContentConfig(
+                                    system_instruction=system_prompt,
+                                    temperature=0.2,
+                                )
+                            else:
+                                _gem_cfg = types.GenerateContentConfig(
                                     system_instruction=system_prompt,
                                     temperature=0.2,
                                     tools=[types.Tool(google_search=types.GoogleSearch())],
-                                ),
+                                )
+                            stream = client.models.generate_content_stream(
+                                model=_m,
+                                contents=user_prompt,
+                                config=_gem_cfg,
                             )
                             for chunk in stream:
                                 if getattr(chunk, "candidates", None):
@@ -3714,8 +3854,8 @@ def stream_latex_resume(
             yield {"event": "error", "msg": "AI could not produce content. Please retry."}
             return
 
-        # Diff
-        if base_body:
+        # Diff + JD ratings — skipped for template/layout-only compiles (no JD tailoring UX).
+        if not layout_compile and base_body:
             yield {"event": "status", "msg": "Computing changes…"}
             diff_lines, adds, removes = _compute_diff(base_body, latex_body)
             logger.info(f"Diff  |  +{adds}  -{removes}")
@@ -3731,12 +3871,12 @@ def stream_latex_resume(
             except Exception as exc:
                 logger.warning(f"Rationale generation failed: {exc}")
 
-        # Ratings
-        yield {"event": "status", "msg": "Rating resume against JD…"}
-        ratings = _rate_resume(client, model, latex_body, job_description[:1500])
-        if ratings:
-            logger.info(f"Ratings  |  {ratings}")
-            yield {"event": "ratings", "data": ratings}
+        if not layout_compile:
+            yield {"event": "status", "msg": "Rating resume against JD…"}
+            ratings = _rate_resume(client, model, latex_body, job_description[:1500])
+            if ratings:
+                logger.info(f"Ratings  |  {ratings}")
+                yield {"event": "ratings", "data": ratings}
 
         # Save + compile
         yield {"event": "status", "msg": "Saving .tex and compiling PDF…"}

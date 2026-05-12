@@ -137,11 +137,14 @@ async def api_generate_stream(request: Request):
     reference_folder  = (body.get("reference_folder") or "").strip() or None
     candidate_profile = (body.get("candidate_profile") or "").strip() or None
     user_id           = (body.get("user_id") or "").strip() or "local"
+    layout_compile    = bool(body.get("layout_compile"))
+    accepted_suggestions = body.get("accepted_suggestions")
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
         f"|  reference_folder={reference_folder}  "
-        f"|  custom_profile={bool(candidate_profile)}  |  user={user_id or 'anon'}"
+        f"|  custom_profile={bool(candidate_profile)}  |  layout_compile={layout_compile}  "
+        f"|  user={user_id or 'anon'}  |  accepted_suggestions={len(accepted_suggestions) if isinstance(accepted_suggestions, list) else 0}"
     )
 
     if not company or not role or not jd:
@@ -164,6 +167,8 @@ async def api_generate_stream(request: Request):
             company, role, jd,
             reference_folder=reference_folder,
             model=model, base_folder=base_folder, candidate_profile=candidate_profile, user_id=user_id,
+            layout_compile=layout_compile,
+            accepted_suggestions=accepted_suggestions if isinstance(accepted_suggestions, list) else None,
         ):
             ev_name = event.get("event")
 

@@ -11,9 +11,11 @@ import {
 import {
   RN_LINE_SPACING_KEY,
   RN_MARGIN_IN_KEY,
+  RN_BUILDER_LAYOUT_ONLY_KEY,
   type LineSpacingChoice,
   type MarginInchesChoice,
 } from "@/lib/resumeTemplateStudioPrefs";
+import { nameAndSubtitleLineIndices, isPlaceholderResumeHeaderLine } from "@/lib/resumePreviewNameLine";
 
 const PROFILE_KEY = "rn_builder_profile_prefill";
 const STYLE_REF_KEY = "rn_builder_style_ref";
@@ -332,6 +334,7 @@ function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: strin
   const accentColor = isMalta ? "#E25822" : "#0f172a";
 
   const lines = text.split("\n");
+  const { nameLineIndex } = nameAndSubtitleLineIndices(lines);
 
   const isHeader = (line: string) => {
     const t = line.trim();
@@ -344,16 +347,15 @@ function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: strin
     return idx <= 3 && !isHeader(t) && (t.includes("@") || t.includes("·") || t.includes("|") || /^\(?\d/.test(t));
   };
 
-  const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
-
   return (
     <div style={{ fontFamily: font, fontSize: 11, lineHeight, color: "#0f172a" }}>
       {lines.map((line, i) => {
         const t = line.trim();
         if (!t) return <div key={i} style={{ height: lineHeight * 5 }} />;
+        if (isPlaceholderResumeHeaderLine(line) && i !== nameLineIndex) return null;
 
         // Name line
-        if (i === firstNonEmpty) {
+        if (i === nameLineIndex) {
           if (isMalta) {
             return (
               <div key={i} style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.3, marginBottom: 2, lineHeight: 1.15, color: "#0f172a" }}>
@@ -373,7 +375,7 @@ function FormattedResumePreview({ text, lineHeight, styleFolder }: { text: strin
         }
 
         // Contact line
-        if (isContactLine(line, i - firstNonEmpty)) {
+        if (isContactLine(line, i - nameLineIndex)) {
           return (
             <div key={i} style={{ fontSize: 9.5, color: "#475569", marginBottom: 2, letterSpacing: 0.1, textAlign: (!isHarshibar && !isMalta) ? "center" : "left" }}>
               {t}
@@ -523,17 +525,20 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
   }, [router]);
 
   const onContinue = useCallback(() => {
-    // Store style prefs — profile text is collected on the next screen
     try {
       persistTemplateStyleChoice(styleFolder);
       sessionStorage.setItem(RN_LINE_SPACING_KEY, lineSpacing);
       sessionStorage.setItem(RN_MARGIN_IN_KEY, marginIn);
+      sessionStorage.setItem(PROFILE_KEY, previewBody);
+      sessionStorage.setItem(RN_BUILDER_LAYOUT_ONLY_KEY, "1");
     } catch { /* quota */ }
     const q = new URLSearchParams();
-    q.set("view", "content-source");
+    q.set("view", "builder");
+    q.set("flow", "tailor");
+    q.set("fromTemplateStudio", "1");
     if (base) q.set("base", base);
     router.push(`/?${q.toString()}`);
-  }, [router, styleFolder, lineSpacing, marginIn, base]);
+  }, [router, styleFolder, lineSpacing, marginIn, base, previewBody]);
 
   const selectStyleFolder = useCallback((folder: string) => {
     setStyleFolder(folder);
@@ -574,7 +579,7 @@ export default function ResumeTemplateStudio({ initialBaseFolder }: { initialBas
           </p>
           <button
             type="button"
-            onClick={() => router.push("/?view=builder&flow=tailor")}
+            onClick={() => router.push("/?view=builder&flow=tailor&intent=job")}
             style={{
               flexShrink: 0,
               padding: "10px 18px",

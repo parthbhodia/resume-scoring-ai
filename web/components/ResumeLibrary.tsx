@@ -16,6 +16,7 @@ import type { ResumeRecord } from "@/lib/types";
 import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
 import { fetchResumes, getSupabaseClient } from "@/lib/supabase";
 import { RESUME_LIBRARY_CHANGED_EVENT } from "@/lib/resumeLibraryEvents";
+import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 
 type SortKey = "recent" | "score" | "company";
 
@@ -136,7 +137,10 @@ export default function ResumeLibrary({ onUseAsBase }: {
   const useAsBase = (r: ResumeRecord) => {
     onUseAsBase?.(r.folder);
     stashTailorPrefillFromLibrary(r);
-    router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(r.folder)}`);
+    try {
+      sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+    } catch { /* ignore */ }
+    router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(r.folder)}&intent=job`);
   };
 
   return (
@@ -333,7 +337,12 @@ export default function ResumeLibrary({ onUseAsBase }: {
               </div>
               <button
                 type="button"
-                onClick={() => router.push("/?view=builder&flow=tailor")}
+                onClick={() => {
+                  try {
+                    sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+                  } catch { /* ignore */ }
+                  router.push("/?view=builder&flow=tailor&intent=job");
+                }}
                 style={{
                   flexShrink: 0,
                   padding: "10px 18px",
@@ -450,7 +459,12 @@ export default function ResumeLibrary({ onUseAsBase }: {
                 hasAny={resumes.length > 0}
                 filter={filter}
                 signedIn={signedIn === true}
-                onGoBuilder={() => router.push("/?view=builder&flow=tailor")}
+                onGoBuilder={() => {
+                  try {
+                    sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+                  } catch { /* ignore */ }
+                  router.push("/?view=builder&flow=tailor&intent=job");
+                }}
               />
             ) : (
               <div className="library-grid">

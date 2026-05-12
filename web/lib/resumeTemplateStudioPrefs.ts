@@ -1,6 +1,8 @@
 /** Session keys — Template Studio → Résumé Builder handoff (spacing/margins for future LaTeX tuning). */
 export const RN_LINE_SPACING_KEY = "rn_resume_line_spacing";
 export const RN_MARGIN_IN_KEY = "rn_resume_margin_in";
+/** When set, builder keeps template-studio mode until user explicitly opens job tailoring (`intent=job`). */
+export const RN_BUILDER_LAYOUT_ONLY_KEY = "rn_builder_layout_only";
 
 export type LineSpacingChoice = "1" | "1.15" | "1.5";
 export type MarginInchesChoice = "0.5" | "0.75" | "1";

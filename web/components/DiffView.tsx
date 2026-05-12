@@ -10,6 +10,10 @@ interface Props {
   baseFolder: string | null;
   baseLoaded?: boolean | null;
   jdKeywords?: string[];
+  /** Per-change Keep / I'll edit myself — PDF is already tailored; this tracks review intent only. */
+  reviewAcknowledgement?: boolean;
+  /** In-page anchor for “edit myself” (e.g. #rb-customize-preview). */
+  editAnchorHref?: string;
 }
 
 function highlightKeywords(text: string, keywords: string[]): React.ReactNode {
@@ -75,6 +79,11 @@ function latexToText(s: string): string {
     .trim();
 }
 
+/** Collapse whitespace for comparing displayed before/after (catches bogus “rewrote” rows). */
+function proseSig(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
 interface Change {
   type: "added" | "removed" | "rewrote";
   text: string;
@@ -117,18 +126,38 @@ function diffToChanges(diff: DiffLine[]): Change[] {
   return out;
 }
 
-export default function DiffView({ diff, adds, removes, rationales, baseFolder, baseLoaded = null, jdKeywords = [] }: Props) {
+export default function DiffView({
+  diff,
+  adds,
+  removes,
+  rationales,
+  baseFolder,
+  baseLoaded = null,
+  jdKeywords = [],
+  reviewAcknowledgement = false,
+  editAnchorHref = "#resume-builder-main",
+}: Props) {
   const changes: Change[] = useMemo(() => {
     if (rationales && rationales.length) {
-      return rationales.map(r => ({
-        type: r.type,
-        text: latexToText(r.text),
-        previous: r.previous ? latexToText(r.previous) : undefined,
-        why: r.why,
-      }));
+      const fromRat = rationales
+        .map(r => ({
+          type: r.type,
+          text: latexToText(r.text),
+          previous: r.previous ? latexToText(r.previous) : undefined,
+          why: r.why,
+        }))
+        .filter(c => {
+          if (c.type === "rewrote" && c.previous) {
+            return proseSig(c.text) !== proseSig(c.previous);
+          }
+          return true;
+        });
+      if (fromRat.length > 0) return fromRat;
     }
     return diffToChanges(diff);
   }, [diff, rationales]);
+
+  const [reviewAck, setReviewAck] = useState<Record<number, "keep" | "edit">>({});
 
   if (!diff.length && (!rationales || rationales.length === 0)) {
     if (baseFolder && baseLoaded === false) {
@@ -178,7 +207,7 @@ export default function DiffView({ diff, adds, removes, rationales, baseFolder, 
             vs <strong style={{ color: "var(--muted)" }}>{baseFolder}</strong>
           </span>
         )}
-        {rationales && rationales.length > 0 && (
+        {changes.some(c => !!c.why) && (
           <span style={{ marginLeft: "auto", color: "var(--dim)", fontSize: 11 }}>
             Hover the ⓘ icon to see why each change was made.
           </span>
@@ -194,14 +223,36 @@ export default function DiffView({ diff, adds, removes, rationales, baseFolder, 
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {changes.map((c, i) => (
-          <ChangeCard key={i} change={c} jdKeywords={jdKeywords} />
+          <ChangeCard
+            key={i}
+            change={c}
+            jdKeywords={jdKeywords}
+            reviewAcknowledgement={reviewAcknowledgement}
+            editAnchorHref={editAnchorHref}
+            reviewChoice={reviewAck[i]}
+            onReviewChoice={choice => setReviewAck(prev => ({ ...prev, [i]: choice }))}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function ChangeCard({ change, jdKeywords = [] }: { change: Change; jdKeywords?: string[] }) {
+function ChangeCard({
+  change,
+  jdKeywords = [],
+  reviewAcknowledgement = false,
+  editAnchorHref = "#resume-builder-main",
+  reviewChoice,
+  onReviewChoice,
+}: {
+  change: Change;
+  jdKeywords?: string[];
+  reviewAcknowledgement?: boolean;
+  editAnchorHref?: string;
+  reviewChoice?: "keep" | "edit";
+  onReviewChoice?: (c: "keep" | "edit") => void;
+}) {
   const [open, setOpen] = useState(false);
 
   const meta =
@@ -269,6 +320,59 @@ function ChangeCard({ change, jdKeywords = [] }: { change: Change; jdKeywords?: 
             Why this change
           </div>
           {change.why}
+        </div>
+      )}
+
+      {reviewAcknowledgement && onReviewChoice && (
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${meta.border}` }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.35, textTransform: "uppercase", color: "var(--dim)", marginBottom: 8 }}>
+            Your review
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={() => onReviewChoice("keep")}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: "inherit",
+                padding: "6px 12px",
+                borderRadius: 8,
+                border: reviewChoice === "keep" ? `2px solid ${meta.color}` : "1px solid var(--border)",
+                background: reviewChoice === "keep" ? meta.bg : "var(--surface)",
+                color: "var(--text)",
+                cursor: "pointer",
+              }}
+            >
+              Keep this update
+            </button>
+            <button
+              type="button"
+              onClick={() => onReviewChoice("edit")}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: "inherit",
+                padding: "6px 12px",
+                borderRadius: 8,
+                border: reviewChoice === "edit" ? "2px solid rgba(251,191,36,0.9)" : "1px solid var(--border)",
+                background: reviewChoice === "edit" ? "rgba(251,191,36,0.1)" : "var(--surface)",
+                color: "var(--text)",
+                cursor: "pointer",
+              }}
+            >
+              I&apos;ll change wording myself
+            </button>
+          </div>
+          {reviewChoice === "edit" && (
+            <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+              The PDF above already includes this line — use{" "}
+              <a href={editAnchorHref} style={{ color: "var(--accent)", fontWeight: 600 }}>
+                Customize &amp; preview
+              </a>{" "}
+              or re-run <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> to adjust before the next generate.
+            </p>
+          )}
         </div>
       )}
     </div>

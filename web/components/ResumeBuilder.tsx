@@ -1,7 +1,8 @@
 "use client";
-import { useState, useCallback, useRef, useEffect, useId, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useId, useMemo, type CSSProperties } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale, ParsedSection } from "@/lib/types";
 import { apiUrl, parseJsonOrThrow, scoreColor } from "@/lib/utils";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
@@ -20,6 +21,8 @@ import {
   setProfileAutofillFromUpload,
 } from "@/lib/profileStorage";
 import { extractProfileHintsFromResumeText } from "@/lib/profileFromResumeText";
+import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
+import { nameAndSubtitleLineIndices, isPlaceholderResumeHeaderLine } from "@/lib/resumePreviewNameLine";
 
 import ScoreRing    from "./ScoreRing";
 import MatchBreakdownCards from "./MatchBreakdownCards";
@@ -28,6 +31,16 @@ import SourcesPanel from "./SourcesPanel";
 import AtsPanel, { type AtsResult } from "./AtsPanel";
 import ShareButton   from "./ShareButton";
 import ResumePublicLinkSettings from "./ResumePublicLinkSettings";
+
+const BuilderPdfSuggestionHighlights = dynamic(
+  () => import("@/components/BuilderPdfSuggestionHighlights"),
+  {
+    ssr: false,
+    loading: () => (
+      <div style={{ padding: 40, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>Loading PDF viewer…</div>
+    ),
+  },
+);
 
 type Suggestion = {
   id: string;
@@ -103,6 +116,26 @@ const EMPTY_RESULT: GenerationResult = {
   ratings: null, diff: [], adds: 0, removes: 0, rationales: [],
   sources: [], latexPreview: "", status: "",
 };
+
+/** Resolved PDF URL + folder after a successful `generate()` stream (for save/download UX). */
+type GeneratePdfOutcome = { pdfUrl: string; folder: string | null };
+
+/** Fetch PDF as a blob and trigger a file download (same-origin / CORS permitting). */
+async function fetchPdfAsDownload(url: string, downloadBaseName: string): Promise<void> {
+  const res = await fetch(url, { credentials: "include", mode: "cors" });
+  if (!res.ok) throw new Error(`PDF fetch failed (${res.status})`);
+  const blob = await res.blob();
+  const safe = (downloadBaseName || "resume").replace(/[^\w.-]+/g, "_").slice(0, 80) || "resume";
+  const a = document.createElement("a");
+  const objectUrl = URL.createObjectURL(blob);
+  a.href = objectUrl;
+  a.download = `${safe}.pdf`;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
+}
 
 const SS_KEY = "rn_builder_draft";
 function loadDraft() {
@@ -221,6 +254,7 @@ export default function ResumeBuilder({
   initialBaseFolder?: string | null;
 } = {}) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const draft0: Record<string, unknown> = loadDraft();
   const builderSession0 = parseBuilderSessionFromDraft(draft0);
   const [company,    setCompanyRaw]    = useState<string>(String(draft0.company ?? ""));
@@ -252,6 +286,8 @@ export default function ResumeBuilder({
   /** Right-panel “Save to library” re-upsert (compile already upserts; this is explicit retry). */
   const [libraryReSaveBusy, setLibraryReSaveBusy] = useState(false);
   const [libraryToast, setLibraryToast] = useState<string | null>(null);
+  /** Toast for template customize flow (Save / Download with fresh compile). */
+  const [customizeExportToast, setCustomizeExportToast] = useState<string | null>(null);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
@@ -273,7 +309,7 @@ export default function ResumeBuilder({
   /** Linked selection: click a highlighted résumé line → scroll/highlight matching suggestion card (Analyze-style). */
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
 
-  /** Template handoff — post-compile UI: HTML live paper (instant Style tab) + LaTeX PDF export; Recompile PDF regenerates `.tex` / PDF. */
+  /** Template handoff — post-compile UI: HTML live paper (instant Style tab) + exported PDF; Save / Download run a fresh compile. */
   const [customizeTab, setCustomizeTab] = useState<"style" | "sections" | "add">("style");
   const [previewAccentHex, setPreviewAccentHex] = useState("#1d4ed8");
   const [previewFontSize, setPreviewFontSize] = useState<"small" | "standard" | "large">("standard");
@@ -290,6 +326,9 @@ export default function ResumeBuilder({
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Latest PDF extract text — used to merge into saved Profile */
   const lastResumeExtractRef = useRef<string>("");
+  /** Object URL for the last uploaded PDF — powers true PDF highlights in suggestions (revoked on replace / unmount). */
+  const sourcePdfBlobUrlRef = useRef<string | null>(null);
+  const [sourcePdfBlobUrl, setSourcePdfBlobUrl] = useState<string | null>(null);
   const [profileSyncUpsell, setProfileSyncUpsell] = useState<{
     autoFilled: boolean;
     filledLabels: string[];
@@ -303,10 +342,21 @@ export default function ResumeBuilder({
 
   const acceptedDepsKey = [...acceptedIds].sort().join("\0");
   const rejectedDepsKey = [...rejectedIds].sort().join("\0");
+  const suggestionPdfDocKey = useMemo(
+    () => `${sourcePdfBlobUrl ?? ""}\u001e${acceptedDepsKey}\u001e${rejectedDepsKey}`,
+    [sourcePdfBlobUrl, acceptedDepsKey, rejectedDepsKey],
+  );
 
   useEffect(() => {
     lastResumeExtractRef.current = (candidateProfile ?? "").trim();
   }, [candidateProfile]);
+
+  useEffect(() => () => {
+    if (sourcePdfBlobUrlRef.current) {
+      URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
+      sourcePdfBlobUrlRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -365,10 +415,27 @@ export default function ResumeBuilder({
   // Prefill from Analyze (`fromAnalyze=1`) or Template Studio (`fromTemplateStudio=1`).
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const sp = new URLSearchParams(window.location.search);
+    const sp = new URLSearchParams(searchParams.toString());
+    const intentJob = sp.get("intent") === "job";
+    if (intentJob) {
+      setStudioHandoff(false);
+      try {
+        sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+      } catch { /* ignore */ }
+      sp.delete("intent");
+      const qs = sp.toString();
+      router.replace(qs ? `/?${qs}` : "/?view=builder&flow=tailor");
+      return;
+    }
+
     const fromAnalyze = sp.get("fromAnalyze") === "1";
     const fromTemplateStudio = sp.get("fromTemplateStudio") === "1";
     const flow = (sp.get("flow") || "tailor").toLowerCase();
+    let layoutOnly = false;
+    try {
+      layoutOnly = sessionStorage.getItem(RN_BUILDER_LAYOUT_ONLY_KEY) === "1";
+    } catch { /* ignore */ }
+
     try {
       const profile = sessionStorage.getItem("rn_builder_profile_prefill");
       const jdPre = sessionStorage.getItem(TAILOR_PREFILL_JD);
@@ -390,7 +457,10 @@ export default function ResumeBuilder({
         setRoleRaw(rolePre);
         saveDraft({ role: rolePre });
       }
-      if (fromAnalyze) sessionStorage.removeItem("rn_builder_profile_prefill");
+      if (fromAnalyze) {
+        sessionStorage.removeItem("rn_builder_profile_prefill");
+        sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+      }
       sessionStorage.removeItem(TAILOR_PREFILL_JD);
       sessionStorage.removeItem(TAILOR_PREFILL_COMPANY);
       sessionStorage.removeItem(TAILOR_PREFILL_ROLE);
@@ -399,6 +469,7 @@ export default function ResumeBuilder({
     } catch { /* ignore */ }
 
     if (fromAnalyze && flow === "tailor") {
+      setStudioHandoff(false);
       const baseQ = sp.get("base");
       const styleRef = sp.get("styleRef");
       let next = "/?view=builder&flow=tailor";
@@ -407,6 +478,9 @@ export default function ResumeBuilder({
       router.replace(next);
     } else if (fromTemplateStudio) {
       setStudioHandoff(true);
+      try {
+        sessionStorage.setItem(RN_BUILDER_LAYOUT_ONLY_KEY, "1");
+      } catch { /* ignore */ }
       sp.delete("fromTemplateStudio");
       const qs = sp.toString();
       router.replace(qs ? `/?${qs}` : "/?view=builder&flow=tailor");
@@ -415,9 +489,11 @@ export default function ResumeBuilder({
     // If we land on the tailor flow (from Analyze or plain navigation),
     // do not keep a stale "template studio" UI mode from a previous run.
     if (!fromTemplateStudio && flow === "tailor") {
-      setStudioHandoff(false);
+      if (!layoutOnly) {
+        setStudioHandoff(false);
+      }
     }
-  }, [router]);
+  }, [router, searchParams]);
 
   // ── ATS state — populated lazily when the user opens the ATS panel. ──
   const [atsResult,    setAtsResult]    = useState<AtsResult | null>(null);
@@ -581,8 +657,9 @@ export default function ResumeBuilder({
     }
   }, [authReady, user?.id]);
 
-  // Auto-run ATS after generation completes (signed-in users only).
+  // Auto-run ATS after generation completes (signed-in users only). Skip for template/layout handoff.
   useEffect(() => {
+    if (studioHandoff) return;
     if (!authReady || !user?.id || !result?.folder || atsLoading || atsResult || atsError) return;
     void runAtsCheck(result.folder);
   }, [authReady, user?.id, result?.folder, atsLoading, atsResult, atsError, runAtsCheck]);
@@ -597,7 +674,7 @@ export default function ResumeBuilder({
     let effJd = jd.trim();
     if (!effJd && studioHandoff) {
       effJd = (candidateProfile ?? "").trim()
-        ? "No specific job — optimize structure, ATS safety, and measurable impact."
+        ? "No specific job — optimize structure and measurable impact for a general application."
         : "No specific job posting yet.";
     }
     if (!effJd) { setSuggestError("Please paste a job description first."); return; }
@@ -619,9 +696,7 @@ export default function ResumeBuilder({
       if (!resp.ok) throw new Error(json.error ?? "Could not get suggestions.");
       setSuggestions(json.suggestions ?? []);
       setSuggestSummary(json.summary ?? "");
-      // Default: accept all high-priority suggestions
-      const highIds = new Set((json.suggestions ?? []).filter(s => s.priority === "high").map(s => s.id));
-      setAcceptedIds(highIds);
+      // User explicitly accepts suggestions before generate — nothing pre-selected.
     } catch (e: unknown) {
       setSuggestError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -656,6 +731,14 @@ export default function ResumeBuilder({
       setUploadedFileName(file.name);
       lastResumeExtractRef.current = text;
 
+      if (sourcePdfBlobUrlRef.current) {
+        URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
+        sourcePdfBlobUrlRef.current = null;
+      }
+      const blobUrl = URL.createObjectURL(file);
+      sourcePdfBlobUrlRef.current = blobUrl;
+      setSourcePdfBlobUrl(blobUrl);
+
       const hints = extractProfileHintsFromResumeText(text);
       const hintedKeys = Object.keys(hints).filter(k => String((hints as Record<string, unknown>)[k] ?? "").trim());
       const hintedCount = hintedKeys.length;
@@ -678,7 +761,7 @@ export default function ResumeBuilder({
     }
   }, []);
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (): Promise<GeneratePdfOutcome | null> => {
     let effCompany = company.trim();
     let effRole    = role.trim();
     let effJd      = jd.trim();
@@ -689,8 +772,8 @@ export default function ResumeBuilder({
       if (!effJd) {
         const cp = (candidateProfile ?? "").trim();
         effJd = cp
-          ? `No specific job posting yet—optimize structure, ATS safety, and measurable impact using this candidate profile only.\n\n---\n${cp.slice(0, 6000)}`
-          : "No specific job posting yet—produce a polished ATS-safe résumé from the uploaded profile text.";
+          ? `Layout pass: apply the selected résumé template to the profile below. Preserve employers, titles, and dates; tighten wording only where needed for clarity. Output complete LaTeX for the document body.\n\n---\n${cp.slice(0, 6000)}`
+          : "Layout pass: produce a polished résumé from the uploaded profile text using the selected template.";
       }
     }
 
@@ -724,7 +807,7 @@ export default function ResumeBuilder({
           ? `We couldn't pull the ${label} from that link — please fill it in manually.`
           : `Please fill in the ${label}.`
       );
-      return;
+      return null;
     }
 
     setGenerating(true);
@@ -742,15 +825,13 @@ export default function ResumeBuilder({
     setSearchSources([]);
     setStorageFailures([]);
 
-    // Bake accepted suggestions into the candidate profile as explicit instructions
-    const accepted = (suggestions ?? []).filter(s => acceptedIds.has(s.id));
-    let effProfile = candidateProfile ?? "";
-    if (accepted.length > 0) {
-      const instructions = accepted.map((s, i) =>
-        `${i + 1}. In ${s.section}: change "${s.original}" to "${s.suggested}" — ${s.reason}`
-      ).join("\n");
-      effProfile = `${effProfile}\n\n---\nACCEPTED IMPROVEMENTS TO APPLY:\n${instructions}`;
-    }
+    const acceptedList = (suggestions ?? []).filter(s => acceptedIds.has(s.id)).map(s => ({
+      id: s.id,
+      section: s.section,
+      original: s.original,
+      suggested: s.suggested,
+      reason: s.reason,
+    }));
 
     const acc: GenerationResult =
       studioHandoff && result?.folder
@@ -774,8 +855,10 @@ export default function ResumeBuilder({
           model, base_folder: baseFolder,
           // JD tailor flow uses one fixed ATS layout on the server — layout choice is only for template / PDF studio.
           reference_folder: studioHandoff ? styleReferenceFolder : DEFAULT_REFERENCE_FOLDER,
-          candidate_profile: effProfile,
+          candidate_profile: candidateProfile ?? "",
+          accepted_suggestions: acceptedList.length > 0 ? acceptedList : undefined,
           user_id: user?.id ?? null,
+          layout_compile: studioHandoff,
         }),
       });
 
@@ -868,12 +951,46 @@ export default function ResumeBuilder({
           }
         }
       }
+      setGenerating(false);
+      setStatusMsg("");
+      if (acc.pdfUrl) {
+        const pdfUrl = /^https?:\/\//.test(acc.pdfUrl) ? acc.pdfUrl : apiUrl(acc.pdfUrl);
+        return { pdfUrl, folder: acc.folder ?? null };
+      }
+      return null;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
       setGenerating(false);
       setStatusMsg("");
+      return null;
     }
   }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result]);
+
+  /** Template customize: run full compile, then optional blob download + toast. */
+  const finalizeLayoutPdf = useCallback(
+    async (mode: "save" | "download") => {
+      if (generating) return;
+      const out = await generate();
+      if (!out?.pdfUrl) {
+        setCustomizeExportToast(null);
+        return;
+      }
+      const base = (out.folder ?? "resume").replace(/[^\w.-]+/g, "_").slice(0, 80) || "resume";
+      if (mode === "download") {
+        try {
+          await fetchPdfAsDownload(out.pdfUrl, base);
+          setCustomizeExportToast("Latest PDF downloaded.");
+        } catch {
+          window.open(out.pdfUrl, "_blank", "noopener,noreferrer");
+          setCustomizeExportToast("Latest PDF opened in a new tab.");
+        }
+      } else {
+        setCustomizeExportToast("PDF saved with your latest layout.");
+      }
+      window.setTimeout(() => setCustomizeExportToast(null), 5500);
+    },
+    [generating, generate],
+  );
 
   /** Re-upsert library row so POST /api/share/{folder} finds resumes (fixes race or retry after a hiccup). */
   const syncLibraryRowForShare = useCallback(async () => {
@@ -944,7 +1061,16 @@ export default function ResumeBuilder({
           className="rb-page"
           style={{
             padding: "clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh)",
-            maxWidth: result ? 1180 : suggestionsReviewMode ? 1180 : studioHandoff ? 920 : 820,
+            maxWidth:
+              result && studioHandoff
+                ? "min(1440px, 98vw)"
+                : result
+                  ? 1180
+                  : suggestionsReviewMode
+                    ? 1180
+                    : studioHandoff
+                      ? 920
+                      : 820,
             margin: "0 auto",
             width: "100%",
             boxSizing: "border-box",
@@ -1239,6 +1365,11 @@ export default function ResumeBuilder({
                   <button
                     type="button"
                     onClick={() => {
+                      if (sourcePdfBlobUrlRef.current) {
+                        URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
+                        sourcePdfBlobUrlRef.current = null;
+                      }
+                      setSourcePdfBlobUrl(null);
                       setCandidateProfile(null);
                       setUploadedFileName(null);
                       lastResumeExtractRef.current = "";
@@ -1553,7 +1684,7 @@ export default function ResumeBuilder({
             <>
               <button
                 type="button"
-                onClick={() => { void generate(); }}
+                onClick={() => { void finalizeLayoutPdf("save"); }}
                 disabled={generating || !(candidateProfile ?? "").trim()}
                 style={{
                   width: "100%", padding: "14px 20px", marginBottom: 8, minHeight: 48,
@@ -1635,11 +1766,15 @@ export default function ResumeBuilder({
           {/* ── Suggestions review panel (JD tailor flow only) ── */}
           {!studioHandoff && suggestions && !generating && !result && (
             <SuggestionsPanel
+              key={sourcePdfBlobUrl ?? "rb-sug-no-pdf"}
               summary={suggestSummary}
               suggestions={suggestions}
               acceptedIds={acceptedIds}
               rejectedIds={rejectedIds}
               candidateProfile={candidateProfile ?? ""}
+              pdfBlobUrl={sourcePdfBlobUrl}
+              pdfFileName={uploadedFileName}
+              pdfDocumentKey={suggestionPdfDocKey}
               selectedSuggestionId={selectedSuggestionId}
               onSelectSuggestionCard={setSelectedSuggestionId}
               onToggleAccept={id => setAcceptedIds(prev => {
@@ -1652,6 +1787,12 @@ export default function ResumeBuilder({
                 if (next.has(id)) { next.delete(id); } else { next.add(id); setAcceptedIds(a => { const an = new Set(a); an.delete(id); return an; }); }
                 return next;
               })}
+              onAcceptAll={() => {
+                if (!suggestions?.length) return;
+                setAcceptedIds(new Set(suggestions.map(s => s.id)));
+                setRejectedIds(new Set());
+              }}
+              onClearAccepts={() => setAcceptedIds(new Set())}
               onGenerate={generate}
               generating={generating}
               error={error}
@@ -1688,18 +1829,27 @@ export default function ResumeBuilder({
             >
               <Spinner size={28} />
               <div style={{ fontSize: 17, fontWeight: 600, color: "var(--text)", letterSpacing: -0.3 }}>
-                {statusMsg || "Tailoring your resume…"}
+                {statusMsg || (studioHandoff ? "Formatting your résumé…" : "Tailoring your resume…")}
               </div>
               <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, maxWidth: 480, margin: 0 }}>
-                Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing. When this run
-                uses live web research, search queries and sources show up in the web research panel as they arrive (sometimes only after a
-                short delay).
+                {studioHandoff ? (
+                  <>
+                    Applying your selected layout and typography. LaTeX streams below when generation starts. This pass does not run live web
+                    research or job-match scoring — use <strong>Tailor to a job</strong> from the sidebar when you want a posting-specific version.
+                  </>
+                ) : (
+                  <>
+                    Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing. When this run
+                    uses live web research, search queries and sources show up in the web research panel as they arrive (sometimes only after a
+                    short delay).
+                  </>
+                )}
               </p>
             </div>
           )}
 
           {/* Web research: only while no results card yet — ratings sets `result` before `done`, so hide once the results view is up */}
-          {generating && !result && !hasWebResearch && (
+          {generating && !result && !hasWebResearch && !studioHandoff && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
@@ -1726,7 +1876,7 @@ export default function ResumeBuilder({
           )}
 
           {/* Live web search — hide after results appear so Phase 3 isn’t stacked under streaming chrome */}
-          {hasWebResearch && !result && (
+          {hasWebResearch && !result && !studioHandoff && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
@@ -1860,7 +2010,8 @@ export default function ResumeBuilder({
                 signInForAts={signInForAts}
                 atsOAuthBusy={atsOAuthBusy}
                 storageFailures={storageFailures}
-                generate={generate}
+                customizeExportToast={customizeExportToast}
+                onExportLayoutPdf={finalizeLayoutPdf}
                 ensureLibraryRow={syncLibraryRowForShare}
               />
             ) : (
@@ -2189,13 +2340,33 @@ export default function ResumeBuilder({
                     scrollMarginTop: 24,
                   }}
                 >
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 8 }}>
                     Changes to your résumé{" "}
                     <span style={{ color: "var(--green)", fontWeight: 600 }}>+{result.adds}</span>
                     <span style={{ color: "var(--dim)" }}> / </span>
                     <span style={{ color: "var(--red)", fontWeight: 600 }}>−{result.removes}</span>
                   </div>
-                  <DiffView diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={result.baseFolder} baseLoaded={result.baseLoaded} jdKeywords={jdKeywords} />
+                  <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--muted)", lineHeight: 1.55 }}>
+                    Your PDF already includes these edits — tailoring runs when you use{" "}
+                    <strong style={{ color: "var(--text)" }}>Improve this résumé</strong>. Each card explains a line-level change. Use{" "}
+                    <strong style={{ color: "var(--text)" }}>Keep this update</strong> or{" "}
+                    <strong style={{ color: "var(--text)" }}>I&apos;ll change wording myself</strong> to note what you want to revisit (your
+                    choices do not alter or revert the file). To steer the model <em>before</em> tailoring, run{" "}
+                    <strong style={{ color: "var(--text)" }}>Analyze &amp; get suggestions</strong>, accept or reject suggestions there, then
+                    run <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> again.
+                  </p>
+                  <DiffView
+                    key={result.folder ?? "diff"}
+                    diff={result.diff}
+                    adds={result.adds}
+                    removes={result.removes}
+                    rationales={result.rationales}
+                    baseFolder={result.baseFolder}
+                    baseLoaded={result.baseLoaded}
+                    jdKeywords={jdKeywords}
+                    reviewAcknowledgement
+                    editAnchorHref="#rb-customize-preview"
+                  />
                 </div>
               )}
 
@@ -2713,7 +2884,8 @@ function TemplateCustomizePostResult({
   signInForAts,
   atsOAuthBusy,
   storageFailures,
-  generate,
+  customizeExportToast,
+  onExportLayoutPdf,
   ensureLibraryRow,
 }: {
   generating: boolean;
@@ -2747,7 +2919,8 @@ function TemplateCustomizePostResult({
   signInForAts: () => Promise<void>;
   atsOAuthBusy: boolean;
   storageFailures: { artifact: "pdf" | "tex"; reason: string }[];
-  generate: () => void;
+  customizeExportToast: string | null;
+  onExportLayoutPdf: (mode: "save" | "download") => Promise<void>;
   ensureLibraryRow: () => Promise<void>;
 }) {
   const roleCompany = [role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Your résumé";
@@ -2759,9 +2932,14 @@ function TemplateCustomizePostResult({
       <style>{`
         .rb-template-customize-grid {
           display: grid;
-          grid-template-columns: minmax(300px, 1.42fr) minmax(280px, 0.88fr);
-          gap: 24px;
+          grid-template-columns: minmax(280px, 2.55fr) minmax(252px, 0.52fr);
+          gap: clamp(16px, 2.2vw, 28px);
           align-items: start;
+        }
+        @media (max-width: 1100px) {
+          .rb-template-customize-grid {
+            grid-template-columns: minmax(260px, 2.1fr) minmax(240px, 0.62fr);
+          }
         }
         @media (max-width: 960px) {
           .rb-template-customize-grid { grid-template-columns: 1fr; }
@@ -2797,8 +2975,27 @@ function TemplateCustomizePostResult({
         </div>
       )}
 
+      {customizeExportToast ? (
+        <div
+          role="status"
+          style={{
+            marginBottom: 16,
+            padding: "12px 16px",
+            borderRadius: "var(--radius-xl)",
+            background: "rgba(52,211,153,0.12)",
+            border: "1px solid rgba(52,211,153,0.35)",
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--text)",
+            lineHeight: 1.45,
+          }}
+        >
+          {customizeExportToast}
+        </div>
+      ) : null}
+
       <nav aria-label="Breadcrumb" style={{ fontSize: 12, color: "var(--dim)", marginBottom: 14 }}>
-        <Link href="/?view=builder&flow=tailor" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
+        <Link href="/?view=builder&flow=tailor&intent=job" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
           Resume Builder
         </Link>
         <span style={{ margin: "0 8px", opacity: 0.45 }} aria-hidden>›</span>
@@ -2880,10 +3077,13 @@ function TemplateCustomizePostResult({
               Back to templates
             </button>
             {result.pdfUrl ? (
-              <a
-                href={result.pdfUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                disabled={
+                  generating
+                  || (!(candidateProfile ?? "").trim() && !result.folder)
+                }
+                onClick={() => { void onExportLayoutPdf("download"); }}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -2891,16 +3091,23 @@ function TemplateCustomizePostResult({
                   padding: "10px 20px",
                   minHeight: 44,
                   borderRadius: 10,
-                  background: "#1d4ed8",
+                  border: "none",
+                  background:
+                    generating || (!(candidateProfile ?? "").trim() && !result.folder)
+                      ? "#94a3b8"
+                      : "#1d4ed8",
                   color: "#fff",
                   fontSize: 13,
                   fontWeight: 600,
-                  textDecoration: "none",
+                  cursor:
+                    generating || (!(candidateProfile ?? "").trim() && !result.folder)
+                      ? "not-allowed"
+                      : "pointer",
                   fontFamily: "inherit",
                 }}
               >
-                Download PDF →
-              </a>
+                {generating ? "Working…" : "Download PDF →"}
+              </button>
             ) : (
               <button
                 type="button"
@@ -3025,57 +3232,27 @@ function TemplateCustomizePostResult({
             <div style={{ marginTop: 20 }}>
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  marginBottom: 10,
-                  flexWrap: "wrap",
-                  gap: 8,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: "var(--dim)",
-                    textTransform: "uppercase",
-                    letterSpacing: 0.4,
-                  }}
-                >
-                  LaTeX PDF (exported)
-                </span>
-                <span style={{ fontSize: 12, color: "var(--muted)" }}>Last compile</span>
-              </div>
-              <div
-                style={{
                   borderRadius: 12,
                   overflow: "hidden",
                   border: "1px solid #e2e8f0",
                   background: "#525659",
                   boxShadow: "0 4px 16px rgba(15,23,42,0.1)",
-                  aspectRatio: "8.5 / 11",
-                  maxHeight: 520,
-                  minHeight: 280,
+                  width: "100%",
+                  height: "clamp(480px, 80vh, 960px)",
+                  minHeight: 420,
                 }}
               >
                 <iframe
-                  title="Résumé PDF — LaTeX export"
+                  title="Exported résumé PDF"
                   src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
                   loading="lazy"
-                  style={{ width: "100%", height: "100%", minHeight: 360, border: "none", display: "block" }}
+                  style={{ width: "100%", height: "100%", border: "none", display: "block" }}
                 />
               </div>
-              <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
-                If the PDF is blank,{" "}
-                <a href={result.pdfUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8", fontWeight: 600 }}>
-                  open it in a new tab
-                </a>
-                . Use <strong style={{ color: "var(--text)" }}>Recompile PDF</strong> to refresh this file after profile or template changes.
-              </p>
             </div>
           ) : (
             <p style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45, marginTop: 10, marginBottom: 0 }}>
-              The LaTeX PDF appears below when the compile step finishes.
+              Your PDF will appear here when the compile step finishes.
             </p>
           )}
         </div>
@@ -3323,11 +3500,6 @@ function TemplateCustomizePostResult({
                 <span style={{ fontSize: 11, color: "var(--dim)" }}>Structured fields only — switch to the Add details tab.</span>
               </div>
 
-              <p style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.45, margin: "16px 0 0" }}>
-                <strong style={{ color: "var(--text)" }}>Live paper</strong> (left) updates instantly from the Style tab.{" "}
-                <strong style={{ color: "var(--text)" }}>LaTeX PDF</strong> is the real export — use{" "}
-                <strong style={{ color: "var(--text)" }}>Recompile PDF</strong> after changing profile text or switching template in Templates.
-              </p>
             </div>
           )}
 
@@ -3384,7 +3556,7 @@ function TemplateCustomizePostResult({
           <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 10 }}>
             <button
               type="button"
-              onClick={() => void generate()}
+              onClick={() => { void onExportLayoutPdf("save"); }}
               disabled={
                 generating
                 || (!(candidateProfile ?? "").trim() && !result.folder)
@@ -3409,7 +3581,7 @@ function TemplateCustomizePostResult({
                 fontFamily: "inherit",
               }}
             >
-              {generating ? "Recompiling…" : "Recompile PDF"}
+              {generating ? "Saving…" : "Save PDF"}
             </button>
             {result.folder && result.pdfUrl && !generating ? (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
@@ -3524,6 +3696,31 @@ type BuilderPaperInteractive = {
   onLineSelectSuggestion: (id: string) => void;
 };
 
+/** Distinct left-border tints per suggestion (pending lines) — pairs with list order / card index. */
+const RB_SUGGESTION_STRIPE_PALETTE: ReadonlyArray<{ border: string; bg: string }> = [
+  { border: "#d97706", bg: "rgba(217, 119, 6, 0.11)" },
+  { border: "#7c3aed", bg: "rgba(124, 58, 237, 0.09)" },
+  { border: "#2563eb", bg: "rgba(37, 99, 235, 0.09)" },
+  { border: "#db2777", bg: "rgba(219, 39, 119, 0.08)" },
+  { border: "#0d9488", bg: "rgba(13, 148, 136, 0.10)" },
+  { border: "#c2410c", bg: "rgba(194, 65, 12, 0.10)" },
+  { border: "#4f46e5", bg: "rgba(79, 70, 229, 0.09)" },
+  { border: "#ca8a04", bg: "rgba(202, 138, 4, 0.11)" },
+];
+
+function stripeStyleForSuggestion(sug: Suggestion | null, all: Suggestion[]): CSSProperties {
+  if (!sug || !all.length) return {};
+  const idx = Math.max(0, all.findIndex(s => s.id === sug.id));
+  const c = RB_SUGGESTION_STRIPE_PALETTE[idx % RB_SUGGESTION_STRIPE_PALETTE.length];
+  return {
+    background: c.bg,
+    borderLeft: `3px solid ${c.border}`,
+    paddingLeft: 6,
+    marginLeft: -9,
+    borderRadius: "0 3px 3px 0",
+  };
+}
+
 function ResumePaperView({
   text,
   highlightOriginals,
@@ -3561,9 +3758,10 @@ function ResumePaperView({
   const lineMatchesHighlight = buildResumeHighlightMatcher(highlightOriginals);
   const ic = interactiveSuggestions;
 
+  const { nameLineIndex, subtitleLineIndex } = nameAndSubtitleLineIndices(lines);
+
   const isAllCaps = (t: string) => t.length > 2 && t === t.toUpperCase() && /[A-Z]/.test(t) && !/^[•\-–*\u2022\u00b7]/.test(t);
   const isBullet  = (t: string) => /^[•\-–*\u2022\u00b7]/.test(t);
-  const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
 
   const rowInteractiveProps = (
     _line: string,
@@ -3607,6 +3805,7 @@ function ResumePaperView({
       {lines.map((line, i) => {
         const t = line.trim();
         if (!t) return <div key={i} style={{ height: 7 }} />;
+        if (isPlaceholderResumeHeaderLine(line) && i !== nameLineIndex) return null;
 
         const acceptedSug = ic
           ? firstSuggestionMatchingLine(line, ic.suggestions, s => ic.acceptedIds.has(s.id))
@@ -3633,9 +3832,10 @@ function ResumePaperView({
         };
         let hlStyle: React.CSSProperties = {};
         if (acceptedSug) hlStyle = green;
+        else if (pendingHighlight && linkSug && ic) hlStyle = stripeStyleForSuggestion(linkSug, ic.suggestions);
         else if (pendingHighlight || highlightedPlain) hlStyle = amber;
 
-        if (i === firstNonEmpty) {
+        if (i === nameLineIndex) {
           if (nameCenteredCaps) {
             return (
               <div key={i} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5, marginBottom: 2, textAlign: "center", textTransform: "uppercase" }}>
@@ -3662,7 +3862,7 @@ function ResumePaperView({
             </div>
           );
         }
-        if (i === firstNonEmpty + 1 && !isAllCaps(t)) {
+        if (subtitleLineIndex >= 0 && i === subtitleLineIndex && !isAllCaps(t)) {
           return (
             <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: nameCenteredCaps ? "center" : "left", marginBottom: 8 }}>
               {t}
@@ -3685,8 +3885,9 @@ function ResumePaperView({
         if (isBullet(t)) {
           const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 2, paddingLeft: 6, ...hlStyle };
           const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
+          const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
           return (
-            <div key={i} {...p}>
+            <div key={i} {...p} {...lineMark}>
               <span style={{ flexShrink: 0, marginTop: 1 }}>•</span>
               <span>{innerFromAccepted}</span>
             </div>
@@ -3694,7 +3895,8 @@ function ResumePaperView({
         }
         const base: React.CSSProperties = { marginBottom: 2, ...hlStyle };
         const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
-        return <div key={i} {...p}>{acceptedSug ? innerFromAccepted : t}</div>;
+        const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
+        return <div key={i} {...p} {...lineMark}>{acceptedSug ? innerFromAccepted : t}</div>;
       })}
     </div>
   );
@@ -3717,32 +3919,52 @@ function priorityLabel(p: Suggestion["priority"]): string {
 
 function SuggestionsPanel({
   summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
+  pdfBlobUrl, pdfFileName, pdfDocumentKey,
   selectedSuggestionId, onSelectSuggestionCard,
-  onToggleAccept, onToggleReject, onGenerate, generating, error, onBackToInputs,
+  onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onGenerate, generating, error, onBackToInputs,
 }: {
   summary: string;
   suggestions: Suggestion[];
   acceptedIds: Set<string>;
   rejectedIds: Set<string>;
   candidateProfile: string;
+  /** When set, user can switch to true PDF highlights (same file as upload). */
+  pdfBlobUrl: string | null;
+  pdfFileName: string | null;
+  /** Remount PDF text layer when accept/reject sets change so tints stay correct. */
+  pdfDocumentKey: string;
   selectedSuggestionId: string | null;
   onSelectSuggestionCard: (id: string | null) => void;
   onToggleAccept: (id: string) => void;
   onToggleReject: (id: string) => void;
-  onGenerate: () => void;
+  onAcceptAll: () => void;
+  onClearAccepts: () => void;
+  onGenerate: () => void | Promise<unknown>;
   generating: boolean;
   error: string | null;
   onBackToInputs: () => void;
 }) {
+  const [leftPreviewTab, setLeftPreviewTab] = useState<"pdf" | "text">(() => (pdfBlobUrl ? "pdf" : "text"));
+
   const accepted = suggestions.filter(s => acceptedIds.has(s.id));
   const highlightOriginals = suggestions.map(s => s.original);
   const panelScrollMax = "min(720px, calc(100vh - 220px))";
+  const textPreviewScrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!selectedSuggestionId) return;
-    const el = document.getElementById(`rb-sug-${selectedSuggestionId}`);
-    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [selectedSuggestionId]);
+    const esc =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(selectedSuggestionId)
+        : selectedSuggestionId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    try {
+      const lineEl = textPreviewScrollRef.current?.querySelector(`[data-rb-sug-line="${esc}"]`);
+      lineEl?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    } catch {
+      /* ignore invalid selector */
+    }
+    document.getElementById(`rb-sug-${selectedSuggestionId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [selectedSuggestionId, leftPreviewTab]);
 
   return (
     <div className="fade-in" style={{ marginBottom: 32 }}>
@@ -3759,7 +3981,7 @@ function SuggestionsPanel({
       `}</style>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", letterSpacing: -0.1 }}>
-          Review suggestions against your résumé text
+          Accept suggestions first — only accepted items are sent as structured edits to LaTeX generation
         </span>
         <button
           type="button"
@@ -3797,24 +4019,105 @@ function SuggestionsPanel({
       {/* Two-panel layout (View 5 — Phase 2); stacks on narrow screens */}
       <div className="rb-suggestions-grid">
 
-        {/* Left: live resume preview */}
+        {/* Left: scanned PDF (when available) or extracted-text paper */}
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 8 }}>
-            Your resume — highlighted bullets can be improved
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              marginBottom: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.4, textTransform: "uppercase" }}>
+              Your résumé
+            </div>
+            {pdfBlobUrl ? (
+              <div style={{ display: "flex", gap: 4, background: "var(--surface2)", padding: 3, borderRadius: 10, border: "1px solid var(--border)" }}>
+                <button
+                  type="button"
+                  onClick={() => setLeftPreviewTab("pdf")}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    cursor: "pointer",
+                    background: leftPreviewTab === "pdf" ? "var(--surface)" : "transparent",
+                    color: leftPreviewTab === "pdf" ? "var(--text)" : "var(--muted)",
+                    boxShadow: leftPreviewTab === "pdf" ? "var(--shadow-sm)" : "none",
+                  }}
+                >
+                  Scanned PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLeftPreviewTab("text")}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    cursor: "pointer",
+                    background: leftPreviewTab === "text" ? "var(--surface)" : "transparent",
+                    color: leftPreviewTab === "text" ? "var(--text)" : "var(--muted)",
+                    boxShadow: leftPreviewTab === "text" ? "var(--shadow-sm)" : "none",
+                  }}
+                >
+                  Extracted text
+                </button>
+              </div>
+            ) : (
+              <span style={{ fontSize: 10, color: "var(--dim)" }}>Text preview — upload a PDF to unlock scanned view</span>
+            )}
           </div>
-          <div style={{ overflowY: "auto", maxHeight: panelScrollMax }}>
-            <ResumePaperView
-              text={candidateProfile}
-              highlightOriginals={highlightOriginals}
-              interactiveSuggestions={{
-                suggestions,
-                acceptedIds,
-                rejectedIds,
-                selectedSuggestionId,
-                onLineSelectSuggestion: id => onSelectSuggestionCard(id),
+          {pdfBlobUrl && leftPreviewTab === "pdf" ? (
+            <div
+              style={{
+                overflow: "hidden",
+                maxHeight: panelScrollMax,
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: "#fff",
               }}
-            />
-          </div>
+            >
+              <BuilderPdfSuggestionHighlights
+                key={pdfDocumentKey}
+                pdfBlobUrl={pdfBlobUrl}
+                filename={pdfFileName ?? "resume.pdf"}
+                suggestions={suggestions.map(s => ({ id: s.id, original: s.original }))}
+                acceptedIds={acceptedIds}
+                rejectedIds={rejectedIds}
+                selectedSuggestionId={selectedSuggestionId}
+                onSelectSuggestion={id => onSelectSuggestionCard(id)}
+              />
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 10, color: "var(--dim)", marginBottom: 6, lineHeight: 1.45 }}>
+                Tinted lines match cards on the right — click a line to focus the matching suggestion.
+              </div>
+              <div ref={textPreviewScrollRef} style={{ overflowY: "auto", maxHeight: panelScrollMax }}>
+                <ResumePaperView
+                  text={candidateProfile}
+                  highlightOriginals={highlightOriginals}
+                  interactiveSuggestions={{
+                    suggestions,
+                    acceptedIds,
+                    rejectedIds,
+                    selectedSuggestionId,
+                    onLineSelectSuggestion: id => onSelectSuggestionCard(id),
+                  }}
+                />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Right: suggestion cards */}
@@ -3827,6 +4130,8 @@ function SuggestionsPanel({
               const isAccepted = acceptedIds.has(s.id);
               const isRejected = rejectedIds.has(s.id);
               const isLinked = selectedSuggestionId === s.id;
+              const si = suggestions.findIndex(x => x.id === s.id);
+              const stripe = RB_SUGGESTION_STRIPE_PALETTE[Math.max(0, si) % RB_SUGGESTION_STRIPE_PALETTE.length];
               return (
                 <div
                   key={s.id}
@@ -3845,6 +4150,17 @@ function SuggestionsPanel({
                 >
                   {/* Header row */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <span
+                      title="Same color as the matching line in the preview"
+                      aria-hidden
+                      style={{
+                        width: 5,
+                        minHeight: 26,
+                        borderRadius: 3,
+                        background: stripe.border,
+                        flexShrink: 0,
+                      }}
+                    />
                     <span style={{
                       fontSize: 9, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase",
                       padding: "3px 9px", borderRadius: "var(--radius-pill, 99px)",
@@ -3908,14 +4224,41 @@ function SuggestionsPanel({
           {error}
         </div>
       )}
-      <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={onAcceptAll}
+            disabled={generating}
+            style={{
+              padding: "8px 14px", minHeight: 40, fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+              borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface2)",
+              color: "var(--text)", cursor: generating ? "not-allowed" : "pointer",
+            }}
+          >
+            Accept all
+          </button>
+          <button
+            type="button"
+            onClick={onClearAccepts}
+            disabled={generating || acceptedIds.size === 0}
+            style={{
+              padding: "8px 14px", minHeight: 40, fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+              borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
+              color: acceptedIds.size === 0 ? "var(--dim)" : "var(--muted)",
+              cursor: generating || acceptedIds.size === 0 ? "not-allowed" : "pointer",
+            }}
+          >
+            Clear accepts
+          </button>
+        </div>
         <button
           type="button"
-          onClick={onGenerate}
+          onClick={() => { void onGenerate(); }}
           disabled={generating}
           aria-busy={generating}
           style={{
-            flex: 1, padding: "14px 20px", minHeight: 48,
+            width: "100%", padding: "14px 20px", minHeight: 48,
             background: generating ? "var(--surface2)" : "var(--accent)",
             color: generating ? "var(--muted)" : "#fff",
             border: "none", borderRadius: 12,
@@ -3931,13 +4274,13 @@ function SuggestionsPanel({
             <><Spinner size={16} />Generating your resume…</>
           ) : (
             accepted.length > 0
-              ? `Generate PDF with ${accepted.length} improvement${accepted.length > 1 ? "s" : ""} →`
-              : "Generate PDF without changes →"
+              ? `Apply ${accepted.length} accepted edit${accepted.length > 1 ? "s" : ""} & generate PDF →`
+              : "Generate tailored PDF (no accepted bullet edits) →"
           )}
         </button>
       </div>
-      <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginTop: 8 }}>
-        {accepted.length} of {suggestions.length} suggestions accepted
+      <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginTop: 8, lineHeight: 1.5 }}>
+        {accepted.length} of {suggestions.length} accepted — the profile text stays unchanged; accepted rows are passed as a separate structured list to the model before LaTeX is written.
       </p>
     </div>
   );
