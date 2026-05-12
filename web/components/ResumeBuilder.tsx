@@ -2186,7 +2186,22 @@ export default function ResumeBuilder({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setResult(null)}
+                  onClick={() => {
+                    setResult(null);
+                    setPreview("");
+                    setSuggestions(null);
+                    setSuggestSummary("");
+                    setSuggestError(null);
+                    setSuggestResearchDigest("");
+                    setSuggestResearchQueries([]);
+                    setSuggestResearchSources([]);
+                    setAcceptedIds(new Set());
+                    setRejectedIds(new Set());
+                    setSelectedSuggestionId(null);
+                    setJd("");
+                    setCompany("");
+                    setRole("");
+                  }}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -2597,7 +2612,21 @@ export default function ResumeBuilder({
                 </span>
                 <button
                   type="button"
-                  onClick={() => { setResult(null); setSuggestions(null); setJd(""); setCompany(""); setRole(""); setPreview(""); }}
+                  onClick={() => {
+                    setResult(null);
+                    setSuggestions(null);
+                    setJd("");
+                    setCompany("");
+                    setRole("");
+                    setPreview("");
+                    setAcceptedIds(new Set());
+                    setRejectedIds(new Set());
+                    setSelectedSuggestionId(null);
+                    setSuggestSummary("");
+                    setSuggestResearchDigest("");
+                    setSuggestResearchQueries([]);
+                    setSuggestResearchSources([]);
+                  }}
                   style={{
                     fontSize: 12,
                     fontWeight: 600,
@@ -3979,6 +4008,15 @@ function ResumePaperView({
         const innerFromAccepted = acceptedSug
           ? (acceptedSug.suggested.trim().replace(/^[•\-–*\u2022\u00b7]\s*/, "").split("\n")[0]?.trim() || stripped)
           : stripped;
+
+        /* One logical paragraph / bullet is often split across lines with the same combined match text.
+           Only the first physical row should render the full accepted replacement — otherwise the same
+           suggested paragraph repeats on every wrapped line (e.g. SUMMARY ×6). */
+        const mergedCur = (combinedMatchByLine[i] ?? "").trim();
+        const mergedPrevLine = i > 0 ? (combinedMatchByLine[i - 1] ?? "").trim() : "";
+        if (acceptedSug && i > 0 && mergedCur !== "" && mergedCur === mergedPrevLine) {
+          return <div key={i} style={{ display: "none" }} aria-hidden />;
+        }
 
         if (isBullet(t)) {
           const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: 4, paddingLeft: 6, ...hlStyle };
