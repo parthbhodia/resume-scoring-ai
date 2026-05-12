@@ -179,3 +179,26 @@ export function resumeLineMatchesSuggestionOriginal(line: string, original: stri
 
   return false;
 }
+
+/**
+ * Like {@link resumeLineMatchesSuggestionOriginal}, but avoids false positives when `line`
+ * is a long merged block (several bullets concatenated): a short accepted `original` must
+ * not match the whole paragraph just because it appears as a substring once.
+ */
+export function resumeLineMatchesAcceptedSuggestionHighlight(line: string, original: string): boolean {
+  const no = normalizeResumeLineForSuggestion(original);
+  const nl = normalizeResumeLineForSuggestion(line);
+  if (!no || !nl) return false;
+  if (nl === no) return true;
+  const rawLine = line.trim().toLowerCase().replace(/[\u2018\u2019\u201c\u201d]/g, "'");
+  const rawOrig = original.trim().toLowerCase().replace(/[\u2018\u2019\u201c\u201d]/g, "'");
+  if (rawLine === rawOrig) return true;
+
+  const minContains = 8;
+  if (no.length >= minContains && nl.length >= minContains && nl.includes(no)) {
+    const density = no.length / Math.max(nl.length, 1);
+    if (nl.length > 180 && no.length < 120 && density < 0.12) return false;
+  }
+
+  return resumeLineMatchesSuggestionOriginal(line, original);
+}

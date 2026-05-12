@@ -22,7 +22,11 @@ import {
   setProfileAutofillFromUpload,
 } from "@/lib/profileStorage";
 import { extractProfileHintsFromResumeText } from "@/lib/profileFromResumeText";
-import { resumeLineMatchesSuggestionOriginal, computeCombinedMatchTextByLineIndex } from "@/lib/suggestionResumeMatch";
+import {
+  resumeLineMatchesSuggestionOriginal,
+  resumeLineMatchesAcceptedSuggestionHighlight,
+  computeCombinedMatchTextByLineIndex,
+} from "@/lib/suggestionResumeMatch";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import {
   nameAndSubtitleLineIndices,
@@ -2914,6 +2918,19 @@ function buildResumeHighlightMatcher(
   };
 }
 
+/** First accepted suggestion matching this line (stricter than pending highlights on merged blocks). */
+function firstAcceptedSuggestionMatchingLine(
+  line: string,
+  suggestions: Suggestion[],
+  acceptedIds: ReadonlySet<string>,
+): Suggestion | null {
+  for (const s of suggestions) {
+    if (!acceptedIds.has(s.id)) continue;
+    if (resumeLineMatchesAcceptedSuggestionHighlight(line, s.original)) return s;
+  }
+  return null;
+}
+
 /** First suggestion in list order whose `original` matches the résumé line (same rules as highlight). */
 function firstSuggestionMatchingLine(
   line: string,
@@ -3933,7 +3950,10 @@ function ResumePaperView({
 
         const matchText = (combinedMatchByLine[i] ?? "").trim() || t;
         const acceptedSug = ic
-          ? firstSuggestionMatchingLine(matchText, ic.suggestions, s => ic.acceptedIds.has(s.id))
+          ? firstAcceptedSuggestionMatchingLine(t, ic.suggestions, ic.acceptedIds) ??
+            (matchText.trim() !== t.trim()
+              ? firstAcceptedSuggestionMatchingLine(matchText, ic.suggestions, ic.acceptedIds)
+              : null)
           : null;
         const linkSug = ic
           ? firstSuggestionMatchingLine(matchText, ic.suggestions, s => !ic.rejectedIds.has(s.id))
