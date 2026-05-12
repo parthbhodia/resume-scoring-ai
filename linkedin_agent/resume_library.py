@@ -401,6 +401,10 @@ LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", "")
 import shutil as _shutil
 PDFLATEX = os.environ.get("PDFLATEX_PATH") or _shutil.which("pdflatex") or ""
 
+# Contact block markers (spliced preamble + parser); defined early for assembly audits.
+_CONTACT_START = "% RESUME-CONTACT-BLOCK-START"
+_CONTACT_END = "% RESUME-CONTACT-BLOCK-END"
+
 # LaTeX preamble — shared across all generated resumes
 _LATEX_PREAMBLE = r"""%-------------------------
 % Resume - {role} - {company}
@@ -1086,7 +1090,7 @@ def _fix_tex_contact_pipe_spacing(tex: str) -> str:
 
 
 _LEADING_BODY_JUNK = re.compile(
-    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*0(?:in|pt)\s*$",
+    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*0\s*(?:in|pt)\s*$",
     re.I,
 )
 
@@ -1119,6 +1123,60 @@ def _strip_tex_leading_body_junk(tex: str) -> str:
     return head + tail
 
 
+_METRIC_NOISE_LINE = re.compile(
+    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*0\s*(?:in|pt)\s*$",
+    re.I,
+)
+
+
+def _strip_metric_noise_lines_after_begin_document(tex: str) -> str:
+    """Remove standalone metric fragments (e.g. `sep 0in`) anywhere after \\begin{document} — not only at file top."""
+    token = "\\begin{document}"
+    i = tex.find(token)
+    if i < 0:
+        return tex
+    head = tex[: i + len(token)]
+    body = tex[i + len(token) :]
+    lines = body.splitlines(keepends=True)
+    kept: List[str] = []
+    for ln in lines:
+        if _METRIC_NOISE_LINE.match(ln.strip()):
+            continue
+        kept.append(ln)
+    return head + "".join(kept)
+
+
+# Contact header uses this tabular; duplicates may add optional [t] before the column spec.
+_CONTACT_TABULAR_HEAD_RE = re.compile(
+    r"^\\begin\{tabular\*\}\{\\textwidth\}(?:\[[^\]]*\])?\{l@\{\\extracolsep\{\\fill\}\}r\}"
+)
+
+
+def _strip_llm_duplicate_header_tabular_after_contact(tex: str) -> str:
+    """Remove a second name/contact tabular the LLM often pastes immediately after our canonical contact block."""
+    end_tag = "% RESUME-CONTACT-BLOCK-END"
+    i = tex.find(end_tag)
+    if i < 0:
+        return tex
+    prefix = tex[: i + len(end_tag)]
+    rest = tex[i + len(end_tag) :]
+    rest_l = rest.lstrip()
+    off = len(rest) - len(rest_l)
+    if not _CONTACT_TABULAR_HEAD_RE.match(rest_l):
+        return tex
+    block_start = off
+    chunk = rest[block_start:]
+    end_m = re.search(r"\\end\{tabular\*\}", chunk)
+    if not end_m:
+        return tex
+    inner = chunk[: end_m.end()]
+    if "\\Huge" not in inner and "Location:" not in inner and "Email:" not in inner:
+        return tex
+    tail = rest[block_start + end_m.end() :].lstrip("\n")
+    nl = "\n" if tail and not tail.startswith("\n") else ""
+    return prefix + nl + tail
+
+
 _GLUED_RESUME_WORDS = re.compile(
     r"(?i)([a-z]{2,22}(?:ing|ed|es|tion|sions?|ments?|ness))"
     r"((?:ability|ibility|insights|analysis|operations|management|performance|reporting|validation|processing|optimization|alignment|framework|workflows?))"
@@ -1146,10 +1204,101 @@ def _fix_tex_resumeitem_word_glues(tex: str) -> str:
 def _sanitize_full_resume_tex(full_tex: str) -> str:
     """Last-mile fixes on assembled .tex before write (run-ons, contact pipes, stray text)."""
     t = _strip_tex_leading_body_junk(full_tex)
+    t = _strip_metric_noise_lines_after_begin_document(t)
+    t = _strip_llm_duplicate_header_tabular_after_contact(t)
     t = _fix_tex_runon_employer_month(t)
     t = _fix_tex_contact_pipe_spacing(t)
     t = _fix_tex_resumeitem_word_glues(t)
     return t
+
+
+def _count_huge_before_first_section(tex: str) -> int:
+    """How many ``\\Huge`` appear between ``\\begin{document}`` and the first ``\\section{`` (masthead zone)."""
+    token = "\\begin{document}"
+    i = tex.find(token)
+    if i < 0:
+        return 0
+    rest = tex[i + len(token) :]
+    j = rest.find("\\section{")
+    head = rest[:j] if j >= 0 else rest[:8000]
+    return head.count("\\Huge")
+
+
+def _audit_assembled_resume_tex(full_tex: str) -> List[str]:
+    """Structural checks after preamble + body + footer assembly. Returns human-readable issues (empty if OK)."""
+    issues: List[str] = []
+    n_cs = full_tex.count(_CONTACT_START)
+    n_ce = full_tex.count(_CONTACT_END)
+    if n_cs > 1 or n_ce > 1:
+        issues.append(f"duplicate_contact_markers start={n_cs} end={n_ce}")
+    elif n_cs != n_ce:
+        issues.append(f"contact_block_marker_mismatch start={n_cs} end={n_ce}")
+    bd = full_tex.count("\\begin{document}")
+    if bd != 1:
+        issues.append(f"begin_document_count={bd} (expected 1)")
+    ed = full_tex.count("\\end{document}")
+    if ed != 1:
+        issues.append(f"end_document_count={ed} (expected 1)")
+    if "\\begin{document}" in full_tex and "\\end{document}" in full_tex:
+        body = full_tex.split("\\begin{document}", 1)[1]
+        body = body.rsplit("\\end{document}", 1)[0]
+        if "\\begin{document}" in body:
+            issues.append("nested_or_duplicate_begin_document_inside_body")
+    huge_pre = _count_huge_before_first_section(full_tex)
+    if huge_pre > 1:
+        issues.append(f"huge_in_masthead_zone={huge_pre} (expected 1; likely duplicate name header)")
+    return issues
+
+
+def _finalize_full_resume_tex(full_tex: str) -> str:
+    """Sanitize assembled .tex and log structural audit warnings."""
+    t = _sanitize_full_resume_tex(full_tex)
+    for msg in _audit_assembled_resume_tex(t):
+        logger.warning("assembled_tex_audit  |  %s", msg)
+    return t
+
+
+_OVERFULL_HBOX_RE = re.compile(r"Overfull \\hbox")
+
+
+def _audit_pdflatex_log(log_text: str, *, max_hits: int = 10) -> List[str]:
+    """Surface typography issues from pdflatex stdout/stderr (optional quality pass)."""
+    if not (log_text or "").strip():
+        return []
+    return [ln.strip() for ln in log_text.splitlines() if _OVERFULL_HBOX_RE.search(ln)][:max_hits]
+
+
+def _log_pdflatex_quality(proc_stdout: Optional[str], proc_stderr: Optional[str]) -> None:
+    blob = (proc_stdout or "") + "\n" + (proc_stderr or "")
+    hits = _audit_pdflatex_log(blob)
+    if hits:
+        logger.warning(
+            "pdflatex_quality  |  Overfull \\hbox (showing %d):\n%s",
+            len(hits),
+            "\n".join(hits),
+        )
+
+
+def _maybe_chktex_warn(tex_path: str) -> None:
+    """If ``chktex`` is on PATH, run it once on the saved .tex and log warnings (best-effort, no hard fail)."""
+    exe = _shutil.which("chktex")
+    if not exe or not tex_path or not os.path.isfile(tex_path):
+        return
+    folder = os.path.dirname(os.path.abspath(tex_path)) or "."
+    try:
+        proc = subprocess.run(
+            [exe, tex_path],
+            cwd=folder,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        blob = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        lines = [ln.strip() for ln in blob.splitlines() if "Warning" in ln][:20]
+        if lines:
+            logger.warning("chktex  |  %s", "\n".join(lines))
+    except Exception as exc:
+        logger.debug("chktex skipped  |  %s", exc)
 
 
 # ============================================================================
@@ -1279,10 +1428,6 @@ def _trio_to_header(m: "re.Match[str]") -> str:
     a, b, c = m.group(1), m.group(2), m.group(3)
     parts = [_latex_to_plain(p) for p in (a, b, c) if p.strip()]
     return " · ".join(parts)
-
-
-_CONTACT_START = "% RESUME-CONTACT-BLOCK-START"
-_CONTACT_END   = "% RESUME-CONTACT-BLOCK-END"
 
 
 def _parse_contact_block(full_tex: str) -> Optional[Dict]:
@@ -1863,6 +2008,7 @@ def recompile_resume_from_tex(folder: str, full_tex: str, layout: Optional[Dict]
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(rendered_tex)
     logger.info(f"Re-saved .tex  |  {tex_path}  |  {len(full_tex)} chars")
+    _maybe_chktex_warn(tex_path)
 
     result = {"folder": folder, "folder_path": folder_path, "tex_path": tex_path, "pdf_path": None}
 
@@ -1879,6 +2025,7 @@ def recompile_resume_from_tex(folder: str, full_tex: str, layout: Optional[Dict]
             [PDFLATEX, "-interaction=nonstopmode", "-output-directory", folder_path, tex_path],
             capture_output=True, text=True, timeout=60,
         )
+        _log_pdflatex_quality(proc.stdout, proc.stderr)
         pdf_path = os.path.join(folder_path, filename[:-4] + ".pdf")
         if os.path.exists(pdf_path):
             result["pdf_path"] = pdf_path
@@ -3671,7 +3818,7 @@ def generate_latex_resume(
         reference_tex, role, company, contact_hints, reference_folder=ref_folder
     )
     full_tex = preamble + "\n" + latex_body + _LATEX_FOOTER
-    full_tex = _sanitize_full_resume_tex(full_tex)
+    full_tex = _finalize_full_resume_tex(full_tex)
 
     folder_name = _make_folder_name(company, role)
     folder_path = os.path.join(LIBRARY_ROOT, folder_name)
@@ -3687,6 +3834,7 @@ def generate_latex_resume(
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(full_tex)
     logger.info(f"Saved .tex  |  {tex_path}")
+    _maybe_chktex_warn(tex_path)
 
     result = {
         "success": True,
@@ -3708,6 +3856,7 @@ def generate_latex_resume(
                 [PDFLATEX, "-interaction=nonstopmode", "-output-directory", folder_path, tex_path],
                 capture_output=True, text=True, timeout=60,
             )
+            _log_pdflatex_quality(proc.stdout, proc.stderr)
             pdf_path = os.path.join(folder_path, filename + ".pdf")
             if os.path.exists(pdf_path):
                 result["pdf_path"] = pdf_path
@@ -3801,7 +3950,18 @@ def _latex_tailor_system_instruction() -> str:
         "12. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
         "13. CITATIONS: Never output Markdown footnotes, bracketed citation markers, or raw URLs used for web "
         "grounding (for example `[[1]](https://...)` or `[[2]]`). The résumé must read as a clean PDF — "
-        "search is for your reasoning only, not for visible references in the LaTeX."
+        "search is for your reasoning only, not for visible references in the LaTeX.\n"
+        "14. CONTACT / HEADER (injected by the app): The final document already contains exactly one "
+        "`% RESUME-CONTACT-BLOCK-START` … `% RESUME-CONTACT-BLOCK-END` block (name, links, email, phone). "
+        "Do **not** output a second name/contact `\\begin{tabular*}{\\textwidth}` block, do **not** duplicate `\\Huge` "
+        "name lines, and do **not** paste another masthead. Start your body with the profile’s first real section "
+        "(typically `\\section{...}` or the equivalent first content macro from the REFERENCE — not another header).\n"
+        "15. PACKAGE / LIST OPTION TEXT: Never print enumitem/list keys as standalone body lines "
+        "(e.g. `nosep`, `topsep=0pt`, `sep 0in`, `parsep=0pt`, `labelsep=0in`). Use them **only** inside valid "
+        "`\\begin{itemize}[...]` / `\\begin{enumerate}[...]` optional arguments (or other macro args), never as stray text.\n"
+        "16. PRESENT vs DATES: If a job ends with **Present**, the role’s start month/year must **not** be in the future "
+        "unless the CANDIDATE PROFILE or CURRENT RESUME BODY **explicitly** documents that future start. Do **not** invent "
+        "lines like **Jan 2026 – Present** without explicit profile support."
     )
 
 
@@ -3868,7 +4028,18 @@ def _latex_tailor_system_instruction_no_live_search() -> str:
         "11. LENGTH: Prefer one page when the profile fits; tighten wording before dropping real sections or employers.\n"
         "12. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
         "13. CITATIONS: Never output Markdown footnotes, bracketed citation markers, or raw URLs in the LaTeX. "
-        "The résumé must read as a clean PDF."
+        "The résumé must read as a clean PDF.\n"
+        "14. CONTACT / HEADER (injected by the app): The final document already contains exactly one "
+        "`% RESUME-CONTACT-BLOCK-START` … `% RESUME-CONTACT-BLOCK-END` block (name, links, email, phone). "
+        "Do **not** output a second name/contact `\\begin{tabular*}{\\textwidth}` block, do **not** duplicate `\\Huge` "
+        "name lines, and do **not** paste another masthead. Start your body with the profile’s first real section "
+        "(typically `\\section{...}` or the equivalent first content macro from the REFERENCE — not another header).\n"
+        "15. PACKAGE / LIST OPTION TEXT: Never print enumitem/list keys as standalone body lines "
+        "(e.g. `nosep`, `topsep=0pt`, `sep 0in`, `parsep=0pt`, `labelsep=0in`). Use them **only** inside valid "
+        "`\\begin{itemize}[...]` / `\\begin{enumerate}[...]` optional arguments (or other macro args), never as stray text.\n"
+        "16. PRESENT vs DATES: If a job ends with **Present**, the role’s start month/year must **not** be in the future "
+        "unless the CANDIDATE PROFILE or CURRENT RESUME BODY **explicitly** documents that future start. Do **not** invent "
+        "lines like **Jan 2026 – Present** without explicit profile support."
     )
 
 
@@ -3961,6 +4132,31 @@ def _accepted_suggestions_prompt_block(items: List[Dict]) -> str:
         "capabilities that are not already implied by the profile or current body.\n"
     )
     return "\n".join(lines)
+
+
+_REFERENCE_TEX_PROMPT_CHAR_LIMIT = 10_000
+
+
+def _reference_macro_cheat_sheet(reference_folder: Optional[str]) -> str:
+    """Short macro summary so the model relies less on a truncated raw REFERENCE .tex paste."""
+    f = (reference_folder or "").strip()
+    if f == "Harshibar_Template1":
+        return (
+            "Quick macro map: \\section{TITLE}; jobs via \\resumeSubheading / \\resumeQuadHeading / \\resumeTrioHeading "
+            "exactly as in REFERENCE; bullets in \\resumeItemListStart … \\resumeItem{…} … \\resumeItemListEnd; "
+            "projects via \\resumeProjectHeading; skills via the REFERENCE’s list pattern. "
+            "Never duplicate the contact tabular.\n"
+        )
+    if f == "MaltaCV_Modern":
+        return (
+            "Quick macro map: \\cvsection{title}; \\cvexperience{role}{company}{dates}{location}{tags}; "
+            "\\cvuniversity{degree}{school}{dates}{location}; \\bio{…}; lists per REFERENCE. "
+            "Never duplicate the contact tabular.\n"
+        )
+    return (
+        "Quick macro map: use **only** command names that appear in the REFERENCE fragment (sections, headings, bullets). "
+        "Do not import macros from a different template family. Never duplicate the contact tabular.\n"
+    )
 
 
 def _reference_folder_layout_hint(reference_folder: Optional[str]) -> str:
@@ -4067,6 +4263,8 @@ def _build_prompts(
         )
 
     ref_hint = _reference_folder_layout_hint(reference_folder)
+    ref_snippet = (reference_tex or "")[:_REFERENCE_TEX_PROMPT_CHAR_LIMIT]
+    ref_cheat = _reference_macro_cheat_sheet(reference_folder)
 
     user_prompt = (
         f"Generate a tailored LaTeX resume body for this application:\n\n"
@@ -4078,7 +4276,8 @@ def _build_prompts(
         f"{base_section}"
         f"{digest_block}"
         f"{approved_block}"
-        f"---\nREFERENCE LaTeX SYNTAX (typeset the profile's sections using these commands only — do not copy this file's section order or content as your outline):\n{reference_tex[:6500]}\n\n"
+        f"---\nMACRO CHEAT SHEET (read first; then REFERENCE for exact spelling):\n{ref_cheat}"
+        f"---\nREFERENCE LaTeX SYNTAX (typeset the profile's sections using these commands only — do not copy this file's section order or content as your outline):\n{ref_snippet}\n\n"
         f"{ref_hint}"
         f"{research_tail}"
         f"{closing}"
@@ -4177,7 +4376,7 @@ def _save_and_compile(
         reference_tex, role, company, contact_hints, reference_folder=reference_folder
     )
     full_tex  = preamble + "\n" + latex_body + _LATEX_FOOTER
-    full_tex = _sanitize_full_resume_tex(full_tex)
+    full_tex = _finalize_full_resume_tex(full_tex)
 
     folder_name = _make_folder_name(company, role)
     folder_path = os.path.join(LIBRARY_ROOT, folder_name)
@@ -4193,6 +4392,7 @@ def _save_and_compile(
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(full_tex)
     logger.info(f"Saved .tex  |  {tex_path}")
+    _maybe_chktex_warn(tex_path)
 
     result = {"folder": folder_name, "folder_path": folder_path, "tex_path": tex_path, "pdf_path": None}
 
@@ -4204,6 +4404,7 @@ def _save_and_compile(
                 [PDFLATEX, "-interaction=nonstopmode", "-output-directory", folder_path, tex_path],
                 capture_output=True, text=True, timeout=60,
             )
+            _log_pdflatex_quality(proc.stdout, proc.stderr)
             pdf_path = os.path.join(folder_path, filename + ".pdf")
             if os.path.exists(pdf_path):
                 result["pdf_path"] = pdf_path

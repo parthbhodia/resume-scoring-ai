@@ -909,13 +909,8 @@ export default function ResumeBuilder({
     setStatusMsg("Connecting…");
     setJdKeywords(extractJdKeywords(effJd));
     const digestTrim = suggestResearchDigest.trim();
-    if (digestTrim) {
-      setSearchQueries(suggestResearchQueries.length ? [...suggestResearchQueries] : []);
-      setSearchSources(suggestResearchSources.length ? [...suggestResearchSources] : []);
-    } else {
-      setSearchQueries([]);
-      setSearchSources([]);
-    }
+    setSearchQueries([]);
+    setSearchSources([]);
     setStorageFailures([]);
 
     const acceptedList = (suggestions ?? []).filter(s => acceptedIds.has(s.id)).map(s => ({
@@ -1775,7 +1770,7 @@ export default function ResumeBuilder({
           </>)} {/* end !result && !generating inputs block */}
 
           {/* ── Web research used for suggestions (API runs search before coach JSON) ── */}
-          {!studioHandoff && hasSuggestResearch && suggestions && !result && (suggestionsReviewMode || generating) && (
+          {!studioHandoff && hasSuggestResearch && suggestions && !result && suggestionsReviewMode && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
@@ -1989,7 +1984,7 @@ export default function ResumeBuilder({
           )}
 
           {/* Live web search during PDF generation (SSE), or the same queries/sources reused from suggestions */}
-          {hasWebResearch && !result && !studioHandoff && (
+          {hasWebResearch && !result && !studioHandoff && !reusingSuggestWebForPdf && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
@@ -2694,8 +2689,17 @@ export default function ResumeBuilder({
                     >
                       Résumé preview
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 12, letterSpacing: -0.2 }}>
-                      {selectedTemplateLabel}
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 500,
+                        color: "var(--dim)",
+                        marginBottom: 12,
+                        letterSpacing: -0.1,
+                      }}
+                    >
+                      PDF · Template:{" "}
+                      <span style={{ fontWeight: 600, color: "var(--text)" }}>{selectedTemplateLabel}</span>
                     </div>
                     {result.pdfUrl ? (
                       <div
