@@ -59,6 +59,7 @@ from resume_library import (
     ats_check,
     doctor_check_resume,
     primary_gemini_flash_model,
+    primary_llm_model_for_resume_workloads,
 )
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
@@ -128,12 +129,7 @@ async def api_generate_stream(request: Request):
     company           = (body.get("company") or "").strip()
     role              = (body.get("role") or "").strip()
     jd                = (body.get("job_description") or "").strip()
-    model             = (body.get("model") or "").strip() or primary_gemini_flash_model()
-    # LLM_PROVIDER=grok in .env flips the default primary model to Grok without
-    # redeploying. Useful when Gemini free-tier is rate-limited and an xAI
-    # balance is available. Explicit model param in the body still wins.
-    if model.startswith("gemini") and os.environ.get("LLM_PROVIDER", "").lower() == "grok":
-        model = "grok-4-fast-non-reasoning"
+    model = primary_llm_model_for_resume_workloads((body.get("model") or "").strip() or None)
     base_folder       = (body.get("base_folder") or "").strip() or None
     reference_folder  = (body.get("reference_folder") or "").strip() or None
     candidate_profile = (body.get("candidate_profile") or "").strip() or None

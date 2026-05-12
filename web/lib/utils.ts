@@ -17,6 +17,8 @@ export function weightColor(w: string): { bg: string; color: string } {
   return                     { bg: "var(--surface3)",  color: "var(--muted)"  };
 }
 
+import { messageForNonJsonApiFailure } from "@/lib/userFriendlyError";
+
 export function apiUrl(path: string): string {
   const base = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8765").replace(/\/$/, "");
   return `${base}${path}`;
@@ -41,9 +43,9 @@ export async function parseJsonOrThrow<T = unknown>(resp: Response): Promise<T> 
   // Non-JSON response — likely a 404 "Not Found" or an HTML error page.
   if (!resp.ok) {
     const snippet = text.trim().slice(0, 120) || resp.statusText || "Request failed";
-    throw new Error(`Server returned ${resp.status}: ${snippet}`);
+    throw new Error(messageForNonJsonApiFailure(resp.status, snippet));
   }
-  throw new Error("Server returned an unexpected non-JSON response.");
+  throw new Error("The résumé server returned an unexpected response (not JSON). Please try again.");
 }
 
 export function escHtml(s: string): string {

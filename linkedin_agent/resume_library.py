@@ -38,6 +38,33 @@ def primary_gemini_flash_model(explicit: Optional[str] = None) -> str:
     return (os.environ.get("GEMINI_FLASH_MODEL") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 
 
+def grok_preferred_for_throughput() -> bool:
+    """Use xAI Grok as the primary model when ``XAI_API_KEY`` is set.
+
+    Set ``LLM_PROVIDER=gemini`` to keep Google Gemini as primary despite having an xAI key.
+    Unset or ``LLM_PROVIDER=grok`` → Grok-first (better RPM on many xAI tiers).
+    """
+    if not (os.environ.get("XAI_API_KEY") or "").strip():
+        return False
+    p = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
+    if p == "gemini":
+        return False
+    return True
+
+
+def primary_llm_model_for_resume_workloads(explicit: Optional[str] = None) -> str:
+    """Primary model for résumé generation, JD extract, skills, bullet rewrite.
+
+    When ``grok_preferred_for_throughput()`` is true, uses ``GROK_MODEL`` (or the default
+    Grok slug) even if the client sent a Gemini id — unless the client explicitly sent a ``grok-`` id."""
+    ex = (explicit or "").strip()
+    if grok_preferred_for_throughput():
+        if ex.lower().startswith("grok"):
+            return ex
+        return (os.environ.get("GROK_MODEL") or _GROK_FALLBACK_MODELS[0]).strip() or _GROK_FALLBACK_MODELS[0]
+    return primary_gemini_flash_model(explicit or None)
+
+
 # Extra models to try when the primary hits quota errors (free tier is per-model).
 # gemini-1.5-* are retired on the v1beta endpoint; including them just adds 404 noise.
 # Prefer 2.5 Flash-Lite before older 2.0 models when 2.5 Flash is exhausted.
@@ -1680,7 +1707,7 @@ def ai_rewrite_bullet(bullet_text: str, instruction: str, jd_snippet: str = "") 
 
     # Try Gemini first (fast + free), fall back to Grok if configured.
     last_err: Optional[BaseException] = None
-    for model in _model_chain(primary_gemini_flash_model()):
+    for model in _model_chain(primary_llm_model_for_resume_workloads()):
         try:
             if _is_grok(model):
                 # _stream_grok yields events; we just need the final text.
@@ -1725,7 +1752,7 @@ def ai_generate_skills(role: str, existing_skills: Optional[List[str]] = None) -
 
     import json as _json
     last_err: Optional[BaseException] = None
-    for model in _model_chain(primary_gemini_flash_model()):
+    for model in _model_chain(primary_llm_model_for_resume_workloads()):
         try:
             if _is_grok(model):
                 pieces: List[str] = []
@@ -3322,7 +3349,7 @@ def generate_latex_resume(
         base_folder:        Existing resume folder — content body to tailor; style comes from reference_folder when set
         candidate_profile: Multiline profile from the app (name, contact, experience); used for PDF header + LLM facts
     """
-    model = primary_gemini_flash_model(model)
+    model = primary_llm_model_for_resume_workloads(model)
     t_start = time.time()
     logger.info("=" * 60)
     logger.info(f"START  |  {role} @ {company}")
@@ -3964,7 +3991,7 @@ def stream_latex_resume(
     and the digest is injected into the user prompt instead — one research pass for both suggestions and PDF.
     """
     try:
-        model = primary_gemini_flash_model(model)
+        model = primary_llm_model_for_resume_workloads(model)
         t_start = time.time()
         logger.info("=" * 60)
         logger.info(f"STREAM  |  {role} @ {company}  |  model={model}")
@@ -4440,7 +4467,7 @@ def extract_jd_from_url(url: str, model: Optional[str] = None) -> Dict:
 
     url = _normalize_job_url(url)
 
-    model = primary_gemini_flash_model(model)
+    model = primary_llm_model_for_resume_workloads(model)
 
     t0 = time.time()
     raw_text = ""

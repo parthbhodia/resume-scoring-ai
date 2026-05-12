@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale, ParsedSection } from "@/lib/types";
 import { apiUrl, parseJsonOrThrow, scoreColor } from "@/lib/utils";
-import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
+import { toUserFriendlyErrorMessage, messageForNonJsonApiFailure } from "@/lib/userFriendlyError";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD, TAILOR_PREFILL_COMPANY, TAILOR_PREFILL_ROLE } from "@/lib/tailorPrefill";
 import type { User } from "@supabase/supabase-js";
@@ -941,12 +941,18 @@ export default function ResumeBuilder({
       });
 
       if (!resp.ok) {
+        const ct = resp.headers.get("content-type") ?? "";
+        const body = await resp.text().catch(() => "");
+        if (!ct.includes("application/json")) {
+          throw new Error(messageForNonJsonApiFailure(resp.status, body));
+        }
         let msg = `HTTP ${resp.status}`;
         try {
-          const t = await resp.clone().text();
-          if (t.trim()) msg = t;
+          const j = JSON.parse(body) as { error?: string };
+          if (j?.error) msg = j.error;
+          else if (body.trim()) msg = body.trim().slice(0, 400);
         } catch {
-          /* ignore */
+          if (body.trim()) msg = body.trim().slice(0, 400);
         }
         throw new Error(toUserFriendlyErrorMessage(msg));
       }
