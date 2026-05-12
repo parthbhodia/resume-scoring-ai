@@ -90,6 +90,121 @@ _REASONING_MODEL_GEMINI = "gemini-2.5-pro"
 _REASONING_MODEL_GROK   = os.environ.get("GROK_REASONING_MODEL", "grok-4")
 
 
+def _extract_grounding_from_gemini_response(resp) -> Tuple[List[str], List[dict]]:
+    """Pull web_search_queries and cited URLs from a non-streaming Gemini response."""
+    queries: List[str] = []
+    sources: List[dict] = []
+    seen_urls: set = set()
+    for cand in getattr(resp, "candidates", None) or []:
+        gm = getattr(cand, "grounding_metadata", None)
+        if not gm:
+            continue
+        for q in getattr(gm, "web_search_queries", None) or []:
+            qs = (q if isinstance(q, str) else str(q)).strip()
+            if qs:
+                queries.append(qs)
+        for chunk in getattr(gm, "grounding_chunks", None) or []:
+            web = getattr(chunk, "web", None)
+            uri = getattr(web, "uri", None) if web else None
+            if uri and uri not in seen_urls:
+                seen_urls.add(uri)
+                title = getattr(web, "title", None) or uri
+                sources.append({"title": title, "url": uri})
+    return queries, sources
+
+
+def _run_tailor_research_job_context_gemini(job_description: str) -> Tuple[str, List[str], List[dict]]:
+    """Gemini + Google Search: public employer/JD/domain context before résumé suggestions."""
+    api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("GOOGLE_API_KEY or GEMINI_API_KEY is required for Gemini+Search research")
+    jd = (job_description or "").strip()
+    prompt = (
+        "You have Google Search enabled. Run **3–6 searches** to gather **public** context useful for tailoring "
+        "a candidate's résumé to this **specific job posting**: the hiring organization or product line, industry norms, "
+        "acronyms and domain terms in the posting, and vocabulary employers use for this role type. "
+        "Output **plain text only**: short bullet points (max ~700 words). No JSON. No markdown code fences. "
+        "Do not invent private facts about any person. Do not write résumé edits — only background context.\n\n"
+        f"JOB DESCRIPTION:\n{jd[:4000]}"
+    )
+    client = genai.Client(api_key=api_key)
+    resp = client.models.generate_content(
+        model=primary_gemini_flash_model(),
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=0.25,
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+        ),
+    )
+    text = (getattr(resp, "text", None) or "").strip()
+    queries, sources = _extract_grounding_from_gemini_response(resp)
+    return text, queries, sources
+
+
+def _run_tailor_research_job_context_grok(job_description: str) -> Tuple[str, List[str], List[dict]]:
+    """Grok + web_search: same role as Gemini pre-suggestion digest (used when Grok is primary)."""
+    m = (os.environ.get("GROK_MODEL") or _GROK_FALLBACK_MODELS[0]).strip() or str(_GROK_FALLBACK_MODELS[0])
+    jd = (job_description or "").strip()
+    system_prompt = (
+        "You are a research assistant with web search. Output **plain text only**: short bullet points "
+        "(max ~700 words). No JSON. No markdown code fences. Do not invent private facts about any person. "
+        "Do not write résumé edits — only background context."
+    )
+    user_prompt = (
+        "Run **several** targeted web searches to gather **public** context useful for tailoring "
+        "a candidate's résumé to this **specific job posting**: the hiring organization or product line, industry norms, "
+        "acronyms and domain terms in the posting, and vocabulary employers use for this role type.\n\n"
+        f"JOB DESCRIPTION:\n{jd[:4000]}"
+    )
+    buf: List[str] = []
+    queries: List[str] = []
+    sources: List[dict] = []
+    for ev in _stream_grok(m, system_prompt, user_prompt, temperature=0.25, web_search=True):
+        t = ev.get("type")
+        if t == "text":
+            buf.append(ev.get("delta") or "")
+        elif t == "query":
+            q = (ev.get("query") or "").strip()
+            if q and q not in queries:
+                queries.append(q)
+        elif t == "source":
+            u = (ev.get("url") or "").strip()
+            if u and not any(s.get("url") == u for s in sources):
+                sources.append({"title": ev.get("title"), "url": u})
+    return "".join(buf).strip(), queries, sources
+
+
+def run_tailor_research_job_context(job_description: str) -> Tuple[str, List[str], List[dict]]:
+    """JD/market digest + queries + sources for ``/api/suggest-changes`` (Gemini+Search or Grok web_search)."""
+    if grok_preferred_for_throughput():
+        return _run_tailor_research_job_context_grok(job_description)
+    return _run_tailor_research_job_context_gemini(job_description)
+
+
+def coach_suggestions_llm(prompt: str) -> str:
+    """Return raw JSON text for the résumé coach (``/api/suggest-changes`` body) — Grok or Gemini."""
+    if grok_preferred_for_throughput():
+        model = primary_llm_model_for_resume_workloads()
+        client = _get_xai_client()
+        r = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        return (r.choices[0].message.content or "").strip()
+    api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("GOOGLE_API_KEY or GEMINI_API_KEY is required when LLM_PROVIDER=gemini (or unset without XAI_API_KEY)")
+    client = genai.Client(api_key=api_key)
+    resp = client.models.generate_content(
+        model=primary_gemini_flash_model(),
+        contents=prompt,
+        config=types.GenerateContentConfig(temperature=0.2),
+    )
+    return (getattr(resp, "text", None) or "").strip()
+
+
 def _error_probe_text(exc: BaseException) -> str:
     """All text used to classify provider errors (str + repr; some SDKs hide detail in repr)."""
     parts: list[str] = []

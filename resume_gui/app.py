@@ -4,8 +4,15 @@ Run locally:
   .venv/Scripts/python.exe resume_gui/app.py   (Windows)
   python resume_gui/app.py                      (macOS/Linux)
 
-Deploy on Railway:
-  Set env vars: GOOGLE_API_KEY, LIBRARY_ROOT, ALLOWED_ORIGINS
+Deploy on Railway — LLM env (pick one primary):
+  Grok-first (recommended to avoid Gemini free-tier caps):
+    XAI_API_KEY=…
+    LLM_PROVIDER=grok
+    (optional) GROK_MODEL=grok-4-1-fast-non-reasoning
+  Gemini-first:
+    GOOGLE_API_KEY=…
+    LLM_PROVIDER=gemini   # also use if XAI_API_KEY is set but you want Gemini primary
+  Shared: LIBRARY_ROOT, ALLOWED_ORIGINS, …
   Railway auto-detects the Procfile and runs: uvicorn resume_gui.app:app --host 0.0.0.0 --port $PORT
 """
 
@@ -60,6 +67,9 @@ from resume_library import (
     doctor_check_resume,
     primary_gemini_flash_model,
     primary_llm_model_for_resume_workloads,
+    grok_preferred_for_throughput,
+    run_tailor_research_job_context,
+    coach_suggestions_llm,
 )
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
@@ -1915,11 +1925,35 @@ Return ONLY this JSON (no markdown fences, no explanation):
 
 
 def _llm_json_call(prompt: str) -> Optional[dict]:
-    """Call configured Gemini Flash (primary) or Grok (fallback) for a JSON response."""
+    """Call Grok (primary when configured) or Gemini for a JSON response."""
     import time
 
-    google_key = os.environ.get("GOOGLE_API_KEY")
-    if google_key:
+    def _grok_json() -> Optional[dict]:
+        xai_key = os.environ.get("XAI_API_KEY")
+        if not xai_key:
+            return None
+        try:
+            from openai import OpenAI  # type: ignore
+            model = os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning")
+            xai = OpenAI(api_key=xai_key, base_url="https://api.x.ai/v1")
+            r = xai.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                response_format={"type": "json_object"},
+            )
+            text = (r.choices[0].message.content or "").strip()
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+            return json.loads(text)
+        except Exception as exc:
+            logger.warning(f"Grok analysis failed: {exc}")
+        return None
+
+    def _gemini_json() -> Optional[dict]:
+        google_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+        if not google_key:
+            return None
         try:
             from google import genai as _genai  # type: ignore
             from google.genai import types as _gtypes  # type: ignore
@@ -1939,27 +1973,17 @@ def _llm_json_call(prompt: str) -> Optional[dict]:
             return json.loads(text)
         except Exception as exc:
             logger.warning(f"Gemini analysis failed: {exc}")
+        return None
 
-    xai_key = os.environ.get("XAI_API_KEY")
-    if xai_key:
-        try:
-            from openai import OpenAI  # type: ignore
-            model = os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning")
-            xai = OpenAI(api_key=xai_key, base_url="https://api.x.ai/v1")
-            r = xai.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                response_format={"type": "json_object"},
-            )
-            text = (r.choices[0].message.content or "").strip()
-            text = re.sub(r"^```[a-z]*\n?", "", text)
-            text = re.sub(r"\n?```$", "", text)
-            return json.loads(text)
-        except Exception as exc:
-            logger.warning(f"Grok analysis failed: {exc}")
-
-    return None
+    if grok_preferred_for_throughput():
+        out = _grok_json()
+        if out is not None:
+            return out
+        return _gemini_json()
+    out = _gemini_json()
+    if out is not None:
+        return out
+    return _grok_json()
 
 
 def _normalize_analysis(raw: dict) -> dict:
@@ -2275,56 +2299,6 @@ async def api_rewrite_role(request: Request):
     return JSONResponse({"bullets": rewritten})
 
 
-def _extract_grounding_from_gemini_response(resp) -> Tuple[List[str], List[dict]]:
-    """Pull web_search_queries and cited URLs from a non-streaming Gemini response."""
-    queries: List[str] = []
-    sources: List[dict] = []
-    seen_urls: set = set()
-    for cand in getattr(resp, "candidates", None) or []:
-        gm = getattr(cand, "grounding_metadata", None)
-        if not gm:
-            continue
-        for q in getattr(gm, "web_search_queries", None) or []:
-            qs = (q if isinstance(q, str) else str(q)).strip()
-            if qs:
-                queries.append(qs)
-        for chunk in getattr(gm, "grounding_chunks", None) or []:
-            web = getattr(chunk, "web", None)
-            uri = getattr(web, "uri", None) if web else None
-            if uri and uri not in seen_urls:
-                seen_urls.add(uri)
-                title = getattr(web, "title", None) or uri
-                sources.append({"title": title, "url": uri})
-    return queries, sources
-
-
-def _run_tailor_research_job_context(job_description: str) -> Tuple[str, List[str], List[dict]]:
-    """Gemini + Google Search: public employer/JD/domain context before résumé suggestions."""
-    from google import genai as _genai  # type: ignore
-    from google.genai import types as _gtypes  # type: ignore
-    client = _genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-    jd = (job_description or "").strip()
-    prompt = (
-        "You have Google Search enabled. Run **3–6 searches** to gather **public** context useful for tailoring "
-        "a candidate's résumé to this **specific job posting**: the hiring organization or product line, industry norms, "
-        "acronyms and domain terms in the posting, and vocabulary employers use for this role type. "
-        "Output **plain text only**: short bullet points (max ~700 words). No JSON. No markdown code fences. "
-        "Do not invent private facts about any person. Do not write résumé edits — only background context.\n\n"
-        f"JOB DESCRIPTION:\n{jd[:4000]}"
-    )
-    resp = client.models.generate_content(
-        model=primary_gemini_flash_model(),
-        contents=prompt,
-        config=_gtypes.GenerateContentConfig(
-            temperature=0.25,
-            tools=[_gtypes.Tool(google_search=_gtypes.GoogleSearch())],
-        ),
-    )
-    text = (getattr(resp, "text", None) or "").strip()
-    queries, sources = _extract_grounding_from_gemini_response(resp)
-    return text, queries, sources
-
-
 async def api_suggest_changes(request: Request):
     """POST /api/suggest-changes — analyze resume vs JD and return per-bullet suggestions.
 
@@ -2350,7 +2324,7 @@ async def api_suggest_changes(request: Request):
     research_sources: List[dict] = []
     try:
         digest, research_queries, research_sources = await loop.run_in_executor(
-            None, _run_tailor_research_job_context, job_description
+            None, run_tailor_research_job_context, job_description
         )
     except Exception as exc:
         logger.warning("pre-suggestion web research failed (suggestions will use resume+JD only): %s", exc)
@@ -2393,15 +2367,7 @@ async def api_suggest_changes(request: Request):
     )
 
     def _call():
-        from google import genai as _genai  # type: ignore
-        from google.genai import types as _gtypes  # type: ignore
-        client = _genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-        resp = client.models.generate_content(
-            model=primary_gemini_flash_model(),
-            contents=prompt,
-            config=_gtypes.GenerateContentConfig(temperature=0.2),
-        )
-        return (resp.text or "").strip()
+        return coach_suggestions_llm(prompt)
 
     try:
         text = await loop.run_in_executor(None, _call)
