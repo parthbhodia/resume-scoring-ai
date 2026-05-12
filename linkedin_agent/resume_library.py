@@ -3674,6 +3674,14 @@ def _reference_folder_layout_hint(reference_folder: Optional[str]) -> str:
             "On \\resumeSubheading lines, keep a visible space between the employer name and the month/date "
             "(e.g. `Morgan Stanley` then `Dec 2023`, not `Morgan StanleyDec 2023`).\n"
         )
+    if f == "MaltaCV_Modern":
+        return (
+            "\n---\nLAYOUT — MALTA MODERN (this run uses MaltaCV_Modern): Follow the REFERENCE’s \\cvsection, "
+            "\\cvexperience, \\cvuniversity, \\cvlistitem, and any multi-column / skills macros exactly as shown. "
+            "Section titles use the reference’s accent styling — do not substitute a different section-macro family. "
+            "Do not output Markdown `**`; use \\textbf{{}} or the reference’s emphasis pattern. "
+            "Keep skills readable (columns or list items per the reference), not a single run-on paragraph.\n"
+        )
     return ""
 
 
