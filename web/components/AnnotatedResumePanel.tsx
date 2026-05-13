@@ -845,6 +845,48 @@ export default function AnnotatedResumePanel({
                 {t.label}
               </button>
             ))}
+            {sourcePdfUrl ? (
+              <a
+                href={sourcePdfUrl}
+                download={sourcePdfFileName ?? "resume.pdf"}
+                title="Download the original uploaded PDF (exact same file)."
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  letterSpacing: 0.08,
+                  padding: "5px 11px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-h)",
+                  background: "var(--surface)",
+                  color: "var(--text)",
+                  textDecoration: "none",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Original PDF
+              </a>
+            ) : null}
+            <button
+              type="button"
+              disabled={pdfExporting}
+              onClick={onSavePreviewPdf}
+              title="Quick export from this preview text. Useful for drafts; formatting may differ from LaTeX template output."
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                letterSpacing: 0.08,
+                padding: "5px 11px",
+                borderRadius: 8,
+                border: "1px solid var(--border-h)",
+                background: "var(--surface)",
+                color: "var(--text)",
+                cursor: pdfExporting ? "wait" : "pointer",
+                fontFamily: "inherit",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {pdfExporting ? "Exporting…" : "Quick export"}
+            </button>
             <button
               type="button"
               disabled={builderOpening}
@@ -852,7 +894,7 @@ export default function AnnotatedResumePanel({
                 e.preventDefault();
                 onOpenBuilder();
               }}
-              title="Open Résumé Builder — change template, tailor to a job, get LaTeX PDF"
+              title="Open Résumé Builder to generate and download ATS PDF with the selected template."
               style={{
                 marginLeft: "auto",
                 fontSize: 10.5,
@@ -866,7 +908,7 @@ export default function AnnotatedResumePanel({
                 fontFamily: "inherit",
               }}
             >
-              {builderOpening ? "Opening…" : "Résumé builder"}
+              {builderOpening ? "Opening…" : "Download ATS PDF"}
             </button>
           </div>
         ) : null}

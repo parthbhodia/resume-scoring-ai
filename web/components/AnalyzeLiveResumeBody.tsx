@@ -394,6 +394,53 @@ function renderInline(text: string): ReactNode[] {
   });
 }
 
+function normalizeHeaderContactGlue(line: string): string {
+  let out = line;
+  out = out.replace(/(GitHub)(Email\s*:)/gi, "$1 | $2");
+  out = out.replace(/(LinkedIn)(GitHub)/gi, "$1 | $2");
+  out = out.replace(/(Email\s*:)(Mobile\s*:)/gi, "$1 | $2");
+  out = out.replace(/(Mobile\s*:)(Senior\s+[A-Za-z])/gi, "$1 | $2");
+  out = out.replace(/(Location\s*:)(?=[A-Za-z])/gi, "$1 ");
+  return out;
+}
+
+function normalizeSkillsLineSpacing(line: string): string {
+  return line
+    .replace(/\s*,\s*/g, ", ")
+    .replace(/\s*\/\s*/g, " / ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function mergeWrappedSkillsLines(lines: string[]): string[] {
+  const cleaned = lines
+    .map((ln) => normalizeSkillsLineSpacing(softenRunOnExtractLine(ln.trim())))
+    .filter((ln) => ln.length > 0);
+
+  const out: string[] = [];
+  for (const line of cleaned) {
+    const prev = out[out.length - 1];
+    if (!prev) {
+      out.push(line);
+      continue;
+    }
+
+    const prevEndsWithDelimiter = /[,/:;-]$/.test(prev);
+    const lineLooksContinuation =
+      /^[a-z0-9]/.test(line) ||
+      /^(and|or|with|plus|incl\.?|including|tools?|frameworks?|platforms?|pipelines?)\b/i.test(line);
+
+    if (prevEndsWithDelimiter || lineLooksContinuation) {
+      out[out.length - 1] = `${prev} ${line}`.replace(/\s{2,}/g, " ").trim();
+      continue;
+    }
+
+    out.push(line);
+  }
+
+  return out;
+}
+
 function EntryHeaderLine({ line }: { line: string }) {
   const t = line.trim();
 
@@ -532,6 +579,7 @@ export default function AnalyzeLiveResumeBody({
   const [popup, setPopup] = useState<PopupState | null>(null);
   const [popupDraft, setPopupDraft] = useState<string>("");
   const popupRef = useRef<HTMLDivElement>(null);
+  const popupDragOffsetRef = useRef<{ dx: number; dy: number } | null>(null);
 
   const blocks = useMemo(() => {
     const lines = extractedText.split(/\r?\n/).map(normalizeExtractLine);
@@ -575,6 +623,36 @@ export default function AnalyzeLiveResumeBody({
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setPopup(null); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, [popup]);
+
+  useEffect(() => {
+    if (!popup) return;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const drag = popupDragOffsetRef.current;
+      if (!drag) return;
+
+      const panelW = popupRef.current?.offsetWidth ?? 320;
+      const panelH = popupRef.current?.offsetHeight ?? 360;
+      const nextLeft = e.clientX - drag.dx;
+      const nextTop = e.clientY - drag.dy;
+
+      const left = Math.max(8, Math.min(nextLeft, window.innerWidth - panelW - 8));
+      const top = Math.max(8, Math.min(nextTop, window.innerHeight - panelH - 8));
+
+      setPopup((prev) => (prev ? { ...prev, left, top } : prev));
+    };
+
+    const onMouseUp = () => {
+      popupDragOffsetRef.current = null;
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
   }, [popup]);
 
   const popupBullet = popup != null ? bulletAnalysis[popup.bulletIdx] : null;
@@ -647,8 +725,9 @@ export default function AnalyzeLiveResumeBody({
           const contactItems: string[] = [];
           for (const ln of contactLines) {
             if (isPlaceholderIdentityLine(ln)) continue;
-            const parts = ln.split(/[|•·,]\s*|\s{2,}/).map(p => p.trim()).filter(Boolean);
-            const chunk = parts.length > 1 ? parts : [ln];
+            const normalizedLine = normalizeHeaderContactGlue(ln);
+            const parts = normalizedLine.split(/[|•·,]\s*|\s{2,}/).map(p => p.trim()).filter(Boolean);
+            const chunk = parts.length > 1 ? parts : [normalizedLine.trim()];
             for (const p of chunk) {
               if (!isPlaceholderIdentityLine(p)) contactItems.push(p);
             }
@@ -714,9 +793,18 @@ export default function AnalyzeLiveResumeBody({
 
         /* ── Paragraph / entry header ── */
         if (blk.type === "paragraph") {
+          const prevBlk = bi > 0 ? blocks[bi - 1] : null;
+          const inSkillsSection =
+            !!prevBlk &&
+            prevBlk.type === "section" &&
+            /\bskills\b/i.test(prevBlk.text);
+          const paragraphLines = inSkillsSection
+            ? mergeWrappedSkillsLines(blk.lines)
+            : blk.lines;
+
           return (
             <div key={bi} style={{ marginBottom: 6 }}>
-              {blk.lines.map((ln, li) => {
+              {paragraphLines.map((ln, li) => {
                 const t = ln.trim();
                 if (!t || isPlaceholderIdentityLine(ln)) return null;
                 if (looksLikeEntryHeader(t)) {
@@ -737,7 +825,7 @@ export default function AnalyzeLiveResumeBody({
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
                   }}>
-                    {renderInline(softenRunOnExtractLine(t))}
+                    {renderInline(inSkillsSection ? normalizeSkillsLineSpacing(t) : softenRunOnExtractLine(t))}
                   </div>
                 );
               })}
@@ -893,6 +981,15 @@ export default function AnalyzeLiveResumeBody({
           <div style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
             padding: "10px 12px 8px", borderBottom: "1px solid var(--border)", background: "var(--surface2)",
+            cursor: "move",
+          }}
+          onMouseDown={(e) => {
+            if ((e.target as HTMLElement).closest("button")) return;
+            popupDragOffsetRef.current = {
+              dx: e.clientX - popup.left,
+              dy: e.clientY - popup.top,
+            };
+            e.preventDefault();
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               <span style={{
