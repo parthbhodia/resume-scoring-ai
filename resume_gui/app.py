@@ -224,16 +224,20 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
                 doc.summary = suggested
 
 
-def _create_structured_folder_from_base(base_folder: str) -> Tuple[str, str]:
-    src = Path(LIBRARY_ROOT) / base_folder
+def _create_structured_folder_source(base_folder: Optional[str], reference_folder: Optional[str]) -> Tuple[str, str]:
+    source_name = (base_folder or "").strip() or (reference_folder or "").strip()
+    if not source_name:
+        raise RuntimeError("No base_folder or reference_folder was provided")
+
+    src = Path(LIBRARY_ROOT) / source_name
     if not src.exists() or not src.is_dir():
-        raise RuntimeError("base_folder not found for structured renderer")
-    new_folder = f"{base_folder}_structured_{uuid4().hex[:8]}"
+        raise RuntimeError(f"Template/source folder not found: {source_name}")
+    new_folder = f"{source_name}_structured_{uuid4().hex[:8]}"
     dst = Path(LIBRARY_ROOT) / new_folder
     shutil.copytree(src, dst)
     tex_files = [p for p in dst.iterdir() if p.suffix == ".tex"]
     if not tex_files:
-        raise RuntimeError("No .tex file in base folder")
+        raise RuntimeError("No .tex file in selected source folder")
     return new_folder, str(tex_files[0])
 
 # CORS: allow localhost dev + deployed frontend
@@ -302,7 +306,7 @@ async def api_generate_stream(request: Request):
     post_suggestion_coach_run = bool(body.get("post_suggestion_coach_run"))
     _tb = body.get("tailor_body_with_ai")
     tailor_body_with_ai = True if _tb is None else bool(_tb)
-    use_jinja_renderer = USE_JINJA_LATEX_RENDERER or bool(body.get("use_jinja_renderer"))
+    use_jinja_renderer = True
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
@@ -333,17 +337,18 @@ async def api_generate_stream(request: Request):
 
         if use_jinja_renderer:
             try:
-                if not base_folder:
-                    raise RuntimeError("Structured renderer requires a base resume. Select a library resume first.")
+                source_folder = (base_folder or "").strip() or (reference_folder or "").strip()
+                if not source_folder:
+                    raise RuntimeError("Structured renderer requires either a base folder or a reference template.")
 
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "status",
                     "msg": "Structured renderer: loading base resume…",
                 }), loop).result()
 
-                base_tex = get_resume_tex(base_folder)
+                base_tex = get_resume_tex(source_folder)
                 if not base_tex:
-                    raise RuntimeError("Could not load base resume TeX for structured rendering.")
+                    raise RuntimeError(f"Could not load TeX from selected source folder: {source_folder}")
 
                 parsed = parse_resume_tex(base_tex)
                 doc = _resume_doc_from_parsed(parsed)
@@ -357,7 +362,7 @@ async def api_generate_stream(request: Request):
                 renderer = JinjaLatexRenderer()
                 new_tex = renderer.render(doc)
 
-                out_folder, _ = _create_structured_folder_from_base(base_folder)
+                out_folder, _ = _create_structured_folder_source(base_folder, reference_folder)
                 compiled = recompile_resume_from_tex(out_folder, new_tex)
                 tex_path = compiled.get("tex_path")
                 pdf_path = compiled.get("pdf_path")
@@ -424,7 +429,7 @@ async def api_generate_stream(request: Request):
                 # Minimal result contract for frontend + library row.
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "base",
-                    "folder": base_folder,
+                    "folder": source_folder,
                     "loaded": True,
                 }), loop).result()
                 asyncio.run_coroutine_threadsafe(queue.put({

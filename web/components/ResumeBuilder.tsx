@@ -923,7 +923,6 @@ export default function ResumeBuilder({
       reason: s.reason,
     }));
     const tailorBodyWithAi = acceptedList.length > 0 || aiJobFitWithoutTicks;
-
     const acc: GenerationResult =
       studioHandoff && result?.folder
         ? {
@@ -953,7 +952,7 @@ export default function ResumeBuilder({
           ...(digestTrim ? { suggest_research_digest: suggestResearchDigest } : {}),
           post_suggestion_coach_run: !studioHandoff && Array.isArray(suggestions) && suggestions.length > 0,
           tailor_body_with_ai: tailorBodyWithAi,
-          use_jinja_renderer: useStructuredRenderer,
+          use_jinja_renderer: true,
         }),
       });
 
