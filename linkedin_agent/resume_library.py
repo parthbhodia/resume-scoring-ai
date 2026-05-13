@@ -2214,7 +2214,12 @@ def _apply_pdf_layout_to_tex(full_tex: str, layout: Optional[Dict]) -> str:
 
     # Keep contact header visible in PDF by adding a tiny top spacer and
     # using the configured heading size.
-    out = re.sub(r"\\textbf\{\\Huge\s+", rf"\\textbf{{{header_size} ", out, count=1)
+    out = re.sub(
+        r"\\textbf\{\\Huge\s+",
+        lambda _m: "\\textbf{" + header_size + " ",
+        out,
+        count=1,
+    )
     if "\\begin{tabular*}{\\textwidth}{l@{\\extracolsep{\\fill}}r}" in out:
         out = out.replace(
             "\\begin{tabular*}{\\textwidth}{l@{\\extracolsep{\\fill}}r}",
