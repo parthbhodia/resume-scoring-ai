@@ -809,6 +809,7 @@ export default function AnalyzeResume() {
     setHistoryRestoreActive(false);
     setActiveEditDraftId(null);
     setEditDraftStatus(null);
+    setImprovementPlanVisible(true);
   }, [bindSourcePdf]);
 
   const saveLocalPreviewDraft = useCallback(() => {
@@ -1229,8 +1230,42 @@ export default function AnalyzeResume() {
           text-orientation: mixed;
           letter-spacing: 0.02em;
         }
+        .az-sidebar-scan-fab {
+          display: none;
+          position: fixed;
+          left: 0;
+          top: calc(50% + 98px);
+          transform: translateY(-50%);
+          z-index: 1001;
+          align-items: center;
+          justify-content: center;
+          flex-direction: column;
+          gap: 8px;
+          padding: 10px 6px;
+          min-height: 132px;
+          border-radius: 0 12px 12px 0;
+          border: 1px solid var(--border);
+          border-left: none;
+          background: var(--surface);
+          box-shadow: 2px 0 14px rgba(0,0,0,0.08);
+          cursor: pointer;
+          font-family: inherit;
+          color: var(--text);
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: -0.02em;
+          transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+        }
+        .az-sidebar-scan-fab span {
+          writing-mode: vertical-rl;
+          text-orientation: mixed;
+          letter-spacing: 0.02em;
+        }
         @media (min-width: 768px) {
           .az-sidebar-restore-fab.is-visible {
+            display: inline-flex;
+          }
+          .az-sidebar-scan-fab.is-visible {
             display: inline-flex;
           }
         }
@@ -1323,8 +1358,8 @@ export default function AnalyzeResume() {
         {result && (
           <button
             type="button"
-            onClick={() => fileRef.current?.click()}
-            title="Upload a new résumé PDF for a fresh score"
+            onClick={startOverAnalyze}
+            title="Go back to Analyze home and start a fresh scan"
             style={{
               width: "100%",
               display: "inline-flex",
@@ -1427,6 +1462,27 @@ export default function AnalyzeResume() {
           <rect x="7" y="3" width="7" height="10" rx="1" stroke="currentColor" strokeWidth="1.35" fill="none" />
         </svg>
         <span>{"Scores & history"}</span>
+      </button>
+      <button
+        type="button"
+        className={`az-sidebar-scan-fab${!improvementPlanVisible && !!result ? " is-visible" : ""}`}
+        onClick={startOverAnalyze}
+        title="Start a fresh scan from Analyze home"
+        aria-label="Start a new scan"
+        onMouseEnter={e => {
+          e.currentTarget.style.background = "var(--surface2)";
+          e.currentTarget.style.boxShadow = "2px 0 18px rgba(0,0,0,0.1)";
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = "var(--surface)";
+          e.currentTarget.style.boxShadow = "";
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden style={{ flexShrink: 0, opacity: 0.85 }}>
+          <path d="M8 2v9M4 6l4-4 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+        </svg>
+        <span>{"New scan"}</span>
       </button>
       <main
         className={`az-main${workspaceSplit ? " az-main-workspace-split" : ""}`}
@@ -2685,10 +2741,10 @@ export default function AnalyzeResume() {
                 </div>
 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-                  {/* Primary — upload new file */}
+                  {/* Primary — go back to Analyze home */}
                   <button
                     type="button"
-                    onClick={() => fileRef.current?.click()}
+                    onClick={startOverAnalyze}
                     style={{
                       display: "flex", alignItems: "center", gap: 8,
                       padding: "11px 22px", borderRadius: 10,
@@ -2704,7 +2760,7 @@ export default function AnalyzeResume() {
                       <path d="M8 2v9M4 6l4-4 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
                       <path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
                     </svg>
-                    Upload new résumé
+                    New scan
                   </button>
 
                   {/* Secondary — clear and start over */}
