@@ -331,11 +331,6 @@ export default function AnnotatedResumePanel({
     }
   }, [pdfExporting, useLiveDoc, effectiveExtracted, bulletAnalysis, previewLineOverrides, resumeHeader]);
 
-  const openBuilderForAtsPdf = useCallback(() => {
-    if (!builderReady || !onOpenBuilder || builderOpening) return;
-    onOpenBuilder({ referenceFolder: selectedReferenceFolder });
-  }, [builderReady, onOpenBuilder, builderOpening, selectedReferenceFolder]);
-
   /** Maps `data-bullet-idx` on the preview page to a thick, score-colored frame (split / presentation column). */
   const updateMirrorPosition = useCallback(() => {
     if (!presentationOnly) {
@@ -705,10 +700,10 @@ export default function AnnotatedResumePanel({
                 <>
                   <button
                     type="button"
-                    onClick={openBuilderForAtsPdf}
-                    disabled={builderOpening}
-                    title="Open Résumé Builder to generate and download ATS PDF with your selected LaTeX template."
-                    aria-label="Open resume builder for template-based ATS PDF download"
+                    onClick={onSavePreviewPdf}
+                    disabled={pdfExporting}
+                    title="Download exactly what is shown in this preview (including line edits)."
+                    aria-label="Download preview PDF"
                     style={{
                       fontSize: 10.5,
                       fontWeight: 700,
@@ -716,16 +711,16 @@ export default function AnnotatedResumePanel({
                       padding: "6px 12px",
                       borderRadius: 8,
                       border: "none",
-                      background: builderOpening ? "var(--surface3)" : "var(--accent)",
+                      background: pdfExporting ? "var(--surface3)" : "var(--accent)",
                       color: "#fff",
-                      cursor: builderOpening ? "wait" : "pointer",
+                      cursor: pdfExporting ? "wait" : "pointer",
                       fontFamily: "inherit",
                       flexShrink: 0,
                       whiteSpace: "nowrap",
-                      boxShadow: builderOpening ? "none" : "var(--shadow-sm)",
+                      boxShadow: pdfExporting ? "none" : "var(--shadow-sm)",
                     }}
                   >
-                    {builderOpening ? "Opening Builder…" : "Download ATS PDF"}
+                    {pdfExporting ? "Exporting…" : "Download preview PDF"}
                   </button>
                   <button
                     type="button"
@@ -894,7 +889,7 @@ export default function AnnotatedResumePanel({
                 e.preventDefault();
                 onOpenBuilder();
               }}
-              title="Open Résumé Builder to generate and download ATS PDF with the selected template."
+              title="Download exactly what is shown in this preview (including line edits)."
               style={{
                 marginLeft: "auto",
                 fontSize: 10.5,
@@ -902,13 +897,13 @@ export default function AnnotatedResumePanel({
                 padding: "5px 12px",
                 borderRadius: 8,
                 border: "none",
-                background: builderOpening ? "var(--surface3)" : "linear-gradient(180deg, #ff9966 0%, #fb7c44 100%)",
+                background: pdfExporting ? "var(--surface3)" : "linear-gradient(180deg, #ff9966 0%, #fb7c44 100%)",
                 color: "#fff",
-                cursor: builderOpening ? "wait" : "pointer",
+                cursor: pdfExporting ? "wait" : "pointer",
                 fontFamily: "inherit",
               }}
             >
-              {builderOpening ? "Opening…" : "Download ATS PDF"}
+              {pdfExporting ? "Exporting…" : "Download preview PDF"}
             </button>
           </div>
         ) : null}

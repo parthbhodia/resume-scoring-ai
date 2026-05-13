@@ -1206,9 +1206,12 @@ export default function AnalyzeResume() {
           transform: translateY(-50%);
           z-index: 1001;
           align-items: center;
-          gap: 6px;
-          padding: 8px 12px 8px 8px;
-          border-radius: 0 999px 999px 0;
+          justify-content: center;
+          flex-direction: column;
+          gap: 8px;
+          padding: 10px 6px;
+          min-height: 150px;
+          border-radius: 0 12px 12px 0;
           border: 1px solid var(--border);
           border-left: none;
           background: var(--surface);
@@ -1220,6 +1223,11 @@ export default function AnalyzeResume() {
           font-weight: 600;
           letter-spacing: -0.02em;
           transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+        }
+        .az-sidebar-restore-fab span {
+          writing-mode: vertical-rl;
+          text-orientation: mixed;
+          letter-spacing: 0.02em;
         }
         @media (min-width: 768px) {
           .az-sidebar-restore-fab.is-visible {

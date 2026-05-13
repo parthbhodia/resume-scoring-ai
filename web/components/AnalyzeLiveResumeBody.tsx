@@ -404,6 +404,23 @@ function normalizeHeaderContactGlue(line: string): string {
   return out;
 }
 
+function isLikelyHeaderContactLine(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  if (t.length > 160) return false;
+
+  const words = t.split(/\s+/).filter(Boolean);
+  const hasStrongContactAnchor = /@|linkedin|github|portfolio|website|mobile|phone|email|location|\+\d{1,3}/i.test(t);
+  const hasDelimiter = /[|•◆·]/.test(t);
+  const looksSentenceLike = /\b(with|building|engineered|delivered|optimized|owning|across)\b/i.test(t);
+
+  if (hasStrongContactAnchor) return true;
+  if (!hasDelimiter) {
+    return words.length >= 2 && words.length <= 8 && !looksSentenceLike;
+  }
+  return words.length <= 14 && !looksSentenceLike;
+}
+
 function normalizeSkillsLineSpacing(line: string): string {
   return line
     .replace(/\s*,\s*/g, ", ")
@@ -439,6 +456,21 @@ function mergeWrappedSkillsLines(lines: string[]): string[] {
   }
 
   return out;
+}
+
+function renderSkillsLine(text: string): ReactNode {
+  const m = text.match(/^([^:]{2,42}):(\s*)(.+)$/);
+  if (!m) return <>{renderInline(text)}</>;
+  const label = m[1].trim();
+  const value = m[3].trim();
+  const labelWords = label.split(/\s+/).filter(Boolean).length;
+  if (labelWords > 5) return <>{renderInline(text)}</>;
+  return (
+    <>
+      <strong>{label}:</strong>{" "}
+      {renderInline(value)}
+    </>
+  );
 }
 
 function EntryHeaderLine({ line }: { line: string }) {
@@ -720,7 +752,10 @@ export default function AnalyzeLiveResumeBody({
             rest.shift();
           }
           const nameLine = rest[0]?.trim() || "";
-          const contactLines = rest.slice(1).map((l) => l.trim()).filter(Boolean);
+          const contactLines = rest
+            .slice(1)
+            .map((l) => l.trim())
+            .filter((l) => l.length > 0 && isLikelyHeaderContactLine(l));
           // Flatten contact info — split on common separators into individual items
           const contactItems: string[] = [];
           for (const ln of contactLines) {
@@ -825,7 +860,9 @@ export default function AnalyzeLiveResumeBody({
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
                   }}>
-                    {renderInline(inSkillsSection ? normalizeSkillsLineSpacing(t) : softenRunOnExtractLine(t))}
+                    {inSkillsSection
+                      ? renderSkillsLine(normalizeSkillsLineSpacing(t))
+                      : renderInline(softenRunOnExtractLine(t))}
                   </div>
                 );
               })}
