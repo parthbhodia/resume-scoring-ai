@@ -72,6 +72,7 @@ from resume_library import (
     grok_preferred_for_throughput,
     run_tailor_research_job_context,
     coach_suggestions_llm,
+    _get_resume_tex_for_user,
 )
 try:
     from resume_gui.renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items
@@ -224,37 +225,76 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
                 doc.summary = suggested
 
 
-def _create_structured_folder_source(base_folder: Optional[str], reference_folder: Optional[str]) -> Tuple[str, str]:
+def _create_structured_folder_source(base_folder: Optional[str], reference_folder: Optional[str], source_tex: str) -> Tuple[str, str]:
     source_name = (base_folder or "").strip() or (reference_folder or "").strip()
     if not source_name:
-        raise RuntimeError("No base_folder or reference_folder was provided")
+        source_name = "structured"
 
     src = Path(LIBRARY_ROOT) / source_name
-    if not src.exists() or not src.is_dir():
-        raise RuntimeError(f"Template/source folder not found: {source_name}")
     new_folder = f"{source_name}_structured_{uuid4().hex[:8]}"
     dst = Path(LIBRARY_ROOT) / new_folder
-    shutil.copytree(src, dst)
+    if src.exists() and src.is_dir():
+        shutil.copytree(src, dst)
+    else:
+        dst.mkdir(parents=True, exist_ok=True)
+        (dst / "resume.tex").write_text(source_tex or "", encoding="utf-8")
+
     tex_files = [p for p in dst.iterdir() if p.suffix == ".tex"]
     if not tex_files:
-        raise RuntimeError("No .tex file in selected source folder")
+        fallback = dst / "resume.tex"
+        fallback.write_text(source_tex or "", encoding="utf-8")
+        tex_files = [fallback]
     return new_folder, str(tex_files[0])
 
 
-def _resolve_structured_source_folder(base_folder: Optional[str], reference_folder: Optional[str]) -> str:
+def _load_tex_from_candidate(folder: str, user_id: Optional[str]) -> Optional[str]:
+    name = (folder or "").strip()
+    if not name:
+        return None
+    tex = _get_resume_tex_for_user(name, user_id)
+    if tex:
+        return tex
+    return get_resume_tex(name)
+
+
+def _resolve_structured_source_folder(base_folder: Optional[str], reference_folder: Optional[str], user_id: Optional[str]) -> Tuple[str, str]:
     candidates: List[str] = []
     if (base_folder or "").strip():
         candidates.append((base_folder or "").strip())
     if (reference_folder or "").strip() and (reference_folder or "").strip() not in candidates:
         candidates.append((reference_folder or "").strip())
-    if "Adobe_FullStack" not in candidates:
-        candidates.append("Adobe_FullStack")
+    for fallback in ("Adobe_FullStack", "Harshibar_Template1", "MaltaCV_Modern"):
+        if fallback not in candidates:
+            candidates.append(fallback)
 
     for c in candidates:
-        if get_resume_tex(c):
-            return c
+        # Preferred: canonical template source in Supabase table.
+        tex_from_template = _load_template_tex_from_supabase(c)
+        if tex_from_template:
+            return c, tex_from_template
+
+        tex = _load_tex_from_candidate(c, user_id)
+        if tex:
+            return c, tex
+    # Last resort: pick any folder under LIBRARY_ROOT that contains a .tex file.
+    try:
+        root = Path(LIBRARY_ROOT)
+        if root.exists() and root.is_dir():
+            for child in root.iterdir():
+                if not child.is_dir():
+                    continue
+                has_tex = any(p.suffix == ".tex" for p in child.iterdir() if p.is_file())
+                if has_tex:
+                    tex = get_resume_tex(child.name)
+                    if tex:
+                        return child.name, tex
+    except Exception:
+        pass
+
     raise RuntimeError(
-        "Could not load TeX from selected source folders: " + ", ".join(candidates)
+        "Could not load TeX from selected source folders: "
+        + ", ".join(candidates)
+        + ". Add at least one template/base folder with a .tex file under LIBRARY_ROOT."
     )
 
 # CORS: allow localhost dev + deployed frontend
@@ -354,16 +394,12 @@ async def api_generate_stream(request: Request):
 
         if use_jinja_renderer:
             try:
-                source_folder = _resolve_structured_source_folder(base_folder, reference_folder)
+                source_folder, base_tex = _resolve_structured_source_folder(base_folder, reference_folder, user_id)
 
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "status",
                     "msg": f"Structured renderer: loading source ({source_folder})…",
                 }), loop).result()
-
-                base_tex = get_resume_tex(source_folder)
-                if not base_tex:
-                    raise RuntimeError(f"Could not load TeX from selected source folder: {source_folder}")
 
                 parsed = parse_resume_tex(base_tex)
                 doc = _resume_doc_from_parsed(parsed)
@@ -377,7 +413,7 @@ async def api_generate_stream(request: Request):
                 renderer = JinjaLatexRenderer()
                 new_tex = renderer.render(doc)
 
-                out_folder, _ = _create_structured_folder_source(base_folder, reference_folder)
+                out_folder, _ = _create_structured_folder_source(base_folder, reference_folder, base_tex)
                 compiled = recompile_resume_from_tex(out_folder, new_tex)
                 tex_path = compiled.get("tex_path")
                 pdf_path = compiled.get("pdf_path")
@@ -985,6 +1021,52 @@ def _share_table():
     except Exception as exc:
         logger.warning(f"share_table unavailable: {exc}")
         return None
+
+
+def _supabase_table(table_name: str):
+    """Return a Supabase table handle via service-role client, else None."""
+    try:
+        try:
+            from resume_gui.storage import _get_client  # type: ignore
+        except ImportError:
+            from storage import _get_client  # type: ignore
+        client = _get_client()
+        if client is None:
+            return None
+        return client.table(table_name)
+    except Exception as exc:
+        logger.warning(f"supabase table unavailable [{table_name}]: {exc}")
+        return None
+
+
+def _load_template_tex_from_supabase(reference_folder: str) -> Optional[str]:
+    """Load canonical template tex from `resume_templates` table when available.
+
+    Expected columns: reference_folder text, tex_body text, active bool.
+    """
+    rf = (reference_folder or "").strip()
+    if not rf:
+        return None
+    table = _supabase_table("resume_templates")
+    if table is None:
+        return None
+    try:
+        res = (
+            table.select("tex_body")
+            .eq("reference_folder", rf)
+            .eq("active", True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if rows and isinstance(rows[0], dict):
+            tex = str(rows[0].get("tex_body") or "").strip()
+            if tex:
+                logger.info(f"Loaded template tex from Supabase  |  reference_folder={rf}")
+                return tex
+    except Exception as exc:
+        logger.warning(f"template lookup failed  |  reference_folder={rf}  |  {exc}")
+    return None
 
 
 async def api_share_create(request: Request):
