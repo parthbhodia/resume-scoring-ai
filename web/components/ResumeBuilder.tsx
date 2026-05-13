@@ -354,6 +354,8 @@ export default function ResumeBuilder({
    * unless the user ticks structured edits. When true, the model may reword for the JD even with zero ticks.
    */
   const [aiJobFitWithoutTicks, setAiJobFitWithoutTicks] = useState(false);
+  /** Beta path: deterministic backend renderer scaffold (Jinja2 + structured model). */
+  const [useStructuredRenderer, setUseStructuredRenderer] = useState(true);
 
   /** Template handoff — post-compile UI: HTML live paper (instant Style tab) + exported PDF; Save / Download run a fresh compile. */
   const [customizeTab, setCustomizeTab] = useState<"style" | "sections" | "add">("style");
@@ -951,6 +953,7 @@ export default function ResumeBuilder({
           ...(digestTrim ? { suggest_research_digest: suggestResearchDigest } : {}),
           post_suggestion_coach_run: !studioHandoff && Array.isArray(suggestions) && suggestions.length > 0,
           tailor_body_with_ai: tailorBodyWithAi,
+          use_jinja_renderer: useStructuredRenderer,
         }),
       });
 
@@ -1041,12 +1044,36 @@ export default function ResumeBuilder({
                 try {
                   // Wait for library row so Share and /api/share/{folder} succeed immediately after.
                   await upsertResume(
-                    acc.folder, effCompany, effRole, model, acc.texPath ?? "", acc.pdfUrl, acc.ratings, effJd,
+                    acc.folder,
+                    effCompany,
+                    effRole,
+                    model,
+                    acc.texPath ?? "",
+                    acc.pdfUrl,
+                    acc.ratings,
+                    effJd,
+                    {
+                      renderer: useStructuredRenderer ? "structured" : "legacy",
+                      schemaVersion: 1,
+                      appliedPatch: acceptedList.length > 0
+                        ? { edits: acceptedList, source: "accepted_suggestions" }
+                        : null,
+                    },
                   );
                 } catch (e: unknown) {
-                  console.error("upsertResume (library row)", e);
                   const msg = e instanceof Error ? e.message : String(e);
-                  setError(`Résumé generated, but saving to your library failed: ${msg}`);
+                  const isDuplicateFolder =
+                    /duplicate key value/i.test(msg) && /resumes_folder_key/i.test(msg);
+
+                  // Non-fatal: row already exists for this folder; keep generation success path.
+                  if (isDuplicateFolder) {
+                    console.warn("upsertResume duplicate resumes.folder; continuing", {
+                      folder: acc.folder,
+                    });
+                  } else {
+                    console.error("upsertResume (library row)", e);
+                    setError("Resume generated, but we couldn't refresh your library right now. Please try again.");
+                  }
                 }
                 setBaseFolder(acc.folder);
               }
@@ -1071,7 +1098,7 @@ export default function ResumeBuilder({
       setStatusMsg("");
       return null;
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources, aiJobFitWithoutTicks]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources, aiJobFitWithoutTicks, useStructuredRenderer]);
 
   /** Template customize: run full compile, then optional blob download + toast. */
   const finalizeLayoutPdf = useCallback(
@@ -1888,6 +1915,8 @@ export default function ResumeBuilder({
               previewSectionAccentHex={previewAccentHex}
               aiJobFitWithoutTicks={aiJobFitWithoutTicks}
               setAiJobFitWithoutTicks={setAiJobFitWithoutTicks}
+              useStructuredRenderer={useStructuredRenderer}
+              setUseStructuredRenderer={setUseStructuredRenderer}
               onBackToInputs={() => {
                 setSelectedSuggestionId(null);
                 setSuggestions(null);
@@ -3905,6 +3934,16 @@ function ResumePaperView({
 
   const isAllCaps = (t: string) => t.length > 2 && t === t.toUpperCase() && /[A-Z]/.test(t) && !/^[•\-–*\u2022\u00b7]/.test(t);
   const isBullet  = (t: string) => /^[•\-–*\u2022\u00b7]/.test(t);
+  const isSectionHeadingLike = (t: string) =>
+    /^(technical skills|skills|experience|work experience|professional experience|education|projects|summary|profile|certifications|awards|publications|languages)$/i.test(t.trim());
+  const splitLabelAndValue = (t: string): { label: string; value: string } | null => {
+    const m = t.match(/^([^:]{2,42}):(\s*)(.+)$/);
+    if (!m) return null;
+    const label = m[1].trim();
+    const value = m[3].trim();
+    if (label.split(/\s+/).length > 5) return null;
+    return { label, value };
+  };
 
   const rowInteractiveProps = (
     _line: string,
@@ -4017,10 +4056,11 @@ function ResumePaperView({
             </div>
           );
         }
-        if (isAllCaps(t)) {
+        if (isAllCaps(t) || isSectionHeadingLike(t)) {
+          const headingText = isAllCaps(t) ? t : t.toUpperCase();
           return (
             <div key={i} style={{ marginTop: harshibarCompactPreview ? 9 : 14, marginBottom: harshibarCompactPreview ? 3 : 4 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: sectionAccentColor, marginBottom: harshibarCompactPreview ? 3 : 5 }}>{t}</div>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: sectionAccentColor, marginBottom: harshibarCompactPreview ? 3 : 5 }}>{headingText}</div>
               <div
                 role="presentation"
                 aria-hidden
@@ -4041,16 +4081,21 @@ function ResumePaperView({
           : stripped;
 
         /* One logical paragraph / bullet is often split across lines with the same combined match text.
-           Only the first physical row should render the full accepted replacement — otherwise the same
-           suggested paragraph repeats on every wrapped line (e.g. SUMMARY ×6). */
+           Render only one visual row for that logical line to avoid stacked highlight strips and extra gaps. */
         const mergedCur = (combinedMatchByLine[i] ?? "").trim();
         const mergedPrevLine = i > 0 ? (combinedMatchByLine[i - 1] ?? "").trim() : "";
-        if (acceptedSug && i > 0 && mergedCur !== "" && mergedCur === mergedPrevLine) {
+        const mergedNextLine = i + 1 < paperLines.length ? (combinedMatchByLine[i + 1] ?? "").trim() : "";
+        const mergedGroupContinuation = i > 0 && mergedCur !== "" && mergedCur === mergedPrevLine;
+        const mergedGroupStart = mergedCur !== "" && mergedCur !== mergedPrevLine && mergedCur === mergedNextLine;
+        if (mergedGroupContinuation) {
           return <div key={i} style={{ display: "none" }} aria-hidden />;
         }
+        const mergedDisplay = mergedGroupStart
+          ? mergedCur.replace(/^[•\-–*\u2022\u00b7]\s*/, "")
+          : null;
 
         /* Wrapped bullet row where a later physical line lost the bullet glyph (PDF extract). */
-        const mergedSameAsPrev = i > 0 && mergedCur !== "" && mergedCur === mergedPrevLine;
+        const mergedSameAsPrev = mergedGroupContinuation;
         if (!isBullet(t) && mergedSameAsPrev && isBullet(mergedCur) && !isAllCaps(t)) {
           const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: harshibarCompactPreview ? 2 : 4, paddingLeft: 6, ...hlStyle };
           const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
@@ -4076,10 +4121,22 @@ function ResumePaperView({
             </div>
           );
         }
+        const renderText = mergedDisplay ?? t;
+        const labelSplit = splitLabelAndValue(renderText);
+        const lineNode = acceptedSug
+          ? paperLineDisplayContent(innerFromAccepted)
+          : labelSplit
+            ? (
+              <>
+                <strong>{labelSplit.label}:</strong>{" "}
+                {paperLineDisplayContent(labelSplit.value)}
+              </>
+            )
+            : paperLineDisplayContent(renderText);
         const base: React.CSSProperties = { marginBottom: harshibarCompactPreview ? 2 : 4, ...hlStyle };
         const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
         const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
-        return <div key={i} {...p} {...lineMark}>{acceptedSug ? paperLineDisplayContent(innerFromAccepted) : paperLineDisplayContent(t)}</div>;
+        return <div key={i} {...p} {...lineMark}>{lineNode}</div>;
       })}
     </div>
   );
@@ -4287,6 +4344,7 @@ function SuggestionsPanel({
   onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, error, onBackToInputs,
   styleReferenceFolder, setStyleReferenceFolder,
   previewSectionAccentHex, aiJobFitWithoutTicks, setAiJobFitWithoutTicks,
+  useStructuredRenderer, setUseStructuredRenderer,
 }: {
   summary: string;
   suggestions: Suggestion[];
@@ -4314,6 +4372,8 @@ function SuggestionsPanel({
   previewSectionAccentHex: string;
   aiJobFitWithoutTicks: boolean;
   setAiJobFitWithoutTicks: (v: boolean) => void;
+  useStructuredRenderer: boolean;
+  setUseStructuredRenderer: (v: boolean) => void;
 }) {
   /** Prefer styled HTML preview: it follows `styleReferenceFolder` and dedupes repeated headers. Raw PDF is the upload as printed (often different fonts / duplicate header blocks). */
   const [resumePreviewTab, setResumePreviewTab] = useState<"pdf" | "text">(() => {
@@ -4723,6 +4783,29 @@ function SuggestionsPanel({
             {accepted.length > 0
               ? " Disabled while you have ticked edits — those always run through the model."
               : " Leave off to compile the LaTeX body from your base library file as-is."}
+          </span>
+        </label>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            fontSize: 12,
+            color: "var(--muted)",
+            lineHeight: 1.45,
+            cursor: generating ? "default" : "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={useStructuredRenderer}
+            onChange={e => { setUseStructuredRenderer(e.target.checked); }}
+            disabled={generating}
+            style={{ width: 18, height: 18, minWidth: 18, minHeight: 18, flexShrink: 0, marginTop: 2 }}
+          />
+          <span>
+            <strong style={{ color: "var(--text)", fontWeight: 600 }}>Use structured renderer (beta)</strong>.
+            Deterministic backend LaTeX path (Jinja scaffold) for cleaner, stable formatting.
           </span>
         </label>
         <button

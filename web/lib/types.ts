@@ -42,6 +42,10 @@ export interface ResumeRecord {
   verdict: string | null;
   /** Job description text from the last tailor run — used to prefill Builder when tailoring again. */
   job_description?: string | null;
+  resume_doc?: Record<string, unknown> | null;
+  applied_patch?: Record<string, unknown> | null;
+  renderer?: "legacy" | "structured" | null;
+  schema_version?: number | null;
   /** Lowercase segment for public URL `/r/?id=<public_slug>`. */
   public_slug?: string | null;
   /** Single primary resume per account (library ordering + “default link” UX). */
@@ -156,3 +160,6 @@ export type SSEEvent =
   | { event: "storage"; artifact: "pdf" | "tex"; stored: boolean; url?: string; reason?: string }
   | { event: "done" }
   | { event: "error";   msg: string };
+
+export type { ResumeDoc, ResumeTemplate } from "@/lib/resumeDoc";
+export type { ResumeEdit, ResumeEditOp, LlmResumePatch } from "@/lib/resumeEdits";

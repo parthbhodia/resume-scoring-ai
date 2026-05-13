@@ -15,11 +15,26 @@ create table if not exists resumes (
   score       int,
   verdict     text,
   job_description text,
+  resume_doc    jsonb,         -- canonical structured resume snapshot (ResumeDoc)
+  applied_patch jsonb,         -- last accepted LLM patch applied for this artifact
+  renderer      text,          -- 'legacy' | 'structured'
+  schema_version int,          -- structured schema version (starts at 1)
   public_slug   text,          -- optional /r/?id=<slug> segment (lowercase; unique when set)
   is_default    bool not null default false,  -- at most one true row per user_id (partial unique index)
   created_at  timestamptz default now(),
   unique (user_id, folder)
 );
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'resumes_renderer_check'
+  ) then
+    alter table resumes
+      add constraint resumes_renderer_check
+      check (renderer is null or renderer in ('legacy', 'structured'));
+  end if;
+end $$;
 
 create unique index if not exists resumes_public_slug_lower_uidx
   on resumes (lower(public_slug))

@@ -19,6 +19,7 @@ langchain-xai>=0.2.0
 # Tools and utilities
 langsmith>=0.1.63
 python-dotenv>=1.0.0
+jinja2>=3.1.4
 
 # LinkedIn Scraping - Choose your method
 beautifulsoup4>=4.12.0

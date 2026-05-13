@@ -17,6 +17,7 @@ Living document for engineers extending the product. When behavior changes mater
 | `web/` | **Next.js 16** app (React 19, TypeScript). **Static export** (`output: "export"`). Primary UX: landing, signed-in shell (`/r`), analyze, builder, library. |
 | `resume_gui/` | **Starlette** HTTP API + optional legacy `index.html`. Serves JSON routes under `/api/*`, PDFs under `/pdf/…`, CORS-aware for the web origin. |
 | `linkedin_agent/` | Python package: **LaTeX resume library**, JD extraction, streaming generation, doctor/ATS helpers. Imported by `resume_gui` (and historically by LangGraph tooling). `.env` here is loaded by `resume_gui/app.py` in dev. |
+| `resume_gui/renderers/` + `resume_gui/templates/latex/` | Deterministic LaTeX scaffold (Jinja2) for future structured ResumeDoc rendering. |
 | `docs/` | Deep dives (e.g. `analyze-preview-flow.md`) plus this file. |
 
 Other folders (e.g. `.claude/`, editor worktrees) are tooling or experiments — **do not** treat them as deploy sources of truth.
@@ -72,6 +73,7 @@ flowchart LR
 | `NEXT_PUBLIC_BASE_PATH` | App path prefix when not served from domain root. |
 | `NEXT_PUBLIC_ASSET_PREFIX` | Absolute origin for `_next` static assets in some hosts. |
 | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Auth + DB reads/writes from the client. |
+| `USE_JINJA_LATEX_RENDERER` (API env) | Feature flag scaffold. Emits status + keeps legacy generator fallback until structured ResumeDoc wiring is complete. |
 
 `apiUrl()` in `web/lib/utils.ts` joins paths to `NEXT_PUBLIC_API_URL`.
 

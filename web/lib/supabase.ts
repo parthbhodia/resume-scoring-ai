@@ -104,6 +104,12 @@ export async function upsertResume(
   pdfUrl: string | null,
   ratings: RatingsData | null,
   jobDescription?: string | null,
+  structured?: {
+    resumeDoc?: Record<string, unknown> | null;
+    appliedPatch?: Record<string, unknown> | null;
+    renderer?: "legacy" | "structured";
+    schemaVersion?: number;
+  },
 ): Promise<string> {
   const db = getSupabaseClient();
 
@@ -126,6 +132,10 @@ export async function upsertResume(
     score: coerceResumeScore(ratings?.match_score),
     verdict: coerceVerdictText(ratings?.verdict),
     job_description: jobDescription?.trim() || null,
+    resume_doc: structured?.resumeDoc ?? null,
+    applied_patch: structured?.appliedPatch ?? null,
+    renderer: structured?.renderer ?? "legacy",
+    schema_version: structured?.schemaVersion ?? 1,
     user_id,
   };
 

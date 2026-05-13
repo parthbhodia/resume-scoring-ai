@@ -23,8 +23,10 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 import threading
+from uuid import uuid4
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -71,6 +73,10 @@ from resume_library import (
     run_tailor_research_job_context,
     coach_suggestions_llm,
 )
+try:
+    from resume_gui.renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items
+except ImportError:
+    from renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items  # type: ignore
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
 # `python resume_gui/app.py` (local dev).
@@ -83,6 +89,152 @@ except ImportError:
 LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", str(Path(__file__).parent.parent / "resumes"))
 HTML_FILE       = Path(__file__).parent / "index.html"
 PORT            = int(os.environ.get("PORT", 8765))
+USE_JINJA_LATEX_RENDERER = os.environ.get("USE_JINJA_LATEX_RENDERER", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_entry_header(header: str) -> Tuple[str, str, str, str]:
+    parts = [p.strip() for p in (header or "").split("|") if p.strip()]
+    if not parts:
+        return "", "", "", ""
+    if len(parts) == 1:
+        return "", parts[0], "", ""
+    if len(parts) == 2:
+        return parts[0], parts[1], "", ""
+    if len(parts) == 3:
+        return parts[0], parts[1], "", parts[2]
+    return parts[0], parts[1], parts[2], " | ".join(parts[3:])
+
+
+def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
+    contact = parsed.get("contact") or {}
+    sections = parsed.get("sections") or []
+
+    doc = ResumeDocModel(
+        full_name=str(contact.get("name") or "Candidate").strip() or "Candidate",
+        headline="",
+        location=str(contact.get("location") or "").strip(),
+        email=str(contact.get("email") or "").strip(),
+        phone=str(contact.get("phone") or "").strip(),
+        linkedin=str(contact.get("linkedinUrl") or contact.get("linkedin") or "").strip(),
+        github=str(contact.get("githubUrl") or contact.get("github") or "").strip(),
+        summary="",
+        skills=[],
+        experience=[],
+    )
+
+    for sec in sections:
+        sec_name = str(sec.get("name") or "").strip().lower()
+        entries = sec.get("entries") or []
+
+        if "summary" in sec_name or "profile" in sec_name:
+            for ent in entries:
+                bullets = ent.get("bullets") or []
+                if bullets:
+                    doc.summary = " ".join(str(b.get("text") or "").strip() for b in bullets if str(b.get("text") or "").strip())
+                    break
+            continue
+
+        if "skill" in sec_name:
+            for ent in entries:
+                for b in ent.get("bullets") or []:
+                    line = str(b.get("text") or "").strip()
+                    if not line:
+                        continue
+                    if ":" in line:
+                        label, rest = line.split(":", 1)
+                        items = [x.strip() for x in rest.split(",") if x.strip()]
+                        doc.skills.append((label.strip(), normalize_skill_items(items)))
+                    else:
+                        doc.skills.append(("Skills", normalize_skill_items([line])))
+            continue
+
+        if "experience" in sec_name or "work" in sec_name:
+            for ent in entries:
+                role, company, location, dates = _parse_entry_header(str(ent.get("header") or ""))
+                bullets = [
+                    str(b.get("text") or "").strip()
+                    for b in (ent.get("bullets") or [])
+                    if str(b.get("text") or "").strip()
+                ]
+                if not company and not role and not bullets:
+                    continue
+                doc.experience.append(
+                    ExperienceItem(
+                        company=company or "Experience",
+                        role=role,
+                        location=location,
+                        dates=dates,
+                        bullets=bullets,
+                    )
+                )
+
+    return doc
+
+
+def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Optional[list]) -> None:
+    if not isinstance(accepted_suggestions, list):
+        return
+
+    for item in accepted_suggestions:
+        if not isinstance(item, dict):
+            continue
+        original = str(item.get("original") or "").strip()
+        suggested = str(item.get("suggested") or "").strip()
+        if not original:
+            continue
+
+        replaced = False
+
+        if doc.summary and original in doc.summary:
+            doc.summary = doc.summary.replace(original, suggested).strip()
+            replaced = True
+
+        for idx, (label, items) in enumerate(doc.skills):
+            next_items = []
+            changed = False
+            for it in items:
+                if original in it:
+                    if suggested:
+                        next_items.append(it.replace(original, suggested).strip())
+                    changed = True
+                    replaced = True
+                else:
+                    next_items.append(it)
+            if changed:
+                doc.skills[idx] = (label, [x for x in next_items if x])
+
+        for exp in doc.experience:
+            next_bullets = []
+            changed = False
+            for b in exp.bullets:
+                if original in b:
+                    if suggested:
+                        next_bullets.append(b.replace(original, suggested).strip())
+                    changed = True
+                    replaced = True
+                else:
+                    next_bullets.append(b)
+            if changed:
+                exp.bullets = [x for x in next_bullets if x]
+
+        if not replaced and suggested:
+            if doc.summary:
+                doc.summary = suggested
+            else:
+                doc.summary = suggested
+
+
+def _create_structured_folder_from_base(base_folder: str) -> Tuple[str, str]:
+    src = Path(LIBRARY_ROOT) / base_folder
+    if not src.exists() or not src.is_dir():
+        raise RuntimeError("base_folder not found for structured renderer")
+    new_folder = f"{base_folder}_structured_{uuid4().hex[:8]}"
+    dst = Path(LIBRARY_ROOT) / new_folder
+    shutil.copytree(src, dst)
+    tex_files = [p for p in dst.iterdir() if p.suffix == ".tex"]
+    if not tex_files:
+        raise RuntimeError("No .tex file in base folder")
+    return new_folder, str(tex_files[0])
 
 # CORS: allow localhost dev + deployed frontend
 _raw_origins    = os.environ.get(
@@ -150,6 +302,7 @@ async def api_generate_stream(request: Request):
     post_suggestion_coach_run = bool(body.get("post_suggestion_coach_run"))
     _tb = body.get("tailor_body_with_ai")
     tailor_body_with_ai = True if _tb is None else bool(_tb)
+    use_jinja_renderer = USE_JINJA_LATEX_RENDERER or bool(body.get("use_jinja_renderer"))
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
@@ -159,6 +312,7 @@ async def api_generate_stream(request: Request):
         f"  |  reuse_suggest_digest={bool(suggest_research_digest)}"
         f"  |  post_suggestion_coach_run={post_suggestion_coach_run}"
         f"  |  tailor_body_with_ai={tailor_body_with_ai}"
+        f"  |  use_jinja_renderer={use_jinja_renderer}"
     )
 
     if not company or not role or not jd:
@@ -176,6 +330,136 @@ async def api_generate_stream(request: Request):
         saved_tex_path: Optional[str] = None
         # "local" = anonymous / no Supabase user — do not write under that prefix in Storage.
         storage_user = user_id if user_id and user_id != "local" else ""
+
+        if use_jinja_renderer:
+            try:
+                if not base_folder:
+                    raise RuntimeError("Structured renderer requires a base resume. Select a library resume first.")
+
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "event": "status",
+                    "msg": "Structured renderer: loading base resume…",
+                }), loop).result()
+
+                base_tex = get_resume_tex(base_folder)
+                if not base_tex:
+                    raise RuntimeError("Could not load base resume TeX for structured rendering.")
+
+                parsed = parse_resume_tex(base_tex)
+                doc = _resume_doc_from_parsed(parsed)
+                _apply_accepted_edits_to_doc(doc, accepted_suggestions if isinstance(accepted_suggestions, list) else None)
+
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "event": "status",
+                    "msg": "Structured renderer: generating deterministic LaTeX…",
+                }), loop).result()
+
+                renderer = JinjaLatexRenderer()
+                new_tex = renderer.render(doc)
+
+                out_folder, _ = _create_structured_folder_from_base(base_folder)
+                compiled = recompile_resume_from_tex(out_folder, new_tex)
+                tex_path = compiled.get("tex_path")
+                pdf_path = compiled.get("pdf_path")
+                filename = Path(tex_path).name if tex_path else "resume.tex"
+
+                saved_event = {
+                    "event": "saved",
+                    "folder": out_folder,
+                    "tex_path": tex_path,
+                }
+
+                # mirror storage upload handling for .tex
+                saved_folder = saved_event.get("folder")
+                saved_tex_path = saved_event.get("tex_path")
+                if storage_user and saved_folder and saved_tex_path:
+                    try:
+                        tex_url = upload_tex(storage_user, saved_folder, saved_tex_path)
+                        if tex_url:
+                            asyncio.run_coroutine_threadsafe(queue.put({
+                                "event": "storage",
+                                "artifact": "tex",
+                                "stored": True,
+                                "url": tex_url,
+                            }), loop).result()
+                        else:
+                            asyncio.run_coroutine_threadsafe(queue.put({
+                                "event": "storage",
+                                "artifact": "tex",
+                                "stored": False,
+                                "reason": storage_status().get("reason") or "Supabase upload returned no public URL",
+                            }), loop).result()
+                    except Exception as exc:
+                        logger.warning(f"upload_tex failed: {exc}")
+
+                asyncio.run_coroutine_threadsafe(queue.put(saved_event), loop).result()
+
+                if not compiled.get("compiled"):
+                    raise RuntimeError(compiled.get("compile_error") or "Structured renderer compile failed")
+
+                rel_pdf = f"/pdf/{out_folder}/{Path(pdf_path).name}" if pdf_path else None
+                pdf_event = {"event": "pdf", "url": rel_pdf}
+
+                if storage_user and saved_folder and pdf_path:
+                    try:
+                        public = upload_pdf(storage_user, saved_folder, pdf_path)
+                        if public and public.startswith(("http://", "https://")):
+                            pdf_event = {"event": "pdf", "url": public}
+                            asyncio.run_coroutine_threadsafe(queue.put({
+                                "event": "storage",
+                                "artifact": "pdf",
+                                "stored": True,
+                                "url": public,
+                            }), loop).result()
+                        else:
+                            asyncio.run_coroutine_threadsafe(queue.put({
+                                "event": "storage",
+                                "artifact": "pdf",
+                                "stored": False,
+                                "reason": storage_status().get("reason") or "Supabase upload returned no public URL",
+                            }), loop).result()
+                    except Exception as exc:
+                        logger.warning(f"upload_pdf failed: {exc}")
+
+                # Minimal result contract for frontend + library row.
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "event": "base",
+                    "folder": base_folder,
+                    "loaded": True,
+                }), loop).result()
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "event": "diff",
+                    "data": [],
+                    "adds": 0,
+                    "removes": 0,
+                }), loop).result()
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "event": "rationales",
+                    "data": [],
+                }), loop).result()
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "event": "ratings",
+                    "data": {
+                        "match_score": 0,
+                        "criteria": [],
+                        "whats_working": [],
+                        "gaps": [],
+                        "verdict": "Structured render complete",
+                    },
+                }), loop).result()
+
+                asyncio.run_coroutine_threadsafe(queue.put(pdf_event), loop).result()
+                asyncio.run_coroutine_threadsafe(queue.put({"event": "done"}), loop).result()
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
+                return
+            except Exception as exc:
+                logger.exception("structured renderer failed")
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "event": "error",
+                    "msg": f"Structured renderer failed: {exc}",
+                }), loop).result()
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
+                return
 
         for event in stream_latex_resume(
             company, role, jd,
