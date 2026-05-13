@@ -294,11 +294,25 @@ function collapseAdjacentSameBulletRows(
   bullets: LiveBulletItem[],
 ): Array<{ rawLine: string; bulletIdx: number }> {
   const out: Array<{ rawLine: string; bulletIdx: number }> = [];
+
+  const isLikelyBulletContinuation = (line: string): boolean => {
+    const t = normalizeForMatch(line).trim();
+    if (!t || t.length > 80) return false;
+    if (/^[+]/.test(t)) return false;
+    if (/^[A-Z][a-z].*:$/.test(t)) return false;
+    if (/^technologies\s*:/i.test(t)) return false;
+    return /^[a-z0-9(]/.test(t) || /^(and|or|with|for|to|across|in|on)\b/i.test(t);
+  };
+
   for (const it of items) {
     const prev = out[out.length - 1];
     if (prev && prev.bulletIdx === it.bulletIdx) {
       const canon = bullets[it.bulletIdx]?.originalBullet?.trim();
       prev.rawLine = canon && canon.length > 0 ? canon : `${prev.rawLine} ${it.rawLine}`.replace(/\s+/g, " ").trim();
+      continue;
+    }
+    if (prev && isLikelyBulletContinuation(it.rawLine)) {
+      prev.rawLine = `${prev.rawLine} ${normalizeForMatch(it.rawLine)}`.replace(/\s+/g, " ").trim();
       continue;
     }
     out.push({ rawLine: it.rawLine, bulletIdx: it.bulletIdx });
@@ -548,6 +562,34 @@ function EntryHeaderLine({ line }: { line: string }) {
       </span>
     </div>
   );
+}
+
+function coalesceEmploymentParagraphLines(lines: string[]): string[] {
+  const out: string[] = [];
+  const isLikelyMeta = (t: string): boolean => {
+    const hasDate = /\b(19|20)\d{2}\b/.test(t) || /\b(?:present|current)\b/i.test(t);
+    const hasRole = /\b(Engineer|Developer|Architect|Analyst|Manager|Lead|Consultant|Designer|Scientist)\b/i.test(t);
+    return t.length <= 90 && (hasDate || hasRole);
+  };
+  const isLikelyCompany = (t: string): boolean => {
+    if (!t || t.length > 90) return false;
+    if (/\b(19|20)\d{2}\b/.test(t)) return false;
+    if (lineLooksLikeBulletLead(t)) return false;
+    if (/^[+•\-–—]/.test(t)) return false;
+    return /\b(Inc|LLC|Ltd|Technologies|Solutions|Systems|Corp|Company|Remote|,\s*[A-Z]{2}|,\s*[A-Za-z]+)\b/i.test(t);
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const cur = lines[i].trim();
+    const next = i + 1 < lines.length ? lines[i + 1].trim() : "";
+    if (cur && next && isLikelyCompany(cur) && isLikelyMeta(next)) {
+      out.push(`${cur} | ${next}`);
+      i++;
+      continue;
+    }
+    out.push(lines[i]);
+  }
+  return out;
 }
 
 function scoreBorderColor(score: number): string {
@@ -833,9 +875,15 @@ export default function AnalyzeLiveResumeBody({
             !!prevBlk &&
             prevBlk.type === "section" &&
             /\bskills\b/i.test(prevBlk.text);
+          const inExperienceSection =
+            !!prevBlk &&
+            prevBlk.type === "section" &&
+            /\b(experience|work|employment)\b/i.test(prevBlk.text);
           const paragraphLines = inSkillsSection
             ? mergeWrappedSkillsLines(blk.lines)
-            : blk.lines;
+            : inExperienceSection
+              ? coalesceEmploymentParagraphLines(blk.lines)
+              : blk.lines;
 
           return (
             <div key={bi} style={{ marginBottom: 6 }}>
