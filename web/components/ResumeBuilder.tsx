@@ -3983,160 +3983,172 @@ function ResumePaperView({
       color: "#1e293b",
       minHeight: 480,
     }}>
-      {paperLines.map((line, i) => {
-        const t = line.trim();
-        if (!t) return <div key={i} style={{ height: harshibarCompactPreview ? 4 : 7 }} />;
-        if (isPlaceholderResumeHeaderLine(line) && i !== nameLineIndex) return null;
+      {(() => {
+        const renderedAcceptedSuggestionIds = new Set<string>();
+        return paperLines.map((line, i) => {
+          const t = line.trim();
+          if (!t) return <div key={i} style={{ height: harshibarCompactPreview ? 4 : 7 }} />;
+          if (isPlaceholderResumeHeaderLine(line) && i !== nameLineIndex) return null;
 
-        const matchText = (combinedMatchByLine[i] ?? "").trim() || t;
-        const acceptedSug = ic
-          ? firstAcceptedSuggestionMatchingLine(t, ic.suggestions, ic.acceptedIds) ??
-            (matchText.trim() !== t.trim()
-              ? firstAcceptedSuggestionMatchingLine(matchText, ic.suggestions, ic.acceptedIds)
-              : null)
-          : null;
-        const linkSug = ic
-          ? firstSuggestionMatchingLine(matchText, ic.suggestions, s => !ic.rejectedIds.has(s.id))
-          : null;
-        const pendingHighlight = ic && linkSug && !ic.acceptedIds.has(linkSug.id);
-        const highlightedPlain = !ic && lineMatchesHighlight(i);
+          const matchText = (combinedMatchByLine[i] ?? "").trim() || t;
+          const acceptedSug = ic
+            ? firstAcceptedSuggestionMatchingLine(t, ic.suggestions, ic.acceptedIds) ??
+              (matchText.trim() !== t.trim()
+                ? firstAcceptedSuggestionMatchingLine(matchText, ic.suggestions, ic.acceptedIds)
+                : null)
+            : null;
 
-        const amber: React.CSSProperties = {
-          background: "rgba(245,158,11,0.12)",
-          borderLeft: "3px solid #f59e0b",
-          paddingLeft: 6,
-          marginLeft: -9,
-          borderRadius: "0 3px 3px 0",
-        };
-        const green: React.CSSProperties = {
-          background: "rgba(52,211,153,0.14)",
-          borderLeft: "3px solid rgb(34, 197, 94)",
-          paddingLeft: 6,
-          marginLeft: -9,
-          borderRadius: "0 3px 3px 0",
-        };
-        let hlStyle: React.CSSProperties = {};
-        if (acceptedSug) hlStyle = green;
-        else if (pendingHighlight && linkSug && ic) hlStyle = stripeStyleForSuggestion(linkSug, ic.suggestions);
-        else if (pendingHighlight || highlightedPlain) hlStyle = amber;
+          // Guardrail: one accepted suggestion should render once in the preview.
+          if (acceptedSug) {
+            if (renderedAcceptedSuggestionIds.has(acceptedSug.id)) {
+              return <div key={i} style={{ display: "none" }} aria-hidden />;
+            }
+            renderedAcceptedSuggestionIds.add(acceptedSug.id);
+          }
 
-        if (i === nameLineIndex) {
-          if (nameCenteredCaps) {
+          const linkSug = ic
+            ? firstSuggestionMatchingLine(matchText, ic.suggestions, s => !ic.rejectedIds.has(s.id))
+            : null;
+          const pendingHighlight = ic && linkSug && !ic.acceptedIds.has(linkSug.id);
+          const highlightedPlain = !ic && lineMatchesHighlight(i);
+
+          const amber: React.CSSProperties = {
+            background: "rgba(245,158,11,0.12)",
+            borderLeft: "3px solid #f59e0b",
+            paddingLeft: 6,
+            marginLeft: -9,
+            borderRadius: "0 3px 3px 0",
+          };
+          const green: React.CSSProperties = {
+            background: "rgba(52,211,153,0.14)",
+            borderLeft: "3px solid rgb(34, 197, 94)",
+            paddingLeft: 6,
+            marginLeft: -9,
+            borderRadius: "0 3px 3px 0",
+          };
+          let hlStyle: React.CSSProperties = {};
+          if (acceptedSug) hlStyle = green;
+          else if (pendingHighlight && linkSug && ic) hlStyle = stripeStyleForSuggestion(linkSug, ic.suggestions);
+          else if (pendingHighlight || highlightedPlain) hlStyle = amber;
+
+          if (i === nameLineIndex) {
+            if (nameCenteredCaps) {
+              return (
+                <div key={i} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5, marginBottom: 2, textAlign: "center", textTransform: "uppercase" }}>
+                  {paperLineDisplayContent(stripBareLocationSuffixFromNameLine(t))}
+                </div>
+              );
+            }
+            const nameSize = isMalta ? 18 : 19;
             return (
-              <div key={i} style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.5, marginBottom: 2, textAlign: "center", textTransform: "uppercase" }}>
+              <div
+                key={i}
+                style={{
+                  fontSize: nameSize,
+                  fontWeight: 700,
+                  letterSpacing: -0.35,
+                  marginBottom: 2,
+                  lineHeight: 1.15,
+                  textAlign: "left",
+                  color: "#0f172a",
+                  textTransform: "none",
+                }}
+              >
                 {paperLineDisplayContent(stripBareLocationSuffixFromNameLine(t))}
               </div>
             );
           }
-          const nameSize = isMalta ? 18 : 19;
-          return (
-            <div
-              key={i}
-              style={{
-                fontSize: nameSize,
-                fontWeight: 700,
-                letterSpacing: -0.35,
-                marginBottom: 2,
-                lineHeight: 1.15,
-                textAlign: "left",
-                color: "#0f172a",
-                textTransform: "none",
-              }}
-            >
-              {paperLineDisplayContent(stripBareLocationSuffixFromNameLine(t))}
-            </div>
-          );
-        }
-        if (subtitleLineIndex >= 0 && i === subtitleLineIndex && !isAllCaps(t)) {
-          if (isBareLocationLabelLine(t)) return null;
-          return (
-            <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: nameCenteredCaps ? "center" : "left", marginBottom: harshibarCompactPreview ? 5 : 8 }}>
-              {paperLineDisplayContent(t)}
-            </div>
-          );
-        }
-        if (isAllCaps(t) || isSectionHeadingLike(t)) {
-          const headingText = isAllCaps(t) ? t : t.toUpperCase();
-          return (
-            <div key={i} style={{ marginTop: harshibarCompactPreview ? 9 : 14, marginBottom: harshibarCompactPreview ? 3 : 4 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: sectionAccentColor, marginBottom: harshibarCompactPreview ? 3 : 5 }}>{headingText}</div>
-              <div
-                role="presentation"
-                aria-hidden
-                style={{
-                  height: 1,
-                  background: sectionAccentColor,
-                  opacity: 0.5,
-                  borderRadius: 1,
-                  marginBottom: harshibarCompactPreview ? 6 : 10,
-                }}
-              />
-            </div>
-          );
-        }
-        const stripped = t.replace(/^[•\-–*\u2022\u00b7]\s*/, "");
-        const innerFromAccepted = acceptedSug
-          ? (acceptedSug.suggested.trim().replace(/^[•\-–*\u2022\u00b7]\s*/, "").split("\n")[0]?.trim() || stripped)
-          : stripped;
+          if (subtitleLineIndex >= 0 && i === subtitleLineIndex && !isAllCaps(t)) {
+            if (isBareLocationLabelLine(t)) return null;
+            return (
+              <div key={i} style={{ fontSize: 9.5, color: "#64748b", textAlign: nameCenteredCaps ? "center" : "left", marginBottom: harshibarCompactPreview ? 5 : 8 }}>
+                {paperLineDisplayContent(t)}
+              </div>
+            );
+          }
+          if (isAllCaps(t) || isSectionHeadingLike(t)) {
+            const headingText = isAllCaps(t) ? t : t.toUpperCase();
+            return (
+              <div key={i} style={{ marginTop: harshibarCompactPreview ? 9 : 14, marginBottom: harshibarCompactPreview ? 3 : 4 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, color: sectionAccentColor, marginBottom: harshibarCompactPreview ? 3 : 5 }}>{headingText}</div>
+                <div
+                  role="presentation"
+                  aria-hidden
+                  style={{
+                    height: 1,
+                    background: sectionAccentColor,
+                    opacity: 0.5,
+                    borderRadius: 1,
+                    marginBottom: harshibarCompactPreview ? 6 : 10,
+                  }}
+                />
+              </div>
+            );
+          }
+          const stripped = t.replace(/^[•\-–*\u2022\u00b7]\s*/, "");
+          const innerFromAccepted = acceptedSug
+            ? (acceptedSug.suggested.trim().replace(/^[•\-–*\u2022\u00b7]\s*/, "").split("\n")[0]?.trim() || stripped)
+            : stripped;
 
-        /* One logical paragraph / bullet is often split across lines with the same combined match text.
-           Render only one visual row for that logical line to avoid stacked highlight strips and extra gaps. */
-        const mergedCur = (combinedMatchByLine[i] ?? "").trim();
-        const mergedPrevLine = i > 0 ? (combinedMatchByLine[i - 1] ?? "").trim() : "";
-        const mergedNextLine = i + 1 < paperLines.length ? (combinedMatchByLine[i + 1] ?? "").trim() : "";
-        const mergedGroupContinuation = i > 0 && mergedCur !== "" && mergedCur === mergedPrevLine;
-        const mergedGroupStart = mergedCur !== "" && mergedCur !== mergedPrevLine && mergedCur === mergedNextLine;
-        if (mergedGroupContinuation) {
-          return <div key={i} style={{ display: "none" }} aria-hidden />;
-        }
-        const mergedDisplay = mergedGroupStart
-          ? mergedCur.replace(/^[•\-–*\u2022\u00b7]\s*/, "")
-          : null;
+          /* One logical paragraph / bullet is often split across lines with the same combined match text.
+             Render only one visual row for that logical line to avoid stacked highlight strips and extra gaps. */
+          const mergedCur = (combinedMatchByLine[i] ?? "").trim();
+          const mergedPrevLine = i > 0 ? (combinedMatchByLine[i - 1] ?? "").trim() : "";
+          const mergedNextLine = i + 1 < paperLines.length ? (combinedMatchByLine[i + 1] ?? "").trim() : "";
+          const mergedGroupContinuation = i > 0 && mergedCur !== "" && mergedCur === mergedPrevLine;
+          const mergedGroupStart = mergedCur !== "" && mergedCur !== mergedPrevLine && mergedCur === mergedNextLine;
+          if (mergedGroupContinuation) {
+            return <div key={i} style={{ display: "none" }} aria-hidden />;
+          }
+          const mergedDisplay = mergedGroupStart
+            ? mergedCur.replace(/^[•\-–*\u2022\u00b7]\s*/, "")
+            : null;
 
-        /* Wrapped bullet row where a later physical line lost the bullet glyph (PDF extract). */
-        const mergedSameAsPrev = mergedGroupContinuation;
-        if (!isBullet(t) && mergedSameAsPrev && isBullet(mergedCur) && !isAllCaps(t)) {
-          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: harshibarCompactPreview ? 2 : 4, paddingLeft: 6, ...hlStyle };
+          /* Wrapped bullet row where a later physical line lost the bullet glyph (PDF extract). */
+          const mergedSameAsPrev = mergedGroupContinuation;
+          if (!isBullet(t) && mergedSameAsPrev && isBullet(mergedCur) && !isAllCaps(t)) {
+            const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: harshibarCompactPreview ? 2 : 4, paddingLeft: 6, ...hlStyle };
+            const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
+            const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
+            return (
+              <div key={i} {...p} {...lineMark}>
+                <span style={{ flexShrink: 0, marginTop: 1, visibility: "hidden", userSelect: "none" }} aria-hidden>
+                  •
+                </span>
+                <span>{paperLineDisplayContent(innerFromAccepted)}</span>
+              </div>
+            );
+          }
+
+          if (isBullet(t)) {
+            const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: harshibarCompactPreview ? 2 : 4, paddingLeft: 6, ...hlStyle };
+            const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
+            const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
+            return (
+              <div key={i} {...p} {...lineMark}>
+                <span style={{ flexShrink: 0, marginTop: 1 }}>•</span>
+                <span>{paperLineDisplayContent(innerFromAccepted)}</span>
+              </div>
+            );
+          }
+          const renderText = mergedDisplay ?? t;
+          const labelSplit = splitLabelAndValue(renderText);
+          const lineNode = acceptedSug
+            ? paperLineDisplayContent(innerFromAccepted)
+            : labelSplit
+              ? (
+                <>
+                  <strong>{labelSplit.label}:</strong>{" "}
+                  {paperLineDisplayContent(labelSplit.value)}
+                </>
+              )
+              : paperLineDisplayContent(renderText);
+          const base: React.CSSProperties = { marginBottom: harshibarCompactPreview ? 2 : 4, ...hlStyle };
           const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
           const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
-          return (
-            <div key={i} {...p} {...lineMark}>
-              <span style={{ flexShrink: 0, marginTop: 1, visibility: "hidden", userSelect: "none" }} aria-hidden>
-                •
-              </span>
-              <span>{paperLineDisplayContent(innerFromAccepted)}</span>
-            </div>
-          );
-        }
-
-        if (isBullet(t)) {
-          const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: harshibarCompactPreview ? 2 : 4, paddingLeft: 6, ...hlStyle };
-          const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
-          const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
-          return (
-            <div key={i} {...p} {...lineMark}>
-              <span style={{ flexShrink: 0, marginTop: 1 }}>•</span>
-              <span>{paperLineDisplayContent(innerFromAccepted)}</span>
-            </div>
-          );
-        }
-        const renderText = mergedDisplay ?? t;
-        const labelSplit = splitLabelAndValue(renderText);
-        const lineNode = acceptedSug
-          ? paperLineDisplayContent(innerFromAccepted)
-          : labelSplit
-            ? (
-              <>
-                <strong>{labelSplit.label}:</strong>{" "}
-                {paperLineDisplayContent(labelSplit.value)}
-              </>
-            )
-            : paperLineDisplayContent(renderText);
-        const base: React.CSSProperties = { marginBottom: harshibarCompactPreview ? 2 : 4, ...hlStyle };
-        const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
-        const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
-        return <div key={i} {...p} {...lineMark}>{lineNode}</div>;
-      })}
+          return <div key={i} {...p} {...lineMark}>{lineNode}</div>;
+        });
+      })()}
     </div>
   );
 }

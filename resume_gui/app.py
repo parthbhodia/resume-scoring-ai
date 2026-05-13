@@ -240,6 +240,23 @@ def _create_structured_folder_source(base_folder: Optional[str], reference_folde
         raise RuntimeError("No .tex file in selected source folder")
     return new_folder, str(tex_files[0])
 
+
+def _resolve_structured_source_folder(base_folder: Optional[str], reference_folder: Optional[str]) -> str:
+    candidates: List[str] = []
+    if (base_folder or "").strip():
+        candidates.append((base_folder or "").strip())
+    if (reference_folder or "").strip() and (reference_folder or "").strip() not in candidates:
+        candidates.append((reference_folder or "").strip())
+    if "Adobe_FullStack" not in candidates:
+        candidates.append("Adobe_FullStack")
+
+    for c in candidates:
+        if get_resume_tex(c):
+            return c
+    raise RuntimeError(
+        "Could not load TeX from selected source folders: " + ", ".join(candidates)
+    )
+
 # CORS: allow localhost dev + deployed frontend
 _raw_origins    = os.environ.get(
     "ALLOWED_ORIGINS",
@@ -337,13 +354,11 @@ async def api_generate_stream(request: Request):
 
         if use_jinja_renderer:
             try:
-                source_folder = (base_folder or "").strip() or (reference_folder or "").strip()
-                if not source_folder:
-                    raise RuntimeError("Structured renderer requires either a base folder or a reference template.")
+                source_folder = _resolve_structured_source_folder(base_folder, reference_folder)
 
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "status",
-                    "msg": "Structured renderer: loading base resume…",
+                    "msg": f"Structured renderer: loading source ({source_folder})…",
                 }), loop).result()
 
                 base_tex = get_resume_tex(source_folder)
@@ -2216,14 +2231,18 @@ Return ONLY this JSON (no markdown fences, no explanation):
 def _llm_json_call(prompt: str) -> Optional[dict]:
     """Call Grok (primary when configured) or Gemini for a JSON response."""
     import time
+    selected_model = primary_llm_model_for_resume_workloads()
 
-    def _grok_json() -> Optional[dict]:
+    def _is_grok_model(model_name: str) -> bool:
+        return (model_name or "").strip().lower().startswith("grok")
+
+    def _grok_json(model_name: Optional[str] = None) -> Optional[dict]:
         xai_key = os.environ.get("XAI_API_KEY")
         if not xai_key:
             return None
         try:
             from openai import OpenAI  # type: ignore
-            model = os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning")
+            model = (model_name or os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning")).strip()
             xai = OpenAI(api_key=xai_key, base_url="https://api.x.ai/v1")
             r = xai.chat.completions.create(
                 model=model,
@@ -2239,7 +2258,7 @@ def _llm_json_call(prompt: str) -> Optional[dict]:
             logger.warning(f"Grok analysis failed: {exc}")
         return None
 
-    def _gemini_json() -> Optional[dict]:
+    def _gemini_json(model_name: Optional[str] = None) -> Optional[dict]:
         google_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
         if not google_key:
             return None
@@ -2252,7 +2271,7 @@ def _llm_json_call(prompt: str) -> Optional[dict]:
                 temperature=0.2,
             )
             r = client.models.generate_content(
-                model=primary_gemini_flash_model(),
+                model=(model_name or primary_gemini_flash_model()).strip(),
                 contents=prompt,
                 config=cfg,
             )
@@ -2264,15 +2283,15 @@ def _llm_json_call(prompt: str) -> Optional[dict]:
             logger.warning(f"Gemini analysis failed: {exc}")
         return None
 
-    if grok_preferred_for_throughput():
-        out = _grok_json()
+    if _is_grok_model(selected_model):
+        out = _grok_json(selected_model)
         if out is not None:
             return out
-        return _gemini_json()
-    out = _gemini_json()
+        return _gemini_json(primary_gemini_flash_model())
+    out = _gemini_json(selected_model)
     if out is not None:
         return out
-    return _grok_json()
+    return _grok_json(os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning"))
 
 
 def _normalize_analysis(raw: dict) -> dict:

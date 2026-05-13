@@ -53,17 +53,12 @@ def primary_gemini_flash_model(explicit: Optional[str] = None) -> str:
 
 
 def grok_preferred_for_throughput() -> bool:
-    """Use xAI Grok as the primary model when ``XAI_API_KEY`` is set.
+    """Use xAI Grok as the primary model whenever an xAI key exists.
 
-    Set ``LLM_PROVIDER=gemini`` to keep Google Gemini as primary despite having an xAI key.
-    Unset or ``LLM_PROVIDER=grok`` → Grok-first (better RPM on many xAI tiers).
+    This project defaults to Grok-first because Gemini quotas are often tighter
+    for sustained resume generation/analysis traffic.
     """
-    if not (os.environ.get("XAI_API_KEY") or "").strip():
-        return False
-    p = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
-    if p == "gemini":
-        return False
-    return True
+    return bool((os.environ.get("XAI_API_KEY") or "").strip())
 
 
 def primary_llm_model_for_resume_workloads(explicit: Optional[str] = None) -> str:
