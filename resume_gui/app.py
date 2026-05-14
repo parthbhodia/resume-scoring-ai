@@ -411,9 +411,32 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
             continue
         full_name = ln
         break
-    summary_lines = [ln for ln in lines[1:] if len(ln.split()) >= 6][:3]
+    summary_lines = [
+        ln for ln in lines[1:]
+        if len(ln.split()) >= 8
+        and ":" not in ln
+        and ln.lower() not in {"technical skills", "experience", "education", "projects"}
+    ][:3]
     summary = " ".join(summary_lines)[:1200]
-    bullets = [ln.lstrip("-•* ") for ln in lines if len(ln.split()) >= 8][:5]
+
+    bullets: list[str] = []
+    in_experience = False
+    for ln in lines:
+        low = ln.lower().strip()
+        if low in {"experience", "professional experience", "work experience"}:
+            in_experience = True
+            continue
+        if in_experience and low in {"projects", "education", "technical skills", "skills"}:
+            break
+        if in_experience:
+            cleaned = ln.lstrip("-•* ").strip()
+            if len(cleaned.split()) >= 8 and ":" not in cleaned:
+                bullets.append(cleaned)
+        if len(bullets) >= 8:
+            break
+
+    if not bullets:
+        bullets = [ln.lstrip("-•* ") for ln in lines if len(ln.split()) >= 8][:6]
     return ResumeDocModel(
         full_name=full_name,
         headline=role or "",
@@ -566,7 +589,11 @@ async def api_generate_stream(request: Request):
                     "msg": f"Structured renderer: loading source ({source_folder})…",
                 }), loop).result()
 
-                if base_tex:
+                # Prefer candidate_profile content when provided.
+                # The selected template controls layout; profile text should control content.
+                if candidate_profile:
+                    doc = _resume_doc_from_profile_text(candidate_profile, role, company)
+                elif base_tex:
                     parsed = parse_resume_tex(base_tex)
                     doc = _resume_doc_from_parsed(parsed)
                 else:
