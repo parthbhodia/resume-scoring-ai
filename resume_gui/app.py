@@ -77,6 +77,10 @@ try:
     from resume_gui.renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items
 except ImportError:
     from renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items  # type: ignore
+try:
+    from resume_gui.profile_parser import parse_profile_text
+except ImportError:
+    from profile_parser import parse_profile_text  # type: ignore
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
 # `python resume_gui/app.py` (local dev).
@@ -394,57 +398,18 @@ def _resolve_structured_source_folder(base_folder: Optional[str], reference_fold
 
 
 def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
-    text = (candidate_profile or "").strip()
-    lines = [
-        _clean_model_text(ln)
-        for ln in text.splitlines()
-        if _clean_model_text(ln) and not _is_structural_noise_line(ln)
-    ]
-    full_name = "Candidate"
-    for ln in lines:
-        if ":" in ln:
-            continue
-        words = [w for w in re.split(r"\s+", ln) if w]
-        if len(words) < 2 or len(words) > 5:
-            continue
-        if any(ch.isdigit() for ch in ln):
-            continue
-        full_name = ln
-        break
-    summary_lines = [
-        ln for ln in lines[1:]
-        if len(ln.split()) >= 8
-        and ":" not in ln
-        and ln.lower() not in {"technical skills", "experience", "education", "projects"}
-    ][:3]
-    summary = " ".join(summary_lines)[:1200]
-
-    bullets: list[str] = []
-    in_experience = False
-    for ln in lines:
-        low = ln.lower().strip()
-        if low in {"experience", "professional experience", "work experience"}:
-            in_experience = True
-            continue
-        if in_experience and low in {"projects", "education", "technical skills", "skills"}:
-            break
-        if in_experience:
-            cleaned = ln.lstrip("-•* ").strip()
-            if len(cleaned.split()) >= 8 and ":" not in cleaned:
-                bullets.append(cleaned)
-        if len(bullets) >= 8:
-            break
-
-    if not bullets:
-        bullets = [ln.lstrip("-•* ") for ln in lines if len(ln.split()) >= 8][:6]
+    parsed = parse_profile_text(candidate_profile)
+    full_name = _clean_model_text(parsed.full_name or "Candidate") or "Candidate"
+    summary = _clean_model_text(parsed.summary or "")
+    bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
     return ResumeDocModel(
         full_name=full_name,
-        headline=role or "",
-        location="",
-        email="",
-        phone="",
-        linkedin="",
-        github="",
+        headline=_clean_model_text(parsed.headline or role or ""),
+        location=_clean_model_text(parsed.location or ""),
+        email=_clean_model_text(parsed.email or ""),
+        phone=_clean_model_text(parsed.phone or ""),
+        linkedin=_clean_model_text(parsed.linkedin or ""),
+        github=_clean_model_text(parsed.github or ""),
         summary=summary,
         skills=[],
         experience=[
