@@ -94,6 +94,7 @@ LIBRARY_ROOT    = os.environ.get("LIBRARY_ROOT", str(Path(__file__).parent.paren
 HTML_FILE       = Path(__file__).parent / "index.html"
 PORT            = int(os.environ.get("PORT", 8765))
 USE_JINJA_LATEX_RENDERER = os.environ.get("USE_JINJA_LATEX_RENDERER", "true").strip().lower() in {"1", "true", "yes", "on"}
+ENABLE_JD_URL_EXTRACT = os.environ.get("ENABLE_JD_URL_EXTRACT", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_entry_header(header: str) -> Tuple[str, str, str, str]:
@@ -861,6 +862,14 @@ async def api_upload_resume(request: Request):
 
 async def api_extract_jd(request: Request):
     """Fetch a job posting URL and extract structured {company, role, location, job_description}."""
+    if not ENABLE_JD_URL_EXTRACT:
+        return JSONResponse(
+            {
+                "error": "JD URL extraction is temporarily disabled.",
+                "code": "feature_disabled",
+            },
+            status_code=503,
+        )
     try:
         body = await request.json()
         url  = (body.get("url") or "").strip()
