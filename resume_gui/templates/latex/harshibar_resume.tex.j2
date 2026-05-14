@@ -83,12 +83,7 @@
 
 \begin{center}
     \textbf{\Huge {{ doc.full_name|latex }}} \\ \vspace{5pt}
-    \small
-    {% if doc.phone %}\faPhone* \texttt{ {{ doc.phone|latex }} }{% endif %}
-    {% if doc.email %} \hspace{1pt} $|$ \hspace{1pt} \faEnvelope \texttt{ {{ doc.email|latex }} }{% endif %}
-    {% if doc.linkedin %} \hspace{1pt} $|$ \hspace{1pt} \faLinkedin \texttt{ {{ doc.linkedin|latex }} }{% endif %}
-    {% if doc.github %} \hspace{1pt} $|$ \hspace{1pt} \faGithub \texttt{ {{ doc.github|latex }} }{% endif %}
-    {% if doc.location %} \hspace{1pt} $|$ \hspace{1pt} \faMapMarker* \texttt{ {{ doc.location|latex }} }{% endif %}
+    \small {{ doc.phone|latex }}{% if doc.phone %} | {% endif %}{{ doc.email|latex }}{% if doc.email %} | {% endif %}{{ doc.linkedin|latex }}{% if doc.linkedin %} | {% endif %}{{ doc.github|latex }}{% if doc.github %} | {% endif %}{{ doc.location|latex }}
     \\ \vspace{-3pt}
 \end{center}
 
