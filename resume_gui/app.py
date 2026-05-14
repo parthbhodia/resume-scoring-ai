@@ -23,7 +23,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import sys
 import threading
 from uuid import uuid4
@@ -120,6 +119,44 @@ def _clean_model_text(value: str) -> str:
     return t
 
 
+_STRUCTURAL_NOISE_PATTERNS = (
+    r"^leftmargin\s*=",
+    r"^label\s*=",
+    r"^textbackslash$",
+    r"^begin\s+itemize$",
+    r"^end\s+itemize$",
+    r"^item$",
+    r"^\\item$",
+    r"^\\textbackslash$",
+)
+
+_SECTION_HEADING_LINES = {
+    "candidate",
+    "summary",
+    "technical skills",
+    "skills",
+    "experience",
+    "work experience",
+    "professional experience",
+    "education",
+    "github",
+    "linkedin",
+}
+
+
+def _is_structural_noise_line(value: str) -> bool:
+    t = _clean_model_text(value)
+    if not t:
+        return True
+    low = t.lower().strip(" :-")
+    if low in _SECTION_HEADING_LINES:
+        return True
+    for pat in _STRUCTURAL_NOISE_PATTERNS:
+        if re.match(pat, low):
+            return True
+    return False
+
+
 def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
     contact = parsed.get("contact") or {}
     sections = parsed.get("sections") or []
@@ -145,11 +182,13 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
             for ent in entries:
                 bullets = ent.get("bullets") or []
                 if bullets:
-                    doc.summary = " ".join(
-                        _clean_model_text(str(b.get("text") or ""))
-                        for b in bullets
-                        if _clean_model_text(str(b.get("text") or ""))
-                    )
+                    cleaned_lines = []
+                    for b in bullets:
+                        line = _clean_model_text(str(b.get("text") or ""))
+                        if not line or _is_structural_noise_line(line):
+                            continue
+                        cleaned_lines.append(line)
+                    doc.summary = " ".join(cleaned_lines)
                     break
             continue
 
@@ -157,19 +196,24 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
             for ent in entries:
                 for b in ent.get("bullets") or []:
                     line = _clean_model_text(str(b.get("text") or ""))
-                    if not line:
-                        continue
-                    if line.lower().startswith(("begin itemize", "end itemize", "item")):
+                    if not line or _is_structural_noise_line(line):
                         continue
                     if ":" in line:
                         label, rest = line.split(":", 1)
+                        if _is_structural_noise_line(label):
+                            label = "Skills"
                         items = [x.strip() for x in rest.split(",") if x.strip()]
+                        items = [x for x in items if not _is_structural_noise_line(x)]
                         clean_label = _clean_model_text(label)
                         if not clean_label:
                             clean_label = "Skills"
-                        doc.skills.append((clean_label, normalize_skill_items(items)))
+                        normalized = normalize_skill_items(items)
+                        if normalized:
+                            doc.skills.append((clean_label, normalized))
                     else:
-                        doc.skills.append(("Skills", normalize_skill_items([line])))
+                        normalized = normalize_skill_items([line])
+                        if normalized:
+                            doc.skills.append(("Skills", normalized))
             continue
 
         if "experience" in sec_name or "work" in sec_name:
@@ -180,6 +224,7 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
                     for b in (ent.get("bullets") or [])
                     if _clean_model_text(str(b.get("text") or ""))
                 ]
+                bullets = [b for b in bullets if not _is_structural_noise_line(b)]
                 if not company and not role and not bullets:
                     continue
                 doc.experience.append(
@@ -191,6 +236,46 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
                         bullets=bullets,
                     )
                 )
+
+    # Consolidate duplicated skill labels/items from noisy model output.
+    merged_skills: list[tuple[str, list[str]]] = []
+    skill_index: dict[str, int] = {}
+    for label, items in doc.skills:
+        clean_label = _clean_model_text(label) or "Skills"
+        key = clean_label.lower()
+        if key not in skill_index:
+            skill_index[key] = len(merged_skills)
+            merged_skills.append((clean_label, []))
+        idx = skill_index[key]
+        existing = merged_skills[idx][1]
+        seen = {x.lower() for x in existing}
+        for item in items:
+            item_clean = _clean_model_text(item)
+            if not item_clean or _is_structural_noise_line(item_clean):
+                continue
+            lk = item_clean.lower()
+            if lk not in seen:
+                existing.append(item_clean)
+                seen.add(lk)
+    doc.skills = [(label, items) for label, items in merged_skills if items]
+
+    cleaned_exp: list[ExperienceItem] = []
+    for exp in doc.experience:
+        company = _clean_model_text(exp.company)
+        role = _clean_model_text(exp.role)
+        bullets = [b for b in exp.bullets if b and not _is_structural_noise_line(b)]
+        if not bullets and not role and company.lower() in {"", "experience"}:
+            continue
+        cleaned_exp.append(
+            ExperienceItem(
+                company=company or "Experience",
+                role=role,
+                location=_clean_model_text(exp.location),
+                dates=_clean_model_text(exp.dates),
+                bullets=bullets,
+            )
+        )
+    doc.experience = cleaned_exp
 
     return doc
 
@@ -254,13 +339,9 @@ def _create_structured_output_folder(base_folder: Optional[str], reference_folde
         rc = f"{role}_{company}".strip("_") or "structured"
         source_name = re.sub(r"[^A-Za-z0-9_.-]+", "", rc) or "structured"
 
-    src = Path(LIBRARY_ROOT) / source_name
     new_folder = f"{source_name}_structured_{uuid4().hex[:8]}"
     dst = Path(LIBRARY_ROOT) / new_folder
-    if src.exists() and src.is_dir():
-        shutil.copytree(src, dst)
-    else:
-        dst.mkdir(parents=True, exist_ok=True)
+    dst.mkdir(parents=True, exist_ok=True)
 
     tex_files = [p for p in dst.iterdir() if p.suffix == ".tex"]
     if not tex_files:
@@ -281,6 +362,7 @@ def _load_tex_from_candidate(folder: str, user_id: Optional[str]) -> Optional[st
 
 
 def _resolve_structured_source_folder(base_folder: Optional[str], reference_folder: Optional[str], user_id: Optional[str]) -> Tuple[str, str]:
+    _ = user_id  # Structured template resolution is Supabase-driven.
     candidates: List[str] = []
     if (base_folder or "").strip():
         candidates.append((base_folder or "").strip())
@@ -291,40 +373,36 @@ def _resolve_structured_source_folder(base_folder: Optional[str], reference_fold
             candidates.append(fallback)
 
     for c in candidates:
-        # Preferred: canonical template source in Supabase table.
+        # Canonical source: Supabase `resume_templates`.
         tex_from_template = _load_template_tex_from_supabase(c)
         if tex_from_template:
             return c, tex_from_template
 
-        tex = _load_tex_from_candidate(c, user_id)
-        if tex:
-            return c, tex
-    # Last resort: pick any folder under LIBRARY_ROOT that contains a .tex file.
-    try:
-        root = Path(LIBRARY_ROOT)
-        if root.exists() and root.is_dir():
-            for child in root.iterdir():
-                if not child.is_dir():
-                    continue
-                has_tex = any(p.suffix == ".tex" for p in child.iterdir() if p.is_file())
-                if has_tex:
-                    tex = get_resume_tex(child.name)
-                    if tex:
-                        return child.name, tex
-    except Exception:
-        pass
-
     raise RuntimeError(
-        "Could not load TeX from selected source folders: "
+        "Could not load template TeX from Supabase table `resume_templates` for folders: "
         + ", ".join(candidates)
-        + ". Add at least one template/base folder with a .tex file under LIBRARY_ROOT."
+        + ". Ensure rows exist with {reference_folder, tex_body, active=true}."
     )
 
 
 def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
     text = (candidate_profile or "").strip()
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    full_name = lines[0] if lines else "Candidate"
+    lines = [
+        _clean_model_text(ln)
+        for ln in text.splitlines()
+        if _clean_model_text(ln) and not _is_structural_noise_line(ln)
+    ]
+    full_name = "Candidate"
+    for ln in lines:
+        if ":" in ln:
+            continue
+        words = [w for w in re.split(r"\s+", ln) if w]
+        if len(words) < 2 or len(words) > 5:
+            continue
+        if any(ch.isdigit() for ch in ln):
+            continue
+        full_name = ln
+        break
     summary_lines = [ln for ln in lines[1:] if len(ln.split()) >= 6][:3]
     summary = " ".join(summary_lines)[:1200]
     bullets = [ln.lstrip("-•* ") for ln in lines if len(ln.split()) >= 8][:5]
