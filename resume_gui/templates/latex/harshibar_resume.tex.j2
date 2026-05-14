@@ -83,13 +83,12 @@
 
 \begin{center}
     \textbf{\Huge {{ doc.full_name|latex }}} \\ \vspace{5pt}
-    {% set contact = [] %}
-    {% if doc.phone %}{% set _ = contact.append('\\faPhone*\\ \\texttt{' ~ (doc.phone|latex) ~ '}') %}{% endif %}
-    {% if doc.email %}{% set _ = contact.append('\\faEnvelope\\ \\texttt{' ~ (doc.email|latex) ~ '}') %}{% endif %}
-    {% if doc.linkedin %}{% set _ = contact.append('\\faLinkedin\\ \\texttt{' ~ (doc.linkedin|latex) ~ '}') %}{% endif %}
-    {% if doc.github %}{% set _ = contact.append('\\faGithub\\ \\texttt{' ~ (doc.github|latex) ~ '}') %}{% endif %}
-    {% if doc.location %}{% set _ = contact.append('\\faMapMarker*\\ \\texttt{' ~ (doc.location|latex) ~ '}') %}{% endif %}
-    \small {% if contact|length %}{{ contact|join(' \\hspace{1pt} $|$ \\hspace{1pt} ') }}{% endif %}
+    \small
+    {% if doc.phone %}\faPhone* \texttt{ {{ doc.phone|latex }} }{% endif %}
+    {% if doc.email %} \hspace{1pt} $|$ \hspace{1pt} \faEnvelope \texttt{ {{ doc.email|latex }} }{% endif %}
+    {% if doc.linkedin %} \hspace{1pt} $|$ \hspace{1pt} \faLinkedin \texttt{ {{ doc.linkedin|latex }} }{% endif %}
+    {% if doc.github %} \hspace{1pt} $|$ \hspace{1pt} \faGithub \texttt{ {{ doc.github|latex }} }{% endif %}
+    {% if doc.location %} \hspace{1pt} $|$ \hspace{1pt} \faMapMarker* \texttt{ {{ doc.location|latex }} }{% endif %}
     \\ \vspace{-3pt}
 \end{center}
 
