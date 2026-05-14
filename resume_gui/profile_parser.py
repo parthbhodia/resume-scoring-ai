@@ -198,19 +198,27 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
         "experience", "professional experience", "work experience",
         "projects", "project", "education",
     }
+    _CONTACT_WORDS = {"linkedin", "github", "location", "email", "phone",
+                      "mobile", "website", "portfolio"}
     current_header = ""
     current_items: list[str] = []
     extras: list[tuple[str, list[str]]] = []
     for ln in lines:
         low = ln.lower().strip()
-        # heading heuristic: short alpha line, no punctuation colon, not bullet
-        is_heading = (
-            1 <= len(low.split()) <= 4
+        # Exclude candidate name line and lines that look like contact metadata
+        is_name_line = out.full_name != "Candidate" and ln.strip().lower() == out.full_name.lower()
+        has_contact = any(w in low for w in _CONTACT_WORDS)
+        has_url = ".com" in low or "http" in low or "https://" in low
+        # Likely a section heading: short alpha, no sentence-punctuation, not contact/name
+        if (
+            1 <= len(low.split()) <= 5
             and ":" not in low
             and not low.startswith(("-", "•", "*"))
             and re.match(r"^[a-zA-Z /&]+$", low) is not None
-        )
-        if is_heading:
+            and not is_name_line
+            and not has_contact
+            and not has_url
+        ):
             if current_header and current_items and current_header.lower() not in known:
                 extras.append((current_header, current_items[:]))
             current_header = ln.strip()
