@@ -95,6 +95,7 @@ HTML_FILE       = Path(__file__).parent / "index.html"
 PORT            = int(os.environ.get("PORT", 8765))
 USE_JINJA_LATEX_RENDERER = os.environ.get("USE_JINJA_LATEX_RENDERER", "true").strip().lower() in {"1", "true", "yes", "on"}
 ENABLE_JD_URL_EXTRACT = os.environ.get("ENABLE_JD_URL_EXTRACT", "false").strip().lower() in {"1", "true", "yes", "on"}
+USE_SUPABASE_TEMPLATE_BODY = os.environ.get("USE_SUPABASE_TEMPLATE_BODY", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_entry_header(header: str) -> Tuple[str, str, str, str]:
@@ -664,13 +665,16 @@ async def api_generate_stream(request: Request):
 
         if use_jinja_renderer:
             try:
-                source_folder = (base_folder or "").strip() or (reference_folder or "").strip() or "structured"
+                source_folder = (reference_folder or "").strip() or (base_folder or "").strip() or "structured"
                 base_tex: Optional[str] = None
-                try:
-                    _sf, _tex = _resolve_structured_source_folder(base_folder, reference_folder, user_id)
-                    source_folder, base_tex = _sf, _tex
-                except Exception:
-                    base_tex = None
+                if USE_SUPABASE_TEMPLATE_BODY:
+                    try:
+                        _sf, _tex = _resolve_structured_source_folder(base_folder, reference_folder, user_id)
+                        source_folder, base_tex = _sf, _tex
+                    except Exception:
+                        base_tex = None
+                else:
+                    base_tex = _load_tex_from_candidate(source_folder, user_id)
 
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "status",
@@ -695,21 +699,11 @@ async def api_generate_stream(request: Request):
 
                 renderer = JinjaLatexRenderer()
                 template_name = _template_name_for_reference(source_folder or reference_folder)
-                # Dynamic template selection:
-                # 1) If Supabase template is Jinja-shaped, render directly from DB body.
-                # 2) Otherwise render with file-based template selected by reference key.
-                if _supabase_template_is_jinja(base_tex):
-                    new_tex = renderer.render_from_string(doc, base_tex or "")
-                    asyncio.run_coroutine_threadsafe(queue.put({
-                        "event": "status",
-                        "msg": f"Structured renderer: using Supabase Jinja template ({source_folder})…",
-                    }), loop).result()
-                else:
-                    new_tex = renderer.render(doc, template_name=template_name)
-                    asyncio.run_coroutine_threadsafe(queue.put({
-                        "event": "status",
-                        "msg": f"Structured renderer: using file template ({template_name})…",
-                    }), loop).result()
+                new_tex = renderer.render(doc, template_name=template_name)
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "event": "status",
+                    "msg": f"Structured renderer: using file template ({template_name})…",
+                }), loop).result()
 
                 out_folder, _ = _create_structured_output_folder(base_folder, reference_folder, role, company)
                 compiled = recompile_resume_from_tex(out_folder, new_tex)
