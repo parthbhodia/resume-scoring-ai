@@ -478,7 +478,28 @@ async def api_resumes(request: Request):
 
 async def api_generate_stream(request: Request):
     """SSE endpoint — streams events as the resume is generated."""
-    body        = await request.json()
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        async def err_gen():
+            yield {
+                "data": json.dumps({
+                    "event": "error",
+                    "msg": "Invalid JSON body. Send strict JSON with double-quoted property names.",
+                })
+            }
+        return EventSourceResponse(err_gen())
+
+    if not isinstance(body, dict):
+        async def err_gen():
+            yield {
+                "data": json.dumps({
+                    "event": "error",
+                    "msg": "Invalid request body. Expected a JSON object.",
+                })
+            }
+        return EventSourceResponse(err_gen())
+
     company           = (body.get("company") or "").strip()
     role              = (body.get("role") or "").strip()
     jd                = (body.get("job_description") or "").strip()
