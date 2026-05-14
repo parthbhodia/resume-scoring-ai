@@ -9,20 +9,17 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 def _latex_escape(value: str) -> str:
     text = value or ""
-    replacements = {
-        "\\": r"\\textbackslash{}",
-        "&": r"\\&",
-        "%": r"\\%",
-        "$": r"\\$",
-        "#": r"\\#",
-        "_": r"\\_",
-        "{": r"\\{",
-        "}": r"\\}",
-        "~": r"\\textasciitilde{}",
-        "^": r"\\textasciicircum{}",
-    }
-    for src, dest in replacements.items():
-        text = text.replace(src, dest)
+    # Order: replace `\` first, then `%` (which is LaTeX comment char).
+    text = text.replace("\\", "\\textbackslash{} ")
+    text = text.replace("%", "\\%")
+    text = text.replace("&", "\\&")
+    text = text.replace("$", "\\$")
+    text = text.replace("#", "\\#")
+    text = text.replace("_", "\\_")
+    text = text.replace("{", "\\{")
+    text = text.replace("}", "\\}")
+    text = text.replace("~", "\\textasciitilde{}")
+    text = text.replace("^", "\\textasciicircum{}")
     return text
 
 
