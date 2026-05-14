@@ -337,6 +337,62 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
                 doc.summary = suggested
 
 
+def _structured_ratings_from_ats(ats: dict) -> dict:
+    checks = ats.get("checks") if isinstance(ats, dict) else []
+    jd_match = ats.get("jdMatch") if isinstance(ats, dict) else {}
+    criteria = []
+    for chk in (checks or [])[:8]:
+        name = str(chk.get("name") or "").strip()
+        if not name:
+            continue
+        passed = bool(chk.get("pass"))
+        criteria.append({
+            "name": name,
+            "weight": "Medium",
+            "score": 10 if passed else 4,
+            "notes": str(chk.get("detail") or "").strip(),
+        })
+
+    whats_working = []
+    gaps = []
+    for chk in (checks or []):
+        name = str(chk.get("name") or "").strip()
+        detail = str(chk.get("detail") or "").strip()
+        if not name:
+            continue
+        msg = f"{name}: {detail}" if detail else name
+        if chk.get("pass"):
+            if len(whats_working) < 5:
+                whats_working.append(msg)
+        else:
+            if len(gaps) < 5:
+                gaps.append(msg)
+
+    for sk in (jd_match.get("missingRequiredSkills") or [])[:4]:
+        gaps.append(f"Missing required skill signal: {sk}")
+
+    score = ats.get("score") if isinstance(ats, dict) else None
+    if score is None:
+        score = jd_match.get("matchScore") if isinstance(jd_match, dict) else 0
+    try:
+        match_score = int(score)
+    except Exception:
+        match_score = 0
+
+    verdict = "Strong alignment overall." if match_score >= 75 else (
+        "Moderate alignment; address top gaps for better fit." if match_score >= 55 else
+        "Low alignment right now; prioritize required skills and JD phrasing improvements."
+    )
+
+    return {
+        "match_score": match_score,
+        "criteria": criteria,
+        "whats_working": whats_working,
+        "gaps": gaps,
+        "verdict": verdict,
+    }
+
+
 def _create_structured_output_folder(base_folder: Optional[str], reference_folder: Optional[str], role: str, company: str) -> Tuple[str, str]:
     ref_name = (reference_folder or "").strip()
     base_name = (base_folder or "").strip()
@@ -637,31 +693,45 @@ async def api_generate_stream(request: Request):
                     except Exception as exc:
                         logger.warning(f"upload_pdf failed: {exc}")
 
-                # Minimal result contract for frontend + library row.
+                # Frontend/library contract + ATS/JD scoring.
+                parsed_for_analysis = parse_resume_tex(new_tex)
+                ats = ats_check(
+                    out_folder,
+                    jd,
+                    storage_user or user_id,
+                    target_role=role,
+                    parsed=parsed_for_analysis,
+                )
+                ratings_payload = _structured_ratings_from_ats(ats)
+
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "base",
                     "folder": source_folder,
                     "loaded": True,
                 }), loop).result()
+
+                diff_data = []
+                if isinstance(accepted_suggestions, list):
+                    for item in accepted_suggestions:
+                        if not isinstance(item, dict):
+                            continue
+                        orig = str(item.get("original") or "").strip()
+                        sugg = str(item.get("suggested") or "").strip()
+                        if orig or sugg:
+                            diff_data.append({"original": orig, "suggested": sugg})
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "diff",
-                    "data": [],
-                    "adds": 0,
-                    "removes": 0,
+                    "data": diff_data,
+                    "adds": len([d for d in diff_data if d.get("suggested")]),
+                    "removes": len([d for d in diff_data if d.get("original") and not d.get("suggested")]),
                 }), loop).result()
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "rationales",
-                    "data": [],
+                    "data": ratings_payload.get("gaps", [])[:4],
                 }), loop).result()
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "ratings",
-                    "data": {
-                        "match_score": 0,
-                        "criteria": [],
-                        "whats_working": [],
-                        "gaps": [],
-                        "verdict": "Structured render complete",
-                    },
+                    "data": ratings_payload,
                 }), loop).result()
 
                 asyncio.run_coroutine_threadsafe(queue.put(pdf_event), loop).result()
