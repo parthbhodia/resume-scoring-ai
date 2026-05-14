@@ -1624,6 +1624,9 @@ _TRIO_HEADING_RE  = re.compile(r"\\resumeTrioHeading\{([^}]*)\}\{([^}]*)\}\{([^}
 # non-greedy) outer match; we then strip braces ourselves to avoid pulling in
 # trailing tokens like `\resumeItemListEnd` if a bullet contains a `}`.
 _RESUME_ITEM_RE   = re.compile(r"\\resumeItem\{(.*)\}\s*$")
+_PLAIN_ITEM_RE    = re.compile(r"\\item\s+(.*)$")
+_BOLD_LINE_RE     = re.compile(r"\\textbf\{([^}]*)\}\s*\\\\\s*$")
+_ITALIC_LINE_RE   = re.compile(r"\\textit\{([^}]*)\}\s*\\\\\s*$")
 
 # Sections we never let the editor touch. (Was {"education"} originally per
 # user request — they later asked to allow editing Education too.) Kept as a
@@ -1723,7 +1726,63 @@ def _parse_contact_block(full_tex: str) -> Optional[Dict]:
                 block_end = i
                 break
         if block_start == -1 or block_end == -1:
-            return None
+            # Strategy 3: simple Jinja header (name line + contact/headline lines)
+            in_doc = False
+            hdr_start = -1
+            hdr_end = -1
+            for i, ln in enumerate(lines):
+                s = ln.strip()
+                if not in_doc:
+                    if "\\begin{document}" in s:
+                        in_doc = True
+                    continue
+                if "\\section" in s:
+                    break
+                if not s:
+                    continue
+                if hdr_start == -1 and ("\\LARGE" in s or "\\textbf{" in s):
+                    hdr_start = i
+                    hdr_end = i
+                    continue
+                if hdr_start != -1:
+                    hdr_end = i
+
+            if hdr_start == -1 or hdr_end == -1:
+                return None
+
+            header_lines = [lines[j].strip() for j in range(hdr_start, hdr_end + 1) if lines[j].strip()]
+            joined = " | ".join(header_lines)
+
+            def _grab_inline(pat: str) -> str:
+                m = re.search(pat, joined, re.I)
+                return m.group(1).strip() if m else ""
+
+            name = _grab_inline(r"\\textbf\{\s*([^}]+?)\s*\}")
+            email = _grab_inline(r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})")
+            phone = _grab_inline(r"(\+?\d[\d\s().-]{8,}\d)")
+            linkedin = _grab_inline(r"(https?://(?:www\.)?linkedin\.com/[^\s|]+|linkedin\.com/[^\s|]+|LinkedIn/[^\s|]+)")
+            github = _grab_inline(r"(https?://(?:www\.)?github\.com/[^\s|]+|github\.com/[^\s|]+|GitHub)")
+            location = _grab_inline(r"Location\s*:\s*([^|\\]+)")
+
+            return {
+                "blockStart": hdr_start,
+                "blockEnd": hdr_end,
+                "name": _latex_to_plain(name),
+                "location": _latex_to_plain(location),
+                "locationLabel": "Location",
+                "website": "",
+                "websiteUrl": "",
+                "linkedin": _latex_to_plain(linkedin),
+                "linkedinUrl": "",
+                "github": _latex_to_plain(github),
+                "githubUrl": "",
+                "email": _latex_to_plain(email),
+                "phone": _latex_to_plain(phone),
+                "emailLabel": "Email",
+                "phoneLabel": "Mobile",
+                "customFields": [],
+                "marked": False,
+            }
 
     block_text = "\n".join(lines[block_start : block_end + 1])
 
@@ -1945,6 +2004,26 @@ def parse_resume_tex(full_tex: str) -> Dict:
             in_item_list = False
             continue
 
+        # Jinja-style experience heading lines:
+        #   \textbf{ Company }\\
+        #   \textit{ Role }\\
+        sec_name = str(cur_section.get("name") or "").lower()
+        if "experience" in sec_name or "work" in sec_name:
+            mb = _BOLD_LINE_RE.search(stripped)
+            if mb:
+                company = _latex_to_plain(mb.group(1))
+                cur_entry = _new_entry(f"|{company}||", line_in_full, leading_ws)
+                cur_section["entries"].append(cur_entry)
+                in_item_list = False
+                continue
+            mi_role = _ITALIC_LINE_RE.search(stripped)
+            if mi_role and cur_entry is not None:
+                role_txt = _latex_to_plain(mi_role.group(1))
+                parts = [p.strip() for p in (cur_entry.get("header") or "").split("|")]
+                company_txt = parts[1] if len(parts) > 1 else ""
+                cur_entry["header"] = f"{role_txt}|{company_txt}||"
+                continue
+
         # --- Bullet ---
         mi = _RESUME_ITEM_RE.search(stripped)
         if mi:
@@ -1969,6 +2048,25 @@ def parse_resume_tex(full_tex: str) -> Dict:
                 if cur_entry["bulletBlockStart"] == -1:
                     cur_entry["bulletBlockStart"] = line_in_full
                 cur_entry["bulletBlockEnd"] = line_in_full
+            continue
+
+        # Plain LaTeX itemize bullets used by structured Jinja templates.
+        mip = _PLAIN_ITEM_RE.search(stripped)
+        if mip:
+            text = _latex_to_plain(mip.group(1))
+            if cur_entry is None:
+                cur_entry = _new_entry("", line_in_full, leading_ws)
+                cur_section["entries"].append(cur_entry)
+            bullet_counter += 1
+            cur_entry["bullets"].append({
+                "id": f"b{bullet_counter}",
+                "text": text,
+                "texLine": line_in_full,
+            })
+            if cur_entry["bulletBlockStart"] == -1:
+                cur_entry["bulletBlockStart"] = line_in_full
+            cur_entry["bulletBlockEnd"] = line_in_full
+            continue
 
     # Section end-line = line of next section minus 1, or end-of-document.
     for idx, sec in enumerate(sections):
