@@ -334,7 +334,14 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
 
 
 def _create_structured_output_folder(base_folder: Optional[str], reference_folder: Optional[str], role: str, company: str) -> Tuple[str, str]:
-    source_name = (base_folder or "").strip() or (reference_folder or "").strip()
+    ref_name = (reference_folder or "").strip()
+    base_name = (base_folder or "").strip()
+
+    # Never chain from prior generated artifacts like *_structured_<id>.
+    # Prefer canonical template key from reference_folder.
+    source_name = ref_name
+    if not source_name and base_name and "_structured_" not in base_name:
+        source_name = base_name
     if not source_name:
         rc = f"{role}_{company}".strip("_") or "structured"
         source_name = re.sub(r"[^A-Za-z0-9_.-]+", "", rc) or "structured"
@@ -364,8 +371,9 @@ def _load_tex_from_candidate(folder: str, user_id: Optional[str]) -> Optional[st
 def _resolve_structured_source_folder(base_folder: Optional[str], reference_folder: Optional[str], user_id: Optional[str]) -> Tuple[str, str]:
     _ = user_id  # Structured template resolution is Supabase-driven.
     candidates: List[str] = []
-    if (base_folder or "").strip():
-        candidates.append((base_folder or "").strip())
+    base_name = (base_folder or "").strip()
+    if base_name and "_structured_" not in base_name:
+        candidates.append(base_name)
     if (reference_folder or "").strip() and (reference_folder or "").strip() not in candidates:
         candidates.append((reference_folder or "").strip())
     for fallback in ("Adobe_FullStack", "Harshibar_Template1", "MaltaCV_Modern"):
