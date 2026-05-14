@@ -9,7 +9,9 @@
 \begin{document}
 
 {\LARGE \textbf{ {{ doc.full_name|latex }} }}\\
-{% if doc.headline %}{{ doc.headline|latex }}\\{% endif %}
+{% if doc.headline %}
+{{ doc.headline|latex }}\\
+{% endif %}
 {% set contact = [] %}
 {% if doc.location %}{% set _ = contact.append(doc.location) %}{% endif %}
 {% if doc.email %}{% set _ = contact.append(doc.email) %}{% endif %}
