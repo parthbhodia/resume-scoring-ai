@@ -31,6 +31,7 @@ class ParsedProfile:
     experience_bullets: list[str] = field(default_factory=list)
     projects_bullets: list[str] = field(default_factory=list)
     education_lines: list[str] = field(default_factory=list)
+    extra_sections: list[tuple[str, list[str]]] = field(default_factory=list)
 
 
 _NLP = None
@@ -190,6 +191,39 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
         {"projects", "experience", "professional experience", "work experience", "technical skills", "skills"},
         12,
     )
+
+    # Dynamic catch-all: capture additional headed sections so content is not lost.
+    known = {
+        "summary", "technical skills", "skills",
+        "experience", "professional experience", "work experience",
+        "projects", "project", "education",
+    }
+    current_header = ""
+    current_items: list[str] = []
+    extras: list[tuple[str, list[str]]] = []
+    for ln in lines:
+        low = ln.lower().strip()
+        # heading heuristic: short alpha line, no punctuation colon, not bullet
+        is_heading = (
+            1 <= len(low.split()) <= 4
+            and ":" not in low
+            and not low.startswith(("-", "•", "*"))
+            and re.match(r"^[a-zA-Z /&]+$", low) is not None
+        )
+        if is_heading:
+            if current_header and current_items and current_header.lower() not in known:
+                extras.append((current_header, current_items[:]))
+            current_header = ln.strip()
+            current_items = []
+            continue
+        if current_header:
+            val = ln.lstrip("-•* ").strip()
+            if val:
+                current_items.append(val)
+    if current_header and current_items and current_header.lower() not in known:
+        extras.append((current_header, current_items[:]))
+
+    out.extra_sections = extras[:8]
 
     if not out.experience_bullets:
         out.experience_bullets = [ln.lstrip("-•* ").strip() for ln in lines if len(ln.split()) >= 10][:12]

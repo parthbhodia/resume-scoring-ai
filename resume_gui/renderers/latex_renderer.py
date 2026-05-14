@@ -47,6 +47,7 @@ class ResumeDocModel:
     summary: str = ""
     skills: list[tuple[str, list[str]]] = field(default_factory=list)
     experience: list[ExperienceItem] = field(default_factory=list)
+    extra_sections: list[tuple[str, list[str]]] = field(default_factory=list)
 
 
 class JinjaLatexRenderer:

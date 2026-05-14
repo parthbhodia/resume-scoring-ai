@@ -46,4 +46,15 @@
 {% endfor %}
 {% endif %}
 
+{% if doc.extra_sections|length %}
+{% for sec in doc.extra_sections %}
+\section*{ {{ sec[0]|latex }} }
+\begin{itemize}
+{% for line in sec[1] %}
+\item {{ line|latex }}
+{% endfor %}
+\end{itemize}
+{% endfor %}
+{% endif %}
+
 \end{document}

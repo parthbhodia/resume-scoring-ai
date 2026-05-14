@@ -177,6 +177,7 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
         summary="",
         skills=[],
         experience=[],
+        extra_sections=[],
     )
 
     for sec in sections:
@@ -241,6 +242,22 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
                         bullets=bullets,
                     )
                 )
+            continue
+
+        # Dynamic catch-all sections for anything beyond summary/skills/experience.
+        sec_label = _clean_model_text(str(sec.get("name") or "")).strip()
+        if sec_label:
+            extra_lines: list[str] = []
+            for ent in entries:
+                hdr = _clean_model_text(str(ent.get("header") or "")).strip()
+                if hdr and not _is_structural_noise_line(hdr):
+                    extra_lines.append(hdr)
+                for b in ent.get("bullets") or []:
+                    txt = _clean_model_text(str(b.get("text") or ""))
+                    if txt and not _is_structural_noise_line(txt):
+                        extra_lines.append(txt)
+            if extra_lines:
+                doc.extra_sections.append((sec_label, extra_lines[:30]))
 
     # Consolidate duplicated skill labels/items from noisy model output.
     merged_skills: list[tuple[str, list[str]]] = []
@@ -519,6 +536,13 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
                 location="",
                 bullets=merged_bullets,
             )
+        ],
+        extra_sections=[
+            (name, [
+                _clean_model_text(v) for v in vals if _clean_model_text(v)
+            ])
+            for name, vals in (parsed.extra_sections or [])
+            if _clean_model_text(name)
         ],
     )
 
