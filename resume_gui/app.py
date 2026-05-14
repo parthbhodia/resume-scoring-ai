@@ -106,6 +106,20 @@ def _parse_entry_header(header: str) -> Tuple[str, str, str, str]:
     return parts[0], parts[1], parts[2], " | ".join(parts[3:])
 
 
+def _clean_model_text(value: str) -> str:
+    t = (value or "").strip()
+    if not t:
+        return ""
+    # Remove Markdown emphasis markers that leak from parser output.
+    t = t.replace("**", "")
+    # Remove common LaTeX control sequences while preserving plain words.
+    t = re.sub(r"\\(?:begin|end)\{[^}]*\}", " ", t)
+    t = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?", " ", t)
+    t = t.replace("{", " ").replace("}", " ")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
 def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
     contact = parsed.get("contact") or {}
     sections = parsed.get("sections") or []
@@ -131,20 +145,29 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
             for ent in entries:
                 bullets = ent.get("bullets") or []
                 if bullets:
-                    doc.summary = " ".join(str(b.get("text") or "").strip() for b in bullets if str(b.get("text") or "").strip())
+                    doc.summary = " ".join(
+                        _clean_model_text(str(b.get("text") or ""))
+                        for b in bullets
+                        if _clean_model_text(str(b.get("text") or ""))
+                    )
                     break
             continue
 
         if "skill" in sec_name:
             for ent in entries:
                 for b in ent.get("bullets") or []:
-                    line = str(b.get("text") or "").strip()
+                    line = _clean_model_text(str(b.get("text") or ""))
                     if not line:
+                        continue
+                    if line.lower().startswith(("begin itemize", "end itemize", "item")):
                         continue
                     if ":" in line:
                         label, rest = line.split(":", 1)
                         items = [x.strip() for x in rest.split(",") if x.strip()]
-                        doc.skills.append((label.strip(), normalize_skill_items(items)))
+                        clean_label = _clean_model_text(label)
+                        if not clean_label:
+                            clean_label = "Skills"
+                        doc.skills.append((clean_label, normalize_skill_items(items)))
                     else:
                         doc.skills.append(("Skills", normalize_skill_items([line])))
             continue
@@ -153,9 +176,9 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
             for ent in entries:
                 role, company, location, dates = _parse_entry_header(str(ent.get("header") or ""))
                 bullets = [
-                    str(b.get("text") or "").strip()
+                    _clean_model_text(str(b.get("text") or ""))
                     for b in (ent.get("bullets") or [])
-                    if str(b.get("text") or "").strip()
+                    if _clean_model_text(str(b.get("text") or ""))
                 ]
                 if not company and not role and not bullets:
                     continue
