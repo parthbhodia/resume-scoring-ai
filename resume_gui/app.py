@@ -394,6 +394,24 @@ def _structured_ratings_from_ats(ats: dict) -> dict:
     }
 
 
+def _template_name_for_reference(reference_folder: Optional[str]) -> str:
+    rf = (reference_folder or "").strip().lower()
+    if rf == "harshibar_template1":
+        return "classic_resume.tex.j2"
+    if rf == "adobe_fullstack":
+        return "classic_resume.tex.j2"
+    if rf == "maltacv_modern":
+        return "classic_resume.tex.j2"
+    return "classic_resume.tex.j2"
+
+
+def _supabase_template_is_jinja(tex_body: Optional[str]) -> bool:
+    t = (tex_body or "").strip()
+    if not t:
+        return False
+    return "{{ doc." in t or "{%" in t
+
+
 def _create_structured_output_folder(base_folder: Optional[str], reference_folder: Optional[str], role: str, company: str) -> Tuple[str, str]:
     ref_name = (reference_folder or "").strip()
     base_name = (base_folder or "").strip()
@@ -459,6 +477,30 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
     full_name = _clean_model_text(parsed.full_name or "Candidate") or "Candidate"
     summary = _clean_model_text(parsed.summary or "")
     bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
+    skills = []
+    for ln in parsed.skills_lines or []:
+        clean = _clean_model_text(ln)
+        if not clean or _is_structural_noise_line(clean):
+            continue
+        if ":" in clean:
+            label, rest = clean.split(":", 1)
+            items = [x.strip() for x in rest.split(",") if x.strip()]
+            if items:
+                skills.append((_clean_model_text(label) or "Skills", normalize_skill_items(items)))
+        else:
+            skills.append(("Skills", normalize_skill_items([clean])))
+
+    extra_bullets: list[str] = []
+    for p in parsed.projects_bullets or []:
+        cp = _clean_model_text(p)
+        if cp:
+            extra_bullets.append(f"Project: {cp}")
+    for e in parsed.education_lines or []:
+        ce = _clean_model_text(e)
+        if ce:
+            extra_bullets.append(f"Education: {ce}")
+
+    merged_bullets = bullets + extra_bullets
     return ResumeDocModel(
         full_name=full_name,
         headline=_clean_model_text(parsed.headline or role or ""),
@@ -468,14 +510,14 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         linkedin=_clean_model_text(parsed.linkedin or ""),
         github=_clean_model_text(parsed.github or ""),
         summary=summary,
-        skills=[],
+        skills=skills,
         experience=[
             ExperienceItem(
                 company=company or "Experience",
                 role=role or "Role",
                 dates="",
                 location="",
-                bullets=bullets,
+                bullets=merged_bullets,
             )
         ],
     )
@@ -628,7 +670,22 @@ async def api_generate_stream(request: Request):
                 }), loop).result()
 
                 renderer = JinjaLatexRenderer()
-                new_tex = renderer.render(doc)
+                template_name = _template_name_for_reference(source_folder or reference_folder)
+                # Dynamic template selection:
+                # 1) If Supabase template is Jinja-shaped, render directly from DB body.
+                # 2) Otherwise render with file-based template selected by reference key.
+                if _supabase_template_is_jinja(base_tex):
+                    new_tex = renderer.render_from_string(doc, base_tex or "")
+                    asyncio.run_coroutine_threadsafe(queue.put({
+                        "event": "status",
+                        "msg": f"Structured renderer: using Supabase Jinja template ({source_folder})…",
+                    }), loop).result()
+                else:
+                    new_tex = renderer.render(doc, template_name=template_name)
+                    asyncio.run_coroutine_threadsafe(queue.put({
+                        "event": "status",
+                        "msg": f"Structured renderer: using file template ({template_name})…",
+                    }), loop).result()
 
                 out_folder, _ = _create_structured_output_folder(base_folder, reference_folder, role, company)
                 compiled = recompile_resume_from_tex(out_folder, new_tex)

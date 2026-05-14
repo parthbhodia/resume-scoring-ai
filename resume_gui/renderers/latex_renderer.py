@@ -71,6 +71,10 @@ class JinjaLatexRenderer:
         template = self._env.get_template(template_name)
         return template.render(doc=doc)
 
+    def render_from_string(self, doc: ResumeDocModel, template_source: str) -> str:
+        template = self._env.from_string(template_source)
+        return template.render(doc=doc)
+
 
 def normalize_skill_items(items: Iterable[str]) -> list[str]:
     out: list[str] = []

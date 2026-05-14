@@ -27,7 +27,10 @@ class ParsedProfile:
     location: str = ""
     headline: str = ""
     summary: str = ""
+    skills_lines: list[str] = field(default_factory=list)
     experience_bullets: list[str] = field(default_factory=list)
+    projects_bullets: list[str] = field(default_factory=list)
+    education_lines: list[str] = field(default_factory=list)
 
 
 _NLP = None
@@ -143,22 +146,52 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
             break
     out.summary = " ".join(summary_parts)[:1200]
 
-    in_experience = False
-    for ln in lines:
-        low = ln.lower().strip()
-        if low in {"experience", "professional experience", "work experience"}:
-            in_experience = True
-            continue
-        if in_experience and low in {"projects", "education", "technical skills", "skills"}:
-            break
-        if in_experience:
-            bullet = ln.lstrip("-•* ").strip()
-            if len(bullet.split()) >= 8 and ":" not in bullet:
-                out.experience_bullets.append(bullet)
-            if len(out.experience_bullets) >= 8:
+    def _collect_between(start_terms: set[str], stop_terms: set[str], max_items: int) -> list[str]:
+        in_section = False
+        collected: list[str] = []
+        for ln in lines:
+            low = ln.lower().strip()
+            if low in start_terms:
+                in_section = True
+                continue
+            if in_section and low in stop_terms:
                 break
+            if in_section:
+                val = ln.lstrip("-•* ").strip()
+                if val:
+                    collected.append(val)
+                if len(collected) >= max_items:
+                    break
+        return collected
+
+    out.skills_lines = _collect_between(
+        {"technical skills", "skills"},
+        {"experience", "professional experience", "work experience", "projects", "education"},
+        20,
+    )
+
+    out.experience_bullets = [
+        b for b in _collect_between(
+            {"experience", "professional experience", "work experience"},
+            {"projects", "education", "technical skills", "skills"},
+            40,
+        )
+        if len(b.split()) >= 6
+    ]
+
+    out.projects_bullets = _collect_between(
+        {"projects", "project"},
+        {"education", "experience", "professional experience", "work experience", "technical skills", "skills"},
+        20,
+    )
+
+    out.education_lines = _collect_between(
+        {"education"},
+        {"projects", "experience", "professional experience", "work experience", "technical skills", "skills"},
+        12,
+    )
 
     if not out.experience_bullets:
-        out.experience_bullets = [ln.lstrip("-•* ").strip() for ln in lines if len(ln.split()) >= 10][:6]
+        out.experience_bullets = [ln.lstrip("-•* ").strip() for ln in lines if len(ln.split()) >= 10][:12]
 
     return out
