@@ -414,7 +414,7 @@ def _structured_ratings_from_ats(ats: dict) -> dict:
 def _template_name_for_reference(reference_folder: Optional[str]) -> str:
     rf = (reference_folder or "").strip().lower()
     if rf == "harshibar_template1":
-        return "classic_resume.tex.j2"
+        return "harshibar_resume.tex.j2"
     if rf == "adobe_fullstack":
         return "classic_resume.tex.j2"
     if rf == "maltacv_modern":
