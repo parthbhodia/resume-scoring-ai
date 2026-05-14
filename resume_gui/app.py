@@ -225,10 +225,11 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
                 doc.summary = suggested
 
 
-def _create_structured_folder_source(base_folder: Optional[str], reference_folder: Optional[str], source_tex: str) -> Tuple[str, str]:
+def _create_structured_output_folder(base_folder: Optional[str], reference_folder: Optional[str], role: str, company: str) -> Tuple[str, str]:
     source_name = (base_folder or "").strip() or (reference_folder or "").strip()
     if not source_name:
-        source_name = "structured"
+        rc = f"{role}_{company}".strip("_") or "structured"
+        source_name = re.sub(r"[^A-Za-z0-9_.-]+", "", rc) or "structured"
 
     src = Path(LIBRARY_ROOT) / source_name
     new_folder = f"{source_name}_structured_{uuid4().hex[:8]}"
@@ -237,12 +238,11 @@ def _create_structured_folder_source(base_folder: Optional[str], reference_folde
         shutil.copytree(src, dst)
     else:
         dst.mkdir(parents=True, exist_ok=True)
-        (dst / "resume.tex").write_text(source_tex or "", encoding="utf-8")
 
     tex_files = [p for p in dst.iterdir() if p.suffix == ".tex"]
     if not tex_files:
         fallback = dst / "resume.tex"
-        fallback.write_text(source_tex or "", encoding="utf-8")
+        fallback.write_text("", encoding="utf-8")
         tex_files = [fallback]
     return new_folder, str(tex_files[0])
 
@@ -295,6 +295,35 @@ def _resolve_structured_source_folder(base_folder: Optional[str], reference_fold
         "Could not load TeX from selected source folders: "
         + ", ".join(candidates)
         + ". Add at least one template/base folder with a .tex file under LIBRARY_ROOT."
+    )
+
+
+def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
+    text = (candidate_profile or "").strip()
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    full_name = lines[0] if lines else "Candidate"
+    summary_lines = [ln for ln in lines[1:] if len(ln.split()) >= 6][:3]
+    summary = " ".join(summary_lines)[:1200]
+    bullets = [ln.lstrip("-•* ") for ln in lines if len(ln.split()) >= 8][:5]
+    return ResumeDocModel(
+        full_name=full_name,
+        headline=role or "",
+        location="",
+        email="",
+        phone="",
+        linkedin="",
+        github="",
+        summary=summary,
+        skills=[],
+        experience=[
+            ExperienceItem(
+                company=company or "Experience",
+                role=role or "Role",
+                dates="",
+                location="",
+                bullets=bullets,
+            )
+        ],
     )
 
 # CORS: allow localhost dev + deployed frontend
@@ -394,15 +423,24 @@ async def api_generate_stream(request: Request):
 
         if use_jinja_renderer:
             try:
-                source_folder, base_tex = _resolve_structured_source_folder(base_folder, reference_folder, user_id)
+                source_folder = (base_folder or "").strip() or (reference_folder or "").strip() or "structured"
+                base_tex: Optional[str] = None
+                try:
+                    _sf, _tex = _resolve_structured_source_folder(base_folder, reference_folder, user_id)
+                    source_folder, base_tex = _sf, _tex
+                except Exception:
+                    base_tex = None
 
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "status",
                     "msg": f"Structured renderer: loading source ({source_folder})…",
                 }), loop).result()
 
-                parsed = parse_resume_tex(base_tex)
-                doc = _resume_doc_from_parsed(parsed)
+                if base_tex:
+                    parsed = parse_resume_tex(base_tex)
+                    doc = _resume_doc_from_parsed(parsed)
+                else:
+                    doc = _resume_doc_from_profile_text(candidate_profile, role, company)
                 _apply_accepted_edits_to_doc(doc, accepted_suggestions if isinstance(accepted_suggestions, list) else None)
 
                 asyncio.run_coroutine_threadsafe(queue.put({
@@ -413,7 +451,7 @@ async def api_generate_stream(request: Request):
                 renderer = JinjaLatexRenderer()
                 new_tex = renderer.render(doc)
 
-                out_folder, _ = _create_structured_folder_source(base_folder, reference_folder, base_tex)
+                out_folder, _ = _create_structured_output_folder(base_folder, reference_folder, role, company)
                 compiled = recompile_resume_from_tex(out_folder, new_tex)
                 tex_path = compiled.get("tex_path")
                 pdf_path = compiled.get("pdf_path")

@@ -673,6 +673,7 @@ export default function ResumeBuilder({
     setAtsLoading(true);
     setAtsError(null);
     try {
+      const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
       let parsedSlim: { sections: ParsedSection[] } | undefined;
       try {
         const uid = user.id;
@@ -690,19 +691,32 @@ export default function ResumeBuilder({
         /* optional — ATS falls back to PDF line heuristics for bullets */
       }
 
-      const resp = await fetch(apiUrl(`/api/ats-check/${encodeURIComponent(folder)}`), {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          jd: jd.slice(0, 8000),
-          user_id: user.id,
-          target_role: role.trim(),
-          ...(parsedSlim ? { parsed: parsedSlim } : {}),
-        }),
-      });
-      const json = await parseJsonOrThrow<AtsResult & { error?: string }>(resp);
-      if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "ATS check failed."));
-      setAtsResult(json);
+      let lastErr: Error | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const resp = await fetch(apiUrl(`/api/ats-check/${encodeURIComponent(folder)}`), {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({
+            jd: jd.slice(0, 8000),
+            user_id: user.id,
+            target_role: role.trim(),
+            ...(parsedSlim ? { parsed: parsedSlim } : {}),
+          }),
+        });
+        const json = await parseJsonOrThrow<AtsResult & { error?: string }>(resp);
+        if (resp.ok) {
+          setAtsResult(json);
+          lastErr = null;
+          break;
+        }
+        const msg = toUserFriendlyErrorMessage(json.error ?? "ATS check failed.");
+        lastErr = new Error(msg);
+        const retryableNotFound =
+          resp.status === 404 && /not found locally or in storage/i.test(msg);
+        if (!retryableNotFound || attempt === 1) break;
+        await delay(1400);
+      }
+      if (lastErr) throw lastErr;
     } catch (e: unknown) {
       setAtsError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -722,9 +736,10 @@ export default function ResumeBuilder({
   // Auto-run ATS after generation completes (signed-in users only). Skip for template/layout handoff.
   useEffect(() => {
     if (studioHandoff) return;
-    if (!authReady || !user?.id || !result?.folder || atsLoading || atsResult || atsError) return;
+    // Wait for PDF URL so ATS does not race before compile/upload finishes.
+    if (!authReady || !user?.id || !result?.folder || !result?.pdfUrl || atsLoading || atsResult || atsError) return;
     void runAtsCheck(result.folder);
-  }, [authReady, user?.id, result?.folder, atsLoading, atsResult, atsError, runAtsCheck]);
+  }, [authReady, user?.id, result?.folder, result?.pdfUrl, atsLoading, atsResult, atsError, runAtsCheck]);
 
   // Reset ATS when a new generation starts
   useEffect(() => {
