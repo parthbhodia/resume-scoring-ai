@@ -340,6 +340,13 @@ export default function ResumeBuilder({
   const [suggestCoachStreamText, setSuggestCoachStreamText] = useState("");
   const suggestStreamAbortRef = useRef<AbortController | null>(null);
   const [suggestError,   setSuggestError]   = useState<string | null>(null);
+  /** When JD text matches ``jd``, a second coach call can POST ``reuse_research_*`` to skip another web search. */
+  const suggestResearchReuseGateRef = useRef<{
+    jd: string;
+    digest: string;
+    queries: string[];
+    sources: { title: string | null; url: string }[];
+  } | null>(null);
   /** Phased checklist while suggestions API runs: 0 → 1 → 2 → 3 (timed), then hidden when done. */
   const [suggestLoaderStepsDone, setSuggestLoaderStepsDone] = useState(0);
   const [suggestLoaderTipIdx, setSuggestLoaderTipIdx] = useState(0);
@@ -766,6 +773,20 @@ export default function ResumeBuilder({
     if (!effJd) { setSuggestError("Please paste a job description first."); return; }
     if (!candidateProfile) { setSuggestError("Please upload your resume first."); return; }
 
+    const jdKey = effJd.trim();
+    const reuseGate = suggestResearchReuseGateRef.current;
+    const canReuseResearch =
+      !!reuseGate &&
+      reuseGate.jd === jdKey &&
+      reuseGate.digest.trim().length >= 40;
+    const reuseResearchBody = canReuseResearch
+      ? {
+          reuse_research_digest: reuseGate.digest.slice(0, 4800),
+          reuse_research_queries: reuseGate.queries,
+          reuse_research_sources: reuseGate.sources,
+        }
+      : {};
+
     suggestStreamAbortRef.current?.abort();
     const ac = new AbortController();
     suggestStreamAbortRef.current = ac;
@@ -785,7 +806,11 @@ export default function ResumeBuilder({
       const resp = await fetch(apiUrl("/api/suggest-changes-stream"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidate_profile: candidateProfile, job_description: effJd }),
+        body: JSON.stringify({
+          candidate_profile: candidateProfile,
+          job_description: effJd,
+          ...reuseResearchBody,
+        }),
         signal: ac.signal,
       });
 
@@ -877,7 +902,16 @@ export default function ResumeBuilder({
                 : [];
               setSuggestResearchQueries(rq);
               setSuggestResearchSources(rs);
-              setSuggestResearchDigest(typeof ev.research_digest === "string" ? ev.research_digest : "");
+              const digestDone = typeof ev.research_digest === "string" ? ev.research_digest : "";
+              setSuggestResearchDigest(digestDone);
+              if (digestDone.trim().length >= 40) {
+                suggestResearchReuseGateRef.current = {
+                  jd: jdKey,
+                  digest: digestDone.trim(),
+                  queries: rq,
+                  sources: rs,
+                };
+              }
               setSuggestCoachStreamText("");
               break;
             }

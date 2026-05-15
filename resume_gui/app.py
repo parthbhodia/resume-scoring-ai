@@ -383,6 +383,100 @@ def _skills_fallback_replace_or_append(doc: ResumeDocModel, original: str, sugge
     doc.skills.append(("Skills", [sug]))
 
 
+def _normalize_resume_line_for_suggestion(s: str) -> str:
+    """Align with ``web/lib/suggestionResumeMatch.ts`` ``normalizeResumeLineForSuggestion``."""
+    t = (s or "").strip().lower()
+    for a, b in (
+        ("\u2018", "'"),
+        ("\u2019", "'"),
+        ("\u201c", "'"),
+        ("\u201d", "'"),
+        ("\u2032", "'"),
+        ("\u2033", "'"),
+    ):
+        t = t.replace(a, b)
+    t = re.sub(
+        r"^[\s\u2022\u00b7\u2023\u2024\u2043\u2219\-\u2013\u2014*‧·.]+",
+        "",
+        t,
+    )
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _resume_line_matches_suggestion_original(line: str, original: str) -> bool:
+    """Same contract as ``resumeLineMatchesSuggestionOriginal`` in ``suggestionResumeMatch.ts``."""
+    no = _normalize_resume_line_for_suggestion(original)
+    nl = _normalize_resume_line_for_suggestion(line)
+    if not no or not nl:
+        return False
+    if nl == no:
+        return True
+
+    raw_line = line.strip().lower().replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", "'").replace("\u201d", "'")
+    raw_orig = original.strip().lower().replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", "'").replace("\u201d", "'")
+    if raw_line == raw_orig:
+        return True
+
+    min_contains = 8
+    if len(no) >= min_contains and len(nl) >= min_contains:
+        if no in nl or nl in no:
+            return True
+
+    pref_len = 55
+    pref_a = nl[:pref_len]
+    pref_b = no[:pref_len]
+    if len(pref_a) >= 12 and len(pref_b) >= 12:
+        if pref_a.startswith(pref_b) or pref_b.startswith(pref_a):
+            return True
+
+    if len(no) >= 14 and len(nl) >= 14:
+        shorter = nl if len(nl) <= len(no) else no
+        longer = no if len(nl) <= len(no) else nl
+        window = longer[: len(shorter) + 8]
+        if shorter in window:
+            return True
+
+    return False
+
+
+def _apply_line_suggestion(line: str, original: str, suggested: str) -> Optional[str]:
+    """If ``original`` matches this line (verbatim or fuzzy), return the new line text; else None."""
+    if not original:
+        return None
+    if original in line:
+        if suggested:
+            return line.replace(original, suggested).strip()
+        return ""
+    if _resume_line_matches_suggestion_original(line, original):
+        if suggested:
+            return suggested.strip()
+        return ""
+    return None
+
+
+def _experience_fallback_replace_by_prefix(doc: ResumeDocModel, original: str, suggested: str) -> bool:
+    """Last resort when fuzzy match failed: replace the bullet whose text contains a long prefix of ``original``."""
+    orig = (original or "").strip()
+    sug = (suggested or "").strip()
+    if not orig or not sug or len(orig) < 24:
+        return False
+    prefix = orig[:48].lower()
+    for exp in doc.experience:
+        next_bullets: list[str] = []
+        changed = False
+        for b in exp.bullets:
+            if prefix in (b or "").lower():
+                next_bullets.append(sug)
+                changed = True
+            else:
+                next_bullets.append(b)
+        if changed:
+            exp.bullets = [x for x in next_bullets if x]
+            return True
+    return False
+
+
 def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Optional[list]) -> None:
     if not isinstance(accepted_suggestions, list):
         return
@@ -405,13 +499,14 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
             next_items = []
             changed = False
             for it in items:
-                if original in it:
-                    if suggested:
-                        next_items.append(it.replace(original, suggested).strip())
+                updated = _apply_line_suggestion(it, original, suggested)
+                if updated is None:
+                    next_items.append(it)
+                else:
                     changed = True
                     replaced = True
-                else:
-                    next_items.append(it)
+                    if updated:
+                        next_items.append(updated)
             if changed:
                 doc.skills[idx] = (label, [x for x in next_items if x])
 
@@ -419,13 +514,14 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
             next_bullets = []
             changed = False
             for b in exp.bullets:
-                if original in b:
-                    if suggested:
-                        next_bullets.append(b.replace(original, suggested).strip())
+                updated = _apply_line_suggestion(b, original, suggested)
+                if updated is None:
+                    next_bullets.append(b)
+                else:
                     changed = True
                     replaced = True
-                else:
-                    next_bullets.append(b)
+                    if updated:
+                        next_bullets.append(updated)
             if changed:
                 exp.bullets = [x for x in next_bullets if x]
 
@@ -442,12 +538,13 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
             elif bucket == "education":
                 _append_extra_section_line(doc, "Education", suggested)
             elif bucket == "experience":
-                logger.warning(
-                    "accepted_suggestion could not be matched to structured experience "
-                    "(verbatim original missing); skipped id=%s section=%r",
-                    str(item.get("id") or "")[:32],
-                    (item.get("section") or "")[:80],
-                )
+                if not _experience_fallback_replace_by_prefix(doc, original, suggested):
+                    logger.warning(
+                        "accepted_suggestion could not be matched to structured experience "
+                        "(no verbatim or fuzzy line match, prefix fallback failed); skipped id=%s section=%r",
+                        str(item.get("id") or "")[:32],
+                        (item.get("section") or "")[:80],
+                    )
             else:
                 logger.warning(
                     "accepted_suggestion could not be matched in structured doc; skipped id=%s section=%r",
@@ -3588,10 +3685,41 @@ def _resume_coach_prompt(candidate_profile: str, job_description: str, digest: s
     )
 
 
+def _sanitize_reuse_research_sources(raw: object) -> List[dict]:
+    out: List[dict] = []
+    if not isinstance(raw, list):
+        return out
+    for it in raw[:40]:
+        if not isinstance(it, dict):
+            continue
+        url = str(it.get("url") or "").strip()[:2000]
+        if not url:
+            continue
+        title = str(it.get("title") or "").strip()[:500] or None
+        out.append({"title": title, "url": url})
+    return out
+
+
+def _try_suggest_reuse_research(body: dict) -> Optional[Tuple[str, List[str], List[dict]]]:
+    """If the client sends a prior digest (same JD session), skip a second live web search."""
+    d = str(body.get("reuse_research_digest") or "").strip()
+    if len(d) < 40:
+        return None
+    rq_in = body.get("reuse_research_queries")
+    rq = [
+        str(q).strip()[:500]
+        for q in (rq_in if isinstance(rq_in, list) else [])
+        if str(q).strip()
+    ][:40]
+    rs = _sanitize_reuse_research_sources(body.get("reuse_research_sources"))
+    return (d[:5000], rq, rs)
+
+
 async def api_suggest_changes(request: Request):
     """POST /api/suggest-changes — analyze resume vs JD and return per-bullet suggestions.
 
-    Body: { "candidate_profile": str, "job_description": str }
+    Body: { "candidate_profile": str, "job_description": str,
+            optional reuse_research_digest, reuse_research_queries, reuse_research_sources }
     Returns: { "summary", "suggestions", optional "research_queries", "research_sources", "research_digest" }
     """
     try:
@@ -3611,12 +3739,17 @@ async def api_suggest_changes(request: Request):
     digest = ""
     research_queries: List[str] = []
     research_sources: List[dict] = []
-    try:
-        digest, research_queries, research_sources = await loop.run_in_executor(
-            None, run_tailor_research_job_context, job_description
-        )
-    except Exception as exc:
-        logger.warning("pre-suggestion web research failed (suggestions will use resume+JD only): %s", exc)
+    reuse = _try_suggest_reuse_research(body)
+    if reuse:
+        digest, research_queries, research_sources = reuse
+        logger.info("suggest-changes: reusing client-provided research digest (%s chars)", len(digest))
+    else:
+        try:
+            digest, research_queries, research_sources = await loop.run_in_executor(
+                None, run_tailor_research_job_context, job_description
+            )
+        except Exception as exc:
+            logger.warning("pre-suggestion web research failed (suggestions will use resume+JD only): %s", exc)
 
     prompt = _resume_coach_prompt(candidate_profile, job_description, digest)
 
@@ -3645,6 +3778,9 @@ async def api_suggest_changes(request: Request):
 
 async def api_suggest_changes_stream(request: Request):
     """POST /api/suggest-changes-stream — same inputs as suggest-changes; SSE with live coach tokens.
+
+    Body may include reuse_research_digest (+ optional reuse_research_queries / reuse_research_sources)
+    to skip a second live JD web search when the job description is unchanged since the last pass.
 
     Events (JSON per line after ``data: ``):
       ``status`` {msg}
@@ -3678,20 +3814,26 @@ async def api_suggest_changes_stream(request: Request):
 
     loop = asyncio.get_event_loop()
     queue: asyncio.Queue = asyncio.Queue()
+    reuse_pack = _try_suggest_reuse_research(body)
 
     def producer():
         try:
             def qput(item: Dict[str, Any]) -> None:
                 asyncio.run_coroutine_threadsafe(queue.put(item), loop).result()
 
-            qput({"event": "status", "msg": "Gathering live context from the web…"})
             digest = ""
             research_queries: List[str] = []
             research_sources: List[dict] = []
-            try:
-                digest, research_queries, research_sources = run_tailor_research_job_context(job_description)
-            except Exception as exc:
-                logger.warning("pre-suggestion web research failed (suggestions stream): %s", exc)
+            if reuse_pack:
+                digest, research_queries, research_sources = reuse_pack
+                logger.info("suggest-changes-stream: reusing client research digest (%s chars)", len(digest))
+                qput({"event": "status", "msg": "Reusing web research from your last pass for this job…"})
+            else:
+                qput({"event": "status", "msg": "Gathering live context from the web…"})
+                try:
+                    digest, research_queries, research_sources = run_tailor_research_job_context(job_description)
+                except Exception as exc:
+                    logger.warning("pre-suggestion web research failed (suggestions stream): %s", exc)
             rd = digest.strip()[:2500] if digest.strip() else ""
             qput({
                 "event": "research",
