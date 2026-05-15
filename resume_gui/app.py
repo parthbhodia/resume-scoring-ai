@@ -860,8 +860,8 @@ async def api_generate_stream(request: Request):
                     ratings_payload = {
                         "match_score": llm_ratings.get("match_score", 0),
                         "criteria": (llm_ratings.get("criteria") or [])[:12],
-                        "whats_working": [{"text": w} for w in (llm_ratings.get("whats_working") or [])],
-                        "gaps": [{"text": g} for g in (llm_ratings.get("gaps") or [])],
+                        "whats_working": llm_ratings.get("whats_working") or [],
+                        "gaps": llm_ratings.get("gaps") or [],
                         "verdict": llm_ratings.get("verdict", ""),
                     }
                 else:
