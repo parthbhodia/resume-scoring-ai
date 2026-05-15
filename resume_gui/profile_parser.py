@@ -96,6 +96,8 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
     out.phone = _first_regex(text, r"(\+?\d[\d\s().-]{8,}\d)")
     out.linkedin = _first_regex(text, r"(https?://(?:www\.)?linkedin\.com/[^\s|]+|linkedin\.com/[^\s|]+|linkedin/[^\s|]+)")
     out.github = _first_regex(text, r"(https?://(?:www\.)?github\.com/[^\s|]+|github\.com/[^\s|]+|github/[^\s|]+)")
+    if not out.github:
+        out.github = _first_regex(text, r"github\s*[:\-\u2014]\s*(\S+)")
 
     loc = _first_regex(text, r"location\s*:\s*([^\n|]+)")
     out.location = loc

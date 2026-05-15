@@ -41,6 +41,7 @@ class ResumeDocModel:
     phone: str = ""
     linkedin: str = ""
     github: str = ""
+    website: str = ""
     summary: str = ""
     skills: list[tuple[str, list[str]]] = field(default_factory=list)
     experience: list[ExperienceItem] = field(default_factory=list)

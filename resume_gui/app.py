@@ -558,8 +558,151 @@ def _resolve_structured_source_folder(base_folder: Optional[str], reference_fold
     )
 
 
+def _llm_normalize_profile(raw_text: str, parsed: Any) -> Optional[dict]:
+    """Call LLM to normalize and fill gaps in the regex-parsed profile.
+
+    Returns a dict matching the full resume schema, or None on failure.
+    Falls back to None so the caller can use regex-only path.
+    """
+    partial_parse = {
+        "full_name": parsed.full_name,
+        "headline": parsed.headline,
+        "email": parsed.email,
+        "phone": parsed.phone,
+        "linkedin": parsed.linkedin,
+        "github": parsed.github,
+        "location": parsed.location,
+        "summary": (parsed.summary or "")[:500],
+    }
+
+    prompt = (
+        "You are a resume data extraction system. Extract all resume information from the raw text below.\n"
+        "Return ONLY valid JSON (no markdown fences, no explanation) matching this exact schema:\n"
+        '{\n'
+        '  "full_name": "string",\n'
+        '  "headline": "job title or headline, e.g. Senior Frontend Engineer",\n'
+        '  "email": "string",\n'
+        '  "phone": "string",\n'
+        '  "linkedin": "URL or linkedin.com/in/... path or empty string",\n'
+        '  "github": "URL or github.com/username path or empty string",\n'
+        '  "website": "personal website/portfolio URL or empty string",\n'
+        '  "location": "city, state format or empty string",\n'
+        '  "summary": "full professional summary paragraph",\n'
+        '  "skills": [{"label": "Category", "items": ["skill1", "skill2"]}],\n'
+        '  "experience": [\n'
+        '    {"company": "string", "role": "string", "dates": "string", "location": "string",\n'
+        '     "bullets": ["bullet1"], "technologies": ["tech1"]}\n'
+        '  ],\n'
+        '  "projects": [{"name": "string", "bullets": ["..."]}],\n'
+        '  "education": [{"institution": "string", "degree": "string", "dates": "string", "location": "string"}]\n'
+        '}\n\n'
+        f"Partial parse (use as hints, correct if wrong):\n{json.dumps(partial_parse, indent=2)}\n\n"
+        f"Raw resume text:\n{raw_text[:4000]}"
+    )
+
+    try:
+        result = _llm_json_call(prompt)
+        if result and isinstance(result, dict) and result.get("full_name"):
+            return result
+    except Exception as exc:
+        logger.warning(f"_llm_normalize_profile failed: {exc}")
+    return None
+
+
 def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
     parsed = parse_profile_text(candidate_profile)
+
+    # Try LLM normalization first for richer, more complete extraction.
+    llm_data = _llm_normalize_profile(candidate_profile or "", parsed)
+
+    if llm_data:
+        full_name = _clean_model_text(llm_data.get("full_name") or parsed.full_name or "Candidate") or "Candidate"
+        headline = _clean_model_text(llm_data.get("headline") or parsed.headline or role or "")
+        location = _clean_model_text(llm_data.get("location") or parsed.location or "")
+        email = _clean_model_text(llm_data.get("email") or parsed.email or "")
+        phone = _clean_model_text(llm_data.get("phone") or parsed.phone or "")
+        linkedin = _clean_model_text(llm_data.get("linkedin") or parsed.linkedin or "")
+        github = _clean_model_text(llm_data.get("github") or parsed.github or "")
+        website = _clean_model_text(llm_data.get("website") or "")
+        summary = _clean_model_text(llm_data.get("summary") or parsed.summary or "")
+
+        skills: list[tuple[str, list[str]]] = []
+        for sk in llm_data.get("skills") or []:
+            if isinstance(sk, dict):
+                label = _clean_model_text(sk.get("label") or "Skills")
+                items = [_clean_model_text(i) for i in (sk.get("items") or []) if _clean_model_text(i)]
+                if items:
+                    skills.append((label, normalize_skill_items(items)))
+
+        experience_list: list[ExperienceItem] = []
+        for exp in llm_data.get("experience") or []:
+            if isinstance(exp, dict):
+                exp_company = _clean_model_text(exp.get("company") or company or "Experience")
+                exp_role = _clean_model_text(exp.get("role") or role or "")
+                exp_dates = _clean_model_text(exp.get("dates") or "")
+                exp_location = _clean_model_text(exp.get("location") or "")
+                exp_bullets = [_clean_model_text(b) for b in (exp.get("bullets") or []) if _clean_model_text(b)]
+                if exp_company or exp_role:
+                    experience_list.append(ExperienceItem(
+                        company=exp_company,
+                        role=exp_role,
+                        dates=exp_dates,
+                        location=exp_location,
+                        bullets=exp_bullets,
+                    ))
+
+        # Build extra_sections: start from any regex extras, then overlay LLM projects/education.
+        extra_sec: list[tuple[str, list[str]]] = [
+            (name, [_clean_model_text(v) for v in vals if _clean_model_text(v)])
+            for name, vals in (parsed.extra_sections or [])
+            if _clean_model_text(name) and name.lower() not in ("projects", "project", "education")
+        ]
+
+        proj_bullets: list[str] = []
+        for proj in llm_data.get("projects") or []:
+            if isinstance(proj, dict):
+                name_p = _clean_model_text(proj.get("name") or "")
+                p_buls = [_clean_model_text(b) for b in (proj.get("bullets") or []) if _clean_model_text(b)]
+                if name_p and p_buls:
+                    proj_bullets.extend(f"{name_p}: {b}" for b in p_buls)
+                elif name_p:
+                    proj_bullets.append(name_p)
+                else:
+                    proj_bullets.extend(p_buls)
+        if proj_bullets:
+            extra_sec.append(("Projects", proj_bullets))
+
+        edu_lines: list[str] = []
+        for edu in llm_data.get("education") or []:
+            if isinstance(edu, dict):
+                parts = [
+                    _clean_model_text(edu.get("institution") or ""),
+                    _clean_model_text(edu.get("degree") or ""),
+                    _clean_model_text(edu.get("dates") or ""),
+                    _clean_model_text(edu.get("location") or ""),
+                ]
+                line = ", ".join(p for p in parts if p)
+                if line:
+                    edu_lines.append(line)
+        if edu_lines:
+            extra_sec.append(("Education", edu_lines))
+
+        return ResumeDocModel(
+            full_name=full_name,
+            headline=headline,
+            location=location,
+            email=email,
+            phone=phone,
+            linkedin=linkedin,
+            github=github,
+            website=website,
+            summary=summary,
+            skills=skills,
+            experience=experience_list,
+            extra_sections=extra_sec,
+        )
+
+    # ── Fallback: regex-only path ────────────────────────────────────────────
     full_name = _clean_model_text(parsed.full_name or "Candidate") or "Candidate"
     summary = _clean_model_text(parsed.summary or "")
     skills = []
@@ -575,38 +718,39 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         else:
             skills.append(("Skills", normalize_skill_items([clean])))
 
-    # Multi-role experience from structured parser.
     if parsed.experience_entries:
         experience_list = [
             ExperienceItem(
-                company=_clean_model_text(company) or "Experience",
-                role=_clean_model_text(role or ""),
-                dates=_clean_model_text(dates or ""),
-                location=_clean_model_text(location or ""),
-                bullets=[_clean_model_text(b) for b in bullets if _clean_model_text(b)],
+                company=_clean_model_text(ec) or "Experience",
+                role=_clean_model_text(er or ""),
+                dates=_clean_model_text(ed or ""),
+                location=_clean_model_text(el or ""),
+                bullets=[_clean_model_text(b) for b in eb if _clean_model_text(b)],
             )
-            for company, role, dates, location, bullets in parsed.experience_entries
+            for ec, er, ed, el, eb in parsed.experience_entries
         ]
     else:
-        bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
-        extra_bullets: list[str] = []
-        for p in parsed.projects_bullets or []:
-            cp = _clean_model_text(p)
-            if cp:
-                extra_bullets.append(f"Project: {cp}")
-        for e in parsed.education_lines or []:
-            ce = _clean_model_text(e)
-            if ce:
-                extra_bullets.append(f"Education: {ce}")
+        reg_bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
         experience_list = [
             ExperienceItem(
                 company=company or "Experience",
                 role=role or "Role",
                 dates="",
                 location="",
-                bullets=bullets + extra_bullets,
+                bullets=reg_bullets,
             )
         ]
+
+    # ALWAYS add projects and education to extra_sections (not gated on experience_entries).
+    extra_sec = list(parsed.extra_sections or [])
+    if parsed.projects_bullets:
+        clean_proj = [_clean_model_text(b) for b in parsed.projects_bullets if _clean_model_text(b)]
+        if clean_proj:
+            extra_sec.append(("Projects", clean_proj))
+    if parsed.education_lines:
+        clean_edu = [_clean_model_text(e) for e in parsed.education_lines if _clean_model_text(e)]
+        if clean_edu:
+            extra_sec.append(("Education", clean_edu))
 
     return ResumeDocModel(
         full_name=full_name,
@@ -616,14 +760,13 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         phone=_clean_model_text(parsed.phone or ""),
         linkedin=_clean_model_text(parsed.linkedin or ""),
         github=_clean_model_text(parsed.github or ""),
+        website="",
         summary=summary,
         skills=skills,
         experience=experience_list,
         extra_sections=[
-            (name, [
-                _clean_model_text(v) for v in vals if _clean_model_text(v)
-            ])
-            for name, vals in (parsed.extra_sections or [])
+            (name, [_clean_model_text(v) for v in vals if _clean_model_text(v)])
+            for name, vals in extra_sec
             if _clean_model_text(name)
         ],
     )
