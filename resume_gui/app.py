@@ -536,11 +536,15 @@ def _load_tex_from_candidate(folder: str, user_id: Optional[str]) -> Optional[st
 def _resolve_structured_source_folder(base_folder: Optional[str], reference_folder: Optional[str], user_id: Optional[str]) -> Tuple[str, str]:
     _ = user_id  # Structured template resolution is Supabase-driven.
     candidates: List[str] = []
+    ref_name = (reference_folder or "").strip()
     base_name = (base_folder or "").strip()
-    if base_name and "_structured_" not in base_name:
+    # Builder sends `reference_folder` as the explicit LaTeX style choice (e.g. Harshibar).
+    # `base_folder` is whichever library row backed the last compile (often Adobe_FullStack) — it must
+    # not override the user's selected reference style when loading `resume_templates` rows.
+    if ref_name:
+        candidates.append(ref_name)
+    if base_name and "_structured_" not in base_name and base_name not in candidates:
         candidates.append(base_name)
-    if (reference_folder or "").strip() and (reference_folder or "").strip() not in candidates:
-        candidates.append((reference_folder or "").strip())
     for fallback in ("Adobe_FullStack", "Harshibar_Template1", "MaltaCV_Modern"):
         if fallback not in candidates:
             candidates.append(fallback)

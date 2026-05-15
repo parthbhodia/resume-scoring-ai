@@ -3927,8 +3927,18 @@ function ResumePaperView({
 
   const { nameLineIndex, subtitleLineIndex } = nameAndSubtitleLineIndices(paperLines);
 
-  const isAllCaps = (t: string) => t.length > 2 && t === t.toUpperCase() && /[A-Z]/.test(t) && !/^[•\-–*\u2022\u00b7]/.test(t);
-  const isBullet  = (t: string) => /^[•\-–*\u2022\u00b7]/.test(t);
+  const isAllCaps = (t: string) =>
+    t.length > 2 &&
+    t === t.toUpperCase() &&
+    /[A-Z]/.test(t) &&
+    !/^[•\-–*|\u2022\u00b7]/.test(t) &&
+    !/^\.\s+\S/.test(t);
+  const isBullet = (t: string) => /^[•\-–*|\u2022\u00b7]/.test(t) || /^\.\s+\S/.test(t.trim());
+  const stripPaperBulletPrefix = (body: string) =>
+    body
+      .replace(/^[•\-–*|\u2022\u00b7]\s*/, "")
+      .replace(/^\.\s+(?=\S)/, "")
+      .trim();
   const isSectionHeadingLike = (t: string) =>
     /^(technical skills|skills|experience|work experience|professional experience|education|projects|summary|profile|certifications|awards|publications|languages)$/i.test(t.trim());
   const splitLabelAndValue = (t: string): { label: string; value: string } | null => {
@@ -4007,6 +4017,7 @@ function ResumePaperView({
             : null;
           const pendingHighlight = ic && linkSug && !ic.acceptedIds.has(linkSug.id);
           const highlightedPlain = !ic && lineMatchesHighlight(i);
+          const suggestionRowLinked = Boolean(ic && linkSug && ic.selectedSuggestionId === linkSug.id);
 
           const amber: React.CSSProperties = {
             background: "rgba(245,158,11,0.12)",
@@ -4081,11 +4092,6 @@ function ResumePaperView({
               </div>
             );
           }
-          const stripped = t.replace(/^[•\-–*\u2022\u00b7]\s*/, "");
-          const innerFromAccepted = acceptedSug
-            ? (acceptedSug.suggested.trim().replace(/^[•\-–*\u2022\u00b7]\s*/, "").split("\n")[0]?.trim() || stripped)
-            : stripped;
-
           /* One logical paragraph / bullet is often split across lines with the same combined match text.
              Render only one visual row for that logical line to avoid stacked highlight strips and extra gaps. */
           const mergedCur = (combinedMatchByLine[i] ?? "").trim();
@@ -4097,33 +4103,37 @@ function ResumePaperView({
             return <div key={i} style={{ display: "none" }} aria-hidden />;
           }
           const mergedDisplay = mergedGroupStart
-            ? mergedCur.replace(/^[•\-–*\u2022\u00b7]\s*/, "")
+            ? stripPaperBulletPrefix(mergedCur)
             : null;
 
-          /* Wrapped bullet row where a later physical line lost the bullet glyph (PDF extract). */
-          const mergedSameAsPrev = mergedGroupContinuation;
-          if (!isBullet(t) && mergedSameAsPrev && isBullet(mergedCur) && !isAllCaps(t)) {
-            const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: harshibarCompactPreview ? 2 : 4, paddingLeft: 6, ...hlStyle };
-            const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
-            const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
-            return (
-              <div key={i} {...p} {...lineMark}>
-                <span style={{ flexShrink: 0, marginTop: 1, visibility: "hidden", userSelect: "none" }} aria-hidden>
-                  •
-                </span>
-                <span>{paperLineDisplayContent(innerFromAccepted)}</span>
-              </div>
-            );
-          }
+          const strippedPhysical = stripPaperBulletPrefix(t);
+          const strippedMerged = mergedCur ? stripPaperBulletPrefix(mergedCur) : strippedPhysical;
+          /** Wrapped bullets hide continuation rows; display must use the merged block so text is not cut off. */
+          const bulletBodyDefault = strippedMerged.trim() ? strippedMerged : strippedPhysical;
+          const innerFromAccepted = acceptedSug
+            ? (stripPaperBulletPrefix(acceptedSug.suggested.trim()).split("\n")[0]?.trim() ||
+                bulletBodyDefault)
+            : bulletBodyDefault;
 
           if (isBullet(t)) {
-            const base: React.CSSProperties = { display: "flex", gap: 6, marginBottom: harshibarCompactPreview ? 2 : 4, paddingLeft: 6, ...hlStyle };
+            if (!innerFromAccepted.trim()) return null;
+            const base: React.CSSProperties = {
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 6,
+              marginBottom: harshibarCompactPreview ? 2 : 4,
+              paddingLeft: 6,
+              paddingTop: suggestionRowLinked ? 2 : 0,
+              paddingBottom: suggestionRowLinked ? 2 : 0,
+              overflow: "visible",
+              ...hlStyle,
+            };
             const p = rowInteractiveProps(line, base, linkSug, acceptedSug);
             const lineMark = linkSug ? ({ "data-rb-sug-line": linkSug.id } as React.HTMLAttributes<HTMLDivElement>) : {};
             return (
               <div key={i} {...p} {...lineMark}>
                 <span style={{ flexShrink: 0, marginTop: 1 }}>•</span>
-                <span>{paperLineDisplayContent(innerFromAccepted)}</span>
+                <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{paperLineDisplayContent(innerFromAccepted)}</span>
               </div>
             );
           }
