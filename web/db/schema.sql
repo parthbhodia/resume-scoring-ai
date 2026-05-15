@@ -216,3 +216,27 @@ create unique index if not exists resume_templates_reference_folder_uidx
 
 create index if not exists resume_templates_active_idx
   on resume_templates (active);
+
+-- ── usage_events (admin analytics) ─────────────────────────────────────────
+-- Tracks generation/tool usage and token consumption (estimated or provider-reported).
+create table if not exists usage_events (
+  id                uuid primary key default gen_random_uuid(),
+  user_id           text not null,
+  user_email        text,
+  tool_name         text not null,
+  model_used        text,
+  prompt_tokens     int,
+  completion_tokens int,
+  total_tokens      int,
+  token_source      text, -- 'estimated' | 'provider'
+  status            text, -- 'ok' | 'error'
+  company           text,
+  role              text,
+  folder            text,
+  metadata          jsonb,
+  created_at        timestamptz default now()
+);
+
+create index if not exists usage_events_created_idx on usage_events (created_at desc);
+create index if not exists usage_events_user_idx on usage_events (user_id, created_at desc);
+create index if not exists usage_events_tool_idx on usage_events (tool_name, created_at desc);

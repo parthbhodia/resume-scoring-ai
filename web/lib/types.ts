@@ -163,3 +163,22 @@ export type SSEEvent =
 
 export type { ResumeDoc, ResumeTemplate } from "@/lib/resumeDoc";
 export type { ResumeEdit, ResumeEditOp, LlmResumePatch } from "@/lib/resumeEdits";
+
+export interface AdminAnalyticsSummary {
+  total_runs: number;
+  total_tokens: number;
+  success_runs: number;
+  failed_runs: number;
+  unique_users: number;
+  unique_tools: number;
+  unique_models: number;
+}
+
+export interface AdminAnalyticsResponse {
+  window_days: number;
+  summary: AdminAnalyticsSummary;
+  users: Array<{ user_id: string; user_email: string | null; runs: number; tokens: number; tools: Record<string, number> }>;
+  tools: Array<{ tool_name: string; runs: number; tokens: number }>;
+  models: Array<{ model: string; runs: number; tokens: number }>;
+  daily: Array<{ date: string; runs: number; tokens: number; failures: number }>;
+}

@@ -968,6 +968,7 @@ export default function ResumeBuilder({
           post_suggestion_coach_run: !studioHandoff && Array.isArray(suggestions) && suggestions.length > 0,
           tailor_body_with_ai: tailorBodyWithAi,
           use_jinja_renderer: true,
+          user_email: user?.email ?? null,
         }),
       });
 
