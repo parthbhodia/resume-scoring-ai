@@ -27,6 +27,7 @@ export default function CriteriaTable({ criteria }: Props) {
         display: "grid",
         gridTemplateColumns: GRID_COLS,
         gap: 12,
+        alignItems: "end",
         padding: "0 14px 4px",
         fontSize: 10,
         fontWeight: 700,
@@ -37,7 +38,7 @@ export default function CriteriaTable({ criteria }: Props) {
         <div>Requirement</div>
         <div title="How critical the JD says this requirement is">Importance</div>
         <div title="How strongly your resume evidences this requirement (1–10)">Match</div>
-        <div>Why</div>
+        <div style={{ paddingLeft: 0 }}>Why</div>
       </div>
 
       {criteria.map((c, i) => {
@@ -49,7 +50,7 @@ export default function CriteriaTable({ criteria }: Props) {
             display: "grid",
             gridTemplateColumns: GRID_COLS,
             gap: 12,
-            alignItems: "center",
+            alignItems: "start",
             padding: "11px 14px",
             background: alert ? "rgba(248,113,113,0.06)" : "var(--surface2)",
             borderRadius: "var(--radius)",
@@ -75,12 +76,18 @@ export default function CriteriaTable({ criteria }: Props) {
             {/* Match score bar */}
             <div
               title={`Match: ${c.score}/10 — how strongly your resume evidences this`}
-              style={{ display: "flex", alignItems: "center", gap: 8 }}
+              style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}
             >
               <span style={{ fontSize: 13, fontWeight: 600, color: sc, minWidth: 36 }}>
                 {c.score}/10
               </span>
-              <div style={{ flex: 1, height: 4, background: "var(--surface2)", borderRadius: 2, overflow: "hidden" }}>
+              <div style={{
+                flex: 1,
+                height: 4,
+                background: "rgba(148, 163, 184, 0.35)",
+                borderRadius: 2,
+                overflow: "hidden",
+              }}>
                 <div style={{
                   height: "100%", borderRadius: 2,
                   width: `${c.score * 10}%`,
@@ -91,8 +98,16 @@ export default function CriteriaTable({ criteria }: Props) {
             </div>
 
             {/* Notes */}
-            <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.5 }}>
-              {c.notes}
+            <div style={{
+              fontSize: 12,
+              color: "var(--dim)",
+              lineHeight: 1.5,
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+              paddingLeft: 0,
+              margin: 0,
+            }}>
+              {(c.notes ?? "").replace(/^\s+/, "").trimEnd()}
             </div>
           </div>
         );

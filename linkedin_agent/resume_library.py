@@ -16,19 +16,69 @@ import os
 import re
 import subprocess
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 from google import genai
 from google.genai import types
 
 logger = logging.getLogger(__name__)
 
+
+def _google_gemini_api_key() -> str:
+    """API key for Google AI Studio / Gemini (either env name accepted)."""
+    return (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+
+
+def _optional_gemini_client():
+    """``genai.Client`` when a Gemini key exists; ``None`` for Grok-only Railway deploys."""
+    k = _google_gemini_api_key()
+    if not k:
+        return None
+    return genai.Client(api_key=k)
+
+
+def primary_gemini_flash_model(explicit: Optional[str] = None) -> str:
+    """Default Gemini Flash text model for stream/generate/JD/suggest paths.
+
+    Default is **gemini-2.5-flash-lite** — AI Studio free tier often gives ``gemini-2.5-flash``
+    a very low per-day cap; Lite is a separate per-model quota. Override with
+    ``GEMINI_FLASH_MODEL=gemini-2.5-flash`` when you want full Flash.
+    """
+    if explicit and str(explicit).strip():
+        return str(explicit).strip()
+    return (os.environ.get("GEMINI_FLASH_MODEL") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
+
+
+def grok_preferred_for_throughput() -> bool:
+    """Use xAI Grok as the primary model whenever an xAI key exists.
+
+    This project defaults to Grok-first because Gemini quotas are often tighter
+    for sustained resume generation/analysis traffic.
+    """
+    return bool((os.environ.get("XAI_API_KEY") or "").strip())
+
+
+def primary_llm_model_for_resume_workloads(explicit: Optional[str] = None) -> str:
+    """Primary model for résumé generation, JD extract, skills, bullet rewrite.
+
+    When ``grok_preferred_for_throughput()`` is true, uses ``GROK_MODEL`` (or the default
+    Grok slug) even if the client sent a Gemini id — unless the client explicitly sent a ``grok-`` id."""
+    ex = (explicit or "").strip()
+    if grok_preferred_for_throughput():
+        if ex.lower().startswith("grok"):
+            return ex
+        return (os.environ.get("GROK_MODEL") or _GROK_FALLBACK_MODELS[0]).strip() or _GROK_FALLBACK_MODELS[0]
+    return primary_gemini_flash_model(explicit or None)
+
+
 # Extra models to try when the primary hits quota errors (free tier is per-model).
 # gemini-1.5-* are retired on the v1beta endpoint; including them just adds 404 noise.
+# Prefer 2.5 Flash-Lite before older 2.0 models when 2.5 Flash is exhausted.
 _GEMINI_FALLBACK_MODELS = (
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
 )
@@ -48,19 +98,278 @@ _REASONING_MODEL_GEMINI = "gemini-2.5-pro"
 _REASONING_MODEL_GROK   = os.environ.get("GROK_REASONING_MODEL", "grok-4")
 
 
+def _extract_grounding_from_gemini_response(resp) -> Tuple[List[str], List[dict]]:
+    """Pull web_search_queries and cited URLs from a non-streaming Gemini response."""
+    queries: List[str] = []
+    sources: List[dict] = []
+    seen_urls: set = set()
+    for cand in getattr(resp, "candidates", None) or []:
+        gm = getattr(cand, "grounding_metadata", None)
+        if not gm:
+            continue
+        for q in getattr(gm, "web_search_queries", None) or []:
+            qs = (q if isinstance(q, str) else str(q)).strip()
+            if qs:
+                queries.append(qs)
+        for chunk in getattr(gm, "grounding_chunks", None) or []:
+            web = getattr(chunk, "web", None)
+            uri = getattr(web, "uri", None) if web else None
+            if uri and uri not in seen_urls:
+                seen_urls.add(uri)
+                title = getattr(web, "title", None) or uri
+                sources.append({"title": title, "url": uri})
+    return queries, sources
+
+
+def _run_tailor_research_job_context_gemini(job_description: str) -> Tuple[str, List[str], List[dict]]:
+    """Gemini + Google Search: public employer/JD/domain context before résumé suggestions."""
+    api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("GOOGLE_API_KEY or GEMINI_API_KEY is required for Gemini+Search research")
+    jd = (job_description or "").strip()
+    prompt = (
+        "You have Google Search enabled. Run **3–6 searches** to gather **public** context useful for tailoring "
+        "a candidate's résumé to this **specific job posting**: the hiring organization or product line, industry norms, "
+        "acronyms and domain terms in the posting, and vocabulary employers use for this role type. "
+        "Output **plain text only**: short bullet points (max ~700 words). No JSON. No markdown code fences. "
+        "Do not invent private facts about any person. Do not write résumé edits — only background context.\n\n"
+        f"JOB DESCRIPTION:\n{jd[:4000]}"
+    )
+    client = genai.Client(api_key=api_key)
+    primary = primary_gemini_flash_model()
+    gemini_models: List[str] = []
+    _seen_g: set[str] = set()
+    for m in (primary,) + _GEMINI_FALLBACK_MODELS:
+        if m not in _seen_g:
+            _seen_g.add(m)
+            gemini_models.append(m)
+
+    cfg = types.GenerateContentConfig(
+        temperature=0.25,
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+    )
+    last_exc: Optional[BaseException] = None
+    for model in gemini_models:
+        try:
+            resp = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=cfg,
+            )
+            text = (getattr(resp, "text", None) or "").strip()
+            queries, sources = _extract_grounding_from_gemini_response(resp)
+            if model != primary:
+                logger.info(
+                    "tailor research (Gemini+Search): succeeded on %s (primary was %s)", model, primary
+                )
+            return text, queries, sources
+        except Exception as exc:
+            last_exc = exc
+            if _transient_provider_error(exc):
+                logger.warning(
+                    "tailor research Gemini %s transient failure (%s); trying next model", model, exc
+                )
+                _backoff_if_rate_limited(exc)
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Gemini+Search research: no models produced a response")
+
+
+def _run_tailor_research_job_context_grok(job_description: str) -> Tuple[str, List[str], List[dict]]:
+    """Grok + web_search: same role as Gemini pre-suggestion digest (used when Grok is primary)."""
+    m = (os.environ.get("GROK_MODEL") or _GROK_FALLBACK_MODELS[0]).strip() or str(_GROK_FALLBACK_MODELS[0])
+    jd = (job_description or "").strip()
+    system_prompt = (
+        "You are a research assistant with web search. Output **plain text only**: short bullet points "
+        "(max ~700 words). No JSON. No markdown code fences. Do not invent private facts about any person. "
+        "Do not write résumé edits — only background context."
+    )
+    user_prompt = (
+        "Run **several** targeted web searches to gather **public** context useful for tailoring "
+        "a candidate's résumé to this **specific job posting**: the hiring organization or product line, industry norms, "
+        "acronyms and domain terms in the posting, and vocabulary employers use for this role type.\n\n"
+        f"JOB DESCRIPTION:\n{jd[:4000]}"
+    )
+    buf: List[str] = []
+    queries: List[str] = []
+    sources: List[dict] = []
+    for ev in _stream_grok(m, system_prompt, user_prompt, temperature=0.25, web_search=True):
+        t = ev.get("type")
+        if t == "text":
+            buf.append(ev.get("delta") or "")
+        elif t == "query":
+            q = (ev.get("query") or "").strip()
+            if q and q not in queries:
+                queries.append(q)
+        elif t == "source":
+            u = (ev.get("url") or "").strip()
+            if u and not any(s.get("url") == u for s in sources):
+                sources.append({"title": ev.get("title"), "url": u})
+    return "".join(buf).strip(), queries, sources
+
+
+def run_tailor_research_job_context(job_description: str) -> Tuple[str, List[str], List[dict]]:
+    """JD/market digest + queries + sources for ``/api/suggest-changes`` (Gemini+Search or Grok web_search)."""
+    if grok_preferred_for_throughput():
+        return _run_tailor_research_job_context_grok(job_description)
+    return _run_tailor_research_job_context_gemini(job_description)
+
+
+def _coach_suggestions_via_grok(model: str, prompt: str) -> str:
+    client = _get_xai_client()
+    r = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+    return (r.choices[0].message.content or "").strip()
+
+
+def coach_suggestions_llm(prompt: str) -> str:
+    """Return raw JSON text for the résumé coach (``/api/suggest-changes`` body) — Grok or Gemini."""
+    if grok_preferred_for_throughput():
+        model = primary_llm_model_for_resume_workloads()
+        return _coach_suggestions_via_grok(model, prompt)
+
+    api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not api_key:
+        if (os.environ.get("XAI_API_KEY") or "").strip():
+            m = (os.environ.get("GROK_MODEL") or _GROK_FALLBACK_MODELS[0]).strip() or str(_GROK_FALLBACK_MODELS[0])
+            logger.warning(
+                "coach_suggestions_llm: no Gemini API key — using Grok-only fallback (%s)", m
+            )
+            return _coach_suggestions_via_grok(m, prompt)
+        raise RuntimeError(
+            "GOOGLE_API_KEY or GEMINI_API_KEY is required when LLM_PROVIDER=gemini (or unset without XAI_API_KEY)"
+        )
+
+    primary = primary_gemini_flash_model()
+    chain = _model_chain(primary)
+    client = genai.Client(api_key=api_key)
+    last_exc: Optional[BaseException] = None
+
+    for model in chain:
+        if _is_grok(model):
+            try:
+                text = _coach_suggestions_via_grok(model, prompt)
+                if text:
+                    logger.info(
+                        "coach_suggestions_llm: used Grok (%s) after Gemini chain did not return text",
+                        model,
+                    )
+                    return text
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("coach_suggestions_llm: Grok fallback %s failed: %s", model, exc)
+            continue
+
+        try:
+            resp = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.2),
+            )
+            text = (getattr(resp, "text", None) or "").strip()
+            if text:
+                if model != primary:
+                    logger.info("coach_suggestions_llm: succeeded on Gemini model %s (primary was %s)", model, primary)
+                return text
+            logger.warning("coach_suggestions_llm: Gemini %s returned empty text; trying next model", model)
+            continue
+        except Exception as exc:
+            last_exc = exc
+            if _transient_provider_error(exc):
+                logger.warning(
+                    "coach_suggestions_llm: Gemini %s transient failure (%s); trying next model",
+                    model,
+                    exc,
+                )
+                _backoff_if_rate_limited(exc)
+                continue
+            logger.warning("coach_suggestions_llm: Gemini %s failed: %s", model, exc)
+            continue
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("coach_suggestions_llm: empty response from all configured models")
+
+
+def _error_probe_text(exc: BaseException) -> str:
+    """All text used to classify provider errors (str + repr; some SDKs hide detail in repr)."""
+    parts: list[str] = []
+    try:
+        parts.append(str(exc))
+    except Exception:
+        parts.append("error")
+    try:
+        r = repr(exc)
+        if r not in parts:
+            parts.append(r)
+    except Exception:
+        pass
+    return " ".join(parts)
+
+
+def _sse_friendly_error(exc: BaseException) -> str:
+    """User-visible SSE error line — avoid dumping raw provider JSON blobs."""
+    probe = _error_probe_text(exc).lower()
+    if _transient_provider_error_from_text(probe):
+        return (
+            "The AI service is temporarily busy. Please wait a minute and try again — "
+            "demand spikes are usually short-lived."
+        )
+    raw = str(exc).strip()
+    if len(raw) > 280 and ("'error'" in raw or '"error"' in raw):
+        return (
+            "Something went wrong while contacting the AI service. Please try again in a moment."
+        )
+    return raw if raw else "Something went wrong. Please try again."
+
+
+def _transient_provider_error_from_text(m: str) -> bool:
+    """True when `m` is already lowercased / normalized probe text."""
+    return any(
+        n in m
+        for n in (
+            "429",
+            "resource_exhausted",
+            "503",
+            "unavailable",
+            "service unavailable",
+            "high demand",
+            "spikes in demand",
+            "overloaded",
+            "try again later",
+            "deadline exceeded",
+            "too many requests",
+            "rate limit",
+            "quota exceeded",
+        )
+    )
+
+
+def _transient_provider_error(exc: BaseException) -> bool:
+    """True for quota/capacity errors where a short wait + retry often succeeds."""
+    return _transient_provider_error_from_text(_error_probe_text(exc).lower())
+
+
 def _backoff_if_rate_limited(exc: BaseException, default_wait: float = 5.0) -> None:
     """
-    If Gemini returned 429, wait briefly before trying the *next* model in the
-    chain. We deliberately don't honor the full retry-in window: the suggested
-    delay is for retrying the SAME model, but we're moving on to a different
-    one which has its own quota bucket. Capped to keep total fail-fast latency
-    under ~15s across the whole chain.
+    If the provider returned a transient quota/capacity error, pause before
+    retrying the same model or advancing the fallback chain. 503 / UNAVAILABLE /
+    "high demand" from Gemini get a slightly longer pause than plain 429.
     """
-    msg = str(exc)
-    if "429" not in msg and "RESOURCE_EXHAUSTED" not in msg:
+    if not _transient_provider_error(exc):
         return
-    wait = min(max(default_wait, 1.0), 8.0)
-    logger.info(f"Gemini rate limited — pausing {wait:.1f}s before next fallback model")
+    msg = str(exc).lower()
+    if "503" in msg or "unavailable" in msg or "high demand" in msg or "overloaded" in msg:
+        wait = min(max(default_wait + 3.0, 4.0), 14.0)
+    else:
+        wait = min(max(default_wait, 1.0), 8.0)
+    logger.info(f"Transient API pressure — pausing {wait:.1f}s before retry or next model")
     time.sleep(wait)
 
 
@@ -99,9 +408,16 @@ def _get_xai_client():
     return _xai_client
 
 
-def _stream_grok(model: str, system_prompt: str, user_prompt: str, temperature: float = 0.2):
+def _stream_grok(
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.2,
+    *,
+    web_search: bool = True,
+):
     """
-    Stream a Grok generation via the xAI Responses API with the web_search tool.
+    Stream a Grok generation via the xAI Responses API (optionally with the web_search tool).
 
     Yields typed event dicts the caller dispatches on:
       {"type": "text",   "delta": str}                     — incremental text
@@ -118,14 +434,16 @@ def _stream_grok(model: str, system_prompt: str, user_prompt: str, temperature: 
     # Responses API uses `instructions` for the system message and `input` for
     # the user message (or a list of input items for multi-turn). Single-turn
     # is fine here.
-    stream = client.responses.create(
-        model=model,
-        instructions=system_prompt,
-        input=user_prompt,
-        temperature=temperature,
-        tools=[{"type": "web_search"}],
-        stream=True,
-    )
+    _kwargs = {
+        "model": model,
+        "instructions": system_prompt,
+        "input": user_prompt,
+        "temperature": temperature,
+        "stream": True,
+    }
+    if web_search:
+        _kwargs["tools"] = [{"type": "web_search"}]
+    stream = client.responses.create(**_kwargs)
 
     seen_query_ids: set = set()
     seen_source_urls: set = set()
@@ -237,12 +555,62 @@ def _markdown_to_latex_bold(text: str) -> Tuple[str, int]:
     return new_text, n
 
 
+# Gemini / Chat-style grounding footnotes that must never reach pdflatex.
+_MD_GEMINI_FOOTNOTE_RE = re.compile(r"\s*\[\[\d+\]\]\([^)]*\)")
+_MD_GEMINI_FOOTNOTE_BARE_RE = re.compile(r"\s*\[\[\d+\]\]")
+
+
+def _strip_llm_markdown_citations(text: str) -> str:
+    """Remove [[n]](url) / [[n]] artifacts from model output before saving .tex."""
+    if "[[" not in text:
+        return text
+    text = _MD_GEMINI_FOOTNOTE_RE.sub("", text)
+    text = _MD_GEMINI_FOOTNOTE_BARE_RE.sub("", text)
+    return text
+
+
+def _is_removal_suggestion(suggested: str) -> bool:
+    """True when the user (or coach JSON) indicates delete/omit with no replacement prose."""
+    t = (suggested or "").strip().lower()
+    if not t:
+        return True
+    if t in {
+        "(remove)",
+        "remove",
+        "—",
+        "-",
+        "n/a",
+        "[remove]",
+        "omit",
+        "(omit)",
+        "deleted",
+        "(deleted)",
+    }:
+        return True
+    if t.startswith("(remove") or t.startswith("(omit") or t.startswith("[remove"):
+        return True
+    for phrase in (
+        "delete this bullet",
+        "remove this bullet",
+        "omit this bullet",
+        "remove this line",
+        "delete this line",
+    ):
+        if t == phrase or t.startswith(phrase + " ") or t.startswith(phrase + "."):
+            return True
+    return False
+
+
 LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", "")
 
 # Prefer the system pdflatex (cross-platform); the binary must be on PATH or
 # pointed to by the PDFLATEX env var for PDF compilation to work.
 import shutil as _shutil
 PDFLATEX = os.environ.get("PDFLATEX_PATH") or _shutil.which("pdflatex") or ""
+
+# Contact block markers (spliced preamble + parser); defined early for assembly audits.
+_CONTACT_START = "% RESUME-CONTACT-BLOCK-START"
+_CONTACT_END = "% RESUME-CONTACT-BLOCK-END"
 
 # LaTeX preamble — shared across all generated resumes
 _LATEX_PREAMBLE = r"""%-------------------------
@@ -254,8 +622,9 @@ _LATEX_PREAMBLE = r"""%-------------------------
 
 \usepackage{verbatim}
 \usepackage{titlesec}
-\usepackage{color}
+\usepackage[dvipsnames]{xcolor}
 \usepackage{enumitem}
+\usepackage{multicol}
 \usepackage{fancyhdr}
 \usepackage{tabularx}
 \usepackage{latexsym}
@@ -323,6 +692,49 @@ _LATEX_PREAMBLE = r"""%-------------------------
 \newcommand{\resumeHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
 \newcommand{\resumeHeadingListEnd}{\end{itemize}}
 
+% ── Malta CV-style macros (accent color: flame orange on dark) ───────────────
+\definecolor{mcvAccent}{HTML}{E25822}
+\definecolor{mcvMuted}{HTML}{555555}
+\setlength\multicolsep{0pt}
+
+% \cvsection{Title} — colored bold heading + rule
+\newcommand{\cvsection}[1]{%
+  \vspace{8pt}%
+  {\color{mcvAccent}\large\bfseries\scshape #1}%
+  \vspace{2pt}\\*%
+  {\color{mcvAccent}\hrule height 0.6pt}%
+  \vspace{4pt}%
+}
+
+% \cvexperience{Role}{Company}{Date}{Location}{Keywords}
+\newcommand{\cvexperience}[5]{%
+  \vspace{2pt}%
+  \begin{tabular*}{\textwidth}[t]{l@{\extracolsep{\fill}}r}%
+    \textbf{#1} {\color{mcvMuted}\textit{at}} \textbf{#2} & {\color{mcvMuted}\small #3}\\%
+    {\color{mcvMuted}\small #4} & \\%
+  \end{tabular*}%
+  \ifx&#5&\else{\vspace{1pt}\textit{\color{mcvMuted}\small Tags: #5}\vspace{2pt}}\fi%
+}
+
+% \cvuniversity{Degree}{Institution}{Date}{Location}
+\newcommand{\cvuniversity}[4]{%
+  \vspace{2pt}%
+  \begin{tabular*}{\textwidth}[t]{l@{\extracolsep{\fill}}r}%
+    \textbf{#1} & {\color{mcvMuted}\small #3}\\%
+    \textit{\small #2} & {\color{mcvMuted}\small #4}\\%
+  \end{tabular*}%
+  \vspace{2pt}%
+}
+
+% \cvlistitem{Name}{Detail} — used inside multicols or plain itemize
+\newcommand{\cvlistitem}[2]{\item{\small\textbf{#1}\ifx&#2&\else{ --- \textit{#2}}\fi}}
+\newcommand{\cvliststart}{\begin{itemize}[leftmargin=*, nosep, topsep=0pt]}
+\newcommand{\cvlistend}{\end{itemize}}
+
+% \bio{text} — italic summary paragraph
+\newcommand{\bio}[1]{\vspace{4pt}\textit{\small #1}\vspace{6pt}}
+% ─────────────────────────────────────────────────────────────────────────────
+
 \begin{document}
 
 % RESUME-CONTACT-BLOCK-START — parsed and edited by the structured editor.
@@ -332,15 +744,41 @@ _LATEX_PREAMBLE = r"""%-------------------------
   \textbf{\Huge {contact_name} \vspace{2pt}} &
   Location: {contact_location} \\
 
-  \href{{contact_website_url}}{\uline{{contact_website}}} $|$
-  \href{{contact_linkedin_url}}{\uline{{contact_linkedin}}} $|$
-  \href{{contact_github_url}}{\uline{GitHub}}
-  &
-  Email: \href{mailto:{contact_email}}{\uline{{contact_email}}} $|$
-  Mobile: {contact_phone} \\
-\end{tabular*}
-% RESUME-CONTACT-BLOCK-END
 """
+
+_LATEX_PREAMBLE_CONTACT_ROWS = (
+    r"  \href{"
+    + "{contact_website_url}"
+    + r"}{\uline{"
+    + "{contact_website}"
+    + r"}} $|$\n"
+    + r"  \href{"
+    + "{contact_linkedin_url}"
+    + r"}{\uline{"
+    + "{contact_linkedin}"
+    + r"}} $|$\n"
+    + r"  \href{"
+    + "{contact_github_url}"
+    + r"}{\uline{"
+    + "{contact_github}"
+    + r"}}"
+    + "\n"
+    + r"  &"
+    + "\n"
+    + r"  Email: \href{mailto:"
+    + "{contact_email_mailto}"
+    + r"}{\uline{"
+    + "{contact_email}"
+    + r"}} $|$\n"
+    + r"  Mobile: {contact_phone} \\"
+    + "\n"
+    + r"\end{tabular*}"
+    + "\n"
+    + r"% RESUME-CONTACT-BLOCK-END"
+    + "\n"
+)
+
+_LATEX_PREAMBLE = _LATEX_PREAMBLE + _LATEX_PREAMBLE_CONTACT_ROWS
 
 _LATEX_FOOTER = r"""
 \end{document}
@@ -359,8 +797,379 @@ DEFAULT_CONTACT: Dict[str, str] = {
     "github":        os.environ.get("CONTACT_GITHUB",        "GitHub"),
     "github_url":    os.environ.get("CONTACT_GITHUB_URL",    ""),
     "email":         os.environ.get("CONTACT_EMAIL",         ""),
+    "email_mailto":  "",
     "phone":         os.environ.get("CONTACT_PHONE",         ""),
 }
+
+_PROFILE_EMAIL_RE = re.compile(
+    r"\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b",
+    re.IGNORECASE,
+)
+_PROFILE_PHONE_RE = re.compile(
+    r"(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}\b",
+)
+_PROFILE_LINKEDIN_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?linkedin\.com/(?:in|pub)/[\w\-]+/?",
+    re.IGNORECASE,
+)
+_PROFILE_GITHUB_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?github\.com/[\w\-]+(?:/[\w\-]+)?/?",
+    re.IGNORECASE,
+)
+
+# Shown in LaTeX \uline{…} only when URL exists — hide default labels with no href target.
+_DEFAULT_CONTACT_LINK_LABELS = frozenset({"Website", "LinkedIn", "GitHub"})
+
+
+def _ingest_contact_token(token: str, out: Dict[str, str]) -> None:
+    """Parse one pipe- or space-delimited fragment into contact fields (best-effort)."""
+    p = (token or "").strip()
+    if len(p) < 3:
+        return
+    low = p.lower()
+
+    em = _PROFILE_EMAIL_RE.search(p)
+    if em and not out.get("email"):
+        out["email"] = em.group(0).strip()
+    ph = _PROFILE_PHONE_RE.search(p)
+    if ph and not out.get("phone"):
+        out["phone"] = ph.group(0).strip()
+
+    if not out.get("linkedin_url") and "linkedin.com" in low:
+        li = _PROFILE_LINKEDIN_RE.search(p)
+        if li:
+            u = li.group(0).strip()
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["linkedin_url"] = u
+            out.setdefault("linkedin", "LinkedIn")
+        return
+    if not out.get("github_url") and "github.com" in low:
+        gh = _PROFILE_GITHUB_RE.search(p)
+        if gh:
+            u = gh.group(0).strip()
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["github_url"] = u
+            out.setdefault("github", "GitHub")
+        return
+    if low.startswith("http") and "linkedin.com" not in low and "github.com" not in low:
+        if not out.get("website_url"):
+            out["website_url"] = p
+            out.setdefault("website", "Website")
+
+
+def _contact_tokens_from_lines(lines: List[str], out: Dict[str, str]) -> None:
+    """Scan first lines for pipe- or bullet-separated email / phone / URLs (common PDF header)."""
+    for raw in lines[:8]:
+        seg = re.sub(r"^[\s•\-–*]+", "", raw).strip()
+        if not seg or len(seg) > 220:
+            continue
+        if re.match(
+            r"^(experience|education|skills|projects|summary|objective|work|employment)\b",
+            seg,
+            re.I,
+        ):
+            continue
+        if "|" in seg or "·" in seg or "\u00b7" in seg or "•" in seg:
+            for part in re.split(r"\s*[|·•\u00b7]\s*", seg):
+                _ingest_contact_token(part, out)
+        elif sum(
+            bool(x)
+            for x in (
+                _PROFILE_EMAIL_RE.search(seg),
+                _PROFILE_PHONE_RE.search(seg),
+                re.search(r"linkedin\.com|github\.com|https?://", seg, re.I),
+            )
+        ) >= 2:
+            for part in re.split(r"\s{2,}|\t+", seg):
+                _ingest_contact_token(part, out)
+
+
+def _latex_escape_visible(s: str) -> str:
+    """Escape user text embedded in LaTeX arguments (\\uline, \\textbf, etc.)."""
+    if not s:
+        return ""
+    return (
+        s.replace("\\", r"\textbackslash{}")
+        .replace("{", r"\{")
+        .replace("}", r"\}")
+        .replace("&", r"\&")
+        .replace("%", r"\%")
+        .replace("$", r"\$")
+        .replace("#", r"\#")
+        .replace("_", r"\_")
+        .replace("^", r"\textasciicircum{}")
+        .replace("~", r"\textasciitilde{}")
+    )
+
+
+def _latex_href_url(url: str) -> str:
+    """Make URL safe inside \\href{...}{} for pdflatex + hyperref."""
+    if not (url or "").strip() or (url or "").strip() == "#":
+        return "#"
+    u = url.strip()
+    return u.replace("%", r"\%").replace("#", r"\#")
+
+
+def _latex_mailto_href_arg(email: str) -> str:
+    """Minimal escaping for mailto: URL inside \\href (LaTeX + hyperref)."""
+    if not email:
+        return ""
+    return email.replace("%", r"\%").replace("#", r"\#")
+
+
+def _contact_from_candidate_profile(candidate_profile: Optional[str]) -> Dict[str, str]:
+    """Pull contact fields from the multiline profile the UI sends with generate-stream."""
+    out: Dict[str, str] = {}
+    if not candidate_profile or not str(candidate_profile).strip():
+        return out
+    text = str(candidate_profile).strip()
+    lines = [
+        re.sub(r"^[\s•\-–*]+", "", ln).strip()
+        for ln in text.replace("\r\n", "\n").split("\n")
+        if ln.strip()
+    ]
+
+    m = re.search(r"(?im)^Name:\s*(.+)$", text)
+    if m:
+        out["name"] = m.group(1).strip()
+
+    m = re.search(r"(?im)^Location:\s*(.+)$", text)
+    if m:
+        out["location"] = m.group(1).strip()
+
+    for pat in (
+        r"(?im)^E-?mail:\s*([^\s|]+)",
+        r"(?im)^Email:\s*([^\s|]+)",
+    ):
+        m = re.search(pat, text)
+        if m and "@" in m.group(1):
+            out["email"] = m.group(1).strip()
+            break
+
+    for pat in (
+        r"(?im)^(?:Tel|Telephone|Phone|Mobile):\s*([^|\n]+)",
+        r"(?im)^Phone:\s*([^|\n]+)",
+        r"(?im)^Mobile:\s*([^|\n]+)",
+    ):
+        m = re.search(pat, text)
+        if m:
+            out["phone"] = m.group(1).strip()
+            break
+
+    m = re.search(r"(?im)^LinkedIn:\s*(\S+)", text)
+    if m:
+        u = m.group(1).strip()
+        if "linkedin.com" in u.lower():
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["linkedin_url"] = u
+            out.setdefault("linkedin", "LinkedIn")
+
+    m = re.search(r"(?im)^GitHub:\s*(\S+)", text)
+    if m:
+        u = m.group(1).strip()
+        if "github.com" in u.lower():
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["github_url"] = u
+            out.setdefault("github", "GitHub")
+
+    m = re.search(r"(?im)^(?:Website|Portfolio|URL):\s*([^\n|]+)", text)
+    if m:
+        w = m.group(1).strip()
+        if w.lower().startswith("http"):
+            out["website_url"] = w
+            out.setdefault("website", "Website")
+        elif w:
+            out["website"] = w
+
+    # Pipe- / bullet-separated header lines (very common in PDF extracts).
+    _contact_tokens_from_lines(lines, out)
+
+    # Heuristic fallbacks — candidate text is often raw PDF extract without "Name:" lines.
+    if not out.get("email"):
+        em = _PROFILE_EMAIL_RE.search(text)
+        if em:
+            out["email"] = em.group(0).strip()
+    if not out.get("phone"):
+        ph = _PROFILE_PHONE_RE.search(text)
+        if ph:
+            out["phone"] = ph.group(0).strip()
+    if not out.get("linkedin_url"):
+        li = _PROFILE_LINKEDIN_RE.search(text)
+        if li:
+            u = li.group(0).strip()
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["linkedin_url"] = u
+            out.setdefault("linkedin", "LinkedIn")
+    if not out.get("github_url"):
+        gh = _PROFILE_GITHUB_RE.search(text)
+        if gh:
+            u = gh.group(0).strip()
+            if not u.lower().startswith("http"):
+                u = "https://" + u.lstrip("/")
+            out["github_url"] = u
+            out.setdefault("github", "GitHub")
+    if not out.get("name"):
+        for line in lines[:14]:
+            if len(line) > 55 or len(line) < 3:
+                continue
+            if _PROFILE_EMAIL_RE.search(line) or _PROFILE_PHONE_RE.search(line) or re.search(
+                r"https?:", line, re.I
+            ):
+                continue
+            if re.match(
+                r"^(experience|education|skills|projects|summary|objective|work|employment)\b",
+                line,
+                re.I,
+            ):
+                continue
+            if re.match(r"^\d{4}\s*[-–]\s*", line):
+                continue
+            words = line.split()
+            if 2 <= len(words) <= 6 and re.match(r"^[A-Za-z.'\s\-]+$", line):
+                out["name"] = line
+                break
+
+    if not (out.get("location") or "").strip():
+        _infer_location_from_profile_lines(lines, out)
+
+    return out
+
+
+def _infer_location_from_profile_lines(lines: List[str], out: Dict[str, str]) -> None:
+    """Best-effort city/state from header or experience lines when explicit Location: is missing."""
+    if (out.get("location") or "").strip():
+        return
+    # "McLean, VA" / "San Francisco, CA"
+    rx_city_st = re.compile(r"^([A-Z][a-zA-Z .'-]{1,40},\s*[A-Z]{2})\s*$")
+    # "McLean, Virginia"
+    rx_city_state = re.compile(
+        r"^([A-Z][a-zA-Z .'-]{1,35},\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$"
+    )
+    for line in lines[1:24]:
+        t = line.strip()
+        if len(t) < 6 or len(t) > 72:
+            continue
+        if re.match(r"^(experience|education|skills|projects|summary|work|employment)\b", t, re.I):
+            continue
+        if rx_city_st.match(t):
+            out["location"] = t
+            return
+        if rx_city_state.match(t) and not re.match(r"^[A-Z\s,'-]{10,}$", t):
+            out["location"] = t
+            return
+    # "…Present — McLean, Virginia" / hyphen variants (common in PDF extracts)
+    for line in lines[:80]:
+        t = line.strip()
+        if not re.search(r"(?:\d{4}|Present)", t, re.I):
+            continue
+        if "—" not in t and "–" not in t and t.count("-") < 2:
+            continue
+        m = re.search(
+            r"[—–]\s*((?:[A-Z][a-z]+)+,\s*(?:[A-Z]{2}\b|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?))\s*$",
+            t,
+        )
+        if m:
+            out["location"] = m.group(1).strip()
+            return
+
+
+def _strip_contact_block_empty_hrefs(tex: str) -> str:
+    """Remove empty \\href{#}{\\uline{}} link slots and stray $|$ so the PDF header is not a thin pipe row."""
+    start = tex.find("% RESUME-CONTACT-BLOCK-START")
+    end = tex.find("% RESUME-CONTACT-BLOCK-END")
+    if start == -1 or end == -1 or end <= start:
+        return tex
+    head, mid, tail = tex[:start], tex[start:end], tex[end:]
+    chunk = mid
+    for _ in range(40):
+        nxt = re.sub(r"\s*\\href\{#\}\{\\uline\{\}\}\s*(?:\$\|\$\s*)?", "", chunk)
+        nxt = re.sub(r"\s*\\href\{#\}\{\\uline\{\s*\}\}\s*(?:\$\|\$\s*)?", "", nxt)
+        if nxt == chunk:
+            break
+        chunk = nxt
+    chunk = re.sub(r"(?:\s*\$\|\$\s*){2,}", r" $|$ ", chunk)
+    chunk = re.sub(r"(?m)^(\s*)\$\|\$\s*$", r"\1", chunk)
+    return head + chunk + tail
+
+
+def _canonical_contact_fragment() -> str:
+    """Marked contact tabular from the canonical preamble (for splicing after template \\begin{document})."""
+    s = _LATEX_PREAMBLE
+    start_m = "% RESUME-CONTACT-BLOCK-START"
+    end_m = "% RESUME-CONTACT-BLOCK-END"
+    a = s.find(start_m)
+    b = s.find(end_m)
+    if a == -1 or b == -1:
+        return ""
+    return s[a : b + len(end_m)] + "\n"
+
+
+def _inject_latex_packages_before_document(pre: str, packages: List[str]) -> str:
+    if not packages:
+        return pre
+    return pre.rstrip() + "\n" + "\n".join(packages) + "\n"
+
+
+def _tweak_harshibar_reference_textheight(pre_doc: str) -> str:
+    """Match github.com/harshibar/resume (+1.0in textheight); forks often keep +1.5in and spill to a second page."""
+    return re.sub(
+        r"\\addtolength\{\\textheight\}\{1\.5in\}",
+        r"\\addtolength{\\textheight}{1.0in}",
+        pre_doc,
+        count=1,
+    )
+
+
+def _harshibar_compact_preamble_suffix() -> str:
+    """Tight itemize + raggedbottom like canonical Harshibar; requires enumitem (present in Harshibar reference)."""
+    return (
+        "\n% === resume-scoring-ai: Harshibar compact (canonical harshibar/resume vertical density) ===\n"
+        "\\makeatletter\n"
+        "\\raggedbottom\n"
+        "\\@ifpackageloaded{enumitem}{%\n"
+        "  \\AtBeginDocument{%\n"
+        "    \\setlist[itemize]{nosep,topsep=0pt,itemsep=1pt,parsep=0pt,partopsep=0pt}%\n"
+        "  }%\n"
+        "}{}%\n"
+        "\\makeatother\n"
+        "\\setlength{\\parskip}{0pt}\n"
+        "% === end Harshibar compact ===\n"
+    )
+
+
+def _build_export_preamble(
+    reference_tex: Optional[str],
+    role: str,
+    company: str,
+    contact: Optional[Dict[str, str]],
+    reference_folder: Optional[str] = None,
+) -> str:
+    """Use the selected reference template preamble when possible; always emit a filled contact block."""
+    frag = _canonical_contact_fragment()
+    rt = (reference_tex or "").strip()
+    harshibar = (reference_folder or "").strip() == "Harshibar_Template1"
+    if rt and "\\begin{document}" in rt and frag:
+        pre_doc, sep, _rest = rt.partition("\\begin{document}")
+        if sep:
+            pre_doc = pre_doc.rstrip() + "\n"
+            low = pre_doc.lower()
+            adds: List[str] = []
+            if "hyperref" not in low:
+                adds.append("\\usepackage[hidelinks]{hyperref}")
+            if "ulem" not in low:
+                adds.append("\\usepackage[normalem]{ulem}")
+            pre_doc = _inject_latex_packages_before_document(pre_doc, adds)
+            if harshibar:
+                pre_doc = _tweak_harshibar_reference_textheight(pre_doc)
+                pre_doc = pre_doc.rstrip() + _harshibar_compact_preamble_suffix()
+            combined = pre_doc + "\\begin{document}\n" + frag
+            return _apply_preamble_subs(combined, role, company, contact)
+    return _apply_preamble_subs(_LATEX_PREAMBLE, role, company, contact)
 
 
 def _apply_preamble_subs(preamble: str, role: str, company: str, contact: Optional[Dict[str, str]] = None) -> str:
@@ -371,10 +1180,365 @@ def _apply_preamble_subs(preamble: str, role: str, company: str, contact: Option
     (just changing the email, say) still works.
     """
     out = preamble.replace("{role}", role).replace("{company}", company)
-    merged = {**DEFAULT_CONTACT, **(contact or {})}
+    merged: Dict[str, str] = {**DEFAULT_CONTACT, **(contact or {})}
+
+    for uk, vk in (
+        ("website_url", "website"),
+        ("linkedin_url", "linkedin"),
+        ("github_url", "github"),
+    ):
+        u = (merged.get(uk) or "").strip()
+        if not u:
+            merged[uk] = "#"
+            v = (merged.get(vk) or "").strip()
+            if v in _DEFAULT_CONTACT_LINK_LABELS or not v:
+                merged[vk] = ""
+        else:
+            merged[uk] = u
+
+    url_keys = ("website_url", "linkedin_url", "github_url")
+    vis_keys = ("name", "location", "phone", "linkedin", "github", "website")
+    raw_email = (merged.get("email") or "").strip()
+    merged["email_mailto"] = _latex_mailto_href_arg(raw_email)
+
+    for key, val in list(merged.items()):
+        if not isinstance(val, str):
+            merged[key] = str(val) if val is not None else ""
+
     for key, val in merged.items():
-        out = out.replace("{contact_" + key + "}", val)
+        raw = val if isinstance(val, str) else ""
+        if key in url_keys:
+            raw = _latex_href_url(raw)
+        elif key == "email_mailto":
+            pass
+        elif key == "email":
+            raw = _latex_escape_visible(raw_email) if raw_email else ""
+        elif key in vis_keys:
+            raw = _latex_escape_visible(raw) if raw else ""
+        out = out.replace("{contact_" + key + "}", raw)
+
+    out = re.sub(
+        r"Email:\s*\\href\{mailto:\}\{\\uline\{\}\}\s*\$\|\$\s*",
+        "",
+        out,
+    )
+    out = _strip_contact_block_empty_hrefs(out)
+    if not (merged.get("location") or "").strip():
+        n1 = re.sub(
+            r"(?m)^(\s*)\\textbf\{\\Huge\s+(.+?)\\vspace\{2pt\}\}\s*&\s*\n\s*Location:\s*\\\\",
+            r"\1\\multicolumn{2}{l}{\\textbf{\\Huge \2\\vspace{2pt}}} \\\\",
+            out,
+            count=1,
+        )
+        if n1 != out:
+            out = n1
+        else:
+            out = re.sub(
+                r"(?m)^(\s*)\\textbf\{\\Huge\s+([^&\n]+)\}\s*&\s*\n\s*Location:\s*\\\\",
+                r"\1\\multicolumn{2}{l}{\\textbf{\\Huge \2}} \\\\",
+                out,
+                count=1,
+            )
     return out
+
+
+def _fix_tex_runon_employer_month_line(line: str) -> str:
+    """Insert missing space when PDF/LLM glued a company token to a month abbrev (CAPITAL ONEJan, AccentureNov)."""
+    out = line
+    _m_ci = r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
+    _m_ci_i = r"(?i:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
+    _tail = r"(?=[\s\d,;–—\\]|$|\}|%|\]|\|)"
+    # Long ALL-CAPS token + month (avoid single-letter + Jan false splits inside words).
+    for _ in range(8):
+        nxt = re.sub(
+            rf"\b([A-Z]{{2,}})({_m_ci})\b(?![a-z]){_tail}",
+            r"\1 \2",
+            out,
+            flags=re.I,
+        )
+        if nxt == out:
+            break
+        out = nxt
+    for _ in range(6):
+        nxt = re.sub(rf"([a-z])({_m_ci_i}){_tail}", r"\1 \2", out)
+        nxt = re.sub(rf"([A-Z])({_m_ci_i}){_tail}", r"\1 \2", nxt)
+        nxt = re.sub(r"([A-Za-z])(May)(?=\d)", r"\1 \2", nxt)
+        if nxt == out:
+            break
+        out = nxt
+    return out
+
+
+def _fix_tex_runon_employer_month(tex: str) -> str:
+    out_lines: List[str] = []
+    for ln in tex.splitlines():
+        low = ln.lower()
+        if "tabular" in low or "usepackage" in low or "begin{picture}" in low:
+            out_lines.append(ln)
+            continue
+        out_lines.append(_fix_tex_runon_employer_month_line(ln))
+    return "\n".join(out_lines)
+
+
+def _fix_tex_contact_pipe_spacing(tex: str) -> str:
+    """`|Mobile` / `|Email` in contact block — add space after pipe for readability."""
+    start = tex.find("% RESUME-CONTACT-BLOCK-START")
+    end = tex.find("% RESUME-CONTACT-BLOCK-END")
+    if start == -1 or end == -1 or end <= start:
+        return tex
+    head = tex[: start + len("% RESUME-CONTACT-BLOCK-START")]
+    mid = tex[start + len("% RESUME-CONTACT-BLOCK-START") : end]
+    tail = tex[end:]
+    fixed: List[str] = []
+    for ln in mid.splitlines():
+        # Whole contact fragment: normalize `|Mobile` / `|Email` even when not on same line as labels.
+        fixed.append(re.sub(r"(?<!\$)\|(?=[A-Za-z])", r"| ", ln))
+    return head + "\n".join(fixed) + tail
+
+
+_LEADING_BODY_JUNK = re.compile(
+    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*(?:=\s*)?0\s*(?:in|pt)\s*(?:\\\\|&|,)*\s*$",
+    re.I,
+)
+
+
+def _strip_tex_leading_body_junk(tex: str) -> str:
+    """Drop accidental literal lines (enumitem-like keys) immediately after \\begin{document}."""
+    token = "\\begin{document}"
+    i = tex.find(token)
+    if i < 0:
+        return tex
+    head = tex[: i + len(token)]
+    body = tex[i + len(token) :]
+    if not body.startswith("\n"):
+        return tex
+    lines = body.splitlines(keepends=True)
+    k = 0
+    while k < len(lines):
+        raw = lines[k]
+        s = raw.strip()
+        if not s:
+            k += 1
+            continue
+        if _LEADING_BODY_JUNK.match(s):
+            k += 1
+            continue
+        break
+    tail = "".join(lines[k:])
+    if tail and not tail.startswith("\n"):
+        tail = "\n" + tail
+    return head + tail
+
+
+_METRIC_NOISE_LINE = re.compile(
+    r"^\s*(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*(?:=\s*)?0\s*(?:in|pt)\s*(?:\\\\|&|,)*\s*$",
+    re.I,
+)
+
+
+def _strip_metric_noise_lines_after_begin_document(tex: str) -> str:
+    """Remove standalone metric fragments (e.g. `sep 0in`) anywhere after \\begin{document} — not only at file top."""
+    token = "\\begin{document}"
+    i = tex.find(token)
+    if i < 0:
+        return tex
+    head = tex[: i + len(token)]
+    body = tex[i + len(token) :]
+    lines = body.splitlines(keepends=True)
+    kept: List[str] = []
+    for ln in lines:
+        if _METRIC_NOISE_LINE.match(ln.strip()):
+            continue
+        kept.append(ln)
+    return head + "".join(kept)
+
+
+# ``\resumeItem{sep 0in}`` (LLM echoed enumitem keys as bullet text) — remove whole line.
+_RESUMEITEM_METRIC_JUNK_LINE = re.compile(
+    r"(?m)^\s*\\resumeItem\{\s*(?:(?:sep|nosep|topsep|parsep|itemsep|partopsep|labelsep)\s*(?:=\s*)?"
+    r"0\s*(?:in|pt)\s*;?\s*)+\}\s*$",
+    re.I,
+)
+
+
+def _strip_resumeitem_metric_junk_lines(tex: str) -> str:
+    return _RESUMEITEM_METRIC_JUNK_LINE.sub("", tex)
+
+
+# Contact masthead duplicates after % RESUME-CONTACT-BLOCK-END are stripped in
+# ``_strip_llm_duplicate_header_tabular_after_contact`` (tabular* or plain tabular).
+
+
+def _strip_llm_duplicate_header_tabular_after_contact(tex: str) -> str:
+    """Remove pasted name/contact ``tabular*`` / ``tabular`` block(s) after our canonical contact block.
+
+    The model often repeats the masthead even though ``% RESUME-CONTACT-BLOCK-START`` … ``END`` already
+    emitted one. We strip conservatively: only blocks that look like contact rows (``\\Huge``, Email,
+    Location, mailto, Mobile).
+    """
+    end_tag = "% RESUME-CONTACT-BLOCK-END"
+    i = tex.find(end_tag)
+    if i < 0:
+        return tex
+    prefix = tex[: i + len(end_tag)]
+    rest = tex[i + len(end_tag) :]
+    _masthead_inner = re.compile(
+        r"\\Huge|Email:|Location:|\\href\{mailto:|Mobile:|LinkedIn",
+        re.I,
+    )
+    for _ in range(6):
+        rest_l = rest.lstrip()
+        off = len(rest) - len(rest_l)
+        if rest_l.startswith("\\begin{tabular*}"):
+            em = re.search(r"\\end\{tabular\*\}", rest_l)
+            if not em:
+                break
+            inner = rest_l[: em.end()]
+            if "\\Huge" not in inner and "Email:" not in inner and "Location:" not in inner:
+                break
+            if not _masthead_inner.search(inner):
+                break
+            rest = rest[:off] + rest_l[em.end() :].lstrip("\n")
+            continue
+        if rest_l.startswith("\\begin{tabular}"):
+            em0 = re.search(r"\\end\{tabular\}", rest_l)
+            if not em0 or "\\Huge" not in rest_l[: em0.end()]:
+                break
+            inner0 = rest_l[: em0.end()]
+            if not _masthead_inner.search(inner0):
+                break
+            rest = rest[:off] + rest_l[em0.end() :].lstrip("\n")
+            continue
+        break
+    rest = rest.lstrip("\n")
+    if rest and not rest.startswith("\n"):
+        rest = "\n" + rest
+    return prefix + rest
+
+
+_GLUED_RESUME_WORDS = re.compile(
+    r"(?i)([a-z]{2,22}(?:ing|ed|es|tion|sions?|ments?|ness))"
+    r"((?:ability|ibility|insights|analysis|operations|management|performance|reporting|validation|processing|optimization|alignment|framework|workflows?))"
+    r"(?=\s|$|[,.;)]|to(?:analyze|support|identify|ensure|deliver|improve)\b|for(?:business|data|insights)\b)"
+)
+_TO_VERB_GLUE = re.compile(
+    r"(?i)(?<=[a-z])to(analyze|support|identify|ensure|deliver|improve)\b"
+)
+
+
+def _fix_tex_resumeitem_word_glues_line(ln: str) -> str:
+    if "tabular" in ln.lower() or "@{\\extracolsep" in ln:
+        return ln
+    if "\\resumeItem" not in ln and "\\item" not in ln:
+        return ln
+    out = _GLUED_RESUME_WORDS.sub(r"\1 \2", ln)
+    out = _TO_VERB_GLUE.sub(r" to \1", out)
+    return out
+
+
+def _fix_tex_resumeitem_word_glues(tex: str) -> str:
+    return "\n".join(_fix_tex_resumeitem_word_glues_line(ln) for ln in tex.splitlines())
+
+
+def _sanitize_full_resume_tex(full_tex: str) -> str:
+    """Last-mile fixes on assembled .tex before write (run-ons, contact pipes, stray text)."""
+    t = _strip_tex_leading_body_junk(full_tex)
+    t = _strip_metric_noise_lines_after_begin_document(t)
+    t = _strip_resumeitem_metric_junk_lines(t)
+    t = _strip_llm_duplicate_header_tabular_after_contact(t)
+    t = _fix_tex_runon_employer_month(t)
+    t = _fix_tex_contact_pipe_spacing(t)
+    t = _fix_tex_resumeitem_word_glues(t)
+    return t
+
+
+def _count_huge_before_first_section(tex: str) -> int:
+    """How many ``\\Huge`` appear between ``\\begin{document}`` and the first ``\\section{`` (masthead zone)."""
+    token = "\\begin{document}"
+    i = tex.find(token)
+    if i < 0:
+        return 0
+    rest = tex[i + len(token) :]
+    j = rest.find("\\section{")
+    head = rest[:j] if j >= 0 else rest[:8000]
+    return head.count("\\Huge")
+
+
+def _audit_assembled_resume_tex(full_tex: str) -> List[str]:
+    """Structural checks after preamble + body + footer assembly. Returns human-readable issues (empty if OK)."""
+    issues: List[str] = []
+    n_cs = full_tex.count(_CONTACT_START)
+    n_ce = full_tex.count(_CONTACT_END)
+    if n_cs > 1 or n_ce > 1:
+        issues.append(f"duplicate_contact_markers start={n_cs} end={n_ce}")
+    elif n_cs != n_ce:
+        issues.append(f"contact_block_marker_mismatch start={n_cs} end={n_ce}")
+    bd = full_tex.count("\\begin{document}")
+    if bd != 1:
+        issues.append(f"begin_document_count={bd} (expected 1)")
+    ed = full_tex.count("\\end{document}")
+    if ed != 1:
+        issues.append(f"end_document_count={ed} (expected 1)")
+    if "\\begin{document}" in full_tex and "\\end{document}" in full_tex:
+        body = full_tex.split("\\begin{document}", 1)[1]
+        body = body.rsplit("\\end{document}", 1)[0]
+        if "\\begin{document}" in body:
+            issues.append("nested_or_duplicate_begin_document_inside_body")
+    huge_pre = _count_huge_before_first_section(full_tex)
+    if huge_pre > 1:
+        issues.append(f"huge_in_masthead_zone={huge_pre} (expected 1; likely duplicate name header)")
+    return issues
+
+
+def _finalize_full_resume_tex(full_tex: str) -> str:
+    """Sanitize assembled .tex and log structural audit warnings."""
+    t = _sanitize_full_resume_tex(full_tex)
+    for msg in _audit_assembled_resume_tex(t):
+        logger.warning("assembled_tex_audit  |  %s", msg)
+    return t
+
+
+_OVERFULL_HBOX_RE = re.compile(r"Overfull \\hbox")
+
+
+def _audit_pdflatex_log(log_text: str, *, max_hits: int = 10) -> List[str]:
+    """Surface typography issues from pdflatex stdout/stderr (optional quality pass)."""
+    if not (log_text or "").strip():
+        return []
+    return [ln.strip() for ln in log_text.splitlines() if _OVERFULL_HBOX_RE.search(ln)][:max_hits]
+
+
+def _log_pdflatex_quality(proc_stdout: Optional[str], proc_stderr: Optional[str]) -> None:
+    blob = (proc_stdout or "") + "\n" + (proc_stderr or "")
+    hits = _audit_pdflatex_log(blob)
+    if hits:
+        logger.warning(
+            "pdflatex_quality  |  Overfull \\hbox (showing %d):\n%s",
+            len(hits),
+            "\n".join(hits),
+        )
+
+
+def _maybe_chktex_warn(tex_path: str) -> None:
+    """If ``chktex`` is on PATH, run it once on the saved .tex and log warnings (best-effort, no hard fail)."""
+    exe = _shutil.which("chktex")
+    if not exe or not tex_path or not os.path.isfile(tex_path):
+        return
+    folder = os.path.dirname(os.path.abspath(tex_path)) or "."
+    try:
+        proc = subprocess.run(
+            [exe, tex_path],
+            cwd=folder,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        blob = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        lines = [ln.strip() for ln in blob.splitlines() if "Warning" in ln][:20]
+        if lines:
+            logger.warning("chktex  |  %s", "\n".join(lines))
+    except Exception as exc:
+        logger.debug("chktex skipped  |  %s", exc)
 
 
 # ============================================================================
@@ -460,6 +1624,9 @@ _TRIO_HEADING_RE  = re.compile(r"\\resumeTrioHeading\{([^}]*)\}\{([^}]*)\}\{([^}
 # non-greedy) outer match; we then strip braces ourselves to avoid pulling in
 # trailing tokens like `\resumeItemListEnd` if a bullet contains a `}`.
 _RESUME_ITEM_RE   = re.compile(r"\\resumeItem\{(.*)\}\s*$")
+_PLAIN_ITEM_RE    = re.compile(r"\\item\s+(.*)$")
+_BOLD_LINE_RE     = re.compile(r"\\textbf\{([^}]*)\}\s*\\\\\s*$")
+_ITALIC_LINE_RE   = re.compile(r"\\textit\{([^}]*)\}\s*\\\\\s*$")
 
 # Sections we never let the editor touch. (Was {"education"} originally per
 # user request — they later asked to allow editing Education too.) Kept as a
@@ -504,10 +1671,6 @@ def _trio_to_header(m: "re.Match[str]") -> str:
     a, b, c = m.group(1), m.group(2), m.group(3)
     parts = [_latex_to_plain(p) for p in (a, b, c) if p.strip()]
     return " · ".join(parts)
-
-
-_CONTACT_START = "% RESUME-CONTACT-BLOCK-START"
-_CONTACT_END   = "% RESUME-CONTACT-BLOCK-END"
 
 
 def _parse_contact_block(full_tex: str) -> Optional[Dict]:
@@ -563,7 +1726,63 @@ def _parse_contact_block(full_tex: str) -> Optional[Dict]:
                 block_end = i
                 break
         if block_start == -1 or block_end == -1:
-            return None
+            # Strategy 3: simple Jinja header (name line + contact/headline lines)
+            in_doc = False
+            hdr_start = -1
+            hdr_end = -1
+            for i, ln in enumerate(lines):
+                s = ln.strip()
+                if not in_doc:
+                    if "\\begin{document}" in s:
+                        in_doc = True
+                    continue
+                if "\\section" in s:
+                    break
+                if not s:
+                    continue
+                if hdr_start == -1 and ("\\LARGE" in s or "\\textbf{" in s):
+                    hdr_start = i
+                    hdr_end = i
+                    continue
+                if hdr_start != -1:
+                    hdr_end = i
+
+            if hdr_start == -1 or hdr_end == -1:
+                return None
+
+            header_lines = [lines[j].strip() for j in range(hdr_start, hdr_end + 1) if lines[j].strip()]
+            joined = " | ".join(header_lines)
+
+            def _grab_inline(pat: str) -> str:
+                m = re.search(pat, joined, re.I)
+                return m.group(1).strip() if m else ""
+
+            name = _grab_inline(r"\\textbf\{\s*([^}]+?)\s*\}")
+            email = _grab_inline(r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})")
+            phone = _grab_inline(r"(\+?\d[\d\s().-]{8,}\d)")
+            linkedin = _grab_inline(r"(https?://(?:www\.)?linkedin\.com/[^\s|]+|linkedin\.com/[^\s|]+|LinkedIn/[^\s|]+)")
+            github = _grab_inline(r"(https?://(?:www\.)?github\.com/[^\s|]+|github\.com/[^\s|]+|GitHub)")
+            location = _grab_inline(r"Location\s*:\s*([^|\\]+)")
+
+            return {
+                "blockStart": hdr_start,
+                "blockEnd": hdr_end,
+                "name": _latex_to_plain(name),
+                "location": _latex_to_plain(location),
+                "locationLabel": "Location",
+                "website": "",
+                "websiteUrl": "",
+                "linkedin": _latex_to_plain(linkedin),
+                "linkedinUrl": "",
+                "github": _latex_to_plain(github),
+                "githubUrl": "",
+                "email": _latex_to_plain(email),
+                "phone": _latex_to_plain(phone),
+                "emailLabel": "Email",
+                "phoneLabel": "Mobile",
+                "customFields": [],
+                "marked": False,
+            }
 
     block_text = "\n".join(lines[block_start : block_end + 1])
 
@@ -785,6 +2004,26 @@ def parse_resume_tex(full_tex: str) -> Dict:
             in_item_list = False
             continue
 
+        # Jinja-style experience heading lines:
+        #   \textbf{ Company }\\
+        #   \textit{ Role }\\
+        sec_name = str(cur_section.get("name") or "").lower()
+        if "experience" in sec_name or "work" in sec_name:
+            mb = _BOLD_LINE_RE.search(stripped)
+            if mb:
+                company = _latex_to_plain(mb.group(1))
+                cur_entry = _new_entry(f"|{company}||", line_in_full, leading_ws)
+                cur_section["entries"].append(cur_entry)
+                in_item_list = False
+                continue
+            mi_role = _ITALIC_LINE_RE.search(stripped)
+            if mi_role and cur_entry is not None:
+                role_txt = _latex_to_plain(mi_role.group(1))
+                parts = [p.strip() for p in (cur_entry.get("header") or "").split("|")]
+                company_txt = parts[1] if len(parts) > 1 else ""
+                cur_entry["header"] = f"{role_txt}|{company_txt}||"
+                continue
+
         # --- Bullet ---
         mi = _RESUME_ITEM_RE.search(stripped)
         if mi:
@@ -809,6 +2048,25 @@ def parse_resume_tex(full_tex: str) -> Dict:
                 if cur_entry["bulletBlockStart"] == -1:
                     cur_entry["bulletBlockStart"] = line_in_full
                 cur_entry["bulletBlockEnd"] = line_in_full
+            continue
+
+        # Plain LaTeX itemize bullets used by structured Jinja templates.
+        mip = _PLAIN_ITEM_RE.search(stripped)
+        if mip:
+            text = _latex_to_plain(mip.group(1))
+            if cur_entry is None:
+                cur_entry = _new_entry("", line_in_full, leading_ws)
+                cur_section["entries"].append(cur_entry)
+            bullet_counter += 1
+            cur_entry["bullets"].append({
+                "id": f"b{bullet_counter}",
+                "text": text,
+                "texLine": line_in_full,
+            })
+            if cur_entry["bulletBlockStart"] == -1:
+                cur_entry["bulletBlockStart"] = line_in_full
+            cur_entry["bulletBlockEnd"] = line_in_full
+            continue
 
     # Section end-line = line of next section minus 1, or end-of-document.
     for idx, sec in enumerate(sections):
@@ -1054,7 +2312,12 @@ def _apply_pdf_layout_to_tex(full_tex: str, layout: Optional[Dict]) -> str:
 
     # Keep contact header visible in PDF by adding a tiny top spacer and
     # using the configured heading size.
-    out = re.sub(r"\\textbf\{\\Huge\s+", rf"\\textbf{{{header_size} ", out, count=1)
+    out = re.sub(
+        r"\\textbf\{\\Huge\s+",
+        lambda _m: "\\textbf{" + header_size + " ",
+        out,
+        count=1,
+    )
     if "\\begin{tabular*}{\\textwidth}{l@{\\extracolsep{\\fill}}r}" in out:
         out = out.replace(
             "\\begin{tabular*}{\\textwidth}{l@{\\extracolsep{\\fill}}r}",
@@ -1088,6 +2351,7 @@ def recompile_resume_from_tex(folder: str, full_tex: str, layout: Optional[Dict]
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(rendered_tex)
     logger.info(f"Re-saved .tex  |  {tex_path}  |  {len(full_tex)} chars")
+    _maybe_chktex_warn(tex_path)
 
     result = {"folder": folder, "folder_path": folder_path, "tex_path": tex_path, "pdf_path": None}
 
@@ -1104,6 +2368,7 @@ def recompile_resume_from_tex(folder: str, full_tex: str, layout: Optional[Dict]
             [PDFLATEX, "-interaction=nonstopmode", "-output-directory", folder_path, tex_path],
             capture_output=True, text=True, timeout=60,
         )
+        _log_pdflatex_quality(proc.stdout, proc.stderr)
         pdf_path = os.path.join(folder_path, filename[:-4] + ".pdf")
         if os.path.exists(pdf_path):
             result["pdf_path"] = pdf_path
@@ -1141,24 +2406,25 @@ def ai_rewrite_bullet(bullet_text: str, instruction: str, jd_snippet: str = "") 
         + "REWRITTEN BULLET:"
     )
 
-    # Try Gemini first (fast + free), fall back to Grok if configured.
+    # Try configured primary (Grok-first when XAI key + LLM_PROVIDER), then fallbacks.
     last_err: Optional[BaseException] = None
-    for model in _model_chain("gemini-2.5-flash"):
+    _gem = _optional_gemini_client()
+    for model in _model_chain(primary_llm_model_for_resume_workloads()):
         try:
             if _is_grok(model):
                 # _stream_grok yields events; we just need the final text.
                 pieces: List[str] = []
                 for ev in _stream_grok(model, "You rewrite resume bullets.", prompt, temperature=0.3):
                     if isinstance(ev, dict) and ev.get("type") == "text":
-                        pieces.append(ev.get("text", ""))
+                        pieces.append(ev.get("delta") or "")
                 out = "".join(pieces).strip()
                 if out:
                     return out.strip().strip('"').strip("'")
                 continue
             # Gemini path
-            from google import genai  # type: ignore
-            client = genai.Client()
-            resp = client.models.generate_content(model=model, contents=prompt)
+            if _gem is None:
+                continue
+            resp = _gem.models.generate_content(model=model, contents=prompt)
             out = (getattr(resp, "text", "") or "").strip()
             if out:
                 return out.strip().strip('"').strip("'")
@@ -1167,6 +2433,53 @@ def ai_rewrite_bullet(bullet_text: str, instruction: str, jd_snippet: str = "") 
             _backoff_if_rate_limited(exc)
             continue
     raise RuntimeError(f"All models failed for bullet rewrite: {last_err}")
+
+
+def ai_generate_skills(role: str, existing_skills: Optional[List[str]] = None) -> List[str]:
+    """Generate a list of relevant skills for a job role.
+
+    Returns a flat list of skill strings. Avoids duplicating anything in
+    `existing_skills`. Raises on hard failure.
+    """
+    existing = ", ".join(existing_skills or []) or "none"
+    prompt = (
+        "You are a professional resume writer. Generate 12-15 relevant professional "
+        f"skills for a candidate applying for this role: {role}\n\n"
+        f"Existing skills already on the resume (do not duplicate): {existing}\n\n"
+        "Return ONLY a valid JSON array of concise skill strings — no preamble, "
+        "no markdown, no code fences, just the raw array. "
+        "Mix technical skills with domain-relevant soft skills. "
+        'Example: ["Python", "SQL", "Data Analysis", "Machine Learning", "Communication"]'
+    )
+
+    import json as _json
+    last_err: Optional[BaseException] = None
+    _gem = _optional_gemini_client()
+    for model in _model_chain(primary_llm_model_for_resume_workloads()):
+        try:
+            if _is_grok(model):
+                pieces: List[str] = []
+                for ev in _stream_grok(model, "You generate resume skills lists.", prompt, temperature=0.4):
+                    if isinstance(ev, dict) and ev.get("type") == "text":
+                        pieces.append(ev.get("delta") or "")
+                raw = "".join(pieces).strip()
+            else:
+                if _gem is None:
+                    continue
+                resp = _gem.models.generate_content(model=model, contents=prompt)
+                raw = (getattr(resp, "text", "") or "").strip()
+
+            # Strip markdown fences if the model ignored instructions
+            if raw.startswith("```"):
+                raw = raw.split("```")[1].lstrip("json").strip()
+            skills = _json.loads(raw)
+            if isinstance(skills, list):
+                return [str(s).strip() for s in skills if str(s).strip()]
+        except BaseException as exc:
+            last_err = exc
+            _backoff_if_rate_limited(exc)
+            continue
+    raise RuntimeError(f"All models failed for skills generation: {last_err}")
 
 
 # ============================================================================
@@ -1285,6 +2598,520 @@ def _check_keyword_in_resume(keyword: str, resume_text: str) -> Dict:
     return {"keyword": keyword, "status": "missing", "count": 0}
 
 
+# --- ATS: JD signals, weighted keywords, bullet/summary heuristics (no LLM) ---
+
+_KEYWORD_TYPE_WEIGHTS: Dict[str, int] = {
+    "jobTitle": 25,
+    "requiredSkills": 25,
+    "repeatedKeywords": 15,
+    "certifications": 15,
+    "preferredSkills": 10,
+    "industryTerms": 10,
+}
+
+_ATS_SCORE_WEIGHTS: Dict[str, int] = {
+    "jdKeywordMatch": 30,
+    "requiredSkillMatch": 20,
+    "categoryAndTitleMatch": 15,
+    "experienceBulletQuality": 15,
+    "formattingAndParseability": 10,
+    "contactAndLinks": 5,
+}
+
+_JD_CATEGORY_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "Engineering / Software": (
+        "software", "engineer", "developer", "frontend", "front-end", "backend", "back-end",
+        "full stack", "fullstack", "devops", "sre", "api", "microservices", "cloud", "kubernetes",
+        "python", "java", "typescript", "javascript", "react", "vue", "angular", "node",
+    ),
+    "Data / Analytics": (
+        "data analyst", "analytics", "sql", "tableau", "looker", "power bi", "snowflake",
+        "etl", "warehouse", "metrics", "dashboard", "reporting", "scientist", "machine learning",
+    ),
+    "Sales": (
+        "sales", "account executive", "ae ", " sdr", "bdr", "quota", "pipeline", "territory",
+        "business development", "revenue", "prospecting",
+    ),
+    "Marketing": (
+        "marketing", "seo", "sem", "content", "brand", "campaign", "growth", "email marketing",
+        "social media", "copywriting",
+    ),
+    "Healthcare": (
+        "clinical", "patient", "rn ", "nurse", "hospital", "medical", "pharma", "healthcare",
+        "hipaa",
+    ),
+    "Finance / Accounting": (
+        "finance", "accounting", "cpa", "audit", "budget", "forecast", "fp&a", "controller",
+        "treasury", "tax",
+    ),
+    "Product / Program": (
+        "product manager", "program manager", "roadmap", "stakeholder", "agile", "scrum",
+        "prioritization", "discovery",
+    ),
+}
+
+_COMMON_SKILL_PHRASES: Tuple[str, ...] = (
+    "machine learning", "deep learning", "computer vision", "natural language",
+    "ci/cd", "object oriented", "object-oriented", "rest api", "rest apis", "graphql",
+    "react native", "next.js", "node.js", "vue.js", "ruby on rails", "spring boot",
+    "power bi", "google cloud", "aws lambda", "kubernetes",
+)
+
+_COMMON_SKILL_TOKENS: frozenset = frozenset({
+    "python", "java", "kotlin", "swift", "go", "golang", "rust", "ruby", "php", "scala", "r",
+    "javascript", "typescript", "react", "vue", "angular", "svelte", "nextjs", "nodejs", "node",
+    "express", "django", "flask", "fastapi", "spring", "rails", "laravel", "dotnet", "csharp",
+    "sql", "mysql", "postgresql", "postgres", "mongo", "mongodb", "redis", "elasticsearch",
+    "dynamodb", "cassandra", "snowflake", "databricks", "spark", "kafka", "rabbitmq",
+    "aws", "gcp", "azure", "terraform", "docker", "kubernetes", "jenkins", "nginx",
+    "graphql", "grpc", "html", "css", "sass", "tailwind", "webpack", "vite",
+    "pandas", "numpy", "tensorflow", "pytorch", "sklearn", "tableau", "looker", "excel",
+    "salesforce", "sap", "figma", "jira", "confluence", "git", "github", "gitlab",
+    "linux", "bash", "shell", "c++", "csharp", "dotnet", ".net",
+})
+
+_STRONG_ACTION_VERBS: frozenset = frozenset({
+    "built", "developed", "designed", "launched", "led", "managed", "delivered", "improved",
+    "reduced", "increased", "decreased", "automated", "implemented", "architected", "scaled",
+    "migrated", "secured", "optimized", "debugged", "refactored", "integrated", "deployed",
+    "owned", "created", "established", "accelerated", "streamlined", "drove", "shipped",
+    "grew", "saved", "expanded", "negotiated", "mentored", "coached", "defined", "spearheaded",
+})
+
+_ATS_WEAK_VERBS: frozenset = frozenset({
+    "worked", "helped", "assisted", "responsible", "involved", "participated", "contributed",
+    "supported", "handled", "did", "made", "got", "had", "tried", "attempted",
+})
+
+_WEAK_BULLET_PREFIXES: Tuple[str, ...] = (
+    "responsible for ", "worked on ", "helped with ", "involved in ", "assisted with ",
+    "duties included ", "tasked with ", "duty to ", "main duty",
+)
+
+_ATS_NUMBER_RE = re.compile(r"\b\d+([.,]\d+)?[%KkMmBb]?\+?\b|\$\d|\b\d+x\b", re.I)
+
+_CERT_PATTERNS = re.compile(
+    r"\b(?:PMP|CAPM|CPA|CFA|SHRM(?:-CP)?|PHR|SPHR|CISSP|CISM|CEH|Security\+|CompTIA|"
+    r"AWS\s+Certified|Azure\s+Certified|Google\s+Cloud\s+Professional|GCP\s+Professional|"
+    r"Scrum\s*Master|PSM\s*(?:I{1,3}|1|2)|CSM|ITIL|PE\s*License|Six\s+Sigma)\b",
+    re.I,
+)
+
+_UNPROFESSIONAL_EMAIL_LOCAL = re.compile(
+    r"(?:^|\b)(?:beer|booze|partygirl|partyguy|hotmail420|sexy|badass|killer|"
+    r"princess|gangsta|420|69{2,})(?:\b|\d)",
+    re.I,
+)
+
+_US_CITY_STATE_RE = re.compile(
+    r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?,\s*[A-Z]{2}\b",
+)
+
+
+def _jd_slice(lower: str, start_keys: Tuple[str, ...], end_keys: Tuple[str, ...]) -> str:
+    """Return substring of JD between first start marker and earliest end marker."""
+    idx = len(lower)
+    for k in start_keys:
+        p = lower.find(k)
+        if p != -1 and p < idx:
+            idx = p
+    if idx >= len(lower):
+        return ""
+    end = len(lower)
+    for k in end_keys:
+        p = lower.find(k, idx + 5)
+        if p != -1 and p < end:
+            end = p
+    return lower[idx:end]
+
+
+def _tokenize_skill_line(line: str) -> List[str]:
+    parts = re.split(r"[,;|/•\n]+", line)
+    out: List[str] = []
+    for p in parts:
+        t = re.sub(r"^[\s\d.\-+*)]+", "", p).strip()
+        t = re.sub(r"\s+", " ", t)
+        if 2 <= len(t) <= 60:
+            out.append(t)
+    return out
+
+
+def _extract_jd_skill_phrases(jd_lower: str) -> Tuple[List[str], List[str]]:
+    """Heuristic required vs preferred skill phrases from JD structure."""
+    req_keys = (
+        "requirements", "required qualifications", "minimum qualifications",
+        "must have", "you have", "you'll need", "basic qualifications",
+    )
+    pref_keys = ("preferred qualifications", "nice to have", "bonus", "plus:", "preferred skills")
+    end_keys = (
+        "benefits", "we offer", "salary", "how to apply", "application", "equal opportunity",
+        "about the company", "what you bring", "what we offer",
+    )
+    req_blob = _jd_slice(jd_lower, req_keys, pref_keys + end_keys)
+    pref_blob = _jd_slice(jd_lower, pref_keys, end_keys)
+
+    def _from_blob(blob: str) -> List[str]:
+        found: List[str] = []
+        for line in blob.splitlines():
+            line_l = line.strip().lower()
+            if len(line_l) < 4:
+                continue
+            if line_l.startswith(("•", "-", "*")):
+                line_l = line_l.lstrip("•-* ").strip()
+            for tok in _tokenize_skill_line(line_l):
+                if len(tok) >= 3 and tok not in _STOPWORDS:
+                    found.append(tok)
+        # De-dupe preserving order
+        seen: Set[str] = set()
+        uniq: List[str] = []
+        for t in found:
+            k = t.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            uniq.append(t)
+        return uniq[:40]
+
+    required = _from_blob(req_blob) if req_blob else []
+    preferred = _from_blob(pref_blob) if pref_blob else []
+
+    # If structure didn't yield skills, mine common tech tokens from whole JD
+    if len(required) < 3:
+        extra: List[str] = []
+        for phrase in _COMMON_SKILL_PHRASES:
+            if phrase in jd_lower and phrase not in extra:
+                extra.append(phrase)
+        for tok in sorted(_COMMON_SKILL_TOKENS, key=len, reverse=True):
+            if re.search(r"\b" + re.escape(tok) + r"\b", jd_lower):
+                extra.append(tok)
+        for e in extra:
+            if e.lower() not in {x.lower() for x in required}:
+                required.append(e)
+        required = required[:35]
+
+    return required[:35], preferred[:25]
+
+
+def _infer_jd_job_title(jd: str, target_role: str) -> str:
+    tr = (target_role or "").strip()
+    if tr and len(tr) < 120:
+        return tr
+    lines = [ln.strip() for ln in (jd or "").splitlines() if ln.strip()]
+    skip = re.compile(r"^(location|remote|hybrid|onsite|apply|salary|company|overview)\b", re.I)
+    for ln in lines[:25]:
+        if len(ln) > 100 or skip.search(ln):
+            continue
+        if re.search(r"\b(inc\.|llc|corp\.)\b", ln, re.I) and "engineer" not in ln.lower():
+            continue
+        return ln[:120]
+    return ""
+
+
+def _infer_jd_category(jd_lower: str) -> str:
+    best_cat = "General"
+    best = 0
+    for cat, kws in _JD_CATEGORY_KEYWORDS.items():
+        score = sum(1 for k in kws if re.search(r"\b" + re.escape(k) + r"\b", jd_lower))
+        if score > best:
+            best, best_cat = score, cat
+    return best_cat if best > 0 else "General"
+
+
+def _extract_certifications(jd: str) -> List[str]:
+    return sorted(set(m.group(0).strip() for m in _CERT_PATTERNS.finditer(jd or "")))
+
+
+def _years_experience_hint(jd_lower: str) -> Optional[int]:
+    m = re.search(
+        r"\b(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)\b",
+        jd_lower,
+    )
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def _analyze_jd_signals(jd: str, target_role: str) -> Dict:
+    jd = jd or ""
+    jd_lower = jd.lower()
+    title = _infer_jd_job_title(jd, target_role)
+    category = _infer_jd_category(jd_lower)
+    req_skills, pref_skills = _extract_jd_skill_phrases(jd_lower)
+    certs = _extract_certifications(jd)
+    repeated: List[Dict] = []
+    for item in _extract_jd_keywords(jd, max_keywords=40):
+        if item.get("jd_count", 0) >= 3:
+            repeated.append({"keyword": item["keyword"], "count": item["jd_count"]})
+    # Employer problem — first substantive sentences
+    prob = ""
+    for ln in jd.splitlines():
+        s = ln.strip()
+        if 40 < len(s) < 280:
+            low = s.lower()
+            if any(
+                x in low
+                for x in ("you will", "you'll", "looking for", "seeking", "responsible for", "build", "scale", "lead", "drive", "improve")
+            ):
+                prob = s
+                break
+    if not prob and jd.strip():
+        prob = jd.strip().split("\n\n")[0][:240]
+    return {
+        "jobTitle": title,
+        "jobCategory": category,
+        "requiredSkills": req_skills,
+        "preferredSkills": pref_skills,
+        "certifications": certs,
+        "repeatedKeywords": repeated[:15],
+        "minYearsExperience": _years_experience_hint(jd_lower),
+        "employerProblemHint": prob[:400],
+    }
+
+
+def _classify_keyword_type(
+    keyword: str,
+    jd_lower: str,
+    signals: Dict,
+    title_l: str,
+) -> str:
+    kl = keyword.lower()
+    for c in signals.get("certifications") or []:
+        cl = c.lower()
+        if cl in kl or kl in cl or re.search(r"\b" + re.escape(kl) + r"\b", cl):
+            return "certifications"
+    if kl in title_l or (len(kl) > 3 and kl in title_l.replace("-", " ")):
+        return "jobTitle"
+    req_l = {s.lower() for s in (signals.get("requiredSkills") or [])}
+    if kl in req_l or any(kl in r or r in kl for r in req_l if len(r) >= 5):
+        return "requiredSkills"
+    pref_l = {s.lower() for s in (signals.get("preferredSkills") or [])}
+    if kl in pref_l or any(kl in r or r in kl for r in pref_l if len(r) >= 5):
+        return "preferredSkills"
+    rep = signals.get("repeatedKeywords") or []
+    if any(r.get("keyword", "").lower() == kl for r in rep):
+        return "repeatedKeywords"
+    return "industryTerms"
+
+
+def _resume_bullets(full_text: str, parsed: Optional[Dict]) -> List[str]:
+    out: List[str] = []
+    if parsed and isinstance(parsed.get("sections"), list):
+        for sec in parsed["sections"]:
+            if not sec.get("editable"):
+                continue
+            name = (sec.get("name") or "").lower()
+            if "skill" in name and "experience" not in name:
+                continue
+            for ent in sec.get("entries") or []:
+                for b in ent.get("bullets") or []:
+                    t = (b.get("text") or "").strip()
+                    if len(t) > 10:
+                        out.append(t)
+    if out:
+        return out[:120]
+    for raw in (full_text or "").splitlines():
+        s = raw.strip()
+        if len(s) < 22 or len(s) > 420:
+            continue
+        if s[:1] in "•–-*●◦▪·" or re.match(r"^[\-\u2013\u2014]\s+\S", s) or re.match(r"^\d+[\).\]]\s+\S", s):
+            t = re.sub(r"^[\d\s.)•–\-*●◦▪·]+", "", s).strip()
+            if len(t) > 15:
+                out.append(t)
+    return out[:100]
+
+
+_US_PHONE_INLINE = re.compile(
+    r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b",
+)
+
+
+def _bullet_looks_like_contact_or_latex_noise(b: str) -> bool:
+    """PDF bullet heuristics often swallow the header row (email, LaTeX). Skip for metrics."""
+    low = b.lower()
+    if "@" in b or "mailto:" in low or "linkedin.com" in low or "github.com" in low:
+        return True
+    if "href" in low or "http://" in low or "https://" in low or "www." in low:
+        return True
+    if "\\" in b or "{" in b:
+        return True
+    if _US_PHONE_INLINE.search(b):
+        return True
+    return False
+
+
+def _token_is_long_bare_id_or_phone(token: str) -> bool:
+    """7+ digit runs without %, $, or k/m/b scale are almost never résumé impact metrics."""
+    if re.search(r"[%$]", token) or re.search(r"[kKmMbB]", token):
+        return False
+    if re.search(r"\d\s*x\b", token, re.I):
+        return False
+    core = re.sub(r"[^\d]", "", token.split("+", 1)[0])
+    return bool(core.isdigit() and len(core) >= 7)
+
+
+def _pick_strongest_metric_snippet(bullets: List[str]) -> str:
+    """Pick a number that reads like an accomplishment metric — not longest digit substring."""
+    best_key: Tuple[int, float] = (-1, -1.0)
+    best_snip = ""
+
+    for b in bullets:
+        if _bullet_looks_like_contact_or_latex_noise(b):
+            continue
+        for mm in _ATS_NUMBER_RE.finditer(b):
+            tok = mm.group(0).strip()
+            if _token_is_long_bare_id_or_phone(tok):
+                continue
+            prio = 1
+            tie = 0.0
+            if "%" in tok:
+                prio = 5
+                try:
+                    tie = float(re.sub(r"[^\d.]", "", tok.split("%", 1)[0] or "0"))
+                except ValueError:
+                    tie = 0.0
+            elif re.match(r"^\$", tok):
+                prio = 4
+                try:
+                    tie = float(re.sub(r"[^\d.]", "", tok.replace(",", "")))
+                except ValueError:
+                    tie = 0.0
+            elif re.search(r"\d+\s*x\b", tok, re.I):
+                prio = 3
+                try:
+                    tie = float(re.sub(r"[^\d.]", "", re.split(r"(?i)x", tok)[0] or "0"))
+                except ValueError:
+                    tie = 0.0
+            elif re.search(r"[kKmMbB]", tok, re.I):
+                prio = 2
+                mscale = re.search(r"([\d.,]+)\s*[kKmMbB]", tok, re.I)
+                if mscale:
+                    try:
+                        tie = float(mscale.group(1).replace(",", ""))
+                    except ValueError:
+                        tie = 0.0
+            else:
+                try:
+                    parts = re.split(r"\s+", tok.strip(), 1)
+                    tie = float(re.sub(r"[^\d.]", "", parts[0] or "0"))
+                except ValueError:
+                    tie = 0.0
+                prio = 2 if "+" in tok else 1
+            if (prio, tie) > best_key:
+                best_key = (prio, tie)
+                best_snip = tok + " — " + b[:100]
+    return best_snip
+
+
+def _summary_excerpt(lower_text: str, full_text: str) -> str:
+    """Best-effort summary/objective region from PDF text."""
+    markers = ("summary", "profile", "objective", "about me")
+    lines = full_text.splitlines()
+    grab = False
+    buf: List[str] = []
+    for ln in lines:
+        l = ln.strip()
+        low = l.lower()
+        if any(re.match(rf"^\s*{re.escape(m)}\b", low) for m in markers):
+            grab = True
+            continue
+        if grab:
+            if any(
+                re.match(rf"^\s*{re.escape(m)}\b", low)
+                for m in ("experience", "employment", "work history", "education", "skills", "projects")
+            ):
+                break
+            if l:
+                buf.append(l)
+        if len(buf) > 12:
+            break
+    return " ".join(buf)[:1200]
+
+
+def _bullet_score_row(text: str, jd_terms: Set[str]) -> Dict:
+    low = text.lower()
+    words = re.findall(r"[A-Za-z']+", text)
+    first = words[0].lower() if words else ""
+    starts_action = first in _STRONG_ACTION_VERBS
+    has_metric = bool(_ATS_NUMBER_RE.search(text))
+    impact_kw = any(
+        x in low
+        for x in (
+            "revenue", "cost", "latency", "churn", "conversion", "retention", "efficiency",
+            "downtime", "customer", "user", "users", "traffic", "throughput", "budget",
+            "deadline", "satisfaction", "nps", "arr", "mrr",
+        )
+    )
+    has_rel = False
+    for t in jd_terms:
+        if len(t) >= 3 and re.search(r"\b" + re.escape(t.lower()) + r"\b", low):
+            has_rel = True
+            break
+    weak_prefix = any(low.startswith(p) for p in _WEAK_BULLET_PREFIXES)
+    is_generic = (
+        weak_prefix
+        or first in _ATS_WEAK_VERBS
+        or (len(words) < 10 and not has_metric)
+    )
+    return {
+        "startsWithActionVerb": starts_action,
+        "hasMetric": has_metric,
+        "hasBusinessImpact": impact_kw,
+        "hasRelevantKeyword": has_rel,
+        "isTooGeneric": is_generic,
+    }
+
+
+def _skill_suggestion_rows(
+    jd_lower: str,
+    resume_lower: str,
+    required: List[str],
+    preferred: List[str],
+) -> List[Dict]:
+    rows: List[Dict] = []
+    for skill in required[:20]:
+        sl = skill.lower()
+        in_jd = len(re.findall(r"\b" + re.escape(sl) + r"\b", jd_lower))
+        present = bool(re.search(r"\b" + re.escape(sl) + r"\b", resume_lower))
+        related = False
+        if not present:
+            for tok in sl.replace("/", " ").split():
+                if len(tok) >= 4 and tok != sl and tok in resume_lower:
+                    related = True
+                    break
+        if present:
+            status = "already_present"
+            rec = "add_if_true"
+        elif related:
+            status = "candidate_claimed_related"
+            rec = "add_if_true"
+        else:
+            status = "missing"
+            rec = "add_if_true" if in_jd >= 2 else "do_not_add_without_experience"
+        rows.append({
+            "skill": skill,
+            "source": "job_description",
+            "status": status,
+            "recommendation": rec,
+            "jdMentions": in_jd,
+        })
+    for skill in preferred[:12]:
+        sl = skill.lower()
+        if any(r["skill"].lower() == sl for r in rows):
+            continue
+        present = bool(re.search(r"\b" + re.escape(sl) + r"\b", resume_lower))
+        rows.append({
+            "skill": skill,
+            "source": "job_description",
+            "status": "already_present" if present else "missing",
+            "recommendation": "add_if_true" if present else "do_not_add_without_experience",
+            "jdMentions": len(re.findall(r"\b" + re.escape(sl) + r"\b", jd_lower)),
+        })
+    return rows[:28]
+
+
 def _detect_layout_issues(pdf) -> Dict:
     """Heuristics for ATS-unfriendly layouts. Multi-column resumes (common in
     designer templates) often confuse parsers — the text comes out interleaved
@@ -1324,21 +3151,26 @@ def _detect_layout_issues(pdf) -> Dict:
     return out
 
 
-def ats_check(folder: str, jd: str = "", user_id: str = "", pdf_bytes: Optional[bytes] = None) -> Dict:
-    """Run an ATS-readiness check against the compiled PDF for `folder`.
+def ats_check(
+    folder: str,
+    jd: str = "",
+    user_id: str = "",
+    pdf_bytes: Optional[bytes] = None,
+    *,
+    target_role: str = "",
+    parsed: Optional[Dict] = None,
+) -> Dict:
+    """Run an ATS + job-alignment check on the compiled PDF (text extraction).
 
     Resolution order for the PDF:
       1. `pdf_bytes` arg (if caller already has it)
       2. local LIBRARY_ROOT/<folder>/*.pdf
       3. Supabase resume-pdfs bucket via download_pdf
 
-    Returns:
-      {
-        "score": 0-100,
-        "checks": [{"id", "name", "pass", "detail"}],
-        "keywords": [{"keyword", "weight", "status", "count", "jd_count"}],
-        "stats": {"page_count", "word_count", "char_count"}
-      }
+    Always returns legacy keys: ``score``, ``checks``, ``keywords``, ``stats``.
+    When a job description is present, adds JD match analysis, weighted
+    keyword types, bullet/summary heuristics, recruiter scan, and score
+    breakdown (rule-based — not a guarantee any ATS will pass).
     """
     import io as _io
 
@@ -1355,8 +3187,7 @@ def ats_check(folder: str, jd: str = "", user_id: str = "", pdf_bytes: Optional[
                         break
                     except Exception as exc:
                         logger.warning(f"ats_check: read {fn} failed: {exc}")
-    if data is None and user_id:
-        # Lazy import — avoids a circular dep when resume_gui imports this module
+    if data is None and user_id and user_id != "local":
         try:
             try:
                 from resume_gui.storage import download_pdf  # type: ignore
@@ -1369,7 +3200,6 @@ def ats_check(folder: str, jd: str = "", user_id: str = "", pdf_bytes: Optional[
     if data is None:
         raise FileNotFoundError(f"PDF for folder '{folder}' not found locally or in storage")
 
-    # 2. Extract text + run pdfplumber checks
     try:
         import pdfplumber  # type: ignore
     except ImportError as exc:
@@ -1387,8 +3217,15 @@ def ats_check(folder: str, jd: str = "", user_id: str = "", pdf_bytes: Optional[
     full_text = "\n".join(pages_text)
     word_count = len(re.findall(r"\b\w+\b", full_text))
     char_count = len(full_text)
+    lower_text = full_text.lower()
+    jd_stripped = (jd or "").strip()
+    jd_lower = jd_stripped.lower()
 
-    # 3. Structural checks
+    jd_signals = _analyze_jd_signals(jd_stripped, target_role)
+    title_guess = jd_signals.get("jobTitle") or ""
+    title_l = title_guess.lower()
+
+    # --- Structural checks (legacy + summary hygiene) ----------------------------
     checks: List[Dict] = []
 
     text_extractable = char_count > 200
@@ -1408,15 +3245,14 @@ def ats_check(folder: str, jd: str = "", user_id: str = "", pdf_bytes: Optional[
         "detail": layout.get("detail", ""),
     })
 
-    page_ok = 1 <= page_count <= 2
+    page_ok = 1 <= page_count <= 3
     checks.append({
         "id":     "page_count",
-        "name":   "Page count between 1 and 2",
+        "name":   "Concise length (1–3 pages)",
         "pass":   page_ok,
-        "detail": f"{page_count} page(s)",
+        "detail": f"{page_count} page(s) — aim for 1–2 for most roles, up to 3 for deep senior histories",
     })
 
-    lower_text = full_text.lower()
     sections_found  = [s for s in _ATS_REQUIRED_SECTIONS if s in lower_text]
     sections_missing = [s for s in _ATS_REQUIRED_SECTIONS if s not in lower_text]
     checks.append({
@@ -1430,7 +3266,6 @@ def ats_check(folder: str, jd: str = "", user_id: str = "", pdf_bytes: Optional[
     has_email = bool(_EMAIL_RE.search(full_text))
     has_phone = bool(_PHONE_RE.search(full_text))
     has_url   = bool(_URL_RE.search(full_text))
-    contact_score = sum([has_email, has_phone, has_url])
     checks.append({
         "id":     "contact_info",
         "name":   "Contact info detectable (email + phone/URL)",
@@ -1438,60 +3273,397 @@ def ats_check(folder: str, jd: str = "", user_id: str = "", pdf_bytes: Optional[
         "detail": f"email={'✓' if has_email else '✗'}  phone={'✓' if has_phone else '✗'}  url={'✓' if has_url else '✗'}",
     })
 
-    # 4. Word-count sanity (too short / too long is a flag)
-    wc_ok = 250 <= word_count <= 1200
+    wc_ok = 200 <= word_count <= 1000
     checks.append({
         "id":     "word_count",
-        "name":   "Word count in healthy range (250–1,200)",
+        "name":   "Word count in a healthy range (about 200–1,000)",
         "pass":   wc_ok,
         "detail": f"{word_count:,} words "
-                  + ("(too short — add detail)" if word_count < 250 else
-                     "(too long — trim)" if word_count > 1200 else "(ideal)"),
+                  + ("(too short — add detail)" if word_count < 200 else
+                     "(likely too long — trim to ~1–2 pages; most résumés stay under ~1,000 words)" if word_count > 1000 else "(OK)"),
     })
 
-    # 5. Keyword coverage
-    kw_list = _extract_jd_keywords(jd)
+    has_objective = bool(re.search(r"\bobjective\b", lower_text)) or bool(
+        re.search(r"\bseeking (a |an )?(challenging|new|)?\s*(role|position|opportunity)", lower_text)
+    )
+    checks.append({
+        "id":     "summary_not_objective",
+        "name":   "Use a professional summary (avoid a generic objective)",
+        "pass":   not has_objective,
+        "detail": "Objective-style headers or 'seeking a challenging role' openings read dated to recruiters."
+                  if has_objective else "No classic objective pattern detected in extracted text.",
+    })
+
+    # --- Keyword table with JD signal types ------------------------------------
+    kw_merge: List[Dict] = []
+    seen_kw: Set[str] = set()
+    for item in _extract_jd_keywords(jd_stripped, max_keywords=28):
+        kw_merge.append(dict(item))
+        seen_kw.add(item["keyword"].lower())
+    for s in jd_signals.get("requiredSkills") or []:
+        sl = s.lower()
+        if sl not in seen_kw and len(sl) >= 2:
+            kw_merge.append({
+                "keyword": s,
+                "weight": 3,
+                "jd_count": len(re.findall(re.escape(sl), jd_lower)) or 1,
+            })
+            seen_kw.add(sl)
+
     kw_results: List[Dict] = []
-    for kw in kw_list:
+    w_num = 0.0
+    w_den = 0.0
+    for kw in kw_merge:
         r = _check_keyword_in_resume(kw["keyword"], full_text)
-        r["weight"]    = kw["weight"]
-        r["jd_count"]  = kw["jd_count"]
+        r["weight"] = kw["weight"]
+        r["jd_count"] = kw["jd_count"]
+        ktype = _classify_keyword_type(kw["keyword"], jd_lower, jd_signals, title_l)
+        r["keywordType"] = ktype
+        tw = float(_KEYWORD_TYPE_WEIGHTS.get(ktype, 10))
+        w_den += tw
+        frac = 1.0 if r["status"] == "found" else (0.5 if r["status"] == "partial" else 0.0)
+        w_num += tw * frac
         kw_results.append(r)
 
-    # 6. Compute score
-    # Structural: 60% of total. Each check is weighted equally; failed checks
-    # subtract proportionally. Keywords: 40% — weighted average of found-ness,
-    # where partial counts as 0.5.
-    total_struct  = len(checks)
-    passed_struct = sum(1 for c in checks if c["pass"])
-    struct_pct    = (passed_struct / total_struct) if total_struct else 1.0
+    jd_kw_ratio = (w_num / w_den) if w_den > 0 else 1.0
 
-    if kw_results:
-        total_w = sum(k["weight"] for k in kw_results)
-        got_w   = sum(
-            k["weight"] * (1.0 if k["status"] == "found"
-                           else 0.5 if k["status"] == "partial" else 0.0)
-            for k in kw_results
+    # --- Required skills vs resume ---------------------------------------------
+    req_skills: List[str] = list(jd_signals.get("requiredSkills") or [])
+    resume_lower = lower_text
+    missing_req: List[str] = []
+    matched_req: List[str] = []
+    for s in req_skills:
+        sl = s.lower()
+        if re.search(r"\b" + re.escape(sl) + r"\b", resume_lower) or sl in resume_lower:
+            matched_req.append(s)
+        else:
+            missing_req.append(s)
+
+    req_ratio = (len(matched_req) / max(1, len(req_skills))) if req_skills else 1.0
+
+    # --- Title & category alignment --------------------------------------------
+    title_tokens = [
+        t for t in re.findall(r"[a-z0-9+#./-]{3,}", title_l)
+        if t not in _STOPWORDS and not t.isdigit()
+    ]
+    title_hits = sum(
+        1 for t in title_tokens
+        if len(t) >= 3 and re.search(r"\b" + re.escape(t) + r"\b", resume_lower)
+    )
+    title_ratio = (title_hits / max(1, len(title_tokens))) if title_tokens else 0.0
+    if title_ratio >= 0.45:
+        title_match_label = "Strong"
+    elif title_ratio >= 0.2:
+        title_match_label = "Partial"
+    else:
+        title_match_label = "Weak"
+
+    cat_name = jd_signals.get("jobCategory") or "General"
+    cat_kws = _JD_CATEGORY_KEYWORDS.get(cat_name, ())
+    cat_hits = sum(1 for k in cat_kws if re.search(r"\b" + re.escape(k) + r"\b", resume_lower))
+    cat_jd = sum(1 for k in cat_kws if re.search(r"\b" + re.escape(k) + r"\b", jd_lower))
+    cat_strength = cat_hits / max(5, cat_jd + 4) if jd_lower else 0.0
+    if cat_strength >= 0.28:
+        category_match_label = "Strong"
+    elif cat_strength >= 0.12:
+        category_match_label = "Partial"
+    else:
+        category_match_label = "Weak"
+
+    # --- Bullets & quantification -----------------------------------------------
+    jd_term_set: Set[str] = set()
+    for k in kw_results[:40]:
+        jd_term_set.add(k["keyword"].lower())
+    for s in req_skills[:25]:
+        jd_term_set.add(s.lower())
+
+    bullets = _resume_bullets(full_text, parsed)
+    bullet_rows: List[Dict] = []
+    metrics_n = 0
+    action_n = 0
+    generic_n = 0
+    weak_starts: List[str] = []
+    for b in bullets:
+        row = _bullet_score_row(b, jd_term_set)
+        bullet_rows.append({"text": b[:220], **row})
+        if row["hasMetric"]:
+            metrics_n += 1
+        if row["startsWithActionVerb"]:
+            action_n += 1
+        if row["isTooGeneric"]:
+            generic_n += 1
+        bl = b.lower()
+        for p in _WEAK_BULLET_PREFIXES:
+            if bl.startswith(p.strip()):
+                weak_starts.append(b[:80])
+                break
+    n_bul = len(bullets)
+    if n_bul:
+        quant_ratio = metrics_n / n_bul
+        action_ratio = action_n / n_bul
+        generic_ratio = generic_n / n_bul
+        bullet_quality = min(
+            1.0,
+            0.45 * quant_ratio + 0.35 * action_ratio + 0.25 * (1.0 - generic_ratio),
         )
-        kw_pct = got_w / total_w if total_w else 1.0
     else:
-        kw_pct = 1.0  # No JD = don't penalize keyword section
+        quant_ratio = 0.35
+        action_ratio = 0.35
+        generic_ratio = 0.35
+        bullet_quality = 0.45
 
-    # When no JD provided, structural score is the whole story.
-    if not kw_results:
-        score = round(struct_pct * 100)
+    # --- Summary heuristics -----------------------------------------------------
+    summary_text = _summary_excerpt(lower_text, full_text)
+    sum_low = summary_text.lower()
+    generic_summary = bool(
+        re.search(r"\b(seeking|looking for|challenging role|opportunity to grow)\b", sum_low)
+    )
+    jd_kw_hits_in_summary = sum(
+        1 for k in kw_results[:20]
+        if re.search(r"\b" + re.escape(k["keyword"].lower()) + r"\b", sum_low)
+    )
+    summary_has_metric = bool(_ATS_NUMBER_RE.search(summary_text))
+
+    # --- Contact & links --------------------------------------------------------
+    email_m = _EMAIL_RE.search(full_text)
+    email_val = email_m.group(0) if email_m else ""
+    bad_email = bool(email_val and _UNPROFESSIONAL_EMAIL_LOCAL.search(email_val.split("@")[0]))
+    linkedin_ok = bool(re.search(r"linkedin\.com/[\w./-]+", full_text, re.I))
+    github_ok = bool(re.search(r"github\.com/[\w./-]+", full_text, re.I))
+    portfolio_ok = bool(re.search(r"(?:portfolio|personal site|behance\.com|dribbble\.com)", lower_text))
+    city_state_ok = bool(_US_CITY_STATE_RE.search(full_text))
+
+    sw_category = "software" if (
+        "software" in cat_name.lower()
+        or "engineering" in cat_name.lower()
+        or any(t in jd_lower for t in ("github", "kubernetes", "typescript", "react", "api "))
+    ) else "general"
+
+    contact_validation: Dict = {
+        "fullName": False,
+        "email": has_email,
+        "phone": has_phone,
+        "cityState": city_state_ok,
+        "linkedIn": linkedin_ok,
+        "gitHub": github_ok,
+        "portfolioHint": portfolio_ok,
+        "emailLooksUnprofessional": bad_email,
+    }
+    for ln in full_text.splitlines():
+        s = ln.strip()
+        if 4 < len(s) < 60 and re.match(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+){1,4}$", s):
+            contact_validation["fullName"] = True
+            break
+
+    # --- Red flags & density ----------------------------------------------------
+    red_flags: List[Dict] = []
+    if bad_email:
+        red_flags.append({"id": "email_unprofessional", "severity": "high", "detail": "Email local-part looks informal — use a simple professional address."})
+    long_lines = [ln for ln in full_text.splitlines() if len(ln.split()) > 48]
+    if len(long_lines) >= 2:
+        red_flags.append({"id": "dense_blocks", "severity": "medium", "detail": "Very long lines may scan as dense blocks — break into bullets."})
+    if sw_category == "software" and jd_stripped and not github_ok:
+        red_flags.append({"id": "github_missing", "severity": "low", "detail": "GitHub link not detected — add it if you have public code relevant to this role."})
+    if jd_stripped and not linkedin_ok:
+        red_flags.append({"id": "linkedin_missing", "severity": "low", "detail": "LinkedIn URL not detected — recruiters often expect it."})
+
+    red_penalty = sum(
+        {"high": 8, "medium": 4, "low": 2}.get(r.get("severity", "low"), 2)
+        for r in red_flags
+    )
+    red_penalty = min(15, red_penalty)
+
+    bullets_per_job_hint = ""
+    if n_bul > 18:
+        bullets_per_job_hint = f"{n_bul} accomplishment lines detected — consider trimming older roles if any section feels long."
+
+    # --- Employer problem fit (lightweight) ------------------------------------
+    top_evidence: List[str] = []
+    for b in bullets[:12]:
+        if any(re.search(r"\b" + re.escape(t) + r"\b", b.lower()) for t in list(jd_term_set)[:12] if len(t) > 3):
+            top_evidence.append(b[:160])
+    missing_evidence = missing_req[:6]
+
+    # --- Recruiter 6-second scan ------------------------------------------------
+    scan_name = ""
+    for ln in full_text.splitlines():
+        s = ln.strip()
+        if 4 < len(s) < 56 and re.match(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+){1,4}$", s):
+            scan_name = s
+            break
+    skills_line = ""
+    m_sk = re.search(r"(?i)skills[^\n]*\n([^\n]{10,240})", full_text)
+    if m_sk:
+        cand = m_sk.group(1).strip()[:200]
+        if "," in cand or "|" in cand or cand.count(" ") >= 2 or "•" in cand or " / " in cand:
+            skills_line = cand
+    edu_line = ""
+    m_edu = re.search(r"(?i)\b(B\.?S\.?|M\.?S\.?|B\.?A\.?|M\.?A\.?|Ph\.?D\.?)[^\n]{0,120}", full_text)
+    if m_edu:
+        edu_line = m_edu.group(0).strip()[:160]
+    strongest_metric = _pick_strongest_metric_snippet(bullets)
+
+    recruiter_scan = {
+        "name": scan_name or "(not detected from PDF text)",
+        "targetRole": (target_role or title_guess or "").strip() or "—",
+        "topSkillsLine": skills_line or "(surface skills near a Skills heading if present)",
+        "education": edu_line or "—",
+        "strongestMetric": strongest_metric or "—",
+        "signals": [
+            {"label": "Target role obvious", "ok": bool((target_role or title_guess) and title_ratio >= 0.15)},
+            {"label": "Current title relevant", "ok": title_match_label != "Weak"},
+            {"label": "Top skills visible", "ok": bool(skills_line)},
+            {"label": "Metrics visible", "ok": metrics_n >= max(1, n_bul // 5)},
+            {"label": "Education easy to find", "ok": bool(edu_line)},
+        ],
+    }
+
+    # --- Weak JD keywords (low resume density vs JD) ----------------------------
+    weak_kw: List[str] = []
+    for k in kw_results:
+        if k["status"] == "found" and k.get("jd_count", 0) >= 3:
+            if k.get("count", 0) * 3 < k["jd_count"]:
+                weak_kw.append(k["keyword"])
+    matched_kw_display = [k["keyword"] for k in kw_results if k["status"] == "found"][:18]
+
+    jd_match_score = round(
+        100 * (0.52 * jd_kw_ratio + 0.24 * req_ratio + 0.12 * min(1.0, title_ratio * 1.4) + 0.12 * min(1.0, cat_strength * 2.2))
+    ) if jd_stripped else 0
+
+    # --- Score breakdown (max 95 before penalty) --------------------------------
+    fmt_ids = {"text_extractable", "single_column", "required_sections", "word_count", "page_count"}
+    fmt_checks = [c for c in checks if c["id"] in fmt_ids]
+    fmt_pts = _ATS_SCORE_WEIGHTS["formattingAndParseability"] * (
+        sum(1 for c in fmt_checks if c["pass"]) / max(1, len(fmt_checks))
+    )
+
+    ct_pts = 0.0
+    if has_email:
+        ct_pts += 2.0
+    if has_phone:
+        ct_pts += 1.5
+    if has_url or linkedin_ok:
+        ct_pts += 1.0
+    if city_state_ok:
+        ct_pts += 0.5
+    ct_pts = min(float(_ATS_SCORE_WEIGHTS["contactAndLinks"]), ct_pts)
+
+    if jd_stripped:
+        jd_kw_pts = _ATS_SCORE_WEIGHTS["jdKeywordMatch"] * jd_kw_ratio
+        req_pts = _ATS_SCORE_WEIGHTS["requiredSkillMatch"] * req_ratio
+        cat_title_pts = _ATS_SCORE_WEIGHTS["categoryAndTitleMatch"] * (
+            0.55 * min(1.0, cat_strength * 2.5) + 0.45 * min(1.0, title_ratio * 1.8)
+        )
     else:
-        score = round((0.6 * struct_pct + 0.4 * kw_pct) * 100)
+        jd_kw_pts = _ATS_SCORE_WEIGHTS["jdKeywordMatch"] * 0.55
+        req_pts = _ATS_SCORE_WEIGHTS["requiredSkillMatch"] * 0.55
+        cat_title_pts = _ATS_SCORE_WEIGHTS["categoryAndTitleMatch"] * 0.55
+
+    bullet_pts = _ATS_SCORE_WEIGHTS["experienceBulletQuality"] * bullet_quality
+
+    raw_total = jd_kw_pts + req_pts + cat_title_pts + bullet_pts + fmt_pts + ct_pts
+    scale = 100.0 / 95.0
+    score = max(0, min(100, int(round(raw_total * scale - red_penalty))))
+
+    score_breakdown = {
+        "jdKeywordMatch": round(jd_kw_pts, 1),
+        "requiredSkillMatch": round(req_pts, 1),
+        "categoryAndTitleMatch": round(cat_title_pts, 1),
+        "experienceBulletQuality": round(bullet_pts, 1),
+        "formattingAndParseability": round(fmt_pts, 1),
+        "contactAndLinks": round(ct_pts, 1),
+        "redFlagPenalty": red_penalty,
+        "keywordTypeWeights": dict(_KEYWORD_TYPE_WEIGHTS),
+    }
+
+    export_checklist = [
+        {"id": "jd_custom", "label": "Résumé tailored to this job description", "pass": bool(jd_stripped and jd_kw_ratio >= 0.35)},
+        {"id": "title_cat", "label": "Job title / category reflected in story", "pass": title_match_label != "Weak" and category_match_label != "Weak"},
+        {"id": "req_skills", "label": "Required skills addressed where truthful", "pass": req_ratio >= 0.45 or not req_skills},
+        {"id": "certs", "label": "Certifications from JD surfaced if you hold them", "pass": not jd_signals.get("certifications") or any(c.lower() in resume_lower for c in jd_signals["certifications"])},
+        {"id": "contact", "label": "Contact block complete (email, phone, location)", "pass": has_email and has_phone and city_state_ok},
+        {"id": "no_objective", "label": "No generic objective statement", "pass": not has_objective},
+        {"id": "verbs", "label": "Strong action verbs on accomplishments", "pass": n_bul == 0 or (action_n / n_bul) >= 0.35},
+        {"id": "metrics", "label": "Quantified impact on most bullets", "pass": n_bul == 0 or quant_ratio >= 0.35},
+    ]
+
+    disclaimer = (
+        "Resunova scores how well your résumé text aligns with this job description and common ATS parsing patterns. "
+        "It does not guarantee passage of any specific applicant tracking system."
+    )
 
     return {
-        "score":    score,
-        "checks":   checks,
+        "score": score,
+        "checks": checks,
         "keywords": kw_results,
         "stats": {
             "page_count": page_count,
             "word_count": word_count,
             "char_count": char_count,
         },
+        "disclaimer": disclaimer,
+        "scoreBreakdown": score_breakdown,
+        "jdAnalysis": jd_signals,
+        "jdMatch": {
+            "matchScore": jd_match_score if jd_stripped else None,
+            "missingRequiredSkills": missing_req[:20],
+            "weakKeywords": weak_kw[:20],
+            "matchedKeywords": matched_kw_display,
+            "categoryMatch": category_match_label,
+            "titleMatch": title_match_label,
+        },
+        "summarySignals": {
+            "hasObjectivePattern": has_objective,
+            "summaryLooksGeneric": generic_summary or (len(summary_text) < 40),
+            "jdKeywordsInSummary": jd_kw_hits_in_summary,
+            "summaryHasMetric": summary_has_metric,
+            "suggestions": [
+                *(["Replace an objective block with a 2–3 line summary tied to this role."] if has_objective else []),
+                *(["Add role category + top tools + one measurable outcome to your summary."] if generic_summary or len(summary_text) < 40 else []),
+                *(["Weave 2–3 truthful JD phrases into the summary where they match your experience."] if jd_stripped and jd_kw_hits_in_summary < 2 else []),
+                *(["Add one quantified win to the summary (%, $, time, scale)."] if jd_stripped and not summary_has_metric else []),
+            ],
+        },
+        "bulletStrength": {
+            "bulletCount": n_bul,
+            "samples": bullet_rows[:12],
+            "quantifiedCount": metrics_n,
+            "weakOpenersCount": len(set(weak_starts)),
+            "weakOpenersSample": weak_starts[:4],
+            "uxHint": (
+                f"{metrics_n} of {n_bul} lines include measurable impact — aim to add numbers to more accomplishment lines."
+                if n_bul else "Fewer bullet-like lines detected in the PDF — confirm experience uses clear accomplishment bullets."
+            ),
+        },
+        "quantification": {
+            "withMetric": metrics_n,
+            "total": n_bul,
+            "ratio": round(quant_ratio, 2) if n_bul else None,
+        },
+        "actionVerbs": {
+            "strongVerbRatio": round(action_ratio, 2) if n_bul else None,
+            "weakStartsFound": weak_starts[:6],
+            "tip": "Prefer verbs like Built, Delivered, Reduced, Launched, Automated — especially for technical roles.",
+        },
+        "skillSuggestions": _skill_suggestion_rows(jd_lower, resume_lower, req_skills, list(jd_signals.get("preferredSkills") or [])),
+        "redFlags": red_flags,
+        "contactValidation": contact_validation,
+        "lengthDensity": {
+            "suggestedPages": "1–2 for most candidates; up to 3 for very senior histories",
+            "longLines": len(long_lines),
+            "bulletsPerJobHint": bullets_per_job_hint,
+        },
+        "employerProblemFit": {
+            "employerProblem": jd_signals.get("employerProblemHint") or "",
+            "candidateEvidence": top_evidence[:5],
+            "missingEvidence": missing_evidence,
+            "rewriteHint": (
+                "Tie one more bullet to the outcomes this posting emphasizes — mirror their language where it matches your real work."
+                if jd_stripped else ""
+            ),
+        },
+        "recruiterScan": recruiter_scan,
+        "exportChecklist": export_checklist,
     }
 
 
@@ -1536,8 +3708,16 @@ def doctor_check_bullet(text: str) -> List[Dict]:
         return issues
     first = words[0].lower()
 
-    # 1. Weak opening verb
-    if first in _WEAK_VERBS or any(lower.startswith(p + " ") for p in _WEAK_VERBS):
+    # 1. Weak opening verb / weak duty-style phrases
+    if any(lower.startswith(p) for p in (
+        "responsible for ", "worked on ", "helped with ", "involved in ", "assisted with ",
+    )):
+        issues.append({
+            "id":       "weak_verb",
+            "severity": "warn",
+            "msg":      "Weak duty-style opening — lead with a strong action verb (Built, Delivered, Reduced, …)",
+        })
+    elif first in _WEAK_VERBS or any(lower.startswith(p + " ") for p in _WEAK_VERBS):
         issues.append({
             "id":       "weak_verb",
             "severity": "warn",
@@ -1629,7 +3809,37 @@ def _find_company_reference(company: str) -> Optional[str]:
     return best
 
 
+def _rating_explain_model_chain() -> List[str]:
+    """Models for post-stream ratings and change explanations.
+
+    When ``grok_preferred_for_throughput()`` (XAI key set, ``LLM_PROVIDER`` not ``gemini``),
+    try Grok **before** Gemini so production does not burn free-tier Flash/Pro on every
+    generate after Grok already produced the résumé body. Gemini fallbacks use **Flash
+    Lite before Pro** so we avoid the tight ``gemini-2.5-flash`` daily cap when Lite suffices.
+    """
+    if grok_preferred_for_throughput() and (os.environ.get("XAI_API_KEY") or "").strip():
+        flash_m = primary_gemini_flash_model()
+        gemini_models = [flash_m, _REASONING_MODEL_GEMINI]
+    else:
+        gemini_models = [_REASONING_MODEL_GEMINI, primary_gemini_flash_model()]
+    grok_models: List[str] = []
+    if (os.environ.get("XAI_API_KEY") or "").strip():
+        fast = (os.environ.get("GROK_MODEL") or "grok-4-1-fast-non-reasoning").strip() or "grok-4-1-fast-non-reasoning"
+        grok_models = [_REASONING_MODEL_GROK, fast]
+        seen_g: Set[str] = set()
+        grok_models = [m for m in grok_models if m not in seen_g and not seen_g.add(m)]
+
+    if grok_preferred_for_throughput() and grok_models:
+        merged = grok_models + gemini_models
+    else:
+        merged = gemini_models + grok_models
+
+    seen_all: Set[str] = set()
+    return [m for m in merged if m not in seen_all and not seen_all.add(m)]
+
+
 def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Optional[Dict]:
+    # ``client`` may be ``None`` when only xAI is configured — Gemini slots in the chain are skipped.
     prompt = (
         "You are a coach giving the candidate an honest, direct read on their fit for a job. Write the assessment in "
         "SECOND-PERSON voice — address the candidate directly with 'you', 'your', 'you have', 'you built'. Never refer to "
@@ -1667,10 +3877,7 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
         f"RESUME BODY (LaTeX — ignore formatting commands, read only the content. This is the ONLY source of truth about the candidate's experience):\n{latex_body[:6000]}"
     )
-    # Use reasoning models for ratings: pro → flash → grok-4 (reasoning) → grok fast
-    reasoning_chain: list[str] = [_REASONING_MODEL_GEMINI, "gemini-2.5-flash"]
-    if os.environ.get("XAI_API_KEY"):
-        reasoning_chain += [_REASONING_MODEL_GROK, "grok-4-1-fast-non-reasoning"]
+    reasoning_chain = _rating_explain_model_chain()
 
     for i, m in enumerate(reasoning_chain):
         if i > 0:
@@ -1681,6 +3888,8 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
                 if not result:
                     continue
             else:
+                if client is None:
+                    continue
                 # Enable thinking for Gemini 2.5 models
                 thinking_cfg = (
                     types.ThinkingConfig(thinking_budget=8000)
@@ -1705,6 +3914,44 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
     return None
 
 
+def _prose_signature(s: str) -> str:
+    """Normalize prose for comparing LLM-reported before/after (no-op detection)."""
+    if not s or not isinstance(s, str):
+        return ""
+    return re.sub(r"\s+", " ", s.strip())
+
+
+def _sanitize_change_rationales(raw: Optional[List[Dict]]) -> List[Dict]:
+    """Drop invalid entries and rewrote rows where plain before/after are identical."""
+    out: List[Dict] = []
+    for c in raw or []:
+        if not isinstance(c, dict):
+            continue
+        t = c.get("type")
+        if t not in ("added", "removed", "rewrote"):
+            continue
+        why = (c.get("why") or "").strip()
+        if t == "added":
+            txt = (c.get("text") or "").strip()
+            if not txt:
+                continue
+            out.append({"type": "added", "text": txt, "why": why or "Added for JD alignment."})
+        elif t == "removed":
+            txt = (c.get("text") or "").strip()
+            if not txt:
+                continue
+            out.append({"type": "removed", "text": txt, "why": why or "Trimmed for focus."})
+        else:
+            prev = (c.get("previous") or "").strip()
+            txt = (c.get("text") or "").strip()
+            if not prev or not txt:
+                continue
+            if _prose_signature(prev) == _prose_signature(txt):
+                continue
+            out.append({"type": "rewrote", "previous": prev, "text": txt, "why": why or "Reworded for clarity or JD fit."})
+    return out
+
+
 def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippet: str) -> Optional[List[Dict]]:
     """
     Ask the LLM to diff two resume bodies and produce a human-readable change list
@@ -1720,6 +3967,7 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         "• Only report MEANINGFUL content changes — ignore whitespace, LaTeX commands, punctuation, and formatting-only edits.\n"
         "• Strip all LaTeX commands from the text you output (no \\resumeItem{}, \\textbf{}, etc). Return clean prose.\n"
         "• Every bullet must trace to actual content in OLD or NEW — do not invent.\n"
+        "• For type \"rewrote\": NEVER emit an entry if the old and new plain prose are the same — omit it entirely.\n"
         "• Rationale ('why') must be ONE concise sentence (max 20 words) tied to the JOB DESCRIPTION — "
         "e.g. 'JD emphasizes distributed systems, so the bullet now leads with gRPC + Kubernetes experience.'\n"
         "• Skip pure reordering with no wording change.\n\n"
@@ -1736,9 +3984,7 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         f"OLD RESUME (LaTeX):\n{old_body[:4500]}\n\n"
         f"NEW RESUME (LaTeX):\n{new_body[:4500]}"
     )
-    analysis_chain: list[str] = [_REASONING_MODEL_GEMINI, "gemini-2.5-flash"]
-    if os.environ.get("XAI_API_KEY"):
-        analysis_chain += [_REASONING_MODEL_GROK, "grok-4-1-fast-non-reasoning"]
+    analysis_chain = _rating_explain_model_chain()
     for i, m in enumerate(analysis_chain):
         if i > 0:
             time.sleep(1)
@@ -1748,6 +3994,8 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
                 if not data:
                     continue
             else:
+                if client is None:
+                    continue
                 thinking_cfg = (
                     types.ThinkingConfig(thinking_budget=5000)
                     if "2.5" in m else None
@@ -1765,9 +4013,10 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
                 data = json.loads(text)
             changes = data.get("changes") if isinstance(data, dict) else None
             if isinstance(changes, list):
+                cleaned = _sanitize_change_rationales(changes)
                 if m != model:
                     logger.info(f"Change explanations used fallback model: {m}")
-                return changes
+                return cleaned
         except Exception as exc:
             logger.warning(f"Change explanation failed on {m}: {exc}")
             _backoff_if_rate_limited(exc)
@@ -1815,8 +4064,9 @@ def generate_latex_resume(
     job_description: str,
     reference_folder: Optional[str] = None,
     compile_pdf: bool = True,
-    model: str = "gemini-2.5-flash",
+    model: Optional[str] = None,
     base_folder: Optional[str] = None,
+    candidate_profile: Optional[str] = None,
 ) -> Dict:
     """
     Generate a tailored LaTeX resume for a specific job and save it to the library.
@@ -1825,18 +4075,20 @@ def generate_latex_resume(
         company:          Target company name
         role:             Target role title
         job_description:  Full JD text
-        reference_folder: Style reference folder (overridden by base_folder if set)
+        reference_folder: LaTeX style reference folder under LIBRARY_ROOT (wins over base_folder for macros/layout)
         compile_pdf:      Whether to run pdflatex
         model:            Gemini model ID
-        base_folder:      Existing resume folder to diff against and use as content base
+        base_folder:        Existing resume folder — content body to tailor; style comes from reference_folder when set
+        candidate_profile: Multiline profile from the app (name, contact, experience); used for PDF header + LLM facts
     """
+    model = primary_llm_model_for_resume_workloads(model)
     t_start = time.time()
     logger.info("=" * 60)
     logger.info(f"START  |  {role} @ {company}")
     logger.info(f"Model  |  {model}")
 
-    # Style reference: prefer base_folder, then explicit reference_folder, then auto-match by company, then fallback
-    ref_folder = base_folder or reference_folder or _find_company_reference(company) or "Adobe_FullStack"
+    # Style reference: explicit template first, then reuse base resume's .tex, then company heuristic, then default
+    ref_folder = reference_folder or base_folder or _find_company_reference(company) or "Adobe_FullStack"
     logger.info(f"Style reference  |  {ref_folder}")
     reference_tex = get_resume_tex(ref_folder) or ""
 
@@ -1847,72 +4099,53 @@ def generate_latex_resume(
         base_body = _extract_body(base_tex)
         logger.info(f"Base resume loaded  |  {base_folder}  ({len(base_body)} chars)")
 
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    gemini_client = _optional_gemini_client()
 
-    system_prompt = (
-        "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
-        "for software engineers. You will generate a complete LaTeX resume body tailored for a specific job.\n\n"
-        "STRICT NO-HALLUCINATION RULES — any violation makes the resume fraudulent and unusable:\n"
-        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named in the CANDIDATE PROFILE. "
-        "Do NOT add, infer, rename, or substitute any other employer or company name under any circumstances.\n"
-        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear are those explicitly stated in the CANDIDATE PROFILE. "
-        "Do NOT round up, extrapolate, or invent new figures.\n"
-        "3. FACTS ONLY: You may rephrase and reorder existing bullet points to match job keywords, but every single claim must trace back to an explicit fact in the CANDIDATE PROFILE. "
-        "Do not add achievements, tools, or responsibilities that are not in the profile.\n"
-        "4. VERIFICATION: Before writing each bullet point, ask yourself: 'Is this employer name / metric / claim verbatim in the CANDIDATE PROFILE?' If no, omit it.\n"
-        "5. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
-        "   \\resumeItemListStart, \\resumeItem, \\resumeHeadingListStart, etc.\n"
-        "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
-        "7. To bold the most relevant skills and technologies for this job, use the LaTeX command \\textbf{...} ONLY. "
-        "Never use Markdown bold syntax like **word** — pdflatex prints those asterisks literally instead of rendering bold text.\n"
-        "8. EDUCATION SECTION LOCK: Reproduce the EDUCATION section EXACTLY as it appears in the CANDIDATE PROFILE. "
-        "Do NOT rephrase, reorder, abbreviate, change degree names, university names, dates, or locations. "
-        "Same institutions, same degree names, same dates, same order — verbatim copy.\n"
-        "9. PROFESSIONAL SUMMARY: Begin the body with a \\section{Summary} containing a tailored 2-3 sentence "
-        "professional summary that pitches the candidate for THIS specific role. Write it in resume voice "
-        "(no 'I' pronouns — start with 'Full-stack engineer with…' or '6+ years building…' style). "
-        "Highlight the strongest credentials from the CANDIDATE PROFILE that map to the JD's top requirements. "
-        "Place this BEFORE the EXPERIENCE section.\n"
-        "10. Keep to 1 page — summary + all experience entries + 2 most relevant projects + education + skills"
+    cp_prompt = (candidate_profile or "").strip() or None
+    system_prompt, user_prompt = _build_prompts(
+        company,
+        role,
+        job_description,
+        base_body,
+        reference_tex,
+        candidate_profile=cp_prompt,
+        accepted_suggestions=None,
+        reference_folder=ref_folder,
+        post_suggestion_coach_run=False,
     )
 
-    base_section = ""
-    if base_body:
-        base_section = (
-            f"\n---\nCURRENT RESUME BODY (use as your starting point, tailor it for {role} at {company}):\n"
-            f"{base_body[:2500]}\n"
-        )
-
-    user_prompt = (
-        f"Generate a tailored LaTeX resume body for this application:\n\n"
-        f"TARGET ROLE: {role}\nTARGET COMPANY: {company}\n\n"
-        f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
-        f"---\nCANDIDATE PROFILE (USE ONLY THESE FACTS):\n\n"
-        f"{_get_candidate_profile_block()}"
-        f"{base_section}"
-        f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:2500]}\n\n"
-        f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
-        f" Tailor bullet points to emphasize what matters most for {role} at {company}."
-    )
-
-    logger.info(f"Calling {model} for resume generation (Google Search grounding enabled)...")
     t1 = time.time()
-    response = client.models.generate_content(
-        model=model,
-        contents=user_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            temperature=0.2,
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-        ),
-    )
-    logger.info(f"LLM response  |  {time.time() - t1:.1f}s")
-
-    latex_body = (response.text or "").strip()
+    latex_body = ""
+    if _is_grok(model):
+        logger.info(f"Calling {model} for resume generation (Grok + web search)…")
+        for ev in _stream_grok(model, system_prompt, user_prompt, 0.2, web_search=True):
+            if isinstance(ev, dict) and ev.get("type") == "text":
+                latex_body += ev.get("delta") or ""
+        latex_body = latex_body.strip()
+        logger.info(f"LLM response (Grok)  |  {time.time() - t1:.1f}s")
+    else:
+        if not gemini_client:
+            raise RuntimeError(
+                "GOOGLE_API_KEY or GEMINI_API_KEY is required for Gemini resume generation. "
+                "For Grok-only, set XAI_API_KEY and LLM_PROVIDER=grok."
+            )
+        logger.info(f"Calling {model} for resume generation (Google Search grounding enabled)...")
+        response = gemini_client.models.generate_content(
+            model=model,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.2,
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        )
+        logger.info(f"LLM response  |  {time.time() - t1:.1f}s")
+        latex_body = (getattr(response, "text", None) or "").strip()
     if latex_body.startswith("```"):
         latex_body = re.sub(r"^```[a-z]*\n?", "", latex_body)
         latex_body = re.sub(r"\n?```$", "", latex_body)
     latex_body, _ = _markdown_to_latex_bold(latex_body)
+    latex_body = _strip_llm_markdown_citations(latex_body)
     logger.info(f"LaTeX body  |  {len(latex_body)} chars")
 
     # ── Diff ──────────────────────────────────────────────────────────────────
@@ -1939,12 +4172,16 @@ def generate_latex_resume(
     # ── Ratings ───────────────────────────────────────────────────────────────
     logger.info("Calling Gemini for ratings...")
     t2 = time.time()
-    ratings = _rate_resume(client, model, latex_body, job_description[:1500])
+    ratings = _rate_resume(gemini_client, model, latex_body, job_description[:1500])
     logger.info(f"Ratings  |  {time.time() - t2:.1f}s  |  {ratings}")
 
     # ── Assemble + save ───────────────────────────────────────────────────────
-    preamble = _apply_preamble_subs(_LATEX_PREAMBLE, role, company)
+    contact_hints = _contact_from_candidate_profile(candidate_profile) if candidate_profile else {}
+    preamble = _build_export_preamble(
+        reference_tex, role, company, contact_hints, reference_folder=ref_folder
+    )
     full_tex = preamble + "\n" + latex_body + _LATEX_FOOTER
+    full_tex = _finalize_full_resume_tex(full_tex)
 
     folder_name = _make_folder_name(company, role)
     folder_path = os.path.join(LIBRARY_ROOT, folder_name)
@@ -1952,13 +4189,15 @@ def generate_latex_resume(
 
     safe_company = re.sub(r"[^\w]", "", company)
     safe_role = re.sub(r"[^\w]", "", role.replace(" ", "_"))
-    _safe_owner = re.sub(r"[^\w]", "_", DEFAULT_CONTACT.get("name", "Resume").strip()) or "Resume"
+    merged_owner = {**DEFAULT_CONTACT, **contact_hints}
+    _safe_owner = re.sub(r"[^\w]", "_", (merged_owner.get("name") or "Resume").strip()) or "Resume"
     filename = f"{_safe_owner}_{safe_company}_{safe_role}_Resume"
     tex_path = os.path.join(folder_path, filename + ".tex")
 
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(full_tex)
     logger.info(f"Saved .tex  |  {tex_path}")
+    _maybe_chktex_warn(tex_path)
 
     result = {
         "success": True,
@@ -1980,6 +4219,7 @@ def generate_latex_resume(
                 [PDFLATEX, "-interaction=nonstopmode", "-output-directory", folder_path, tex_path],
                 capture_output=True, text=True, timeout=60,
             )
+            _log_pdflatex_quality(proc.stdout, proc.stderr)
             pdf_path = os.path.join(folder_path, filename + ".pdf")
             if os.path.exists(pdf_path):
                 result["pdf_path"] = pdf_path
@@ -2007,64 +4247,403 @@ def generate_latex_resume(
 # STREAM — same pipeline but yields SSE-friendly event dicts in real-time
 # ============================================================================
 
-def _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=None):
-    """Shared prompt builder used by both stream and non-stream paths."""
-    system_prompt = (
+def _latex_tailor_system_instruction() -> str:
+    """System instruction for LaTeX body generation (Gemini + Google Search)."""
+    return (
         "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
-        "for software engineers. You will generate a complete LaTeX resume body tailored for a specific job.\n\n"
-        "STRICT NO-HALLUCINATION RULES — any violation makes the resume fraudulent and unusable:\n"
-        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named in the CANDIDATE PROFILE. "
-        "Do NOT add, infer, rename, or substitute any other employer or company name under any circumstances.\n"
-        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear are those explicitly stated in the CANDIDATE PROFILE. "
-        "Do NOT round up, extrapolate, or invent new figures.\n"
-        "3. FACTS ONLY: You may rephrase and reorder existing bullet points to match job keywords, but every single claim must trace back to an explicit fact in the CANDIDATE PROFILE. "
-        "Do not add achievements, tools, or responsibilities that are not in the profile.\n"
-        "4. VERIFICATION: Before writing each bullet point, ask yourself: 'Is this employer name / metric / claim verbatim in the CANDIDATE PROFILE?' If no, omit it.\n"
-        "5. Use the exact same LaTeX commands as the reference: \\resumeQuadHeading, \\resumeTrioHeading,\n"
-        "   \\resumeItemListStart, \\resumeItem, \\resumeHeadingListStart, etc.\n"
+        "for professional roles (engineering, analytics, business, operations, etc.). "
+        "You will generate a LaTeX resume body tailored for a specific job.\n\n"
+        "GOOGLE SEARCH — REQUIRED EARLY: You have Google Search enabled. You MUST issue at least "
+        "2 `google_search` tool calls early in the run before producing the LaTeX body. "
+        "Use queries to learn how the target company describes products/engineering, public careers "
+        "or engineering pages, common stack names for the role, and decode dense JD acronyms/product names. "
+        "Use findings for **wording, bullet order, section emphasis, and honest keyword overlap** with skills and "
+        "domains already evidenced in the CANDIDATE PROFILE (or current résumé body). "
+        "**Hard boundary:** employers, job titles, employment dates, schools, degrees, projects, certifications, and "
+        "**all numbers and metrics** about the applicant must still come **only** from the CANDIDATE PROFILE and any "
+        "CURRENT RESUME BODY supplied — never invented or \"borrowed\" from the web.\n\n"
+        "CANDIDATE BIOGRAPHY — NON-NEGOTIABLE (fraudulent if violated):\n"
+        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named "
+        "in the CANDIDATE PROFILE (or in the supplied current résumé body when that line is clearly sourced there). "
+        "Do NOT add, infer, rename, or substitute any other employer or company name.\n"
+        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear "
+        "are those explicitly stated in the CANDIDATE PROFILE (or supplied résumé body). Do NOT round up, extrapolate, "
+        "or invent new figures.\n"
+        "3. EXPERIENCE & ACHIEVEMENT SUBSTANCE: Rephrase bullets for ATS/JD fit **within** each role or section. "
+        "Do **not** add new roles, clients, tools used in a role, or responsibilities that are not supported by the profile or pasted résumé. "
+        "Keep **section order and entry grouping** per STRUCTURE rules below — do not reorder whole sections into a different archetype. "
+        "You **may** align phrasing with the JD when it clearly matches work already described (e.g. say "
+        "\"distributed systems\" if the profile describes equivalent work without that exact phrase).\n"
+        "4. BIOGRAPHICAL CHECK: Before each experience, education, or project bullet, confirm the substance is backed "
+        "by the profile or current résumé body. If not, omit it.\n"
+        "5. Use the exact LaTeX macro vocabulary from the REFERENCE only. Examples: "
+        "\\resumeSubheading, \\resumeProjectHeading, \\resumeItem, \\resumeSubHeadingListStart, \\resumeItemListStart "
+        "OR (other templates) \\resumeQuadHeading, \\resumeTrioHeading — use whichever commands actually appear in the "
+        "reference snippet. Never mix incompatible macro sets.\n"
         "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
         "7. To bold the most relevant skills and technologies for this job, use the LaTeX command \\textbf{...} ONLY. "
         "Never use Markdown bold syntax like **word** — pdflatex prints those asterisks literally instead of rendering bold text.\n"
         "8. EDUCATION SECTION LOCK: Reproduce the EDUCATION section EXACTLY as it appears in the CANDIDATE PROFILE. "
         "Do NOT rephrase, reorder, abbreviate, change degree names, university names, dates, or locations. "
-        "Same institutions, same degree names, same dates, same order — verbatim copy.\n"
-        "9. PROFESSIONAL SUMMARY: Begin the body with a \\section{Summary} containing a tailored 2-3 sentence "
-        "professional summary that pitches the candidate for THIS specific role. Write it in resume voice "
-        "(no 'I' pronouns — start with 'Full-stack engineer with…' or '6+ years building…' style). "
-        "Highlight the strongest credentials from the CANDIDATE PROFILE that map to the JD's top requirements. "
-        "Place this BEFORE the EXPERIENCE section.\n"
-        "10. Keep to 1 page — summary + all experience entries + 2 most relevant projects + education + skills"
+        "Same institutions, same degree names, same dates, same order — verbatim copy. "
+        "When you lay out each education row in LaTeX, insert **visible spaces** or column/tabular breaks between "
+        "degree text, date ranges, school names, and city/state so nothing runs together (wrong: `ScienceAug` or "
+        "`CountyBaltimore`; right: separate tokens with ` `, `&`, `\\\\`, or `\\hfill` as the template does). "
+        "Apply the **same spacing rule to EXPERIENCE / WORK rows**: never run an employer or school name into a "
+        "month abbreviation (wrong: `AccentureNov`, `CAPITAL ONEJan`; right: `Accenture Nov`, `CAPITAL ONE Jan`). "
+        "Put the **job title in a heading macro** (e.g. `\\resumeTrioHeading` arg #1, or the italic row of "
+        "`\\resumeQuadHeading`) — **never** as the first `\\resumeItem` under that employer; the first `\\resumeItem` "
+        "must be a real accomplishment bullet, not the role title alone. "
+        "Add a small vertical gap after education blocks (e.g. `\\\\[4pt]` or `\\vspace{4pt}`) so the section rule "
+        "does not crowd the last line.\n"
+        "GPA in education: include only if explicitly stated in the CANDIDATE PROFILE and the profile is consistent "
+        "with UMBC guidance (typically list GPA when 3.00 or above).\n"
+        "9. RESUME STRUCTURE LOCK (this overrides generic career-center templates): The CANDIDATE PROFILE (and any "
+        "CURRENT RESUME BODY) reflects how **this applicant** already organized their résumé. You MUST preserve: "
+        "(a) the same **major section headings** (use \\section{...} titles that match or closely match the profile); "
+        "(b) the same **top-to-bottom order** of sections; (c) the same **grouping** of employers, schools, and projects "
+        "under those headings. Use the REFERENCE snippet **only** for LaTeX macro syntax (e.g. \\resumeSubheading, "
+        "\\resumeItem) — **not** to impose a different document shape. Do **not** convert the CV into a software-default "
+        "or UMBC-style outline. Do **not** add Objective, Summary, or multi-tier Skills sections that are **absent** "
+        "from the profile. If the profile is linear text from a PDF, keep that narrative flow. Tailoring = stronger "
+        "wording and honest JD keywords **inside** existing lines; not a new layout.\n"
+        "10. PLACEMENT: After the contact/header block, follow the profile's section order — do not force Objective or "
+        "Summary before experience if the profile leads with Experience or another section.\n"
+        "11. LENGTH: Prefer one page when the profile fits; tighten wording before dropping real sections or employers.\n"
+        "12. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
+        "13. CITATIONS: Never output Markdown footnotes, bracketed citation markers, or raw URLs used for web "
+        "grounding (for example `[[1]](https://...)` or `[[2]]`). The résumé must read as a clean PDF — "
+        "search is for your reasoning only, not for visible references in the LaTeX.\n"
+        "14. CONTACT / HEADER (injected by the app): The final document already contains exactly one "
+        "`% RESUME-CONTACT-BLOCK-START` … `% RESUME-CONTACT-BLOCK-END` block (name, links, email, phone). "
+        "Do **not** output a second name/contact `\\begin{tabular*}{\\textwidth}` block, do **not** duplicate `\\Huge` "
+        "name lines, and do **not** paste another masthead. Start your body with the profile’s first real section "
+        "(typically `\\section{...}` or the equivalent first content macro from the REFERENCE — not another header).\n"
+        "15. PACKAGE / LIST OPTION TEXT: Never print enumitem/list keys as standalone body lines "
+        "(e.g. `nosep`, `topsep=0pt`, `sep 0in`, `parsep=0pt`, `labelsep=0in`). Use them **only** inside valid "
+        "`\\begin{itemize}[...]` / `\\begin{enumerate}[...]` optional arguments (or other macro args), never as stray text.\n"
+        "16. PRESENT vs DATES: If a job ends with **Present**, the role’s start month/year must **not** be in the future "
+        "unless the CANDIDATE PROFILE or CURRENT RESUME BODY **explicitly** documents that future start. Do **not** invent "
+        "lines like **Jan 2026 – Present** without explicit profile support."
+    )
+
+
+def _latex_tailor_system_instruction_no_live_search() -> str:
+    """Same tailor rules as the grounded path, but no live Google Search / tool calls in this request."""
+    return (
+        "You are an expert LaTeX resume writer specializing in ATS-optimized resumes "
+        "for professional roles (engineering, analytics, business, operations, etc.). "
+        "You will generate a LaTeX resume body tailored for a specific job.\n\n"
+        "RESEARCH CONTEXT (no live search in this step): The user message includes a **JOB & MARKET CONTEXT** block "
+        "from live web research that already ran **before** PDF generation (the same pass as résumé suggestions). "
+        "Use that block plus the job description for **wording, acronym decoding, bullet order, section emphasis, and "
+        "honest keyword overlap** with skills and domains already evidenced in the CANDIDATE PROFILE (or current résumé body). "
+        "**Hard boundary:** employers, job titles, employment dates, schools, degrees, projects, certifications, and "
+        "**all numbers and metrics** about the applicant must still come **only** from the CANDIDATE PROFILE and any "
+        "CURRENT RESUME BODY supplied — never invented or inferred from the digest alone.\n\n"
+        "CANDIDATE BIOGRAPHY — NON-NEGOTIABLE (fraudulent if violated):\n"
+        "1. EMPLOYER NAMES: The ONLY employers, companies, and institutions that may appear are those explicitly named "
+        "in the CANDIDATE PROFILE (or in the supplied current résumé body when that line is clearly sourced there). "
+        "Do NOT add, infer, rename, or substitute any other employer or company name.\n"
+        "2. METRICS & NUMBERS: The ONLY numbers, percentages, user counts, revenue figures, or statistics that may appear "
+        "are those explicitly stated in the CANDIDATE PROFILE (or supplied résumé body). Do NOT round up, extrapolate, "
+        "or invent new figures.\n"
+        "3. EXPERIENCE & ACHIEVEMENT SUBSTANCE: Rephrase bullets for ATS/JD fit **within** each role or section. "
+        "Do **not** add new roles, clients, tools used in a role, or responsibilities that are not supported by the profile or pasted résumé. "
+        "Keep **section order and entry grouping** per STRUCTURE rules below — do not reorder whole sections into a different archetype. "
+        "You **may** align phrasing with the JD when it clearly matches work already described (e.g. say "
+        "\"distributed systems\" if the profile describes equivalent work without that exact phrase).\n"
+        "4. BIOGRAPHICAL CHECK: Before each experience, education, or project bullet, confirm the substance is backed "
+        "by the profile or current résumé body. If not, omit it.\n"
+        "5. Use the exact LaTeX macro vocabulary from the REFERENCE only. Examples: "
+        "\\resumeSubheading, \\resumeProjectHeading, \\resumeItem, \\resumeSubHeadingListStart, \\resumeItemListStart "
+        "OR (other templates) \\resumeQuadHeading, \\resumeTrioHeading — use whichever commands actually appear in the "
+        "reference snippet. Never mix incompatible macro sets.\n"
+        "6. Output ONLY the LaTeX body — no preamble, no \\documentclass, no \\begin{document} or \\end{document}\n"
+        "7. To bold the most relevant skills and technologies for this job, use the LaTeX command \\textbf{...} ONLY. "
+        "Never use Markdown bold syntax like **word** — pdflatex prints those asterisks literally instead of rendering bold text.\n"
+        "8. EDUCATION SECTION LOCK: Reproduce the EDUCATION section EXACTLY as it appears in the CANDIDATE PROFILE. "
+        "Do NOT rephrase, reorder, abbreviate, change degree names, university names, dates, or locations. "
+        "Same institutions, same degree names, same dates, same order — verbatim copy. "
+        "When you lay out each education row in LaTeX, insert **visible spaces** or column/tabular breaks between "
+        "degree text, date ranges, school names, and city/state so nothing runs together (wrong: `ScienceAug` or "
+        "`CountyBaltimore`; right: separate tokens with ` `, `&`, `\\\\`, or `\\hfill` as the template does). "
+        "Apply the **same spacing rule to EXPERIENCE / WORK rows**: never run an employer or school name into a "
+        "month abbreviation (wrong: `AccentureNov`, `CAPITAL ONEJan`; right: `Accenture Nov`, `CAPITAL ONE Jan`). "
+        "Put the **job title in a heading macro** (e.g. `\\resumeTrioHeading` arg #1, or the italic row of "
+        "`\\resumeQuadHeading`) — **never** as the first `\\resumeItem` under that employer; the first `\\resumeItem` "
+        "must be a real accomplishment bullet, not the role title alone. "
+        "Add a small vertical gap after education blocks (e.g. `\\\\[4pt]` or `\\vspace{4pt}`) so the section rule "
+        "does not crowd the last line.\n"
+        "GPA in education: include only if explicitly stated in the CANDIDATE PROFILE and the profile is consistent "
+        "with UMBC guidance (typically list GPA when 3.00 or above).\n"
+        "9. RESUME STRUCTURE LOCK (this overrides generic career-center templates): The CANDIDATE PROFILE (and any "
+        "CURRENT RESUME BODY) reflects how **this applicant** already organized their résumé. You MUST preserve: "
+        "(a) the same **major section headings** (use \\section{...} titles that match or closely match the profile); "
+        "(b) the same **top-to-bottom order** of sections; (c) the same **grouping** of employers, schools, and projects "
+        "under those headings. Use the REFERENCE snippet **only** for LaTeX macro syntax (e.g. \\resumeSubheading, "
+        "\\resumeItem) — **not** to impose a different document shape. Do **not** convert the CV into a software-default "
+        "or UMBC-style outline. Do **not** add Objective, Summary, or multi-tier Skills sections that are **absent** "
+        "from the profile. If the profile is linear text from a PDF, keep that narrative flow. Tailoring = stronger "
+        "wording and honest JD keywords **inside** existing lines; not a new layout.\n"
+        "10. PLACEMENT: After the contact/header block, follow the profile's section order — do not force Objective or "
+        "Summary before experience if the profile leads with Experience or another section.\n"
+        "11. LENGTH: Prefer one page when the profile fits; tighten wording before dropping real sections or employers.\n"
+        "12. Do not invent high school entries unless they appear in the CANDIDATE PROFILE.\n"
+        "13. CITATIONS: Never output Markdown footnotes, bracketed citation markers, or raw URLs in the LaTeX. "
+        "The résumé must read as a clean PDF.\n"
+        "14. CONTACT / HEADER (injected by the app): The final document already contains exactly one "
+        "`% RESUME-CONTACT-BLOCK-START` … `% RESUME-CONTACT-BLOCK-END` block (name, links, email, phone). "
+        "Do **not** output a second name/contact `\\begin{tabular*}{\\textwidth}` block, do **not** duplicate `\\Huge` "
+        "name lines, and do **not** paste another masthead. Start your body with the profile’s first real section "
+        "(typically `\\section{...}` or the equivalent first content macro from the REFERENCE — not another header).\n"
+        "15. PACKAGE / LIST OPTION TEXT: Never print enumitem/list keys as standalone body lines "
+        "(e.g. `nosep`, `topsep=0pt`, `sep 0in`, `parsep=0pt`, `labelsep=0in`). Use them **only** inside valid "
+        "`\\begin{itemize}[...]` / `\\begin{enumerate}[...]` optional arguments (or other macro args), never as stray text.\n"
+        "16. PRESENT vs DATES: If a job ends with **Present**, the role’s start month/year must **not** be in the future "
+        "unless the CANDIDATE PROFILE or CURRENT RESUME BODY **explicitly** documents that future start. Do **not** invent "
+        "lines like **Jan 2026 – Present** without explicit profile support."
+    )
+
+
+def _user_prompt_research_tail(company: str, role: str) -> str:
+    """Encourage Google Search for company/JD context (not for inventing candidate facts)."""
+    c = (company or "").strip() or "the target company"
+    r = (role or "").strip() or "the role"
+    return (
+        f"---\nWEB RESEARCH (run unless the JD + profile already answer everything): Issue a few **specific** Google "
+        f"searches early (e.g. {c!r} engineering blog, {c!r} careers {r!r}, {c!r} product engineering, or look up "
+        "opaque acronyms from the JD). Briefly use what you learn for terminology, emphasis, and honest keyword fit "
+        "with the candidate's stated skills — **not** to add employers, schools, dates, projects, or metrics for the applicant.\n\n"
+    )
+
+
+def _user_prompt_tail_pre_researched() -> str:
+    """User-message tail when web research was already run before suggestions (no second search this step)."""
+    return (
+        "---\nWEB RESEARCH: A live search pass **already ran** before suggestions; the JOB & MARKET CONTEXT block above "
+        "is that digest. Do **not** assume you can run additional web searches in this step — rely on that block, the JD, "
+        "and the profile only.\n\n"
+    )
+
+
+def _profile_section_for_tailor_prompt(candidate_profile: Optional[str]) -> str:
+    if candidate_profile and str(candidate_profile).strip():
+        return str(candidate_profile).strip()[:12000] + "\n\n"
+    return _get_candidate_profile_block()
+
+
+def _sanitize_accepted_suggestions(raw: Optional[List]) -> List[Dict]:
+    """Normalize client `accepted_suggestions` JSON for tailor prompts (structured layer before LaTeX)."""
+    out: List[Dict] = []
+    if not raw or not isinstance(raw, list):
+        return out
+    for item in raw[:24]:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("id") or "").strip()[:64]
+        sec = str(item.get("section") or "").strip()[:120]
+        orig = str(item.get("original") or "").strip()[:2000]
+        sugg = str(item.get("suggested") or "").strip()[:2000]
+        why = str(item.get("reason") or "").strip()[:500]
+        if not orig:
+            continue
+        remove = _is_removal_suggestion(sugg)
+        if not remove and not sugg:
+            continue
+        out.append(
+            {
+                "id": sid or f"e{len(out)}",
+                "section": sec or "—",
+                "original": orig,
+                "suggested": sugg,
+                "reason": why,
+                "remove": remove,
+            }
+        )
+    return out
+
+
+def _accepted_suggestions_prompt_block(items: List[Dict]) -> str:
+    lines = [
+        "\n---\nUSER-APPROVED STRUCTURED EDITS (the candidate explicitly accepted these in the app — implement every one):\n",
+    ]
+    for i, it in enumerate(items, 1):
+        if it.get("remove"):
+            lines.append(
+                f"{i}. Section: {it['section']}\n"
+                f"   DELETE ENTIRELY (remove the matching bullet or line — no replacement, no empty bullet, no placeholder):\n"
+                f"   TARGET TEXT (verbatim or closest matching line in the resume body): {it['original']}\n"
+                f"   Rationale: {it['reason']}\n"
+            )
+        else:
+            lines.append(
+                f"{i}. Section: {it['section']}\n"
+                f"   FIND (verbatim or closest matching line in the resume body): {it['original']}\n"
+                f"   REPLACE WITH: {it['suggested']}\n"
+                f"   Rationale: {it['reason']}\n"
+            )
+    lines.append(
+        "Rules for the block above:\n"
+        "- DELETE: remove the full \\resumeItem{...} (or equivalent bullet macro) for that line — do not leave URLs, "
+        "footnotes, or blank bullets.\n"
+        "- REPLACE: apply each edit in LaTeX using the same \\resumeItem / heading style as the reference; "
+        "do not skip any numbered item.\n"
+        "- Preserve facts, employers, dates, and metrics unless the replacement text explicitly changes them.\n"
+        "- Do not add new \\resumeItem bullets, new skills lines, or new section bodies beyond these approved items. "
+        "Other existing lines may be lightly reworded for JD keywords only — no new employers, degrees, metrics, or "
+        "capabilities that are not already implied by the profile or current body.\n"
+    )
+    return "\n".join(lines)
+
+
+_REFERENCE_TEX_PROMPT_CHAR_LIMIT = 10_000
+
+
+def _reference_macro_cheat_sheet(reference_folder: Optional[str]) -> str:
+    """Short macro summary so the model relies less on a truncated raw REFERENCE .tex paste."""
+    f = (reference_folder or "").strip()
+    if f == "Harshibar_Template1":
+        return (
+            "Quick macro map: \\section{TITLE}; jobs via \\resumeSubheading / \\resumeQuadHeading / \\resumeTrioHeading "
+            "exactly as in REFERENCE; bullets in \\resumeItemListStart … \\resumeItem{…} … \\resumeItemListEnd; "
+            "projects via \\resumeProjectHeading; skills via the REFERENCE’s list pattern. "
+            "Never duplicate the contact tabular.\n"
+        )
+    if f == "MaltaCV_Modern":
+        return (
+            "Quick macro map: \\cvsection{title}; \\cvexperience{role}{company}{dates}{location}{tags}; "
+            "\\cvuniversity{degree}{school}{dates}{location}; \\bio{…}; lists per REFERENCE. "
+            "Never duplicate the contact tabular.\n"
+        )
+    return (
+        "Quick macro map: use **only** command names that appear in the REFERENCE fragment (sections, headings, bullets). "
+        "Do not import macros from a different template family. Never duplicate the contact tabular.\n"
+    )
+
+
+def _reference_folder_layout_hint(reference_folder: Optional[str]) -> str:
+    """Extra LaTeX rules when the client selected a known gallery reference folder."""
+    f = (reference_folder or "").strip()
+    if f == "Harshibar_Template1":
+        return (
+            "\n---\nLAYOUT — HARSHIBAR (this run uses the Harshibar reference folder): Follow the REFERENCE’s "
+            "\\resumeSubheading / \\resumeProjectHeading / \\resumeItem / list macros (sans tgheros stack). "
+            "For SKILLS, use \\resumeItemListStart … \\resumeItem{…} … \\resumeItemListEnd. Put each skill category in its own "
+            "\\resumeItem, e.g. \\resumeItem{\\textbf{Programming \\& query languages:} SQL, Python, R} — never glue a word "
+            "directly to \\textbf (bad: `Languages\\textbf{{SQL}}`; good: `Languages: \\textbf{{SQL}}, …` or separate \\resumeItem rows). "
+            "Separate tokens with commas, middle dots (·), or ` | `. Do not output Markdown asterisk-bold; use LaTeX \\textbf{{}} only. "
+            "On \\resumeSubheading / quad heading lines, keep a visible space between the employer name and the month/date "
+            "(e.g. `Morgan Stanley` then `Dec 2023`, not `Morgan StanleyDec 2023`). "
+            "Put the job title in the heading row (\\resumeTrioHeading or \\resumeQuadHeading italics line) — not as the first "
+            "\\resumeItem bullet. First \\resumeItem under each role must be an accomplishment, not the title alone. "
+            "Keep vertical density like github.com/harshibar/resume (one page): avoid extra \\vspace between blocks; "
+            "do not pad sections with blank lines or large \\\\vspace.\n"
+        )
+    if f == "MaltaCV_Modern":
+        return (
+            "\n---\nLAYOUT — MALTA MODERN (this run uses MaltaCV_Modern): Follow the REFERENCE’s \\cvsection, "
+            "\\cvexperience, \\cvuniversity, \\cvlistitem, and any multi-column / skills macros exactly as shown. "
+            "Section titles use the reference’s accent styling — do not substitute a different section-macro family. "
+            "Do not output Markdown `**`; use \\textbf{{}} or the reference’s emphasis pattern. "
+            "Keep skills readable (columns or list items per the reference), not a single run-on paragraph.\n"
+        )
+    return ""
+
+
+def _build_prompts(
+    company,
+    role,
+    job_description,
+    base_body,
+    reference_tex,
+    candidate_profile=None,
+    accepted_suggestions: Optional[List] = None,
+    pre_research_digest: Optional[str] = None,
+    system_instruction: Optional[str] = None,
+    reference_folder: Optional[str] = None,
+    *,
+    post_suggestion_coach_run: bool = False,
+):
+    """Shared prompt builder used by both stream and non-stream paths."""
+    system_prompt = (
+        system_instruction
+        if system_instruction is not None
+        else _latex_tailor_system_instruction()
+    )
+    digest_d = (pre_research_digest or "").strip()
+    digest_block = ""
+    if digest_d:
+        digest_block = (
+            "\n---\nJOB & MARKET CONTEXT (from live web search before PDF generation — same research pass as "
+            "suggestions; use for terminology, JD vocabulary, and honest keyword overlap only; do NOT add employers, "
+            "degrees, dates, or metrics not already in the résumé or JD):\n"
+            f"{digest_d[:4500]}\n\n"
+        )
+    research_tail = (
+        _user_prompt_tail_pre_researched()
+        if digest_d
+        else _user_prompt_research_tail(company, role)
     )
     base_section = ""
     if base_body:
         base_section = (
-            f"\n---\nCURRENT RESUME BODY (use as starting point, tailor for {role} at {company}):\n"
-            f"{base_body[:2500]}\n"
+            f"\n---\nCURRENT RESUME BODY (LaTeX body from a prior save — preserve its section skeleton when tailoring for {role} at {company}):\n"
+            f"{base_body[:5500]}\n"
         )
 
-    if candidate_profile:
-        profile_section = candidate_profile[:4000]
-    else:
-        # Build a minimal contact header from env vars when no full profile is supplied.
-        # Callers should always pass candidate_profile for best results.
-        profile_section = (
-            f"Name: {DEFAULT_CONTACT['name']}\n"
-            f"Location: {DEFAULT_CONTACT['location']}\n"
-            f"Email: {DEFAULT_CONTACT['email']} | Phone: {DEFAULT_CONTACT['phone']}\n"
-            f"Website: {DEFAULT_CONTACT['website']} | LinkedIn: {DEFAULT_CONTACT['linkedin_url']}\n\n"
-            "(No detailed experience provided — tailor based on job description and any base resume.)\n"
+    profile_section = _profile_section_for_tailor_prompt(candidate_profile)
+    structure_block = (
+        "---\nSTRUCTURE — the CANDIDATE PROFILE text is the source-of-truth outline:\n"
+        "- Keep the **same major sections, same vertical order, and same employer/school/project grouping** as in that text.\n"
+        "- The REFERENCE LaTeX block teaches **macro syntax only**; do not treat it as a document to imitate section-by-section.\n"
+        "- Do not replace the applicant's layout with a generic career-center or engineer-default template.\n\n"
+    )
+    approved = _sanitize_accepted_suggestions(accepted_suggestions)
+    approved_block = _accepted_suggestions_prompt_block(approved) if approved else ""
+
+    closing = (
+        f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
+    )
+    if approved:
+        closing += (
+            " Honor USER-APPROVED STRUCTURED EDITS first — including every DELETE (omit that bullet entirely from LaTeX) — "
+            "then lightly align other *existing* bullets with the JD (reword only; do not add new bullets or skills lines "
+            "beyond those edits). Keep the same section layout as the CANDIDATE PROFILE unless an approved edit explicitly changes it."
         )
+    elif post_suggestion_coach_run:
+        closing += (
+            " The candidate ran the JD suggestion coach for this job but did not submit any ticked (accepted) structured "
+            "edits for this generate. Treat that as intent to stay close to the source: keep the same substantive bullets "
+            "and skills content as in the CANDIDATE PROFILE / current body — only tighten wording or reorder within "
+            "sections for JD fit. Do NOT add new \\resumeItem bullets, new skills rows, or long new keyword blocks that "
+            "were not already present in that source text."
+        )
+    else:
+        closing += (
+            f" Tailor bullet points to emphasize what matters most for {role} at {company}, "
+            "without changing the profile's section order or inventing new sections."
+        )
+
+    ref_hint = _reference_folder_layout_hint(reference_folder)
+    ref_snippet = (reference_tex or "")[:_REFERENCE_TEX_PROMPT_CHAR_LIMIT]
+    ref_cheat = _reference_macro_cheat_sheet(reference_folder)
 
     user_prompt = (
         f"Generate a tailored LaTeX resume body for this application:\n\n"
         f"TARGET ROLE: {role}\nTARGET COMPANY: {company}\n\n"
         f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
-        f"---\nCANDIDATE PROFILE (USE ONLY THESE FACTS):\n\n"
+        f"---\nCANDIDATE PROFILE (biographical facts for this applicant — do not contradict or extend with the web):\n\n"
         f"{profile_section}"
+        f"{structure_block}"
         f"{base_section}"
-        f"---\nREFERENCE LaTeX STYLE (follow this exact command style):\n{reference_tex[:2500]}\n\n"
-        f"---\nGenerate ONLY the LaTeX body content (no preamble, no \\begin{{document}}, no \\end{{document}})."
-        f" Tailor bullet points to emphasize what matters most for {role} at {company}."
+        f"{digest_block}"
+        f"{approved_block}"
+        f"---\nMACRO CHEAT SHEET (read first; then REFERENCE for exact spelling):\n{ref_cheat}"
+        f"---\nREFERENCE LaTeX SYNTAX (typeset the profile's sections using these commands only — do not copy this file's section order or content as your outline):\n{ref_snippet}\n\n"
+        f"{ref_hint}"
+        f"{research_tail}"
+        f"{closing}"
     )
     return system_prompt, user_prompt
 
@@ -2105,13 +4684,26 @@ def _extract_grounding_live(candidates) -> Tuple[List[str], List[Dict]]:
         if not gm:
             continue
         for q in (getattr(gm, "web_search_queries", None) or []):
-            if isinstance(q, str) and q.strip():
-                queries.append(q.strip())
+            qs = q.strip() if isinstance(q, str) else str(q).strip()
+            if qs:
+                queries.append(qs)
         for chunk in (getattr(gm, "grounding_chunks", None) or []):
             web = getattr(chunk, "web", None)
             if web and getattr(web, "uri", None):
                 sources.append({"title": getattr(web, "title", web.uri), "url": web.uri})
     return queries, sources
+
+
+def _grounding_signal_score(candidates) -> int:
+    """How much Google Search grounding is attached to this candidate list (pick richest chunk in stream)."""
+    n = 0
+    for cand in candidates or []:
+        gm = getattr(cand, "grounding_metadata", None)
+        if not gm:
+            continue
+        n += len(getattr(gm, "web_search_queries", None) or [])
+        n += len(getattr(gm, "grounding_chunks", None) or [])
+    return n
 
 
 def _compute_diff(base_body: str, new_body: str) -> tuple:
@@ -2132,10 +4724,22 @@ def _compute_diff(base_body: str, new_body: str) -> tuple:
     return diff_lines, adds, removes
 
 
-def _save_and_compile(company, role, latex_body, compile_pdf=True):
+def _save_and_compile(
+    company,
+    role,
+    latex_body,
+    compile_pdf=True,
+    reference_tex: Optional[str] = None,
+    candidate_profile: Optional[str] = None,
+    reference_folder: Optional[str] = None,
+):
     """Assemble full .tex, save to library, optionally compile PDF. Returns result dict."""
-    preamble = _apply_preamble_subs(_LATEX_PREAMBLE, role, company)
+    contact_hints = _contact_from_candidate_profile(candidate_profile) if candidate_profile else {}
+    preamble = _build_export_preamble(
+        reference_tex, role, company, contact_hints, reference_folder=reference_folder
+    )
     full_tex  = preamble + "\n" + latex_body + _LATEX_FOOTER
+    full_tex = _finalize_full_resume_tex(full_tex)
 
     folder_name = _make_folder_name(company, role)
     folder_path = os.path.join(LIBRARY_ROOT, folder_name)
@@ -2143,13 +4747,15 @@ def _save_and_compile(company, role, latex_body, compile_pdf=True):
 
     safe_company = re.sub(r"[^\w]", "", company)
     safe_role    = re.sub(r"[^\w]", "", role.replace(" ", "_"))
-    _safe_owner  = re.sub(r"[^\w]", "_", DEFAULT_CONTACT.get("name", "Resume").strip()) or "Resume"
+    merged_owner = {**DEFAULT_CONTACT, **contact_hints}
+    _safe_owner  = re.sub(r"[^\w]", "_", (merged_owner.get("name") or "Resume").strip()) or "Resume"
     filename     = f"{_safe_owner}_{safe_company}_{safe_role}_Resume"
     tex_path     = os.path.join(folder_path, filename + ".tex")
 
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(full_tex)
     logger.info(f"Saved .tex  |  {tex_path}")
+    _maybe_chktex_warn(tex_path)
 
     result = {"folder": folder_name, "folder_path": folder_path, "tex_path": tex_path, "pdf_path": None}
 
@@ -2161,6 +4767,7 @@ def _save_and_compile(company, role, latex_body, compile_pdf=True):
                 [PDFLATEX, "-interaction=nonstopmode", "-output-directory", folder_path, tex_path],
                 capture_output=True, text=True, timeout=60,
             )
+            _log_pdflatex_quality(proc.stdout, proc.stderr)
             pdf_path = os.path.join(folder_path, filename + ".pdf")
             if os.path.exists(pdf_path):
                 result["pdf_path"] = pdf_path
@@ -2197,31 +4804,52 @@ def stream_latex_resume(
     job_description: str,
     reference_folder: Optional[str] = None,
     compile_pdf: bool = True,
-    model: str = "gemini-2.5-flash",
+    model: Optional[str] = None,
     base_folder: Optional[str] = None,
     candidate_profile: Optional[str] = None,
     user_id: Optional[str] = None,
+    layout_compile: bool = False,
+    accepted_suggestions: Optional[List] = None,
+    pre_research_digest: Optional[str] = None,
+    post_suggestion_coach_run: bool = False,
+    tailor_body_with_ai: bool = True,
 ):
     """
     Generator that yields SSE-style event dicts while generating the resume.
 
+    ``post_suggestion_coach_run``: True when the client already showed JD suggestions for this session
+    but may send zero accepted structured edits — prompts stay conservative (no silent new bullets).
+
+    ``tailor_body_with_ai``: When False together with zero approved structured edits and a loaded
+    ``base_body``, the server **skips the LLM** and compiles the existing LaTeX body from the base
+    folder so the PDF matches the saved file (user-controlled). When True, the model rewrites the
+    body for JD fit as usual.
+
     Events:
       {"event": "status",  "msg": "..."}
       {"event": "chunk",   "text": "..."}      # streamed LaTeX
-      {"event": "sources", "urls": [...]}       # sites Gemini searched
+      {"event": "sources", "urls": [...]}       # sites from web research during generation
       {"event": "diff",    "data": [...], "adds": N, "removes": N}
       {"event": "ratings", "data": {...}}
       {"event": "saved",   "folder": "...", "tex_path": "..."}
       {"event": "pdf",     "url": "..."}
       {"event": "done"}
       {"event": "error",   "msg": "..."}
+
+    Optional ``accepted_suggestions`` is a list of dicts from the client
+    ``{id, section, original, suggested, reason}`` — user-approved bullet edits applied in the prompt before LaTeX is generated.
+
+    Optional ``pre_research_digest`` is plain text from the suggest-changes web-research pass. When non-empty
+    (and this is not ``layout_compile``), live Google Search / Grok web_search is **skipped** for PDF generation
+    and the digest is injected into the user prompt instead — one research pass for both suggestions and PDF.
     """
     try:
+        model = primary_llm_model_for_resume_workloads(model)
         t_start = time.time()
         logger.info("=" * 60)
         logger.info(f"STREAM  |  {role} @ {company}  |  model={model}")
 
-        ref_folder = base_folder or reference_folder or _find_company_reference(company) or "Adobe_FullStack"
+        ref_folder = reference_folder or base_folder or _find_company_reference(company) or "Adobe_FullStack"
         yield {"event": "status", "msg": f"Loading style reference ({ref_folder})…"}
         reference_tex = get_resume_tex(ref_folder) or ""
 
@@ -2232,13 +4860,26 @@ def stream_latex_resume(
             logger.info(f"Base resume  |  {base_folder}  ({len(base_body)} chars)")
             yield {"event": "base", "folder": base_folder, "loaded": bool(base_body), "chars": len(base_body)}
 
-        client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-        system_prompt, user_prompt = _build_prompts(company, role, job_description, base_body, reference_tex, candidate_profile=candidate_profile)
+        gemini_client = _optional_gemini_client()
+        n_approved = len(_sanitize_accepted_suggestions(accepted_suggestions))
+        if n_approved:
+            logger.info(f"Structured user-approved edits  |  {n_approved} item(s)")
 
-        _fallback_models = _model_chain(model)
+        use_body_passthrough = (
+            not layout_compile
+            and post_suggestion_coach_run
+            and not tailor_body_with_ai
+            and n_approved == 0
+            and bool(base_body and len(base_body.strip()) > 80)
+        )
+        if use_body_passthrough:
+            logger.info(
+                "PDF stream: LaTeX body passthrough — skipping LLM "
+                "(tailor_body_with_ai=False, no approved structured edits, base_body present)"
+            )
 
-        latex_body      = ""
-        last_candidates = []
+        latex_body = ""
+        last_candidates: List = []
 
         # Sources collected from whichever provider wins the fallback race.
         grok_sources: List[Dict] = []
@@ -2247,85 +4888,189 @@ def stream_latex_resume(
         seen_queries: set = set()
         seen_source_urls: set = set()
 
-        for idx, _m in enumerate(_fallback_models):
-            provider = "Grok" if _is_grok(_m) else "Gemini"
-            yield {"event": "status", "msg": f"Generating with {_m} ({provider})…"}
-            logger.info(f"Starting stream  |  {_m}  |  provider={provider}")
-            t1 = time.time()
-            try:
-                if _is_grok(_m):
-                    # xAI Responses API path with web_search tool. _stream_grok
-                    # yields typed event dicts: text deltas, search queries, and
-                    # citation sources — fire each onto the same SSE stream the
-                    # frontend already handles for Gemini grounding.
-                    for ev in _stream_grok(_m, system_prompt, user_prompt, 0.2):
-                        et = ev.get("type")
-                        if et == "text":
-                            delta = ev.get("delta") or ""
-                            if delta:
-                                latex_body += delta
-                                yield {"event": "chunk", "text": delta}
-                        elif et == "query":
-                            q = ev.get("query") or ""
-                            if q and q not in seen_queries:
-                                seen_queries.add(q)
-                                logger.info(f"🔍 Grok web_search  |  {q}")
-                                yield {"event": "search_query", "query": q}
-                        elif et == "source":
-                            u = ev.get("url")
-                            if u and u not in seen_source_urls:
-                                seen_source_urls.add(u)
-                                grok_sources.append({"title": ev.get("title"), "url": u})
-                                yield {"event": "search_source", "title": ev.get("title"), "url": u}
-                else:
-                    # Gemini path — Google Search grounding
-                    stream = client.models.generate_content_stream(
-                        model=_m,
-                        contents=user_prompt,
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt,
-                            temperature=0.2,
-                            tools=[types.Tool(google_search=types.GoogleSearch())],
-                        ),
-                    )
-                    for chunk in stream:
-                        if getattr(chunk, "candidates", None):
-                            last_candidates = chunk.candidates
-                            # Surface Google Search activity live as Gemini
-                            # issues queries / discovers sources mid-generation.
-                            new_q, new_s = _extract_grounding_live(chunk.candidates)
-                            for q in new_q:
-                                if q not in seen_queries:
+        t_stream0 = time.time()
+
+        if use_body_passthrough:
+            yield {
+                "event": "status",
+                "msg": "Compiling your base résumé as saved — no AI rewrite to the LaTeX body.",
+            }
+            latex_body = base_body.strip()
+            _chunk_sz = 8000
+            for _off in range(0, len(latex_body), _chunk_sz):
+                yield {"event": "chunk", "text": latex_body[_off : _off + _chunk_sz]}
+            logger.info(f"Passthrough body streamed  |  {len(latex_body)} chars  |  {time.time() - t_stream0:.1f}s")
+        else:
+            digest_for_prompt = ((pre_research_digest or "").strip() if not layout_compile else "")
+            skip_live_web = bool(digest_for_prompt)
+            if skip_live_web:
+                logger.info(
+                    "PDF stream: reusing pre-suggestion web digest — disabling live Google Search / Grok web_search "
+                    f"({len(digest_for_prompt)} chars)"
+                )
+            system_inst = _latex_tailor_system_instruction_no_live_search() if skip_live_web else None
+            system_prompt, user_prompt = _build_prompts(
+                company,
+                role,
+                job_description,
+                base_body,
+                reference_tex,
+                candidate_profile=candidate_profile,
+                accepted_suggestions=accepted_suggestions,
+                pre_research_digest=digest_for_prompt or None,
+                system_instruction=system_inst,
+                reference_folder=ref_folder,
+                post_suggestion_coach_run=post_suggestion_coach_run,
+            )
+
+            _fallback_models = _model_chain(model)
+
+            for idx, _m in enumerate(_fallback_models):
+                provider = "Grok" if _is_grok(_m) else "Gemini"
+                yield {"event": "status", "msg": "Generating with AI…"}
+                logger.info(f"Starting stream  |  {_m}  |  provider={provider}")
+                t1 = time.time()
+                try:
+                    best_grounding_candidates = None
+                    best_grounding_score = -1
+                    if _is_grok(_m):
+                        # xAI Responses API path with web_search tool. _stream_grok
+                        # yields typed event dicts: text deltas, search queries, and
+                        # citation sources — fire each onto the same SSE stream the
+                        # frontend already handles for Gemini grounding.
+                        for ev in _stream_grok(_m, system_prompt, user_prompt, 0.2, web_search=not layout_compile and not skip_live_web):
+                            et = ev.get("type")
+                            if et == "text":
+                                delta = ev.get("delta") or ""
+                                if delta:
+                                    latex_body += delta
+                                    yield {"event": "chunk", "text": delta}
+                            elif et == "query":
+                                q = ev.get("query") or ""
+                                if q and q not in seen_queries:
                                     seen_queries.add(q)
-                                    logger.info(f"🔍 Google search  |  {q}")
+                                    logger.info(f"🔍 Grok web_search  |  {q}")
                                     yield {"event": "search_query", "query": q}
-                            for s in new_s:
-                                u = s.get("url")
+                            elif et == "source":
+                                u = ev.get("url")
                                 if u and u not in seen_source_urls:
                                     seen_source_urls.add(u)
-                                    yield {"event": "search_source", "title": s.get("title"), "url": u}
-                        text = getattr(chunk, "text", None)
-                        if text:
-                            latex_body += text
-                            yield {"event": "chunk", "text": text}
+                                    grok_sources.append({"title": ev.get("title"), "url": u})
+                                    yield {"event": "search_source", "title": ev.get("title"), "url": u}
+                    else:
+                        # Gemini path — Google Search grounding (retry same model on
+                        # transient 503 UNAVAILABLE / "high demand" before fallback chain).
+                        if gemini_client is None:
+                            logger.warning(
+                                "stream_latex_resume: skipping Gemini model %s — no GOOGLE_API_KEY "
+                                "or GEMINI_API_KEY (Grok-only deploy)",
+                                _m,
+                            )
+                        else:
+                            _gemini_stream_attempts = 3
+                            for _gem_attempt in range(_gemini_stream_attempts):
+                                best_grounding_candidates = None
+                                best_grounding_score = -1
+                                try:
+                                    if layout_compile or skip_live_web:
+                                        _gem_cfg = types.GenerateContentConfig(
+                                            system_instruction=system_prompt,
+                                            temperature=0.2,
+                                        )
+                                    else:
+                                        _gem_cfg = types.GenerateContentConfig(
+                                            system_instruction=system_prompt,
+                                            temperature=0.2,
+                                            tools=[types.Tool(google_search=types.GoogleSearch())],
+                                        )
+                                    stream = gemini_client.models.generate_content_stream(
+                                        model=_m,
+                                        contents=user_prompt,
+                                        config=_gem_cfg,
+                                    )
+                                    for chunk in stream:
+                                        if getattr(chunk, "candidates", None):
+                                            last_candidates = chunk.candidates
+                                            sc = _grounding_signal_score(chunk.candidates)
+                                            if sc > best_grounding_score:
+                                                best_grounding_score = sc
+                                                best_grounding_candidates = chunk.candidates
+                                            # Surface Google Search activity live as Gemini
+                                            # issues queries / discovers sources mid-generation.
+                                            new_q, new_s = _extract_grounding_live(chunk.candidates)
+                                            for q in new_q:
+                                                if q not in seen_queries:
+                                                    seen_queries.add(q)
+                                                    logger.info(f"🔍 Google search  |  {q}")
+                                                    yield {"event": "search_query", "query": q}
+                                            for s in new_s:
+                                                u = s.get("url")
+                                                if u and u not in seen_source_urls:
+                                                    seen_source_urls.add(u)
+                                                    yield {"event": "search_source", "title": s.get("title"), "url": u}
+                                        text = getattr(chunk, "text", None)
+                                        if text:
+                                            latex_body += text
+                                            yield {"event": "chunk", "text": text}
 
-                if latex_body:
-                    break  # got real content — exit fallback loop
-                else:
-                    logger.warning(f"Model {_m} returned empty body — trying next fallback")
-                    yield {"event": "status", "msg": f"{_m} returned empty response, trying next model…"}
+                                    # Gemini often attaches the richest grounding_metadata only on
+                                    # a late chunk; earlier chunks may have empty metadata. Flush
+                                    # from the chunk we saw with the most queries + citation URLs
+                                    # so the UI still gets search_query / search_source SSE events.
+                                    _flush_cands = (
+                                        best_grounding_candidates
+                                        if best_grounding_score > 0
+                                        else (last_candidates if last_candidates else None)
+                                    )
+                                    if _flush_cands:
+                                        fq, fs = _extract_grounding_live(_flush_cands)
+                                        for q in fq:
+                                            if q not in seen_queries:
+                                                seen_queries.add(q)
+                                                logger.info(f"🔍 Google search (post-stream)  |  {q}")
+                                                yield {"event": "search_query", "query": q}
+                                        for s in fs:
+                                            u = s.get("url")
+                                            if u and u not in seen_source_urls:
+                                                seen_source_urls.add(u)
+                                                yield {"event": "search_source", "title": s.get("title"), "url": u}
+                                    break
+                                except Exception as _gem_e:
+                                    if (
+                                        _gem_attempt + 1 < _gemini_stream_attempts
+                                        and _transient_provider_error(_gem_e)
+                                    ):
+                                        logger.warning(
+                                            f"Gemini stream attempt {_gem_attempt + 1}/{_gemini_stream_attempts} "
+                                            f"failed (transient): {_gem_e}"
+                                        )
+                                        yield {"event": "status", "msg": "AI is busy — retrying shortly…"}
+                                        latex_body = ""
+                                        last_candidates = []
+                                        _backoff_if_rate_limited(_gem_e)
+                                        continue
+                                    raise
+    
+                    if latex_body:
+                        break  # got real content — exit fallback loop
+                    else:
+                        logger.warning(f"Model {_m} returned empty body — trying next fallback")
+                        yield {"event": "status", "msg": "AI returned an empty response — trying again…"}
+                        last_candidates = []
+                except Exception as _e:
+                    logger.warning(f"Model {_m} failed: {_e} — trying next fallback")
+                    yield {"event": "status", "msg": "AI temporarily unavailable — trying again…"}
+                    latex_body = ""
                     last_candidates = []
-            except Exception as _e:
-                logger.warning(f"Model {_m} failed: {_e} — trying next fallback")
-                yield {"event": "status", "msg": f"{_m} unavailable, trying next model…"}
-                latex_body = ""
-                last_candidates = []
-                grok_sources = []
-                _backoff_if_rate_limited(_e)
-            if idx + 1 < len(_fallback_models) and not latex_body:
-                time.sleep(1)
+                    grok_sources = []
+                    _backoff_if_rate_limited(_e)
+                if idx + 1 < len(_fallback_models) and not latex_body:
+                    time.sleep(2)
 
-        logger.info(f"Stream complete  |  {time.time()-t1:.1f}s  |  {len(latex_body)} chars")
+        logger.info(
+            f"LaTeX body pipeline  |  {len(latex_body)} chars  |  passthrough={use_body_passthrough}  |  "
+            f"{time.time() - t_stream0:.1f}s"
+        )
 
         # Strip accidental fences
         latex_body = latex_body.strip()
@@ -2333,13 +5078,12 @@ def stream_latex_resume(
             latex_body = re.sub(r"^```[a-z]*\n?", "", latex_body)
             latex_body = re.sub(r"\n?```$", "", latex_body)
 
-        # Defensive: convert Markdown bold (**word**) → \textbf{word}.
-        # The prompt forbids this, but Grok in particular tends to default to
-        # Markdown formatting; without this rewrite pdflatex prints the literal
-        # asterisks (rule 7 violation surfaced as "**word**" in the rendered PDF).
-        latex_body, n_md_bold = _markdown_to_latex_bold(latex_body)
-        if n_md_bold:
-            logger.info(f"Markdown→LaTeX bold rewrites  |  {n_md_bold}")
+        # Defensive: convert Markdown bold (**word**) → \textbf{word} — LLM output only.
+        if not use_body_passthrough:
+            latex_body, n_md_bold = _markdown_to_latex_bold(latex_body)
+            if n_md_bold:
+                logger.info(f"Markdown→LaTeX bold rewrites  |  {n_md_bold}")
+        latex_body = _strip_llm_markdown_citations(latex_body)
 
         # Sources — from whichever provider actually ran
         sources = _extract_sources(last_candidates) or grok_sources
@@ -2348,36 +5092,47 @@ def stream_latex_resume(
             yield {"event": "sources", "urls": sources}
 
         if not latex_body:
-            yield {"event": "error", "msg": "All models returned empty content. Try a different model or retry."}
+            yield {"event": "error", "msg": "AI could not produce content. Please retry."}
             return
 
-        # Diff
-        if base_body:
+        identical_to_base = bool(base_body) and base_body.strip() == latex_body.strip()
+
+        # Diff + JD ratings — skipped for template/layout-only compiles (no JD tailoring UX).
+        if not layout_compile and base_body:
             yield {"event": "status", "msg": "Computing changes…"}
             diff_lines, adds, removes = _compute_diff(base_body, latex_body)
             logger.info(f"Diff  |  +{adds}  -{removes}")
             yield {"event": "diff", "data": diff_lines, "adds": adds, "removes": removes}
 
             # Human-readable change explanations (why each edit was made vs the JD)
-            yield {"event": "status", "msg": "Explaining changes…"}
-            try:
-                explanations = _explain_changes(client, model, base_body, latex_body, job_description[:1500])
-                if explanations:
-                    logger.info(f"Change rationales  |  {len(explanations)} items")
-                    yield {"event": "rationales", "data": explanations}
-            except Exception as exc:
-                logger.warning(f"Rationale generation failed: {exc}")
+            if not identical_to_base:
+                yield {"event": "status", "msg": "Explaining changes…"}
+                try:
+                    explanations = _explain_changes(gemini_client, model, base_body, latex_body, job_description[:1500])
+                    if explanations:
+                        logger.info(f"Change rationales  |  {len(explanations)} items")
+                        yield {"event": "rationales", "data": explanations}
+                except Exception as exc:
+                    logger.warning(f"Rationale generation failed: {exc}")
 
-        # Ratings
-        yield {"event": "status", "msg": "Rating resume against JD…"}
-        ratings = _rate_resume(client, model, latex_body, job_description[:1500])
-        if ratings:
-            logger.info(f"Ratings  |  {ratings}")
-            yield {"event": "ratings", "data": ratings}
+        if not layout_compile:
+            yield {"event": "status", "msg": "Rating resume against JD…"}
+            ratings = _rate_resume(gemini_client, model, latex_body, job_description[:1500])
+            if ratings:
+                logger.info(f"Ratings  |  {ratings}")
+                yield {"event": "ratings", "data": ratings}
 
         # Save + compile
         yield {"event": "status", "msg": "Saving .tex and compiling PDF…"}
-        saved = _save_and_compile(company, role, latex_body, compile_pdf)
+        saved = _save_and_compile(
+            company,
+            role,
+            latex_body,
+            compile_pdf,
+            reference_tex=reference_tex,
+            candidate_profile=candidate_profile,
+            reference_folder=ref_folder,
+        )
         yield {"event": "saved", "folder": saved["folder"], "tex_path": saved["tex_path"]}
 
         if saved.get("pdf_path"):
@@ -2391,7 +5146,7 @@ def stream_latex_resume(
 
     except Exception as exc:
         logger.error(f"Stream error  |  {exc}", exc_info=True)
-        yield {"event": "error", "msg": str(exc)}
+        yield {"event": "error", "msg": _sse_friendly_error(exc)}
 
 
 # ============================================================================
@@ -2549,7 +5304,7 @@ def _fetch_via_browser(url: str, timeout: int = 25) -> str:
 
 
 def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optional[Dict]:
-    """Use Gemini to pull out company / role / cleaned JD from the scraped page text."""
+    """Use Grok or Gemini to pull out company / role / cleaned JD from the scraped page text."""
     prompt = (
         "You are given the raw visible text of a job posting page. Extract the job posting fields.\n\n"
         "Return ONLY valid JSON (no markdown, no fences):\n"
@@ -2576,6 +5331,8 @@ def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optio
                 if data and isinstance(data, dict):
                     return data
                 continue
+            if client is None:
+                continue
             r = client.models.generate_content(
                 model=m,
                 contents=prompt,
@@ -2593,7 +5350,7 @@ def _structure_jd_with_llm(client, model: str, url: str, raw_text: str) -> Optio
     return None
 
 
-def extract_jd_from_url(url: str, model: str = "gemini-2.5-flash") -> Dict:
+def extract_jd_from_url(url: str, model: Optional[str] = None) -> Dict:
     """
     Public entry point used by the /api/extract-jd route.
     Returns: {"company": str, "role": str, "location": str, "job_description": str}
@@ -2604,6 +5361,8 @@ def extract_jd_from_url(url: str, model: str = "gemini-2.5-flash") -> Dict:
         raise ValueError("URL must start with http:// or https://")
 
     url = _normalize_job_url(url)
+
+    model = primary_llm_model_for_resume_workloads(model)
 
     t0 = time.time()
     raw_text = ""
@@ -2630,8 +5389,8 @@ def extract_jd_from_url(url: str, model: str = "gemini-2.5-flash") -> Dict:
     if len(raw_text) < 200:
         raise ValueError("Could not extract readable content from the page. It may be JS-rendered or auth-gated.")
 
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-    data = _structure_jd_with_llm(client, model, url, raw_text)
+    gemini_client = _optional_gemini_client()
+    data = _structure_jd_with_llm(gemini_client, model, url, raw_text)
     if not data or data.get("error"):
         raise ValueError(data.get("error") if data else "Failed to parse job posting")
 

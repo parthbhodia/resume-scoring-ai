@@ -40,6 +40,16 @@ export interface ResumeRecord {
   pdf_url: string | null;
   score: number | null;
   verdict: string | null;
+  /** Job description text from the last tailor run — used to prefill Builder when tailoring again. */
+  job_description?: string | null;
+  resume_doc?: Record<string, unknown> | null;
+  applied_patch?: Record<string, unknown> | null;
+  renderer?: "legacy" | "structured" | null;
+  schema_version?: number | null;
+  /** Lowercase segment for public URL `/r/?id=<public_slug>`. */
+  public_slug?: string | null;
+  /** Single primary resume per account (library ordering + “default link” UX). */
+  is_default?: boolean;
   created_at: string;
   user_id?: string;
   criteria?: Criterion[];
@@ -139,8 +149,8 @@ export type SSEEvent =
   | { event: "status";  msg: string }
   | { event: "chunk";   text: string }
   | { event: "sources"; urls: Source[] }
-  | { event: "search_query";  query: string }                 // Live: a Google query Gemini just issued
-  | { event: "search_source"; title: string | null; url: string }  // Live: a page Gemini just cited
+  | { event: "search_query";  query: string }                 // Live: a web search query from this AI run
+  | { event: "search_source"; title: string | null; url: string }  // Live: a page cited from web research
   | { event: "base";    folder: string; loaded: boolean; chars: number }
   | { event: "diff";    data: DiffLine[]; adds: number; removes: number }
   | { event: "rationales"; data: ChangeRationale[] }
@@ -150,3 +160,6 @@ export type SSEEvent =
   | { event: "storage"; artifact: "pdf" | "tex"; stored: boolean; url?: string; reason?: string }
   | { event: "done" }
   | { event: "error";   msg: string };
+
+export type { ResumeDoc, ResumeTemplate } from "@/lib/resumeDoc";
+export type { ResumeEdit, ResumeEditOp, LlmResumePatch } from "@/lib/resumeEdits";

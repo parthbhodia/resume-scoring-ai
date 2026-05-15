@@ -137,34 +137,15 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
             out.headline = ln
             break
 
-    _SUMMARY_STOPS = {
-        "technical skills", "skills", "experience", "professional experience",
-        "work experience", "education", "projects", "project",
-        "certifications", "awards", "publications", "languages",
-    }
     summary_parts: list[str] = []
-    in_summary_section = False
     for ln in lines:
-        low = ln.lower().strip()
-        if low == "summary":
-            in_summary_section = True
+        low = ln.lower()
+        if low in {"summary", "technical skills", "experience", "education", "projects"}:
             continue
-        if in_summary_section:
-            if low in _SUMMARY_STOPS:
-                break
-            val = ln.lstrip("-•* ").strip()
-            if val:
-                summary_parts.append(val)
-    if not summary_parts:
-        # Fallback: grab first two long sentences not in a section header.
-        for ln in lines:
-            low = ln.lower()
-            if low in {"summary", "technical skills", "experience", "education", "projects"}:
-                continue
-            if len(ln.split()) >= 10 and ":" not in ln:
-                summary_parts.append(ln)
-            if len(summary_parts) >= 2:
-                break
+        if len(ln.split()) >= 10 and ":" not in ln:
+            summary_parts.append(ln)
+        if len(summary_parts) >= 2:
+            break
     out.summary = " ".join(summary_parts)[:1200]
 
     def _collect_between(start_terms: set[str], stop_terms: set[str], max_items: int) -> list[str]:
@@ -217,7 +198,7 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
     _MONTHS = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
     _DATE_RANGE_PAT = re.compile(
         f"({_MONTHS}\\s+\\d{{4}})"
-        r"\s*[–—\-–—‒]+\s*"
+        r"\s*[–-]\s*"
         f"(present|now|current|{_MONTHS}\\s+\\d{{4}}|\\d{{4}})",
         re.I,
     )

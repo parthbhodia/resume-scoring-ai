@@ -3,24 +3,27 @@
 /**
  * Root page — routes between top-level views via query params.
  *
- *   /                            -> builder (default)
- *   /?view=library               -> library grid
- *   /?view=library&resume=<f>    -> ResumeView for folder <f>
- *   /?view=profile               -> profile (placeholder for now)
+ *   /                            -> analyze (default)
+ *   /?view=builder&flow=tailor|template -> résumé builder workflows
+ *   /?view=library               -> library grid (+ optional right detail panel when resume=<f>)
+ *   /?view=profile&prefill=1     -> Profile page + optional session prefill from Analyze / template flow
  *   /?view=jobs                  -> jobs (placeholder for now)
- *   /?base=<folder>              -> builder, with folder pre-loaded as base
+ *   /?view=builder&flow=tailor&base=<folder> -> builder with folder pre-loaded
  *
  * Query params instead of dynamic routes because GH Pages serves the
  * `output: "export"` build, which can't enumerate runtime-minted IDs.
  */
 
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import AppShell, { useAppView } from "@/components/AppShell";
 import ResumeBuilder from "@/components/ResumeBuilder";
+import ResumeTemplateStudio from "@/components/ResumeTemplateStudio";
+import ContentSourcePicker from "@/components/ContentSourcePicker";
+import ManualResumeForm from "@/components/ManualResumeForm";
 import ResumeLibrary from "@/components/ResumeLibrary";
-import ResumeView from "@/components/ResumeView";
 import AnalyzeResume from "@/components/AnalyzeResume";
+import ProfilePage from "@/components/ProfilePage";
 
 export default function HomePageClient() {
   return (
@@ -32,21 +35,124 @@ export default function HomePageClient() {
   );
 }
 
+/** Fills AppShell main (flex) without growing the document — children handle their own scroll areas. */
+function ViewFill({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        flex: "1 1 0%",
+        minHeight: 0,
+        width: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ScrollPane({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function RouterView() {
-  const view = useAppView();
   const params = useSearchParams();
-  const resume = (params?.get("resume") || "").trim();
+  const router = useRouter();
+  const rawView = (params?.get("view") || "analyze").toLowerCase();
+  const view = useAppView();
   const base = (params?.get("base") || "").trim();
+  const flow = (params?.get("flow") || "tailor").toLowerCase();
+  const templateResumeStart = view === "builder" && flow === "template";
+
+  /** Legacy `flow=scratch` matched tailor; normalize URL so bookmarks still work. */
+  const searchQs = params.toString();
+  useEffect(() => {
+    if (view !== "builder" || flow !== "scratch") return;
+    const q = new URLSearchParams(searchQs);
+    q.set("flow", "tailor");
+    router.replace(`/?${q.toString()}`);
+  }, [view, flow, router, searchQs]);
 
   if (view === "library") {
-    if (resume) return <ResumeView folder={resume} />;
-    return <ResumeLibrary />;
+    return (
+      <ViewFill>
+        <ResumeLibrary />
+      </ViewFill>
+    );
   }
-  if (view === "profile") return <PlaceholderPanel title="Profile" subtitle="Coming next — your Personal, Education, Work Experience, Skills, EEO, and Resume defaults all in one place." />;
-  if (view === "jobs") return <PlaceholderPanel title="Jobs" subtitle="Coming soon — autoapply will live here once your profile is set up." />;
-  if (view === "analyze") return <AnalyzeResume />;
-  // key=base ensures remount when switching from a library-loaded resume to fresh builder
-  return <ResumeBuilder key={`builder-${base}`} initialBaseFolder={base || null} />;
+  if (view === "profile") {
+    const prefill = (params?.get("prefill") || "").trim() === "1";
+    return (
+      <ViewFill>
+        <ScrollPane>
+          <ProfilePage prefill={prefill} />
+        </ScrollPane>
+      </ViewFill>
+    );
+  }
+  if (view === "jobs") {
+    return (
+      <ViewFill>
+        <ScrollPane>
+          <PlaceholderPanel title="Jobs" subtitle="Coming soon — autoapply will live here once your profile is set up." />
+        </ScrollPane>
+      </ViewFill>
+    );
+  }
+  // These views are not in useAppView()'s allowlist so must be checked against
+  // rawView before the view === "analyze" fallback swallows them.
+  if (rawView === "content-source") {
+    return (
+      <ViewFill>
+        <ContentSourcePicker />
+      </ViewFill>
+    );
+  }
+  if (rawView === "manual-form") {
+    return (
+      <ViewFill>
+        <ManualResumeForm />
+      </ViewFill>
+    );
+  }
+  if (view === "analyze") {
+    return (
+      <ViewFill>
+        <AnalyzeResume />
+      </ViewFill>
+    );
+  }
+  /** Dedicated layout gallery — not the JD "tailor" wizard (see Continue → compact compile step). */
+  if (templateResumeStart) {
+    return (
+      <ViewFill>
+        <ResumeTemplateStudio initialBaseFolder={base || null} />
+      </ViewFill>
+    );
+  }
+  // key ensures remount when base folder or builder workflow changes
+  const builderKeyFlow = flow === "scratch" ? "tailor" : flow;
+  return (
+    <ViewFill>
+      <ResumeBuilder
+        key={`builder-${base}-${builderKeyFlow}`}
+        initialBaseFolder={base || null}
+      />
+    </ViewFill>
+  );
 }
 
 function ShellSkeleton() {

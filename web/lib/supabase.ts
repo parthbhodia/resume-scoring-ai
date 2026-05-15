@@ -1,5 +1,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { ResumeRecord, Criterion, RatingsData } from "./types";
+import { type ProfileFormState, EMPTY_PROFILE } from "./profileStorage";
+import { dispatchResumeLibraryChanged } from "./resumeLibraryEvents";
 
 /* ── Analyze-history types ───────────────────────────────────── */
 // result is typed as Record<string,unknown> here because the DB stores raw
@@ -42,7 +44,55 @@ export async function fetchResumes(): Promise<ResumeRecord[]> {
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as ResumeRecord[];
+  const rows = (data ?? []) as ResumeRecord[];
+  // Prefer default résumé first without relying on DB column sort (older DBs may lack `is_default`).
+  rows.sort((a, b) => {
+    const d = Number(!!b.is_default) - Number(!!a.is_default);
+    if (d !== 0) return d;
+    return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+  });
+  return rows;
+}
+
+function formatSupabaseWriteError(err: { message?: string; details?: string; hint?: string }): string {
+  const parts = [err.message, err.details, err.hint].filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+  return parts.join(" — ") || "Database request failed.";
+}
+
+/**
+ * Retry `resumes` write without `job_description` when PostgREST/Postgres rejects that field
+ * (add column: `web/db/migrations/002_resumes_job_description.sql`).
+ */
+function shouldRetryResumeWriteWithoutJobDescription(err: unknown): boolean {
+  const raw =
+    typeof err === "object" && err !== null && "message" in err
+      ? String((err as { message: unknown }).message)
+      : String(err);
+  const msg = raw.toLowerCase();
+  if (!msg.includes("job_description")) return false;
+  if (msg.includes("permission denied") || msg.includes("violates row-level security") || msg.includes(" rls ")) {
+    return false;
+  }
+  return true;
+}
+
+/** Coerce match score for `resumes.score` (int column). */
+function coerceResumeScore(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(Math.min(100, Math.max(0, n)));
+}
+
+/** Coerce verdict / any model field to plain text for `resumes.verdict`. */
+function coerceVerdictText(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v.trim() || null;
+  try {
+    return String(v).trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function upsertResume(
@@ -53,44 +103,109 @@ export async function upsertResume(
   texPath: string,
   pdfUrl: string | null,
   ratings: RatingsData | null,
+  jobDescription?: string | null,
+  structured?: {
+    resumeDoc?: Record<string, unknown> | null;
+    appliedPatch?: Record<string, unknown> | null;
+    renderer?: "legacy" | "structured";
+    schemaVersion?: number;
+  },
 ): Promise<string> {
   const db = getSupabaseClient();
 
-  // Include the signed-in user's id so RLS policies apply
+  // Include the signed-in user's id so RLS policies apply (insert with null user_id is rejected).
   const { data: { session } } = await db.auth.getSession();
   const user_id = session?.user?.id ?? null;
+  if (!user_id) {
+    throw new Error(
+      "Not signed in — sign in with Google first, then generate again so we can save this résumé to your Library.",
+    );
+  }
 
-  const { data, error } = await db
+  const row = {
+    folder: folder.trim(),
+    company: (company ?? "").trim() || "—",
+    role: (role ?? "").trim() || "—",
+    model_used: (model ?? "").trim() || null,
+    tex_path: (texPath ?? "").trim() || null,
+    pdf_url: pdfUrl && String(pdfUrl).trim() ? String(pdfUrl).trim() : null,
+    score: coerceResumeScore(ratings?.match_score),
+    verdict: coerceVerdictText(ratings?.verdict),
+    job_description: jobDescription?.trim() || null,
+    resume_doc: structured?.resumeDoc ?? null,
+    applied_patch: structured?.appliedPatch ?? null,
+    renderer: structured?.renderer ?? "legacy",
+    schema_version: structured?.schemaVersion ?? 1,
+    user_id,
+  };
+
+  /**
+   * Prefer explicit select → update / insert over `.upsert(..., onConflict: "user_id,folder")`.
+   * Some PostgREST / constraint setups return 400 on composite upsert even when a matching unique index exists.
+   */
+  const { data: existing, error: selErr } = await db
     .from("resumes")
-    .upsert(
-      {
-        folder,
-        company,
-        role,
-        model_used: model,
-        tex_path: texPath,
-        pdf_url: pdfUrl,
-        score: ratings?.match_score ?? null,
-        verdict: ratings?.verdict ?? null,
-        user_id,
-      },
-      { onConflict: "folder" },
-    )
     .select("id")
-    .single();
+    .eq("user_id", user_id)
+    .eq("folder", row.folder)
+    .maybeSingle();
 
-  if (error) throw error;
-  const resumeId: string = data.id;
+  if (selErr) {
+    throw new Error(`Library save failed: ${formatSupabaseWriteError(selErr)}`);
+  }
 
+  const persistResumeRow = async (payload: Record<string, unknown>): Promise<string> => {
+    if (existing?.id) {
+      const { data: upd, error: upErr } = await db
+        .from("resumes")
+        .update(payload)
+        .eq("id", existing.id as string)
+        .select("id")
+        .single();
+      if (upErr) throw upErr;
+      return upd!.id as string;
+    }
+    const { data: ins, error: inErr } = await db
+      .from("resumes")
+      .insert(payload)
+      .select("id")
+      .single();
+    if (inErr) throw inErr;
+    return ins!.id as string;
+  };
+
+  let resumeId: string;
+  try {
+    resumeId = await persistResumeRow(row);
+  } catch (first: unknown) {
+    if (shouldRetryResumeWriteWithoutJobDescription(first)) {
+      const { job_description: _jd, ...withoutJobDescription } = row;
+      try {
+        resumeId = await persistResumeRow(withoutJobDescription);
+      } catch (second: unknown) {
+        throw new Error(`Library save failed: ${formatSupabaseWriteError(second as { message?: string })}`);
+      }
+    } else {
+      throw new Error(`Library save failed: ${formatSupabaseWriteError(first as { message?: string })}`);
+    }
+  }
+
+  const { error: delCritAll } = await db.from("criteria").delete().eq("resume_id", resumeId);
+  if (delCritAll) {
+    throw new Error(`Library save failed (criteria): ${formatSupabaseWriteError(delCritAll)}`);
+  }
   if (ratings?.criteria?.length) {
     const rows = ratings.criteria.map((c: Criterion) => ({
       resume_id: resumeId,
       name: c.name,
       weight: c.weight,
-      score: c.score,
-      notes: c.notes,
+      score: typeof c.score === "number" && Number.isFinite(c.score) ? Math.round(c.score) : null,
+      notes: typeof c.notes === "string" ? c.notes : coerceVerdictText(c.notes),
     }));
-    await db.from("criteria").upsert(rows, { onConflict: "resume_id,name" });
+    const { error: insCrit } = await db.from("criteria").insert(rows);
+    if (insCrit) {
+      throw new Error(`Library save failed (criteria): ${formatSupabaseWriteError(insCrit)}`);
+    }
   }
 
   if (ratings) {
@@ -100,11 +215,97 @@ export async function upsertResume(
     ];
     if (signals.length) {
       await db.from("resume_signals").delete().eq("resume_id", resumeId);
-      await db.from("resume_signals").insert(signals);
+      const { error: sigErr } = await db.from("resume_signals").insert(signals);
+      if (sigErr) {
+        throw new Error(`Library save failed (signals): ${formatSupabaseWriteError(sigErr)}`);
+      }
     }
   }
 
+  dispatchResumeLibraryChanged();
   return resumeId;
+}
+
+/** Normalize user-facing slug input to stored form (lowercase, hyphenated, a-z0-9 only). */
+export function normalizeResumePublicSlug(raw: string): string {
+  const s = raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return s;
+}
+
+export async function fetchResumeShareMetaByFolder(
+  folder: string,
+): Promise<{ public_slug: string | null; is_default: boolean } | null> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.user?.id) return null;
+  const { data, error } = await db
+    .from("resumes")
+    .select("public_slug, is_default")
+    .eq("user_id", session.user.id)
+    .eq("folder", folder)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    public_slug: (data.public_slug as string | null) ?? null,
+    is_default: !!(data as { is_default?: boolean }).is_default,
+  };
+}
+
+/** Update public slug and/or default flag for a library row (RLS: own rows only). */
+export async function updateResumeShareSettings(
+  folder: string,
+  opts: { publicSlug: string | null; isDefault: boolean },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  const uid = session?.user?.id;
+  if (!uid) return { ok: false, error: "Sign in to save a public link." };
+
+  const normalized = opts.publicSlug?.trim()
+    ? normalizeResumePublicSlug(opts.publicSlug)
+    : "";
+  if (normalized && (normalized.length < 3 || normalized.length > 50)) {
+    return { ok: false, error: "Slug must be 3–50 characters." };
+  }
+  if (normalized && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized)) {
+    return { ok: false, error: "Use lowercase letters, numbers, and single hyphens only." };
+  }
+
+  if (opts.isDefault) {
+    const { error: e1 } = await db.from("resumes").update({ is_default: false }).eq("user_id", uid);
+    if (e1) return { ok: false, error: e1.message };
+  }
+
+  const { data: updated, error: e2 } = await db
+    .from("resumes")
+    .update({
+      is_default: opts.isDefault,
+      public_slug: normalized || null,
+    })
+    .eq("user_id", uid)
+    .eq("folder", folder)
+    .select("id");
+
+  if (e2) {
+    const msg = e2.message.toLowerCase();
+    if (e2.code === "23505" || msg.includes("unique") || msg.includes("duplicate")) {
+      return { ok: false, error: "That link is already taken. Try another slug." };
+    }
+    return { ok: false, error: e2.message };
+  }
+  if (!updated?.length) {
+    return {
+      ok: false,
+      error: "Résumé is not in your library yet — wait a few seconds after the PDF finishes, then try again.",
+    };
+  }
+  return { ok: true };
 }
 
 /* ── Analyze history CRUD ────────────────────────────────────── */
@@ -166,4 +367,58 @@ export async function deleteAnalysis(id: string): Promise<void> {
     .delete()
     .eq("id", id);
   if (error) throw error;
+}
+
+/* ── User profile (Tailor defaults + EEO) ─────────────────────────────────── */
+
+function coerceUserProfilePayload(raw: unknown): ProfileFormState {
+  if (!raw || typeof raw !== "object") return { ...EMPTY_PROFILE };
+  return { ...EMPTY_PROFILE, ...(raw as Partial<ProfileFormState>) };
+}
+
+/** Load signed-in user’s profile row from `user_profiles`. Returns null if missing, logged out, or on error. */
+export async function fetchUserProfile(): Promise<ProfileFormState | null> {
+  try {
+    const db = getSupabaseClient();
+    const { data: { session } } = await db.auth.getSession();
+    if (!session?.user?.id) return null;
+
+    const { data, error } = await db
+      .from("user_profiles")
+      .select("profile")
+      .eq("user_id", session.user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[user_profiles] fetch:", error.message);
+      return null;
+    }
+    if (!data?.profile) return null;
+    return coerceUserProfilePayload(data.profile);
+  } catch (e) {
+    console.warn("[user_profiles] fetch:", e);
+    return null;
+  }
+}
+
+/** Upsert full profile JSON for the signed-in user. No-op when logged out. */
+export async function upsertUserProfile(profile: ProfileFormState): Promise<void> {
+  try {
+    const db = getSupabaseClient();
+    const { data: { session } } = await db.auth.getSession();
+    if (!session?.user?.id) return;
+
+    const { error } = await db.from("user_profiles").upsert(
+      {
+        user_id: session.user.id,
+        profile: profile as unknown as Record<string, unknown>,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
+
+    if (error) console.warn("[user_profiles] upsert:", error.message);
+  } catch (e) {
+    console.warn("[user_profiles] upsert:", e);
+  }
 }

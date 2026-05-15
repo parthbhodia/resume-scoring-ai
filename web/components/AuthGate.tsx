@@ -8,6 +8,7 @@ import LandingPage from "./LandingPage";
 // Routes that intentionally bypass auth — design-system / preview pages.
 const PUBLIC_ROUTES = new Set<string>([
   "/editor-preview",
+  "/profile-mockup",
   "/terms",
   "/privacy",
   "/contact",

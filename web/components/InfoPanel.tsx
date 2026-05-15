@@ -29,12 +29,12 @@ function Row({ label, value, link }: { label: string; value: string; link?: stri
   );
 }
 
-export default function InfoPanel({ folder, texPath, pdfUrl, company, role, model }: Props) {
+export default function InfoPanel({ folder, texPath, pdfUrl, company, role, model: _model }: Props) {
   return (
     <div>
       <Row label="Company"  value={company} />
       <Row label="Role"     value={role} />
-      <Row label="Model"    value={model} />
+      <Row label="Assistant" value="AI" />
       <Row label="Folder"   value={folder || "—"} />
       <Row label=".tex"     value={texPath || "—"} />
       {pdfUrl && (

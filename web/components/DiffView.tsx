@@ -63,10 +63,21 @@ function latexToText(s: string): string {
 
   // LaTeX text tweaks
   t = t.replace(/---/g, "—").replace(/--/g, "–");
-  t = t.replace(/~/g, " ").replace(/\\\\/g, " ");
+  t = t.replace(/~/g, " ").replace(/\\\\/g, "\n");
   t = t.replace(/[{}]/g, "");
 
-  return t.replace(/\s+/g, " ").trim();
+  // Preserve line breaks (Analyze-style readability); only collapse horizontal spaces per line.
+  return t
+    .split("\n")
+    .map((line) => line.replace(/[ \t\f\v]+/g, " ").trimEnd())
+    .join("\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
+}
+
+/** Collapse whitespace for comparing displayed before/after (catches bogus “rewrote” rows). */
+function proseSig(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
 }
 
 interface Change {
@@ -111,15 +122,31 @@ function diffToChanges(diff: DiffLine[]): Change[] {
   return out;
 }
 
-export default function DiffView({ diff, adds, removes, rationales, baseFolder, baseLoaded = null, jdKeywords = [] }: Props) {
+export default function DiffView({
+  diff,
+  adds,
+  removes,
+  rationales,
+  baseFolder,
+  baseLoaded = null,
+  jdKeywords = [],
+}: Props) {
   const changes: Change[] = useMemo(() => {
     if (rationales && rationales.length) {
-      return rationales.map(r => ({
-        type: r.type,
-        text: latexToText(r.text),
-        previous: r.previous ? latexToText(r.previous) : undefined,
-        why: r.why,
-      }));
+      const fromRat = rationales
+        .map(r => ({
+          type: r.type,
+          text: latexToText(r.text),
+          previous: r.previous ? latexToText(r.previous) : undefined,
+          why: r.why,
+        }))
+        .filter(c => {
+          if (c.type === "rewrote" && c.previous) {
+            return proseSig(c.text) !== proseSig(c.previous);
+          }
+          return true;
+        });
+      if (fromRat.length > 0) return fromRat;
     }
     return diffToChanges(diff);
   }, [diff, rationales]);
@@ -172,7 +199,7 @@ export default function DiffView({ diff, adds, removes, rationales, baseFolder, 
             vs <strong style={{ color: "var(--muted)" }}>{baseFolder}</strong>
           </span>
         )}
-        {rationales && rationales.length > 0 && (
+        {changes.some(c => !!c.why) && (
           <span style={{ marginLeft: "auto", color: "var(--dim)", fontSize: 11 }}>
             Hover the ⓘ icon to see why each change was made.
           </span>
@@ -188,14 +215,24 @@ export default function DiffView({ diff, adds, removes, rationales, baseFolder, 
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {changes.map((c, i) => (
-          <ChangeCard key={i} change={c} jdKeywords={jdKeywords} />
+          <ChangeCard
+            key={i}
+            change={c}
+            jdKeywords={jdKeywords}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function ChangeCard({ change, jdKeywords = [] }: { change: Change; jdKeywords?: string[] }) {
+function ChangeCard({
+  change,
+  jdKeywords = [],
+}: {
+  change: Change;
+  jdKeywords?: string[];
+}) {
   const [open, setOpen] = useState(false);
 
   const meta =
@@ -230,6 +267,8 @@ function ChangeCard({ change, jdKeywords = [] }: { change: Change; jdKeywords?: 
         <div style={{
           fontSize: 12, color: "var(--dim)", lineHeight: 1.55, marginBottom: 6,
           textDecoration: "line-through", opacity: 0.75,
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
         }}>
           {change.previous}
         </div>
@@ -239,6 +278,8 @@ function ChangeCard({ change, jdKeywords = [] }: { change: Change; jdKeywords?: 
         fontSize: 13, color: change.type === "removed" ? "var(--dim)" : "var(--text)",
         lineHeight: 1.55,
         textDecoration: change.type === "removed" ? "line-through" : "none",
+        whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
       }}>
         {change.type !== "removed"
           ? highlightKeywords(change.text, jdKeywords)
@@ -273,15 +314,15 @@ function InfoIcon({ color, open, onToggle, tooltip }: { color: string; open: boo
       title={tooltip}
       aria-label={`Why this change: ${tooltip}`}
       style={{
-        width: 16, height: 16, borderRadius: "50%",
+        width: 18, height: 18, borderRadius: "50%",
         border: `1px solid ${color}`, background: open ? color : "transparent",
         color: open ? "white" : color,
-        fontSize: 10, fontWeight: 700, lineHeight: 1,
+        fontSize: 11, fontWeight: 700, lineHeight: 1,
         display: "inline-flex", alignItems: "center", justifyContent: "center",
         cursor: "pointer", padding: 0, fontFamily: "inherit",
       }}
     >
-      i
+      ?
     </button>
   );
 }

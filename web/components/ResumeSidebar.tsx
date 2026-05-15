@@ -2,7 +2,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ResumeRecord } from "@/lib/types";
+import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
 import { fetchResumes } from "@/lib/supabase";
+import { RESUME_LIBRARY_CHANGED_EVENT } from "@/lib/resumeLibraryEvents";
 import { scoreColor } from "@/lib/utils";
 
 interface Props {
@@ -21,6 +23,24 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
       .then(setResumes)
       .catch(console.error)
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const onRemote = () => {
+      setLoading(true);
+      fetchResumes()
+        .then(setResumes)
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener(RESUME_LIBRARY_CHANGED_EVENT, onRemote);
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener(RESUME_LIBRARY_CHANGED_EVENT, onRemote);
+      }
+    };
   }, []);
 
   const scored   = resumes.filter(r => r.score != null);
@@ -116,6 +136,7 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {filtered.map(r => {
               const sc = r.score;
+              const pdfHref = displayPdfUrlForResume(r);
               const isActive = r.folder === activeFolder;
               return (
                 <div
@@ -200,9 +221,9 @@ export default function ResumeSidebar({ activeFolder, onSelect }: Props) {
                   </button>
 
                   {/* Download PDF */}
-                  {r.pdf_url ? (
+                  {pdfHref ? (
                     <a
-                      href={r.pdf_url}
+                      href={pdfHref}
                       target="_blank"
                       rel="noopener noreferrer"
                       download

@@ -10,11 +10,14 @@ export function scoreClass(score: number): "s-high" | "s-mid" | "s-low" {
   return "s-low";
 }
 
+/** JD requirement weight — avoid red/error tones for “High” (that reads as a bad score). */
 export function weightColor(w: string): { bg: string; color: string } {
-  if (w === "High")   return { bg: "var(--red-bg)",    color: "var(--orange)" };
+  if (w === "High")   return { bg: "rgba(245, 158, 11, 0.14)", color: "var(--orange)" };
   if (w === "Medium") return { bg: "var(--yellow-bg)", color: "var(--yellow)" };
   return                     { bg: "var(--surface3)",  color: "var(--muted)"  };
 }
+
+import { messageForNonJsonApiFailure } from "@/lib/userFriendlyError";
 
 export function apiUrl(path: string): string {
   const base = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8765").replace(/\/$/, "");
@@ -40,9 +43,9 @@ export async function parseJsonOrThrow<T = unknown>(resp: Response): Promise<T> 
   // Non-JSON response — likely a 404 "Not Found" or an HTML error page.
   if (!resp.ok) {
     const snippet = text.trim().slice(0, 120) || resp.statusText || "Request failed";
-    throw new Error(`Server returned ${resp.status}: ${snippet}`);
+    throw new Error(messageForNonJsonApiFailure(resp.status, snippet));
   }
-  throw new Error("Server returned an unexpected non-JSON response.");
+  throw new Error("The résumé server returned an unexpected response (not JSON). Please try again.");
 }
 
 export function escHtml(s: string): string {

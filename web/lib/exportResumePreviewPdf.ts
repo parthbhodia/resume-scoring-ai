@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Rasterizes a DOM node (e.g. the résumé “paper” card) to a multi-page Letter PDF.
+ * Used for the Analyze view: captures highlights and score-tint colors. This is not
+ * the user’s source résumé file; it is a rasterized export of the mirror preview.
  */
 export async function exportResumePreviewPdf(
   element: HTMLElement,

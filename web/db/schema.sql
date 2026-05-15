@@ -14,9 +14,35 @@ create table if not exists resumes (
   pdf_url     text,
   score       int,
   verdict     text,
+  job_description text,
+  resume_doc    jsonb,         -- canonical structured resume snapshot (ResumeDoc)
+  applied_patch jsonb,         -- last accepted LLM patch applied for this artifact
+  renderer      text,          -- 'legacy' | 'structured'
+  schema_version int,          -- structured schema version (starts at 1)
+  public_slug   text,          -- optional /r/?id=<slug> segment (lowercase; unique when set)
+  is_default    bool not null default false,  -- at most one true row per user_id (partial unique index)
   created_at  timestamptz default now(),
   unique (user_id, folder)
 );
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'resumes_renderer_check'
+  ) then
+    alter table resumes
+      add constraint resumes_renderer_check
+      check (renderer is null or renderer in ('legacy', 'structured'));
+  end if;
+end $$;
+
+create unique index if not exists resumes_public_slug_lower_uidx
+  on resumes (lower(public_slug))
+  where public_slug is not null and btrim(public_slug) <> '';
+
+create unique index if not exists resumes_one_default_per_user_uidx
+  on resumes (user_id)
+  where is_default = true;
 
 -- ── criteria ─────────────────────────────────────────────────────────────────
 create table if not exists criteria (
@@ -148,3 +174,45 @@ create policy "users manage own versions" on resume_versions
   for all using (
     exists (select 1 from resumes where id = resume_id and user_id = auth.uid())
   );
+
+-- ── user_profiles (Tailor defaults + EEO JSON per user) ───────────────────
+create table if not exists user_profiles (
+  user_id    uuid primary key references auth.users (id) on delete cascade,
+  profile    jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists user_profiles_updated_idx on user_profiles (updated_at desc);
+
+alter table user_profiles enable row level security;
+
+create policy "users read own profile" on user_profiles
+  for select using (auth.uid() = user_id);
+
+create policy "users insert own profile" on user_profiles
+  for insert with check (auth.uid() = user_id);
+
+create policy "users update own profile" on user_profiles
+  for update using (auth.uid() = user_id);
+
+create policy "users delete own profile" on user_profiles
+  for delete using (auth.uid() = user_id);
+
+-- ── resume_templates (Structured source templates) ───────────────────────────
+-- Canonical TeX templates keyed by reference_folder for structured rendering.
+-- Read/writes are performed by backend service-role key.
+create table if not exists resume_templates (
+  id               uuid primary key default gen_random_uuid(),
+  reference_folder text not null,
+  tex_body         text not null,
+  active           boolean not null default true,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+
+create unique index if not exists resume_templates_reference_folder_uidx
+  on resume_templates (reference_folder)
+  where active = true;
+
+create index if not exists resume_templates_active_idx
+  on resume_templates (active);

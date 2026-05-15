@@ -10,6 +10,12 @@ Uses the SERVICE_ROLE_KEY so uploads bypass RLS. The keys must be set as
 Railway env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 If either is missing, the helpers fall back to local filesystem.
 
+When Storage upload fails but a PDF was compiled, set PUBLIC_API_URL to the
+**public base URL of this resume API** (e.g. https://api.example.com — no path)
+so upload_pdf can still return an https link to GET /pdf/{folder}/{file}.pdf.
+Without that, the web app only gets a relative /pdf/… URL and Supabase rows
+often ended up with pdf_url = null after we rejected non-Storage URLs.
+
 Local fallback strategy:
   - PDFs: <LIBRARY_ROOT>/<user_id>/<folder>.pdf
   - Tex:  <LIBRARY_ROOT>/<user_id>/<folder>.tex
@@ -146,8 +152,14 @@ def upload_pdf(user_id: str, folder: str, pdf_path: str) -> Optional[str]:
     # The API can serve local files through /pdf/... while the container lives.
     if url is None:
         _write_local(user_id, folder, "pdf", data)
+        fname = os.path.basename(pdf_path)
+        base = (os.environ.get("PUBLIC_API_URL") or "").strip().rstrip("/")
+        if base and fname.endswith(".pdf") and folder:
+            fallback = f"{base}/pdf/{folder}/{fname}"
+            logger.info(f"PDF kept on disk — returning public API URL  |  {fallback}")
+            return fallback
         return None
-    
+
     if url:
         logger.info(f"PDF uploaded  |  {len(data)} bytes  |  {url}")
     return url

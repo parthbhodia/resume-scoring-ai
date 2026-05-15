@@ -5,30 +5,51 @@
  * the model happened to type "quantif…" in issues).
  */
 
+/** Matches passive/copula patterns mirrored from backend `_PASSIVE_BULLET_RE`. */
+const PASSIVE_BULLET_RE =
+  /\b(?:was|were|is|are|been|being)\s+[a-z]{2,22}(?:ed|en)\b/i;
+
+/** Opening a bullet with a date range (dates belong on role headers). */
+const BULLET_DATE_LEAD_RE =
+  /^[•\-–*▪▸]\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[,. ]+\d{4}\b|(?:19|20)\d{2}\s*[-–/]\s*(?:(?:19|20)\d{2}|[Pp]resent|[Cc]urrent)|(?:19|20)\d{2}\b\s*[,–-]\s*(?:19|20)\d{2}\b)/i;
+
 export const CATEGORY_ISSUE_KEYWORDS: Record<string, string[]> = {
   quantification: [
-    "quantif", "metric", "measur", "number", "percent", "%", "data",
-    "scale", "figure", "statistic", "numeric", "lack of data", "no numbers",
+    "quantif", "metric", "measur", "percent", "%",
+    "scale", "figure", "statistic", "numeric",
+    "lack of data", "no numbers", "add numbers", "no metrics",
+    "fact-based", "demonstrat result",
   ],
   achievementQuality: [
-    "weak action", "weak verb", "passive", "responsible for", "no achievement",
-    "duty", "task", "vague outcome", "responsibilit", "collaborat", "unclear impact",
+    "weak action", "weak verb", "responsible for", "no achievement",
+    "duty", "task", "vague outcome", "responsibilit", "unclear impact",
+    "passive", "owned", "outcome", "impact", "narrative", "results",
   ],
   languageQuality: [
-    "passive voice", "buzzword", "first person", "filler", "cliché", "cliche",
+    "passive voice", "active voice", "buzzword", "first person", "filler", "cliché", "cliche",
     "wordy", "jargon", "generic", "overused", "grammar", "spelling", "tense",
+    "flowery", "slang", "abbreviat", "spell",
   ],
   readability: [
     "too long", "length", "lengthy", "complex", "unclear", "run-on", "hard to read",
+    "skim", "concise", "organized", "white space",
   ],
   atsCompatibility: [
     "ats", "keyword", "format", "parsing", "column", "table", "graphic",
   ],
   sectionStructure: [
     "section", "structure", "missing", "order", "heading", "summary",
+    "reverse chronological", "chronolog", "references", "objective",
+    "umbc", "professional experience", "additional experience", "coursework", "gpa",
+    "certification", "publication", "presentation", "poster", "honors", "activities", "service",
   ],
   technicalBranding: [
-    "technical", "skill", "technology", "stack", "tool", "github", "link",
+    "github", "gitlab", "portfolio",
+    "tech stack", "technology stack", "full stack", "technical stack",
+    "stack depth", "technical branding", "developer portfolio",
+    "writing sample", "work sample", "teaching portfolio",
+    "clinical credential", "licensure", "board certified",
+    "creative reel", "publications section", "domain expertise", "field-specific",
   ],
   jobMatch: [
     "keyword", "match", "missing term", "requirement", "job description", "jd",
@@ -51,7 +72,7 @@ export function hasStrongQuantification(text: string): boolean {
 }
 
 const ACHIEVEMENT_DUTY_PATTERNS =
-  /\b(responsible\s+for|helped\s+with|assisted\s+with|worked\s+on|participated\s+in|involved\s+in|supported\s+the|handled\s+|managed\s+the\s+team|duties\s+included)\b/i;
+  /\b(responsible\s+for|helped\s+with|assisted\s+with|worked\s+on|participated\s+in|involved\s+in|supported\s+the|duties\s+included)\b/i;
 
 /** Whether this bullet belongs to `category` for highlighting / filtering. */
 export function bulletMatchesAnalysisCategory(
@@ -72,10 +93,12 @@ export function bulletMatchesAnalysisCategory(
         issueBlob,
       );
     case "languageQuality":
-      return /\b(grammar|spelling|punctuation|tense|pronoun|passive|unclear|buzzword|wordy)\b/i.test(
+      if (PASSIVE_BULLET_RE.test(bullet.originalBullet)) return true;
+      return /\b(?:grammar|spelling|punctuation|tense|pronoun|passive|unclear|buzzword|wordy|weak\s+language|sentence|fluency|clarity|capitali[sz]ation|hyphen|word\s+choice|tone|flowery|slang)\b|passive\s+voice/i.test(
         issueBlob,
       );
     case "readability":
+      if (BULLET_DATE_LEAD_RE.test(bullet.originalBullet.trim())) return true;
       return (
         bullet.originalBullet.trim().split(/\s+/).length > 55 ||
         bullet.originalBullet.length > 420
@@ -91,29 +114,40 @@ export function inferPrimaryCategoryFromBullet(bullet: {
   originalBullet: string;
   score: number;
 }): string {
-  const ordered = [
-    "quantification",
-    "achievementQuality",
+  const issueBlob = bullet.issues.join(" ").toLowerCase();
+
+  // Hard-priority: explicit quantification language should always classify as Quantification,
+  // even when the same issue text also contains words like "generic" that map to Language.
+  if (/\b(?:quantif|metric|measur|no numbers|lack of data|specific metrics|numeric)\b/i.test(issueBlob)) {
+    return "quantification";
+  }
+
+  /* Match issue-text keywords — language / structure before quantification so
+   * words like “data” in “consumer data” do not classify as Quantification. */
+  const keywordOrder = [
     "languageQuality",
     "readability",
+    "achievementQuality",
     "atsCompatibility",
     "sectionStructure",
+    "quantification",
     "technicalBranding",
     "jobMatch",
   ] as const;
-
-  const issueBlob = bullet.issues.join(" ").toLowerCase();
-  for (const cat of ordered) {
+  for (const cat of keywordOrder) {
     const kws = CATEGORY_ISSUE_KEYWORDS[cat] ?? [];
     if (kws.some((kw) => issueBlob.includes(kw))) return cat;
   }
 
-  if (!hasStrongQuantification(bullet.originalBullet)) return "quantification";
-  if (ACHIEVEMENT_DUTY_PATTERNS.test(bullet.originalBullet)) return "achievementQuality";
-
+  /* Issue heuristics (no keyword hit) — still before blanket “needs metrics”. */
+  if (bulletMatchesAnalysisCategory(bullet, "languageQuality")) return "languageQuality";
   const text = bullet.originalBullet;
   const wc = text.trim().split(/\s+/).length;
   if (wc > 45 || text.length > 320) return "readability";
+  if (ACHIEVEMENT_DUTY_PATTERNS.test(text)) return "achievementQuality";
+  if (bulletMatchesAnalysisCategory(bullet, "achievementQuality")) return "achievementQuality";
+
+  if (!hasStrongQuantification(text)) return "quantification";
 
   if (bullet.score < 52) return "achievementQuality";
 

@@ -1,4 +1,4 @@
-# Railway build — Python backend with LaTeX support + headless Chromium
+# Railway build — Python backend with LaTeX support
 FROM python:3.11-slim
 
 # Install texlive for PDF compilation.
@@ -20,12 +20,6 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Chromium + its native libs so the JD scraper can render JS-heavy
-# job boards (Ashby, Workday, Google Careers). --with-deps does the apt-get
-# install of libnss3/libatk/etc. that Chromium needs to launch headless.
-RUN python -m playwright install --with-deps chromium && \
-    rm -rf /var/lib/apt/lists/*
 
 COPY . .
 

@@ -558,167 +558,6 @@ def _resolve_structured_source_folder(base_folder: Optional[str], reference_fold
     )
 
 
-_EXTRACT_SCHEMA = """{
-  "full_name": "string",
-  "headline": "string — candidate's current title/role",
-  "location": "string",
-  "email": "string",
-  "phone": "string",
-  "linkedin": "string — URL or handle",
-  "github": "string — URL or handle",
-  "summary": "string — 2-3 sentences tailored to the target role and JD keywords",
-  "skills": [{"category": "string e.g. Languages", "items": ["string"]}],
-  "experience": [{
-    "company": "string",
-    "role": "string",
-    "dates": "string e.g. July 2020 – Present",
-    "location": "string",
-    "bullets": ["string — rewritten with strong action verbs, quantified where possible, emphasising JD keywords"]
-  }],
-  "projects": [{"name": "string", "bullets": ["string"]}],
-  "education": [{"institution": "string", "degree": "string", "dates": "string", "details": ["string"]}]
-}"""
-
-
-def _llm_extract_and_tailor(
-    candidate_profile: str,
-    jd: str,
-    role: str,
-    company: str,
-) -> Optional[ResumeDocModel]:
-    """Use an LLM to extract structured data from raw resume text AND tailor it to the JD.
-
-    Returns None on failure so the caller can fall back to the regex parser.
-    """
-    jd_snippet = (jd or "")[:3000].strip()
-    profile_snippet = (candidate_profile or "")[:6000].strip()
-
-    prompt = f"""You are an expert resume writer. Given a candidate's raw resume text and a job description,
-extract ALL resume content into structured JSON and tailor it for the target role.
-
-TARGET ROLE: {role} at {company}
-
-JOB DESCRIPTION (first 3000 chars):
-{jd_snippet}
-
-CANDIDATE RESUME TEXT:
-{profile_snippet}
-
-Instructions:
-- Extract every section: contact info, summary, ALL skills, ALL work experience entries (every job),
-  ALL projects, ALL education entries. Do NOT drop any section.
-- Rewrite the professional summary (2-3 sentences) tailored to this specific JD.
-- For each experience bullet: keep the core fact but strengthen verbs, add metrics if present,
-  and naturally incorporate 1-2 relevant JD keywords where they fit. Do NOT fabricate numbers.
-- Preserve all dates exactly as written in the source (e.g. "July 2020 – Present").
-- For skills, group by category (Languages, Frameworks, Tools, Cloud, etc.).
-- Include every project from the resume under "projects".
-- Include every education entry under "education".
-- Output ONLY valid JSON matching this schema (no markdown, no explanation):
-
-{_EXTRACT_SCHEMA}"""
-
-    try:
-        # Use Grok exclusively for throughput — fall back to _llm_json_call only if XAI key missing.
-        raw: Optional[dict] = None
-        xai_key = os.environ.get("XAI_API_KEY")
-        if xai_key:
-            try:
-                from openai import OpenAI as _OAI  # type: ignore
-                grok_model = os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning")
-                _xai = _OAI(api_key=xai_key, base_url="https://api.x.ai/v1")
-                _r = _xai.chat.completions.create(
-                    model=grok_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.2,
-                    response_format={"type": "json_object"},
-                )
-                _text = (_r.choices[0].message.content or "").strip()
-                _text = re.sub(r"^```[a-z]*\n?", "", _text)
-                _text = re.sub(r"\n?```$", "", _text)
-                raw = json.loads(_text)
-            except Exception as exc:
-                logger.warning(f"Grok extract+tailor failed: {exc}")
-        if raw is None:
-            raw = _llm_json_call(prompt)
-        if not raw or not isinstance(raw, dict):
-            return None
-
-        full_name = str(raw.get("full_name") or "Candidate").strip() or "Candidate"
-
-        skills: list[tuple[str, list[str]]] = []
-        for sk in (raw.get("skills") or []):
-            cat = _clean_model_text(str(sk.get("category") or "Skills"))
-            items = normalize_skill_items(str(i) for i in (sk.get("items") or []))
-            if items:
-                skills.append((cat or "Skills", items))
-
-        experience: list[ExperienceItem] = []
-        for exp in (raw.get("experience") or []):
-            bullets = [
-                _clean_model_text(str(b))
-                for b in (exp.get("bullets") or [])
-                if _clean_model_text(str(b))
-            ]
-            experience.append(ExperienceItem(
-                company=_clean_model_text(str(exp.get("company") or "")) or "Company",
-                role=_clean_model_text(str(exp.get("role") or "")),
-                dates=_clean_model_text(str(exp.get("dates") or "")),
-                location=_clean_model_text(str(exp.get("location") or "")),
-                bullets=bullets,
-            ))
-
-        extra_sections: list[tuple[str, list[str]]] = []
-        for proj in (raw.get("projects") or []):
-            name = _clean_model_text(str(proj.get("name") or "Project"))
-            bullets = [_clean_model_text(str(b)) for b in (proj.get("bullets") or []) if _clean_model_text(str(b))]
-            if bullets:
-                extra_sections.append((name, bullets))
-        if extra_sections:
-            # Wrap all projects under a single "Projects" section header
-            all_project_lines: list[str] = []
-            for pname, pbullets in extra_sections:
-                all_project_lines.append(pname)
-                all_project_lines.extend(pbullets)
-            extra_sections = [("Projects", all_project_lines)]
-
-        for edu in (raw.get("education") or []):
-            edu_lines: list[str] = []
-            degree = _clean_model_text(str(edu.get("degree") or ""))
-            institution = _clean_model_text(str(edu.get("institution") or ""))
-            dates = _clean_model_text(str(edu.get("dates") or ""))
-            if degree:
-                edu_lines.append(degree)
-            if institution:
-                line = institution
-                if dates:
-                    line += f" | {dates}"
-                edu_lines.append(line)
-            for detail in (edu.get("details") or []):
-                d = _clean_model_text(str(detail))
-                if d:
-                    edu_lines.append(d)
-            if edu_lines:
-                extra_sections.append(("Education", edu_lines))
-
-        return ResumeDocModel(
-            full_name=full_name,
-            headline=_clean_model_text(str(raw.get("headline") or role or "")),
-            location=_clean_model_text(str(raw.get("location") or "")),
-            email=_clean_model_text(str(raw.get("email") or "")),
-            phone=_clean_model_text(str(raw.get("phone") or "")),
-            linkedin=_clean_model_text(str(raw.get("linkedin") or "")),
-            github=_clean_model_text(str(raw.get("github") or "")),
-            summary=_clean_model_text(str(raw.get("summary") or "")),
-            skills=skills,
-            experience=experience,
-            extra_sections=extra_sections,
-        )
-    except Exception as exc:
-        logger.warning(f"LLM extract+tailor failed: {exc}")
-        return None
-
-
 def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
     parsed = parse_profile_text(candidate_profile)
     full_name = _clean_model_text(parsed.full_name or "Candidate") or "Candidate"
@@ -769,28 +608,6 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
             )
         ]
 
-    extra_sections: list[tuple[str, list[str]]] = []
-
-    # Projects and Education live in extra_sections so the template can render them
-    # as their own LaTeX sections (the Harshibar template filters by name).
-    if parsed.projects_bullets:
-        cleaned = [_clean_model_text(b) for b in parsed.projects_bullets if _clean_model_text(b)]
-        if cleaned:
-            extra_sections.append(("Projects", cleaned))
-
-    for name, vals in (parsed.extra_sections or []):
-        clean_name = _clean_model_text(name)
-        if not clean_name:
-            continue
-        clean_vals = [_clean_model_text(v) for v in vals if _clean_model_text(v)]
-        if clean_vals:
-            extra_sections.append((clean_name, clean_vals))
-
-    if parsed.education_lines:
-        cleaned = [_clean_model_text(e) for e in parsed.education_lines if _clean_model_text(e)]
-        if cleaned:
-            extra_sections.append(("Education", cleaned))
-
     return ResumeDocModel(
         full_name=full_name,
         headline=_clean_model_text(parsed.headline or role or ""),
@@ -802,7 +619,13 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         summary=summary,
         skills=skills,
         experience=experience_list,
-        extra_sections=extra_sections,
+        extra_sections=[
+            (name, [
+                _clean_model_text(v) for v in vals if _clean_model_text(v)
+            ])
+            for name, vals in (parsed.extra_sections or [])
+            if _clean_model_text(name)
+        ],
     )
 
 # CORS: allow localhost dev + deployed frontend
@@ -939,23 +762,14 @@ async def api_generate_stream(request: Request):
                     "msg": f"Structured renderer: loading source ({source_folder})…",
                 }), loop).result()
 
-                # Content pipeline: LLM extraction+tailoring → regex fallback → base .tex fallback.
-                # The selected template controls layout; the content pipeline controls substance.
-                doc = None
-                if candidate_profile and jd:
-                    asyncio.run_coroutine_threadsafe(queue.put({
-                        "event": "status",
-                        "msg": "Tailoring resume content to job description…",
-                    }), loop).result()
-                    doc = _llm_extract_and_tailor(candidate_profile, jd, role, company)
-                    if doc is None:
-                        logger.warning("LLM extraction failed — falling back to regex parser")
-                if doc is None and candidate_profile:
+                # Prefer candidate_profile content when provided.
+                # The selected template controls layout; profile text should control content.
+                if candidate_profile:
                     doc = _resume_doc_from_profile_text(candidate_profile, role, company)
-                if doc is None and base_tex:
+                elif base_tex:
                     parsed = parse_resume_tex(base_tex)
                     doc = _resume_doc_from_parsed(parsed)
-                if doc is None:
+                else:
                     doc = _resume_doc_from_profile_text(candidate_profile, role, company)
                 _apply_accepted_edits_to_doc(doc, accepted_suggestions if isinstance(accepted_suggestions, list) else None)
 
@@ -2169,6 +1983,12 @@ _HEADER_JOB_ROLE = re.compile(
     re.IGNORECASE,
 )
 
+_HEADER_CONTACT_ANCHOR = re.compile(
+    r"@|linkedin\.com/|www\.linkedin\.com/|github\.com/|www\.github\.com/|"
+    r"\bportfolio\b|\bsite\b|\bmobile\b|\bphone\b|"
+    r"[\[\(]?\d{3}[\])]?[\s.\-]?\d{3}[\s.\-]?\d{4}",
+    re.IGNORECASE,
+)
 
 def _strip_header_candidate_lines(lines: list[str], start: int, end: int) -> list[str]:
     out: list[str] = []

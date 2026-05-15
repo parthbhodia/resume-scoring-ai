@@ -19,6 +19,7 @@ langchain-xai>=0.2.0
 # Tools and utilities
 langsmith>=0.1.63
 python-dotenv>=1.0.0
+jinja2>=3.1.4
 
 # LinkedIn Scraping - Choose your method
 beautifulsoup4>=4.12.0
@@ -55,7 +56,13 @@ pydantic-settings>=2.1.0
 
 # PDF text extraction (for resume upload feature)
 pdfplumber>=0.11.0
+pypdf>=4.2.0
+unstructured>=0.15.0
 python-multipart>=0.0.9
+
+# Optional NLP/PII extraction for profile parsing
+spacy>=3.7.0
+presidio-analyzer>=2.2.0
 
 # Supabase Storage — persists generated PDFs/.tex across Railway redeploys
 supabase>=2.5.0

@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
   basePath,
   assetPrefix,
+  transpilePackages: ["react-pdf", "pdfjs-dist"],
 };
 
 export default nextConfig;

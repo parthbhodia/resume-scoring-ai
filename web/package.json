@@ -2,6 +2,11 @@
   "name": "web",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "react-pdf": {
+      "pdfjs-dist": "$pdfjs-dist"
+    }
+  },
   "engines": {
     "node": ">=20.9.0"
   },
@@ -17,8 +22,10 @@
     "jspdf": "^4.2.1",
     "lucide-react": "^1.8.0",
     "next": "16.2.4",
+    "pdfjs-dist": "^5.7.284",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-pdf": "^10.4.1",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
