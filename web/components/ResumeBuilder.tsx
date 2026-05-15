@@ -41,7 +41,7 @@ import MatchBreakdownCards from "./MatchBreakdownCards";
 import DiffView     from "./DiffView";
 import SourcesPanel from "./SourcesPanel";
 import AtsPanel, { type AtsResult } from "./AtsPanel";
-import ShareButton   from "./ShareButton";
+
 import ResumePublicLinkSettings from "./ResumePublicLinkSettings";
 
 const BuilderPdfSuggestionHighlights = dynamic(
@@ -2865,16 +2865,6 @@ export default function ResumeBuilder({
                         Download PDF
                       </a>
                     ) : null}
-                    {result.folder && result.pdfUrl && !generating ? (
-                      <div style={{ display: "flex", justifyContent: "stretch" }}>
-                        <ShareButton
-                          folder={result.folder}
-                          pdfUrl={result.pdfUrl}
-                          userId={user?.id ?? null}
-                          ensureLibraryRow={syncLibraryRowForShare}
-                        />
-                      </div>
-                    ) : null}
                     <button
                       type="button"
                       disabled={libraryReSaveBusy || !user?.id || !result.folder}
@@ -3721,16 +3711,6 @@ function TemplateCustomizePostResult({
             >
               {generating ? "Saving…" : "Save PDF"}
             </button>
-            {result.folder && result.pdfUrl && !generating ? (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                <ShareButton
-                  folder={result.folder}
-                  pdfUrl={result.pdfUrl}
-                  userId={user?.id ?? null}
-                  ensureLibraryRow={ensureLibraryRow}
-                />
-              </div>
-            ) : null}
           </div>
         </aside>
       </div>
