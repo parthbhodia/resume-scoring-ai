@@ -72,6 +72,8 @@ from resume_library import (
     run_tailor_research_job_context,
     coach_suggestions_llm,
     _get_resume_tex_for_user,
+    _rate_resume,
+    _optional_gemini_client,
 )
 try:
     from resume_gui.renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items
@@ -848,16 +850,27 @@ async def api_generate_stream(request: Request):
                     except Exception as exc:
                         logger.warning(f"upload_pdf failed: {exc}")
 
-                # Frontend/library contract + ATS/JD scoring.
-                parsed_for_analysis = parse_resume_tex(new_tex)
-                ats = ats_check(
-                    out_folder,
-                    jd,
-                    storage_user or user_id,
-                    target_role=role,
-                    parsed=parsed_for_analysis,
-                )
-                ratings_payload = _structured_ratings_from_ats(ats)
+                # Frontend/library contract + LLM-based ratings.
+                try:
+                    gemini_client = _optional_gemini_client()
+                    llm_ratings = _rate_resume(gemini_client, model, new_tex, jd[:1500])
+                except Exception:
+                    llm_ratings = None
+                if llm_ratings and isinstance(llm_ratings, dict):
+                    ratings_payload = {
+                        "match_score": llm_ratings.get("match_score", 0),
+                        "criteria": (llm_ratings.get("criteria") or [])[:12],
+                        "whats_working": [{"text": w} for w in (llm_ratings.get("whats_working") or [])],
+                        "gaps": [{"text": g} for g in (llm_ratings.get("gaps") or [])],
+                        "verdict": llm_ratings.get("verdict", ""),
+                    }
+                else:
+                    # Fallback to ATS-based scoring.
+                    ats = ats_check(
+                        out_folder, jd, storage_user or user_id,
+                        target_role=role, parsed=parse_resume_tex(new_tex),
+                    )
+                    ratings_payload = _structured_ratings_from_ats(ats)
 
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "base",
