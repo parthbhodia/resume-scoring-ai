@@ -193,8 +193,8 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
         12,
     )
 
-    # Parse multi-role experience entries.
-    # Work from original text (preserves blank-line separation between entries).
+    # Parse multi-role experience entries using paragraph-based splitting.
+    # Blank lines are the most reliable separator between job entries.
     _MONTHS = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
     _DATE_RANGE_PAT = re.compile(
         f"({_MONTHS}\\s+\\d{{4}})"
@@ -214,54 +214,63 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
             break
     if exp_end < 0:
         exp_end = len(raw_all)
-    # Collect raw experience lines including blanks.
-    raw_exp_lines = raw_all[exp_start + 1:exp_end] if exp_start >= 0 else []
-    if raw_exp_lines:
+    raw_exp_section = raw_all[exp_start + 1:exp_end] if exp_start >= 0 else []
+
+    if raw_exp_section:
+        # Split into paragraphs by blank lines, then sub-split by date boundaries.
+        paragraphs: list[list[str]] = [[]]
+        for ln in raw_exp_section:
+            if ln.strip():
+                paragraphs[-1].append(ln)
+            else:
+                if paragraphs[-1]:
+                    paragraphs.append([])
+
         entries: list[tuple[str, str, str, str, list[str]]] = []
-        current_role = ""
-        current_company = ""
-        current_location = ""
-        current_dates = ""
-        current_bullets: list[str] = []
-        blank_before = True  # First paragraph starts fresh.
-        for ln in raw_exp_lines:
-            stripped = ln.strip()
-            is_blank = not stripped
-            is_bullet = stripped and (ln.lstrip()[:1] in ("-", "•", "*"))
-            clean = stripped.lstrip("-•* ").strip()
-            dm = _DATE_RANGE_PAT.search(clean) if clean else None
-            has_dates = bool(dm)
-            if is_blank:
-                blank_before = True
+        for para in paragraphs:
+            if not para:
                 continue
-            if blank_before and not is_bullet and current_role:
-                # Blank line then non-bullet → save previous entry, start new.
-                if current_role and current_bullets:
-                    entries.append((current_company, current_role, current_dates, current_location, current_bullets))
-                current_dates = ""
-                current_role = ""
-                current_company = ""
-                current_location = ""
-                current_bullets = []
-            blank_before = False
-            if has_dates and not is_bullet:
-                if current_role and current_bullets:
-                    entries.append((current_company, current_role, current_dates, current_location, current_bullets))
-                current_dates = dm.group(0).strip()
-                current_role = clean.replace(dm.group(0), "").strip().rstrip(",")
-                current_bullets = []
-                current_company = ""
-                current_location = ""
-            elif not is_bullet and current_role:
-                if not current_company:
-                    current_company = clean
-                elif not current_location:
-                    current_location = clean
-            elif is_bullet and current_role:
-                if clean and len(clean.split()) >= 4:
-                    current_bullets.append(clean)
-        if current_role and current_bullets:
-            entries.append((current_company, current_role, current_dates, current_location, current_bullets))
+            # Sub-split paragraph by date-range lines (handles no-blank-line input).
+            sub_paras: list[list[str]] = [[]]
+            for ln in para:
+                stripped = ln.strip()
+                is_bullet = ln.lstrip()[:1] in ("-", "•", "*")
+                clean = stripped.lstrip("-•* ").strip()
+                dm = _DATE_RANGE_PAT.search(clean)
+                # Start new sub-paragraph on each new date line (role header).
+                if dm and not is_bullet and sub_paras[-1]:
+                    sub_paras.append([])
+                sub_paras[-1].append(ln)
+
+            for sub in sub_paras:
+                if not sub:
+                    continue
+                role = ""
+                company = ""
+                location = ""
+                dates = ""
+                bullets: list[str] = []
+                for ln in sub:
+                    stripped = ln.strip()
+                    is_bullet = ln.lstrip()[:1] in ("-", "•", "*")
+                    clean = stripped.lstrip("-•* ").strip()
+                    dm = _DATE_RANGE_PAT.search(clean)
+                    has_dates = bool(dm)
+
+                    if has_dates and not is_bullet:
+                        dates = dm.group(0).strip()
+                        role = clean.replace(dm.group(0), "").strip().rstrip(",")
+                    elif not is_bullet and role:
+                        if not company:
+                            company = clean
+                        elif not location:
+                            location = clean
+                    elif is_bullet:
+                        if clean and len(clean.split()) >= 3:
+                            bullets.append(clean)
+                if role and bullets:
+                    entries.append((company, role, dates, location, bullets))
+
         out.experience_entries = entries
         out.experience_bullets = [b for e in entries for b in e[4]] or out.experience_bullets
 
