@@ -307,6 +307,82 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
     return doc
 
 
+def _accepted_suggestion_section_bucket(section: Optional[str]) -> str:
+    """Where to apply a suggestion when verbatim ``original`` is not found in the structured doc.
+
+    Coach quotes ``original`` from raw profile text, while ``_resume_doc_from_profile_text`` may
+    normalize via LLM — substring matches often fail. A blanket ``doc.summary = suggested`` fallback
+    then pasted *skills* text into the summary (user-visible bug).
+    """
+    s = (section or "").strip().lower()
+    if not s:
+        return "other"
+    if "summary" in s or "profile" in s or "objective" in s:
+        return "summary"
+    if "skill" in s:
+        return "skills"
+    if "experience" in s or "employment" in s or ("work" in s and "project" not in s):
+        return "experience"
+    if "project" in s:
+        return "projects"
+    if "education" in s or "academic" in s:
+        return "education"
+    return "other"
+
+
+def _append_extra_section_line(doc: ResumeDocModel, section_title: str, line: str) -> None:
+    lt = (line or "").strip()
+    if not lt:
+        return
+    key = section_title.strip().lower()
+    for i, (name, lines) in enumerate(doc.extra_sections):
+        nl = name.strip().lower()
+        if nl == key or key in nl or nl in key:
+            seq = list(lines)
+            if lt not in seq:
+                seq.append(lt)
+            doc.extra_sections[i] = (name, seq)
+            return
+    doc.extra_sections.append((section_title, [lt]))
+
+
+def _skills_fallback_replace_or_append(doc: ResumeDocModel, original: str, suggested: str) -> None:
+    """When ``original`` is not inside any skill line, still apply a skills-section approval."""
+    sug = (suggested or "").strip()
+    if not sug:
+        return
+    orig = (original or "").strip()
+    # Prefer replacing a line that shares a long prefix with what the coach quoted.
+    if orig and len(orig) >= 24:
+        prefix = orig[:48].lower()
+        for idx, (label, items) in enumerate(doc.skills):
+            next_items: list[str] = []
+            changed = False
+            for it in items:
+                if prefix in (it or "").lower():
+                    next_items.append(sug)
+                    changed = True
+                else:
+                    next_items.append(it)
+            if changed:
+                doc.skills[idx] = (label, [x for x in next_items if x])
+                return
+    # Parse "Category: a, b, c" like the profile parser.
+    if ":" in sug:
+        label, rest = sug.split(":", 1)
+        label = _clean_model_text(label)
+        rest = rest.strip()
+        if not label:
+            label = "Skills"
+        items = [x.strip() for x in rest.replace("·", ",").split(",") if x.strip()]
+        items = [x for x in items if not _is_structural_noise_line(x)]
+        normalized = normalize_skill_items(items)
+        if normalized:
+            doc.skills.append((label, normalized))
+            return
+    doc.skills.append(("Skills", [sug]))
+
+
 def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Optional[list]) -> None:
     if not isinstance(accepted_suggestions, list):
         return
@@ -353,11 +429,31 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
             if changed:
                 exp.bullets = [x for x in next_bullets if x]
 
+        # Coach quotes raw profile lines; structured doc may normalize wording — do not
+        # route unrelated sections into ``summary``.
         if not replaced and suggested:
-            if doc.summary:
-                doc.summary = suggested
+            bucket = _accepted_suggestion_section_bucket(str(item.get("section") or ""))
+            if bucket == "summary":
+                doc.summary = suggested.strip()
+            elif bucket == "skills":
+                _skills_fallback_replace_or_append(doc, original, suggested)
+            elif bucket == "projects":
+                _append_extra_section_line(doc, "Projects", suggested)
+            elif bucket == "education":
+                _append_extra_section_line(doc, "Education", suggested)
+            elif bucket == "experience":
+                logger.warning(
+                    "accepted_suggestion could not be matched to structured experience "
+                    "(verbatim original missing); skipped id=%s section=%r",
+                    str(item.get("id") or "")[:32],
+                    (item.get("section") or "")[:80],
+                )
             else:
-                doc.summary = suggested
+                logger.warning(
+                    "accepted_suggestion could not be matched in structured doc; skipped id=%s section=%r",
+                    str(item.get("id") or "")[:32],
+                    (item.get("section") or "")[:80],
+                )
 
 
 def _structured_ratings_from_ats(ats: dict) -> dict:
