@@ -1535,22 +1535,100 @@ async def api_generate_stream(request: Request):
 
 
 async def api_upload_resume(request: Request):
-    """Extract plain text from an uploaded PDF resume."""
+    """Extract résumé text from PDF or DOCX (MarkItDown + LLM structured parse).
+
+    Returns ``text`` (plain, builder-friendly), ``markdown`` (raw extract),
+    optional ``structured`` (JSON), ``parse_status`` (``ready`` | ``llm_failed``),
+    and optional ``hints`` when structured parsing did not complete.
+
+    Guards mirror common patterns from Resume Matcher (type, size, empty extract, clear errors).
+    """
     try:
-        form    = await request.form()
-        file    = form.get("file")
+        form = await request.form()
+        file = form.get("file")
         if file is None:
-            return JSONResponse({"error": "No file uploaded"}, status_code=400)
+            return JSONResponse({"error": "No file uploaded", "code": "no_file"}, status_code=400)
         content = await file.read()
-        with pdfplumber.open(io.BytesIO(content)) as pdf:
-            text = _extract_pdf_text(pdf)
-        if not text:
-            return JSONResponse({"error": "Could not extract text from PDF"}, status_code=422)
-        logger.info(f"PDF upload  |  {len(text)} chars extracted from {getattr(file, 'filename', 'upload.pdf')}")
-        return JSONResponse({"text": text})
-    except Exception as exc:
-        logger.exception("PDF upload failed")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        if not content:
+            return JSONResponse({"error": "Empty file", "code": "empty_file"}, status_code=400)
+
+        filename = getattr(file, "filename", None) or "resume.pdf"
+        content_type = getattr(file, "content_type", None)
+
+        from resume_upload_parse import (
+            RESUME_UPLOAD_MAX_BYTES,
+            extract_upload_markdown,
+            message_for_empty_resume_extract,
+            parse_upload_resume_full_pipeline,
+            validate_resume_upload_file,
+        )
+
+        try:
+            validate_resume_upload_file(content_type, filename)
+        except ValueError as ve:
+            return JSONResponse({"error": str(ve), "code": "invalid_file_type"}, status_code=400)
+
+        if len(content) > RESUME_UPLOAD_MAX_BYTES:
+            mb = RESUME_UPLOAD_MAX_BYTES // (1024 * 1024)
+            return JSONResponse(
+                {
+                    "error": f"File too large (maximum {mb} MB). Try compressing images or a shorter document.",
+                    "code": "file_too_large",
+                },
+                status_code=413,
+            )
+
+        loop = asyncio.get_event_loop()
+
+        def _extract_sync():
+            return extract_upload_markdown(content, filename, pdf_plain_fallback=None)
+
+        outcome = await loop.run_in_executor(None, _extract_sync)
+        if not (outcome.markdown or "").strip():
+            return JSONResponse(
+                {
+                    "error": message_for_empty_resume_extract(outcome.empty_reason),
+                    "code": "no_extractable_text",
+                    "detail": outcome.empty_reason,
+                },
+                status_code=422,
+            )
+
+        markdown_content = outcome.markdown
+
+        def _pipeline_sync():
+            return parse_upload_resume_full_pipeline(markdown_content)
+
+        structured, plain_text, parse_status, hints = await loop.run_in_executor(None, _pipeline_sync)
+
+        logger.info(
+            "Resume upload  |  %s  |  md_chars=%s  plain_chars=%s  parse_status=%s",
+            filename,
+            len(markdown_content),
+            len(plain_text or ""),
+            parse_status,
+        )
+
+        payload: Dict[str, Any] = {
+            "text": plain_text,
+            "markdown": markdown_content,
+            "parse_status": parse_status,
+        }
+        if parse_status == "ready" and structured:
+            payload["structured"] = structured
+        if hints:
+            payload["hints"] = hints
+
+        return JSONResponse(payload)
+    except Exception:
+        logger.exception("Resume upload failed")
+        return JSONResponse(
+            {
+                "error": "Something went wrong while processing your résumé. Please try again in a moment.",
+                "code": "server_error",
+            },
+            status_code=500,
+        )
 
 
 async def api_extract_jd(request: Request):

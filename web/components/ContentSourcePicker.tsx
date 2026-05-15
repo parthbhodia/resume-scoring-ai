@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
+import { apiUrl, isResumeUploadFile, parseJsonOrThrow } from "@/lib/utils";
 import { fetchResumes } from "@/lib/supabase";
 import type { ResumeRecord } from "@/lib/types";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
@@ -20,7 +20,7 @@ function formatDate(iso: string) {
 
 /* ── Upload card state ──────────────────────────────────────────────── */
 
-/** PDF → `/api/upload-resume`; reusable from Template Studio without leaving the page. */
+/** PDF / Word → `/api/upload-resume`; reusable from Template Studio without leaving the page. */
 export function UploadResumePdfPanel({ onDone }: { onDone: (profileText: string) => void }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +28,7 @@ export function UploadResumePdfPanel({ onDone }: { onDone: (profileText: string)
   const [dragging, setDragging] = useState(false);
 
   const handleFile = useCallback(async (file: File) => {
-    if (!file.type.includes("pdf")) { setError("Please upload a PDF file."); return; }
+    if (!isResumeUploadFile(file)) { setError("Please upload a PDF or Word (.doc/.docx) file."); return; }
     setUploading(true);
     setError(null);
     try {
@@ -87,7 +87,7 @@ export function UploadResumePdfPanel({ onDone }: { onDone: (profileText: string)
         )}
       </div>
       {error && <div style={{ fontSize: 12, color: "var(--red, #ef4444)", textAlign: "center" }}>{error}</div>}
-      <input ref={fileRef} type="file" accept=".pdf,application/pdf" style={{ display: "none" }}
+      <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display: "none" }}
         onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
     </div>
   );

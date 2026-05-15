@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale, ParsedSection } from "@/lib/types";
-import { apiUrl, parseJsonOrThrow, scoreColor } from "@/lib/utils";
+import { apiUrl, isResumeUploadFile, parseJsonOrThrow, scoreColor } from "@/lib/utils";
 import { toUserFriendlyErrorMessage, messageForNonJsonApiFailure } from "@/lib/userFriendlyError";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD, TAILOR_PREFILL_COMPANY, TAILOR_PREFILL_ROLE } from "@/lib/tailorPrefill";
@@ -955,7 +955,10 @@ export default function ResumeBuilder({
   }, [router]);
 
   const handlePdfUpload = useCallback(async (file: File) => {
-    if (!file.type.includes("pdf")) { setUploadError("Please upload a PDF file."); return; }
+    if (!isResumeUploadFile(file)) {
+      setUploadError("Please upload a PDF or Word (.doc/.docx) file.");
+      return;
+    }
     setUploadingPdf(true);
     setUploadError(null);
     setProfileSyncUpsell(null);
@@ -963,7 +966,12 @@ export default function ResumeBuilder({
       const formData = new FormData();
       formData.append("file", file);
       const resp = await fetch(apiUrl("/api/upload-resume"), { method: "POST", body: formData });
-      const json = await parseJsonOrThrow<{ error?: string; text?: string }>(resp);
+      const json = await parseJsonOrThrow<{
+        error?: string;
+        text?: string;
+        parse_status?: string;
+        structured?: Record<string, unknown>;
+      }>(resp);
       if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "Upload failed"));
       const text = json.text ?? "";
       setCandidateProfile(text);
@@ -974,9 +982,13 @@ export default function ResumeBuilder({
         URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
         sourcePdfBlobUrlRef.current = null;
       }
-      const blobUrl = URL.createObjectURL(file);
-      sourcePdfBlobUrlRef.current = blobUrl;
-      setSourcePdfBlobUrl(blobUrl);
+      if (file.type.includes("pdf")) {
+        const blobUrl = URL.createObjectURL(file);
+        sourcePdfBlobUrlRef.current = blobUrl;
+        setSourcePdfBlobUrl(blobUrl);
+      } else {
+        setSourcePdfBlobUrl(null);
+      }
 
       const hints = extractProfileHintsFromResumeText(text);
       const hintedKeys = Object.keys(hints).filter(k => String((hints as Record<string, unknown>)[k] ?? "").trim());
@@ -1497,9 +1509,9 @@ export default function ResumeBuilder({
           )}
 
           {/* ── Your résumé (tailor + template studio) ── */}
-          <StepCard step={studioHandoff ? 2 : 1} title="Your resume" subtitle="Upload your current resume as a PDF">
+          <StepCard step={studioHandoff ? 2 : 1} title="Your resume" subtitle="Upload your current résumé as PDF or Word (.doc/.docx)">
             <input
-              ref={fileInputRef} type="file" accept=".pdf,application/pdf"
+              ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               style={{ display: "none" }}
               onChange={e => { const f = e.target.files?.[0]; if (f) handlePdfUpload(f); e.target.value = ""; }}
             />
