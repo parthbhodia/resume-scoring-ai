@@ -1016,8 +1016,7 @@ async def api_upload_resume(request: Request):
             return JSONResponse({"error": "No file uploaded"}, status_code=400)
         content = await file.read()
         with pdfplumber.open(io.BytesIO(content)) as pdf:
-            pages_text = [page.extract_text() or "" for page in pdf.pages]
-        text = "\n".join(pages_text).strip()
+            text = _extract_pdf_text(pdf)
         if not text:
             return JSONResponse({"error": "Could not extract text from PDF"}, status_code=422)
         logger.info(f"PDF upload  |  {len(text)} chars extracted from {getattr(file, 'filename', 'upload.pdf')}")
@@ -1984,6 +1983,12 @@ _HEADER_JOB_ROLE = re.compile(
     re.IGNORECASE,
 )
 
+_HEADER_CONTACT_ANCHOR = re.compile(
+    r"@|linkedin\.com/|www\.linkedin\.com/|github\.com/|www\.github\.com/|"
+    r"\bportfolio\b|\bsite\b|\bmobile\b|\bphone\b|"
+    r"[\[\(]?\d{3}[\])]?[\s.\-]?\d{3}[\s.\-]?\d{4}",
+    re.IGNORECASE,
+)
 
 def _strip_header_candidate_lines(lines: list[str], start: int, end: int) -> list[str]:
     out: list[str] = []
