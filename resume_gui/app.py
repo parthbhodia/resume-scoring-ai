@@ -406,8 +406,8 @@ def _structured_ratings_from_ats(ats: dict) -> dict:
     return {
         "match_score": match_score,
         "criteria": criteria,
-        "whats_working": whats_working,
-        "gaps": gaps,
+        "whats_working": [{"text": w} for w in whats_working],
+        "gaps": [{"text": g} for g in gaps],
         "verdict": verdict,
     }
 
