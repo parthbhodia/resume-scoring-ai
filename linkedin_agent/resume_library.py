@@ -13,6 +13,7 @@ import difflib
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import subprocess
 import time
@@ -601,7 +602,7 @@ def _is_removal_suggestion(suggested: str) -> bool:
     return False
 
 
-LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", "")
+LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", str(Path(__file__).parent.parent / "resumes"))
 
 # Prefer the system pdflatex (cross-platform); the binary must be on PATH or
 # pointed to by the PDFLATEX env var for PDF compilation to work.

@@ -597,7 +597,7 @@ def _llm_normalize_profile(raw_text: str, parsed: Any) -> Optional[dict]:
         '  "education": [{"institution": "string", "degree": "string", "dates": "string", "location": "string"}]\n'
         '}\n\n'
         f"Partial parse (use as hints, correct if wrong):\n{json.dumps(partial_parse, indent=2)}\n\n"
-        f"Raw resume text:\n{raw_text[:4000]}"
+        f"Raw resume text:\n{raw_text[:12000]}"
     )
 
     try:

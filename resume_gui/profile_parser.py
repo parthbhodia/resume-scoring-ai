@@ -94,10 +94,17 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
 
     out.email = _first_regex(text, r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})")
     out.phone = _first_regex(text, r"(\+?\d[\d\s().-]{8,}\d)")
-    out.linkedin = _first_regex(text, r"(https?://(?:www\.)?linkedin\.com/[^\s|]+|linkedin\.com/[^\s|]+|linkedin/[^\s|]+)")
-    out.github = _first_regex(text, r"(https?://(?:www\.)?github\.com/[^\s|]+|github\.com/[^\s|]+|github/[^\s|]+)")
-    if not out.github:
-        out.github = _first_regex(text, r"github\s*[:\-\u2014]\s*(\S+)")
+    _raw_linkedin = _first_regex(text, r"(https?://(?:www\.)?linkedin\.com/[^\s|]+|linkedin\.com/[^\s|]+|linkedin/[^\s|]+)")
+    if _raw_linkedin and not _raw_linkedin.startswith("http"):
+        _raw_linkedin = re.sub(r"^linkedin/", "linkedin.com/", _raw_linkedin, flags=re.IGNORECASE)
+    out.linkedin = _raw_linkedin
+
+    _raw_github = _first_regex(text, r"(https?://(?:www\.)?github\.com/[^\s|]+|github\.com/[^\s|]+|github/[^\s|]+)")
+    if not _raw_github:
+        _raw_github = _first_regex(text, r"github\s*[:\-\u2014]\s*(\S+)")
+    if _raw_github and not _raw_github.startswith("http") and not _raw_github.startswith("github.com"):
+        _raw_github = re.sub(r"^github/", "github.com/", _raw_github, flags=re.IGNORECASE)
+    out.github = _raw_github
 
     loc = _first_regex(text, r"location\s*:\s*([^\n|]+)")
     out.location = loc
