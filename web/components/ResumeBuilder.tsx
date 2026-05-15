@@ -310,7 +310,7 @@ export default function ResumeBuilder({
   const [jdKeywords, setJdKeywords] = useState<string[]>([]);
   const [searchQueries, setSearchQueries] = useState<string[]>([]);
   const [searchSources, setSearchSources] = useState<{ title: string | null; url: string }[]>([]);
-  /** Grounding from POST /api/suggest-changes (live search runs before the coach JSON). */
+  /** Grounding from POST /api/suggest-changes-stream (research event, then coach SSE). */
   const [suggestResearchQueries, setSuggestResearchQueries] = useState<string[]>(
     () => builderSession0?.suggestResearchQueries ?? [],
   );
@@ -337,6 +337,8 @@ export default function ResumeBuilder({
   const [suggestions,    setSuggestions]    = useState<Suggestion[] | null>(() => builderSession0?.suggestions ?? null);
   const [suggestSummary, setSuggestSummary] = useState(() => builderSession0?.suggestSummary ?? "");
   const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestCoachStreamText, setSuggestCoachStreamText] = useState("");
+  const suggestStreamAbortRef = useRef<AbortController | null>(null);
   const [suggestError,   setSuggestError]   = useState<string | null>(null);
   /** Phased checklist while suggestions API runs: 0 → 1 → 2 → 3 (timed), then hidden when done. */
   const [suggestLoaderStepsDone, setSuggestLoaderStepsDone] = useState(0);
@@ -356,6 +358,13 @@ export default function ResumeBuilder({
   const [aiJobFitWithoutTicks, setAiJobFitWithoutTicks] = useState(false);
   /** Beta path: deterministic backend renderer scaffold (Jinja2 + structured model). */
   const [useStructuredRenderer, setUseStructuredRenderer] = useState(true);
+
+  /**
+   * Only the legacy LaTeX stream tends to emit live `search_query` / `search_source` SSE during PDF generation.
+   * Structured + digest-reuse runs should not show a second “waiting for web search” panel above the main progress card.
+   */
+  const pdfGenExpectsLiveWebSearch =
+    !studioHandoff && !useStructuredRenderer && !reusingSuggestWebForPdf;
 
   /** Template handoff — post-compile UI: HTML live paper (instant Style tab) + exported PDF; Save / Download run a fresh compile. */
   const [customizeTab, setCustomizeTab] = useState<"style" | "sections" | "add">("style");
@@ -757,9 +766,14 @@ export default function ResumeBuilder({
     if (!effJd) { setSuggestError("Please paste a job description first."); return; }
     if (!candidateProfile) { setSuggestError("Please upload your resume first."); return; }
 
+    suggestStreamAbortRef.current?.abort();
+    const ac = new AbortController();
+    suggestStreamAbortRef.current = ac;
+
     setSuggestLoading(true);
     setSuggestError(null);
     setSuggestions(null);
+    setSuggestCoachStreamText("");
     setAiJobFitWithoutTicks(false);
     setAcceptedIds(new Set());
     setRejectedIds(new Set());
@@ -768,35 +782,122 @@ export default function ResumeBuilder({
     setSuggestResearchDigest("");
 
     try {
-      const resp = await fetch(apiUrl("/api/suggest-changes"), {
+      const resp = await fetch(apiUrl("/api/suggest-changes-stream"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ candidate_profile: candidateProfile, job_description: effJd }),
+        signal: ac.signal,
       });
-      const json = await parseJsonOrThrow<{
-        error?: string;
-        summary?: string;
-        suggestions?: Suggestion[];
-        research_queries?: string[];
-        research_sources?: { title?: string | null; url?: string }[];
-        research_digest?: string;
-      }>(resp);
-      if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "Could not get suggestions."));
-      setSuggestions(json.suggestions ?? []);
-      setSuggestSummary(json.summary ?? "");
-      const rq = Array.isArray(json.research_queries) ? json.research_queries.filter((q): q is string => typeof q === "string") : [];
-      const rs = Array.isArray(json.research_sources)
-        ? json.research_sources
-            .filter((s): s is { title?: string | null; url: string } => s && typeof (s as { url?: unknown }).url === "string")
-            .map(s => ({ title: s.title ?? null, url: s.url }))
-        : [];
-      setSuggestResearchQueries(rq);
-      setSuggestResearchSources(rs);
-      setSuggestResearchDigest(typeof json.research_digest === "string" ? json.research_digest : "");
-      // Nothing is pre-selected; user ticks cards (or uses compile-as-is) before Generate.
+
+      if (!resp.ok) {
+        const ct = resp.headers.get("content-type") ?? "";
+        const body = await resp.text().catch(() => "");
+        if (!ct.includes("application/json")) {
+          throw new Error(messageForNonJsonApiFailure(resp.status, body));
+        }
+        let msg = `HTTP ${resp.status}`;
+        try {
+          const j = JSON.parse(body) as { error?: string };
+          if (j?.error) msg = j.error;
+          else if (body.trim()) msg = body.trim().slice(0, 400);
+        } catch {
+          if (body.trim()) msg = body.trim().slice(0, 400);
+        }
+        throw new Error(toUserFriendlyErrorMessage(msg));
+      }
+      if (!resp.body) throw new Error("No response body");
+
+      let sawCoachDone = false;
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          let ev: {
+            event?: string;
+            msg?: string;
+            text?: string;
+            summary?: string;
+            suggestions?: unknown;
+            research_queries?: string[];
+            research_sources?: { title?: string | null; url?: string }[];
+            research_digest?: string;
+          };
+          try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+
+          switch (ev.event) {
+            case "status":
+              break;
+            case "research": {
+              const rq = Array.isArray(ev.research_queries)
+                ? ev.research_queries.filter((q): q is string => typeof q === "string")
+                : [];
+              const rs = Array.isArray(ev.research_sources)
+                ? ev.research_sources
+                    .filter((s): s is { title?: string | null; url: string } => s && typeof s.url === "string")
+                    .map(s => ({ title: s.title ?? null, url: s.url }))
+                : [];
+              setSuggestResearchQueries(rq);
+              setSuggestResearchSources(rs);
+              setSuggestResearchDigest(typeof ev.research_digest === "string" ? ev.research_digest : "");
+              setSuggestLoaderStepsDone(3);
+              break;
+            }
+            case "coach_delta": {
+              const t = typeof ev.text === "string" ? ev.text : "";
+              if (!t) break;
+              setSuggestCoachStreamText(prev => {
+                const next = prev + t;
+                return next.length > 16000 ? next.slice(-16000) : next;
+              });
+              break;
+            }
+            case "coach_done": {
+              sawCoachDone = true;
+              const list = Array.isArray(ev.suggestions)
+                ? ev.suggestions.filter(isSuggestionRecord)
+                : [];
+              setSuggestions(list);
+              setSuggestSummary(typeof ev.summary === "string" ? ev.summary : "");
+              const rq = Array.isArray(ev.research_queries)
+                ? ev.research_queries.filter((q): q is string => typeof q === "string")
+                : [];
+              const rs = Array.isArray(ev.research_sources)
+                ? ev.research_sources
+                    .filter((s): s is { title?: string | null; url: string } => s && typeof s.url === "string")
+                    .map(s => ({ title: s.title ?? null, url: s.url }))
+                : [];
+              setSuggestResearchQueries(rq);
+              setSuggestResearchSources(rs);
+              setSuggestResearchDigest(typeof ev.research_digest === "string" ? ev.research_digest : "");
+              setSuggestCoachStreamText("");
+              break;
+            }
+            case "error":
+              throw new Error(toUserFriendlyErrorMessage(typeof ev.msg === "string" ? ev.msg : "Suggestions failed."));
+            default:
+              break;
+          }
+        }
+      }
+      if (!sawCoachDone && !ac.signal.aborted) {
+        throw new Error("The suggestions stream ended unexpectedly. Please try again.");
+      }
     } catch (e: unknown) {
+      if (e instanceof Error && e.name === "AbortError") {
+        return;
+      }
       setSuggestError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
     } finally {
+      if (suggestStreamAbortRef.current === ac) suggestStreamAbortRef.current = null;
       setSuggestLoading(false);
     }
   }, [jd, candidateProfile, studioHandoff]);
@@ -1775,6 +1876,7 @@ export default function ResumeBuilder({
                 <BuilderSuggestAnalysisLoader
                   stepsDone={suggestLoaderStepsDone}
                   tipIdx={suggestLoaderTipIdx}
+                  coachStreamText={suggestCoachStreamText}
                 />
               )}
               <button
@@ -1947,7 +2049,7 @@ export default function ResumeBuilder({
             />
           )}
 
-          {/* During generation, show explicit progress */}
+          {/* During generation (before results): one primary progress card — status line is technical detail, not the headline */}
           {generating && !result && (
             <div
               className="fade-in"
@@ -1955,44 +2057,58 @@ export default function ResumeBuilder({
               aria-live="polite"
               aria-busy="true"
               style={{
-                marginBottom: 28,
-                padding: "28px 24px",
+                marginBottom: 24,
+                padding: "24px 22px",
                 borderRadius: 16,
-                background: "var(--surface)",
+                background: "linear-gradient(180deg, var(--surface) 0%, var(--surface2) 100%)",
                 border: "1px solid var(--border)",
+                boxShadow: "var(--shadow-card)",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 14,
+                gap: 12,
                 textAlign: "center",
               }}
             >
               <Spinner size={28} />
-              <div style={{ fontSize: 17, fontWeight: 600, color: "var(--text)", letterSpacing: -0.3 }}>
-                {statusMsg || (studioHandoff ? "Formatting your résumé…" : "Tailoring your resume…")}
+              <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", letterSpacing: -0.4, lineHeight: 1.25 }}>
+                {studioHandoff ? "Applying your template" : "Building your résumé"}
               </div>
-              <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, maxWidth: 480, margin: 0 }}>
+              {statusMsg ? (
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: "var(--muted)",
+                    lineHeight: 1.5,
+                    maxWidth: 520,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {statusMsg}
+                </div>
+              ) : null}
+              <p style={{ fontSize: 13, color: "var(--dim)", lineHeight: 1.55, maxWidth: 500, margin: 0 }}>
                 {studioHandoff ? (
-                  <>
-                    Applying your selected layout and typography. LaTeX streams below when generation starts. This pass does not run live web
-                    research or job-match scoring — use <strong>Tailor to a job</strong> from the sidebar when you want a posting-specific version.
-                  </>
+                  <>Layout and typography only — no job match or live web research on this path.</>
+                ) : reusingSuggestWebForPdf ? (
+                  <>Research from <strong>Get suggestions</strong> is already included; the PDF step does not run a second web search.</>
+                ) : useStructuredRenderer ? (
+                  <>Structured PDF path: compile and scoring run on the server. A live LaTeX preview appears below when the stream starts.</>
                 ) : (
-                  <>
-                    Analyzing the job description and drafting your tailored résumé. LaTeX streams below when AI starts writing.{" "}
-                    {reusingSuggestWebForPdf ? (
-                      <>Web context from <strong>Get suggestions</strong> is reused for this PDF — there is <strong>no</strong> second live search.</>
-                    ) : (
-                      <>A live web search may still run during this step if there was no research digest from suggestions (for example if you skipped Get suggestions or research failed).</>
-                    )}
-                  </>
+                  <>The model may still run a live web search during this step if the server requests it. Otherwise your file finishes from résumé + job text alone.</>
                 )}
               </p>
             </div>
           )}
 
-          {/* Web research: only while no results card yet — ratings sets `result` before `done`, so hide once the results view is up */}
-          {generating && !result && !hasWebResearch && !studioHandoff && (
+          {/* Legacy PDF path only: placeholder until first search SSE arrives (structured/digest paths skip — see pdfGenExpectsLiveWebSearch). */}
+          {generating && !result && !hasWebResearch && pdfGenExpectsLiveWebSearch && (
             <div style={{ marginBottom: 16 }} className="fade-in">
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
@@ -2013,15 +2129,10 @@ export default function ResumeBuilder({
                 borderRadius: 10, padding: "14px 16px",
                 fontSize: 12, color: "var(--dim)", lineHeight: 1.55,
               }}>
-                {reusingSuggestWebForPdf ? (
-                  <>
-                    Web context from <strong>Get suggestions</strong> is embedded in this PDF request — there is no second search.
-                    {!hasSuggestResearch && " (No query list was returned, but the digest is still applied on the server.)"}
-                  </>
-                ) : hasSuggestResearch ? (
-                  <>No additional live searches have appeared in this PDF pass yet. Your <strong>suggestions</strong> step already captured web queries and sources above.</>
+                {hasSuggestResearch ? (
+                  <>No live searches from <strong>Generate PDF</strong> yet. Your suggestions step may already list queries above.</>
                 ) : (
-                  <>This panel only updates if the model runs a live search during PDF generation. Your résumé can still finish normally.</>
+                  <>This panel fills in when the model runs web search during PDF generation.</>
                 )}
               </div>
             </div>
@@ -2194,35 +2305,6 @@ export default function ResumeBuilder({
             ) : (
             <div className="fade-in">
 
-              {generating && (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  aria-busy="true"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    marginBottom: 20,
-                    padding: "16px 20px",
-                    borderRadius: "var(--radius-xl)",
-                    background: "var(--accent-bg)",
-                    border: "1px solid var(--border)",
-                    boxShadow: "var(--shadow-card)",
-                  }}
-                >
-                  <Spinner size={22} />
-                  <div style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", letterSpacing: -0.2 }}>
-                      Still tailoring…
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.45, marginTop: 2 }}>
-                      {statusMsg || "Saving PDF and finishing your score — almost there."}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <header
                 style={{
                   display: "flex",
@@ -2235,7 +2317,7 @@ export default function ResumeBuilder({
               >
                 <div style={{ minWidth: 0, flex: "1 1 240px" }}>
                   <h2 id="rb-results-heading" style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.75, color: "var(--text)", marginBottom: 6, lineHeight: 1.15 }}>
-                    Your tailored résumé is ready
+                    {generating ? "Almost there — finishing PDF and match score" : "Your tailored résumé is ready"}
                   </h2>
                   <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.5, letterSpacing: -0.15 }}>
                     {[role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Match results for this run"}
@@ -2352,9 +2434,50 @@ export default function ResumeBuilder({
                         <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: "0 0 16px", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                           {ratings.verdict}
                         </p>
+                        {generating ? (
+                          <div
+                            role="status"
+                            aria-live="polite"
+                            aria-busy="true"
+                            style={{
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: 10,
+                              marginBottom: 16,
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              background: "var(--accent-bg)",
+                              border: "1px solid var(--border)",
+                            }}
+                          >
+                            <Spinner size={18} />
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", letterSpacing: -0.05 }}>Finishing up</div>
+                              <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, marginTop: 2 }}>
+                                {statusMsg || "Saving PDF and uploading…"}
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
                       </>
                     ) : (
-                      <div style={{ fontSize: 13, color: "var(--dim)" }}>Analysing match…</div>
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Analysing match…</div>
+                        {generating && statusMsg ? (
+                          <div style={{
+                            fontSize: 11,
+                            color: "var(--muted)",
+                            lineHeight: 1.5,
+                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                            wordBreak: "break-word",
+                          }}
+                          >
+                            {statusMsg}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>Scoring how your résumé lines up with the role…</div>
+                        )}
+                      </div>
                     )}
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
                       <button
@@ -4984,7 +5107,15 @@ function InfoTip({ children, label }: { children: React.ReactNode; label?: strin
 }
 
 /** Full-width analysis loader: shimmer card + phased steps + rotating tips (tailor flow). */
-function BuilderSuggestAnalysisLoader({ stepsDone, tipIdx }: { stepsDone: number; tipIdx: number }) {
+function BuilderSuggestAnalysisLoader({
+  stepsDone,
+  tipIdx,
+  coachStreamText,
+}: {
+  stepsDone: number;
+  tipIdx: number;
+  coachStreamText?: string;
+}) {
   const tip = SUGGEST_LOADER_TIPS[tipIdx % SUGGEST_LOADER_TIPS.length];
   const stepRow = (label: string, stepIndex: number, isLast: boolean) => {
     const done = stepsDone > stepIndex;
@@ -5072,6 +5203,43 @@ function BuilderSuggestAnalysisLoader({ stepsDone, tipIdx }: { stepsDone: number
         >
           {tip}
         </div>
+        {coachStreamText && coachStreamText.trim().length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: "var(--dim)",
+                letterSpacing: 0.04,
+                textTransform: "uppercase",
+                marginBottom: 6,
+              }}
+            >
+              Coach response (live)
+            </div>
+            <pre
+              className="fade-in"
+              style={{
+                margin: 0,
+                maxHeight: 200,
+                overflow: "auto",
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: "var(--surface3)",
+                border: "1px solid var(--border)",
+                fontSize: 11,
+                lineHeight: 1.45,
+                letterSpacing: -0.05,
+                color: "var(--text)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              }}
+            >
+              {coachStreamText}
+            </pre>
+          </div>
+        )}
       </div>
     </div>
   );

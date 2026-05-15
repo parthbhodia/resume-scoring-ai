@@ -17,7 +17,7 @@ from pathlib import Path
 import re
 import subprocess
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import requests
 from bs4 import BeautifulSoup
@@ -296,6 +296,148 @@ def coach_suggestions_llm(prompt: str) -> str:
     if last_exc:
         raise last_exc
     raise RuntimeError("coach_suggestions_llm: empty response from all configured models")
+
+
+def _iter_grok_coach_json_stream(model: str, prompt: str):
+    """Yield fragments of the JSON object from Grok chat completions (stream=True)."""
+    client = _get_xai_client()
+    stream = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        response_format={"type": "json_object"},
+        stream=True,
+    )
+    for chunk in stream:
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            continue
+        delta = getattr(choices[0], "delta", None)
+        if delta is None:
+            continue
+        piece = getattr(delta, "content", None)
+        if piece:
+            yield piece
+
+
+def _iter_gemini_coach_json_stream(model: str, prompt: str, client: genai.Client):
+    """Yield JSON text fragments from Gemini (``response_mime_type=application/json``)."""
+    cfg = types.GenerateContentConfig(
+        temperature=0.2,
+        response_mime_type="application/json",
+    )
+    stream = client.models.generate_content_stream(
+        model=model,
+        contents=prompt,
+        config=cfg,
+    )
+    for chunk in stream:
+        text = getattr(chunk, "text", None) or ""
+        if text:
+            yield text
+
+
+def coach_suggestions_llm_stream(
+    prompt: str,
+    *,
+    on_delta: Optional[Callable[[str], None]] = None,
+) -> str:
+    """
+    Same contract as ``coach_suggestions_llm`` (joined JSON text) but streams each
+    provider chunk to ``on_delta`` when provided — used by ``/api/suggest-changes-stream``.
+    """
+    def emit(s: str) -> None:
+        if on_delta and s:
+            on_delta(s)
+
+    if grok_preferred_for_throughput():
+        model = primary_llm_model_for_resume_workloads()
+        parts: List[str] = []
+        for frag in _iter_grok_coach_json_stream(model, prompt):
+            parts.append(frag)
+            emit(frag)
+        text = "".join(parts).strip()
+        if text:
+            return text
+        raise RuntimeError("coach_suggestions_llm_stream: empty Grok stream")
+
+    api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not api_key:
+        if (os.environ.get("XAI_API_KEY") or "").strip():
+            m = (os.environ.get("GROK_MODEL") or _GROK_FALLBACK_MODELS[0]).strip() or str(_GROK_FALLBACK_MODELS[0])
+            logger.warning(
+                "coach_suggestions_llm_stream: no Gemini API key — using Grok-only fallback (%s)", m
+            )
+            parts = []
+            for frag in _iter_grok_coach_json_stream(m, prompt):
+                parts.append(frag)
+                emit(frag)
+            text = "".join(parts).strip()
+            if text:
+                return text
+            raise RuntimeError("coach_suggestions_llm_stream: empty Grok fallback stream")
+        raise RuntimeError(
+            "GOOGLE_API_KEY or GEMINI_API_KEY is required when LLM_PROVIDER=gemini (or unset without XAI_API_KEY)"
+        )
+
+    primary = primary_gemini_flash_model()
+    chain = _model_chain(primary)
+    client = genai.Client(api_key=api_key)
+    last_exc: Optional[BaseException] = None
+
+    for model in chain:
+        if _is_grok(model):
+            try:
+                parts = []
+                for frag in _iter_grok_coach_json_stream(model, prompt):
+                    parts.append(frag)
+                    emit(frag)
+                text = "".join(parts).strip()
+                if text:
+                    logger.info(
+                        "coach_suggestions_llm_stream: used Grok (%s) after Gemini chain did not return text",
+                        model,
+                    )
+                    return text
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("coach_suggestions_llm_stream: Grok fallback %s failed: %s", model, exc)
+            continue
+
+        try:
+            parts = []
+            for frag in _iter_gemini_coach_json_stream(model, prompt, client):
+                parts.append(frag)
+                emit(frag)
+            text = "".join(parts).strip()
+            if text:
+                if model != primary:
+                    logger.info(
+                        "coach_suggestions_llm_stream: succeeded on Gemini model %s (primary was %s)",
+                        model,
+                        primary,
+                    )
+                return text
+            logger.warning(
+                "coach_suggestions_llm_stream: Gemini %s returned empty stream; trying next model", model
+            )
+            continue
+        except Exception as exc:
+            last_exc = exc
+            if _transient_provider_error(exc):
+                logger.warning(
+                    "coach_suggestions_llm_stream: Gemini %s transient failure (%s); trying next model",
+                    model,
+                    exc,
+                )
+                _backoff_if_rate_limited(exc)
+                continue
+            logger.warning("coach_suggestions_llm_stream: Gemini %s failed: %s", model, exc)
+            continue
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("coach_suggestions_llm_stream: empty response from all configured models")
 
 
 def _error_probe_text(exc: BaseException) -> str:

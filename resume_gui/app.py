@@ -71,6 +71,8 @@ from resume_library import (
     grok_preferred_for_throughput,
     run_tailor_research_job_context,
     coach_suggestions_llm,
+    coach_suggestions_llm_stream,
+    _sse_friendly_error,
     _get_resume_tex_for_user,
     _rate_resume,
     _optional_gemini_client,
@@ -3450,6 +3452,46 @@ async def api_rewrite_role(request: Request):
     return JSONResponse({"bullets": rewritten})
 
 
+def _resume_coach_prompt(candidate_profile: str, job_description: str, digest: str) -> str:
+    """Shared JD + résumé + optional web-digest prompt for suggest-changes (JSON coach)."""
+    digest_block = ""
+    ds = (digest or "").strip()
+    if ds:
+        digest_block = (
+            "\n---\nJOB & MARKET CONTEXT (from live web search before this analysis — use for terminology, "
+            "JD vocabulary, and honest keyword overlap only; do NOT add employers, degrees, dates, or metrics "
+            "not already in the résumé or JD):\n"
+            f"{ds[:4500]}\n\n"
+        )
+    return (
+        "You are an expert resume coach. Analyze this resume against the job description "
+        "and return 5-8 specific, actionable improvements for individual bullets or sections.\n\n"
+        f"RESUME:\n{candidate_profile[:6000]}\n\n"
+        f"JOB DESCRIPTION:\n{job_description[:3000]}\n"
+        f"{digest_block}"
+        "Return a JSON object with this exact structure:\n"
+        '{\n'
+        '  "summary": "One sentence: the most important gap between this resume and the JD.",\n'
+        '  "suggestions": [\n'
+        '    {\n'
+        '      "id": "s1",\n'
+        '      "section": "Work Experience",\n'
+        '      "original": "The exact bullet text from the resume (quote it verbatim)",\n'
+        '      "suggested": "The improved version, tailored to the JD keywords",\n'
+        '      "reason": "Why this change improves the match — 1 concise sentence.",\n'
+        '      "priority": "high"\n'
+        '    }\n'
+        '  ]\n'
+        '}\n\n'
+        "Rules:\n"
+        "- Only suggest changes to bullets that EXIST in the resume — quote them exactly.\n"
+        "- Do NOT invent metrics, employers, or facts not in the resume.\n"
+        "- When JOB & MARKET CONTEXT is present, use it only to sharpen **wording** and JD-aligned phrasing for facts already in the résumé.\n"
+        "- Priority: 'high' = missing critical JD keyword; 'medium' = wording improvement; 'low' = polish.\n"
+        "- Return ONLY the JSON object, no markdown fences."
+    )
+
+
 async def api_suggest_changes(request: Request):
     """POST /api/suggest-changes — analyze resume vs JD and return per-bullet suggestions.
 
@@ -3480,42 +3522,7 @@ async def api_suggest_changes(request: Request):
     except Exception as exc:
         logger.warning("pre-suggestion web research failed (suggestions will use resume+JD only): %s", exc)
 
-    digest_block = ""
-    if digest.strip():
-        digest_block = (
-            "\n---\nJOB & MARKET CONTEXT (from live web search before this analysis — use for terminology, "
-            "JD vocabulary, and honest keyword overlap only; do NOT add employers, degrees, dates, or metrics "
-            "not already in the résumé or JD):\n"
-            f"{digest.strip()[:4500]}\n\n"
-        )
-
-    prompt = (
-        "You are an expert resume coach. Analyze this resume against the job description "
-        "and return 5-8 specific, actionable improvements for individual bullets or sections.\n\n"
-        f"RESUME:\n{candidate_profile[:6000]}\n\n"
-        f"JOB DESCRIPTION:\n{job_description[:3000]}\n"
-        f"{digest_block}"
-        "Return a JSON object with this exact structure:\n"
-        '{\n'
-        '  "summary": "One sentence: the most important gap between this resume and the JD.",\n'
-        '  "suggestions": [\n'
-        '    {\n'
-        '      "id": "s1",\n'
-        '      "section": "Work Experience",\n'
-        '      "original": "The exact bullet text from the resume (quote it verbatim)",\n'
-        '      "suggested": "The improved version, tailored to the JD keywords",\n'
-        '      "reason": "Why this change improves the match — 1 concise sentence.",\n'
-        '      "priority": "high"\n'
-        '    }\n'
-        '  ]\n'
-        '}\n\n'
-        "Rules:\n"
-        "- Only suggest changes to bullets that EXIST in the resume — quote them exactly.\n"
-        "- Do NOT invent metrics, employers, or facts not in the resume.\n"
-        "- When JOB & MARKET CONTEXT is present, use it only to sharpen **wording** and JD-aligned phrasing for facts already in the résumé.\n"
-        "- Priority: 'high' = missing critical JD keyword; 'medium' = wording improvement; 'low' = polish.\n"
-        "- Return ONLY the JSON object, no markdown fences."
-    )
+    prompt = _resume_coach_prompt(candidate_profile, job_description, digest)
 
     def _call():
         return coach_suggestions_llm(prompt)
@@ -3538,6 +3545,114 @@ async def api_suggest_changes(request: Request):
     except Exception as exc:
         logger.exception("suggest-changes failed")
         return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def api_suggest_changes_stream(request: Request):
+    """POST /api/suggest-changes-stream — same inputs as suggest-changes; SSE with live coach tokens.
+
+    Events (JSON per line after ``data: ``):
+      ``status`` {msg}
+      ``research`` {research_queries, research_sources, research_digest}
+      ``coach_delta`` {text} — fragment of the JSON response from the model
+      ``coach_done`` {summary, suggestions, research_*} — final structured payload
+      ``error`` {msg}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        async def err_gen():
+            yield {"data": json.dumps({"event": "error", "msg": "invalid json"})}
+        return EventSourceResponse(err_gen())
+
+    if not isinstance(body, dict):
+        async def err_gen():
+            yield {"data": json.dumps({"event": "error", "msg": "Expected a JSON object."})}
+        return EventSourceResponse(err_gen())
+
+    candidate_profile = (body.get("candidate_profile") or "").strip()
+    job_description = (body.get("job_description") or "").strip()
+    if not candidate_profile:
+        async def err_gen():
+            yield {"data": json.dumps({"event": "error", "msg": "candidate_profile required"})}
+        return EventSourceResponse(err_gen())
+    if not job_description:
+        async def err_gen():
+            yield {"data": json.dumps({"event": "error", "msg": "job_description required"})}
+        return EventSourceResponse(err_gen())
+
+    loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def producer():
+        try:
+            def qput(item: Dict[str, Any]) -> None:
+                asyncio.run_coroutine_threadsafe(queue.put(item), loop).result()
+
+            qput({"event": "status", "msg": "Gathering live context from the web…"})
+            digest = ""
+            research_queries: List[str] = []
+            research_sources: List[dict] = []
+            try:
+                digest, research_queries, research_sources = run_tailor_research_job_context(job_description)
+            except Exception as exc:
+                logger.warning("pre-suggestion web research failed (suggestions stream): %s", exc)
+            rd = digest.strip()[:2500] if digest.strip() else ""
+            qput({
+                "event": "research",
+                "research_queries": research_queries,
+                "research_sources": research_sources,
+                "research_digest": rd,
+            })
+            qput({"event": "status", "msg": "Drafting tailored suggestions…"})
+            prompt = _resume_coach_prompt(candidate_profile, job_description, digest)
+
+            def on_delta(fragment: str) -> None:
+                qput({"event": "coach_delta", "text": fragment})
+
+            text = coach_suggestions_llm_stream(prompt, on_delta=on_delta)
+            if text.startswith("```"):
+                text = re.sub(r"^```[a-z]*\n?", "", text)
+                text = re.sub(r"\n?```$", "", text)
+            data = json.loads(text)
+            if not isinstance(data, dict):
+                raise RuntimeError("Coach returned non-object JSON")
+            data["research_queries"] = research_queries
+            data["research_sources"] = research_sources
+            if digest.strip():
+                data["research_digest"] = digest.strip()[:2500]
+            qput({
+                "event": "coach_done",
+                "summary": data.get("summary"),
+                "suggestions": data.get("suggestions"),
+                "research_queries": data.get("research_queries"),
+                "research_sources": data.get("research_sources"),
+                "research_digest": data.get("research_digest"),
+            })
+        except json.JSONDecodeError as exc:
+            logger.error("suggest-changes-stream JSON parse error: %s", exc)
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"event": "error", "msg": "AI response could not be parsed."}),
+                loop,
+            ).result()
+        except Exception as exc:
+            logger.exception("suggest-changes-stream failed")
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"event": "error", "msg": _sse_friendly_error(exc)}),
+                loop,
+            ).result()
+        finally:
+            asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
+
+    threading.Thread(target=producer, daemon=True).start()
+
+    async def event_gen():
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield {"data": json.dumps(item)}
+
+    return EventSourceResponse(event_gen())
 
 
 async def serve_pdf(request: Request):
@@ -3581,6 +3696,7 @@ routes = [
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
     Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),
     Route("/api/suggest-changes",         api_suggest_changes, methods=["POST"]),
+    Route("/api/suggest-changes-stream",  api_suggest_changes_stream, methods=["POST"]),
     Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
 

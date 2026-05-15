@@ -7,6 +7,7 @@
 \usepackage[usenames,dvipsnames]{color}
 \usepackage{verbatim}
 \usepackage{enumitem}
+\usepackage{needspace}
 \usepackage[hidelinks]{hyperref}
 \usepackage{fancyhdr}
 \usepackage[english]{babel}
@@ -53,10 +54,12 @@
 }{}{0em}{}[\color{light-grey} {\titlerule[2pt]} \vspace{-4pt}]
 
 \newcommand{\resumeItem}[1]{
+  \needspace{2.8\baselineskip}
   \item\small{#1 \vspace{-1pt}}
 }
 
 \newcommand{\resumeSubheading}[4]{
+  \needspace{5\baselineskip}
   \vspace{-1pt}\item
     \begin{tabular*}{\textwidth}[t]{l@{\extracolsep{\fill}}r}
       \textbf{#1} & {\color{dark-grey}\small #2}\vspace{1pt}\\
@@ -65,6 +68,7 @@
 }
 
 \newcommand{\resumeProjectHeading}[2]{
+    \needspace{4\baselineskip}
     \item
     \begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}
       #1 & {\color{dark-grey} #2} \\
@@ -82,6 +86,9 @@
 \color{text-grey}
 
 \begin{document}
+% Reduce widows/orphans in bullets (especially long items near page breaks).
+\widowpenalty=5000
+\clubpenalty=5000
 
 \begin{center}
     \textbf{\Huge {{ doc.full_name|latex }}} \\ \vspace{2pt}
@@ -93,11 +100,13 @@
 \end{center}
 
 {% if doc.summary %}
+\needspace{4\baselineskip}
 \section{SUMMARY}
 \small {{ doc.summary|latex }}
 {% endif %}
 
 {% if doc.experience|length %}
+\needspace{6\baselineskip}
 \section{EXPERIENCE}
 \resumeSubHeadingListStart
 {% for exp in doc.experience %}
@@ -130,6 +139,7 @@
 {% endfor %}
 
 {% if projects|length %}
+\needspace{7\baselineskip}
 \section{PROJECTS}
 \resumeSubHeadingListStart
 {% for sec in projects %}
@@ -144,6 +154,7 @@
 {% endif %}
 
 {% if education|length %}
+\needspace{6\baselineskip}
 \section{EDUCATION}
 \resumeSubHeadingListStart
 {% for sec in education %}
@@ -158,6 +169,7 @@
 {% endif %}
 
 {% if doc.skills|length %}
+\needspace{8\baselineskip}
 \section{SKILLS}
 \begin{itemize}[leftmargin=0in, label={}]
 \small{\item{
@@ -171,9 +183,11 @@
 
 {% if other|length %}
 {% for sec in other %}
+\needspace{5\baselineskip}
 \section{ {{ sec[0]|latex }} }
 \begin{itemize}
 {% for b in sec[1] %}
+  \needspace{2.8\baselineskip}
   \item {{ b|latex }}
 {% endfor %}
 \end{itemize}

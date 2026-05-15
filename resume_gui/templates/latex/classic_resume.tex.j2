@@ -3,10 +3,13 @@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{enumitem}
+\usepackage{needspace}
 \setlist[itemize]{leftmargin=1.1em, itemsep=2pt, topsep=2pt}
 \pagenumbering{gobble}
 
 \begin{document}
+\widowpenalty=5000
+\clubpenalty=5000
 
 {\LARGE \textbf{ {{ doc.full_name|latex }} }}\\
 {% if doc.headline %}
@@ -23,11 +26,13 @@
 
 {% if doc.summary %}
 \vspace{0.5em}
+\needspace{4\baselineskip}
 \section*{Summary}
 {{ doc.summary|latex }}
 {% endif %}
 
 {% if doc.skills|length %}
+\needspace{6\baselineskip}
 \section*{Technical Skills}
 {% for skill in doc.skills %}
 \textbf{ {{ skill[0]|latex }} }: {{ skill[1]|join(', ')|latex }}\\
@@ -35,12 +40,15 @@
 {% endif %}
 
 {% if doc.experience|length %}
+\needspace{6\baselineskip}
 \section*{Experience}
 {% for exp in doc.experience %}
+\needspace{5\baselineskip}
 \textbf{ {{ exp.company|latex }} }{% if exp.location %} --- {{ exp.location|latex }}{% endif %}\\
 \textit{ {{ exp.role|latex }}{% if exp.dates %} | {{ exp.dates|latex }}{% endif %} }\\
 \begin{itemize}
 {% for bullet in exp.bullets %}
+\needspace{2.8\baselineskip}
 \item {{ bullet|latex }}
 {% endfor %}
 \end{itemize}
@@ -49,9 +57,11 @@
 
 {% if doc.extra_sections|length %}
 {% for sec in doc.extra_sections %}
+\needspace{6\baselineskip}
 \section*{ {{ sec[0]|latex }} }
 \begin{itemize}
 {% for line in sec[1] %}
+\needspace{2.8\baselineskip}
 \item {{ line|latex }}
 {% endfor %}
 \end{itemize}
