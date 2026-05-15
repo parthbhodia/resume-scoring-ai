@@ -265,6 +265,26 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
         out.experience_entries = entries
         out.experience_bullets = [b for e in entries for b in e[4]] or out.experience_bullets
 
+    # Collect all content lines already handled by known sections (experience, etc.)
+    # so the dynamic catch-all doesn't duplicate them as extra sections.
+    _known_content: set[str] = set()
+    for _c, _r, _d, _l, _b in out.experience_entries:
+        for _w in (_c, _r, _l, _d):
+            for _tok in _w.lower().split():
+                if len(_tok) > 3:
+                    _known_content.add(_tok)
+    for _ln in out.skills_lines:
+        for _tok in _ln.lower().split():
+            _known_content.add(_tok)
+    for _ln in out.projects_bullets:
+        for _tok in _ln.lower().split():
+            if len(_tok) > 3:
+                _known_content.add(_tok)
+    for _ln in out.education_lines:
+        for _tok in _ln.lower().split():
+            if len(_tok) > 3:
+                _known_content.add(_tok)
+
     # Dynamic catch-all: capture additional headed sections so content is not lost.
     known = {
         "summary", "technical skills", "skills",
@@ -282,6 +302,9 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
         is_name_line = out.full_name != "Candidate" and ln.strip().lower() == out.full_name.lower()
         has_contact = any(w in low for w in _CONTACT_WORDS)
         has_url = ".com" in low or "http" in low or "https://" in low
+        # Skip lines whose content already belongs to parsed sections.
+        low_tokens = set(low.split())
+        already_handled = bool(low_tokens & _known_content)
         # Likely a section heading: short alpha, no sentence-punctuation, not contact/name
         if (
             1 <= len(low.split()) <= 5
@@ -291,6 +314,7 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
             and not is_name_line
             and not has_contact
             and not has_url
+            and not already_handled
         ):
             if current_header and current_items and current_header.lower() not in known:
                 extras.append((current_header, current_items[:]))
