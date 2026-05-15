@@ -365,11 +365,13 @@ def _structured_ratings_from_ats(ats: dict) -> dict:
         if not name:
             continue
         passed = bool(chk.get("pass"))
+        note = str(chk.get("detail") or "").strip()
         criteria.append({
             "name": name,
             "weight": "Medium",
             "score": 10 if passed else 4,
-            "notes": str(chk.get("detail") or "").strip(),
+            "notes": note,
+            "text": f"{name}: {note}" if note else name,
         })
 
     whats_working = []
@@ -406,8 +408,8 @@ def _structured_ratings_from_ats(ats: dict) -> dict:
     return {
         "match_score": match_score,
         "criteria": criteria,
-        "whats_working": [{"text": w} for w in whats_working],
-        "gaps": [{"text": g} for g in gaps],
+        "whats_working": whats_working,
+        "gaps": gaps,
         "verdict": verdict,
     }
 
