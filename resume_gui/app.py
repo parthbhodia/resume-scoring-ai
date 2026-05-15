@@ -27,7 +27,7 @@ import sys
 import threading
 from uuid import uuid4
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import pdfplumber
 
@@ -558,151 +558,8 @@ def _resolve_structured_source_folder(base_folder: Optional[str], reference_fold
     )
 
 
-def _llm_normalize_profile(raw_text: str, parsed: Any) -> Optional[dict]:
-    """Call LLM to normalize and fill gaps in the regex-parsed profile.
-
-    Returns a dict matching the full resume schema, or None on failure.
-    Falls back to None so the caller can use regex-only path.
-    """
-    partial_parse = {
-        "full_name": parsed.full_name,
-        "headline": parsed.headline,
-        "email": parsed.email,
-        "phone": parsed.phone,
-        "linkedin": parsed.linkedin,
-        "github": parsed.github,
-        "location": parsed.location,
-        "summary": (parsed.summary or "")[:500],
-    }
-
-    prompt = (
-        "You are a resume data extraction system. Extract all resume information from the raw text below.\n"
-        "Return ONLY valid JSON (no markdown fences, no explanation) matching this exact schema:\n"
-        '{\n'
-        '  "full_name": "string",\n'
-        '  "headline": "job title or headline, e.g. Senior Frontend Engineer",\n'
-        '  "email": "string",\n'
-        '  "phone": "string",\n'
-        '  "linkedin": "URL or linkedin.com/in/... path or empty string",\n'
-        '  "github": "URL or github.com/username path or empty string",\n'
-        '  "website": "personal website/portfolio URL or empty string",\n'
-        '  "location": "city, state format or empty string",\n'
-        '  "summary": "full professional summary paragraph",\n'
-        '  "skills": [{"label": "Category", "items": ["skill1", "skill2"]}],\n'
-        '  "experience": [\n'
-        '    {"company": "string", "role": "string", "dates": "string", "location": "string",\n'
-        '     "bullets": ["bullet1"], "technologies": ["tech1"]}\n'
-        '  ],\n'
-        '  "projects": [{"name": "string", "bullets": ["..."]}],\n'
-        '  "education": [{"institution": "string", "degree": "string", "dates": "string", "location": "string"}]\n'
-        '}\n\n'
-        f"Partial parse (use as hints, correct if wrong):\n{json.dumps(partial_parse, indent=2)}\n\n"
-        f"Raw resume text:\n{raw_text[:12000]}"
-    )
-
-    try:
-        result = _llm_json_call(prompt)
-        if result and isinstance(result, dict) and result.get("full_name"):
-            return result
-    except Exception as exc:
-        logger.warning(f"_llm_normalize_profile failed: {exc}")
-    return None
-
-
 def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
     parsed = parse_profile_text(candidate_profile)
-
-    # Try LLM normalization first for richer, more complete extraction.
-    llm_data = _llm_normalize_profile(candidate_profile or "", parsed)
-
-    if llm_data:
-        full_name = _clean_model_text(llm_data.get("full_name") or parsed.full_name or "Candidate") or "Candidate"
-        headline = _clean_model_text(llm_data.get("headline") or parsed.headline or role or "")
-        location = _clean_model_text(llm_data.get("location") or parsed.location or "")
-        email = _clean_model_text(llm_data.get("email") or parsed.email or "")
-        phone = _clean_model_text(llm_data.get("phone") or parsed.phone or "")
-        linkedin = _clean_model_text(llm_data.get("linkedin") or parsed.linkedin or "")
-        github = _clean_model_text(llm_data.get("github") or parsed.github or "")
-        website = _clean_model_text(llm_data.get("website") or "")
-        summary = _clean_model_text(llm_data.get("summary") or parsed.summary or "")
-
-        skills: list[tuple[str, list[str]]] = []
-        for sk in llm_data.get("skills") or []:
-            if isinstance(sk, dict):
-                label = _clean_model_text(sk.get("label") or "Skills")
-                items = [_clean_model_text(i) for i in (sk.get("items") or []) if _clean_model_text(i)]
-                if items:
-                    skills.append((label, normalize_skill_items(items)))
-
-        experience_list: list[ExperienceItem] = []
-        for exp in llm_data.get("experience") or []:
-            if isinstance(exp, dict):
-                exp_company = _clean_model_text(exp.get("company") or company or "Experience")
-                exp_role = _clean_model_text(exp.get("role") or role or "")
-                exp_dates = _clean_model_text(exp.get("dates") or "")
-                exp_location = _clean_model_text(exp.get("location") or "")
-                exp_bullets = [_clean_model_text(b) for b in (exp.get("bullets") or []) if _clean_model_text(b)]
-                if exp_company or exp_role:
-                    experience_list.append(ExperienceItem(
-                        company=exp_company,
-                        role=exp_role,
-                        dates=exp_dates,
-                        location=exp_location,
-                        bullets=exp_bullets,
-                    ))
-
-        # Build extra_sections: start from any regex extras, then overlay LLM projects/education.
-        extra_sec: list[tuple[str, list[str]]] = [
-            (name, [_clean_model_text(v) for v in vals if _clean_model_text(v)])
-            for name, vals in (parsed.extra_sections or [])
-            if _clean_model_text(name) and name.lower() not in ("projects", "project", "education")
-        ]
-
-        proj_bullets: list[str] = []
-        for proj in llm_data.get("projects") or []:
-            if isinstance(proj, dict):
-                name_p = _clean_model_text(proj.get("name") or "")
-                p_buls = [_clean_model_text(b) for b in (proj.get("bullets") or []) if _clean_model_text(b)]
-                if name_p and p_buls:
-                    proj_bullets.extend(f"{name_p}: {b}" for b in p_buls)
-                elif name_p:
-                    proj_bullets.append(name_p)
-                else:
-                    proj_bullets.extend(p_buls)
-        if proj_bullets:
-            extra_sec.append(("Projects", proj_bullets))
-
-        edu_lines: list[str] = []
-        for edu in llm_data.get("education") or []:
-            if isinstance(edu, dict):
-                parts = [
-                    _clean_model_text(edu.get("institution") or ""),
-                    _clean_model_text(edu.get("degree") or ""),
-                    _clean_model_text(edu.get("dates") or ""),
-                    _clean_model_text(edu.get("location") or ""),
-                ]
-                line = ", ".join(p for p in parts if p)
-                if line:
-                    edu_lines.append(line)
-        if edu_lines:
-            extra_sec.append(("Education", edu_lines))
-
-        return ResumeDocModel(
-            full_name=full_name,
-            headline=headline,
-            location=location,
-            email=email,
-            phone=phone,
-            linkedin=linkedin,
-            github=github,
-            website=website,
-            summary=summary,
-            skills=skills,
-            experience=experience_list,
-            extra_sections=extra_sec,
-        )
-
-    # ── Fallback: regex-only path ────────────────────────────────────────────
     full_name = _clean_model_text(parsed.full_name or "Candidate") or "Candidate"
     summary = _clean_model_text(parsed.summary or "")
     skills = []
@@ -718,39 +575,60 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         else:
             skills.append(("Skills", normalize_skill_items([clean])))
 
+    # Multi-role experience from structured parser.
     if parsed.experience_entries:
         experience_list = [
             ExperienceItem(
-                company=_clean_model_text(ec) or "Experience",
-                role=_clean_model_text(er or ""),
-                dates=_clean_model_text(ed or ""),
-                location=_clean_model_text(el or ""),
-                bullets=[_clean_model_text(b) for b in eb if _clean_model_text(b)],
+                company=_clean_model_text(company) or "Experience",
+                role=_clean_model_text(role or ""),
+                dates=_clean_model_text(dates or ""),
+                location=_clean_model_text(location or ""),
+                bullets=[_clean_model_text(b) for b in bullets if _clean_model_text(b)],
             )
-            for ec, er, ed, el, eb in parsed.experience_entries
+            for company, role, dates, location, bullets in parsed.experience_entries
         ]
     else:
-        reg_bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
+        bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
+        extra_bullets: list[str] = []
+        for p in parsed.projects_bullets or []:
+            cp = _clean_model_text(p)
+            if cp:
+                extra_bullets.append(f"Project: {cp}")
+        for e in parsed.education_lines or []:
+            ce = _clean_model_text(e)
+            if ce:
+                extra_bullets.append(f"Education: {ce}")
         experience_list = [
             ExperienceItem(
                 company=company or "Experience",
                 role=role or "Role",
                 dates="",
                 location="",
-                bullets=reg_bullets,
+                bullets=bullets + extra_bullets,
             )
         ]
 
-    # ALWAYS add projects and education to extra_sections (not gated on experience_entries).
-    extra_sec = list(parsed.extra_sections or [])
+    extra_sections: list[tuple[str, list[str]]] = []
+
+    # Projects and Education live in extra_sections so the template can render them
+    # as their own LaTeX sections (the Harshibar template filters by name).
     if parsed.projects_bullets:
-        clean_proj = [_clean_model_text(b) for b in parsed.projects_bullets if _clean_model_text(b)]
-        if clean_proj:
-            extra_sec.append(("Projects", clean_proj))
+        cleaned = [_clean_model_text(b) for b in parsed.projects_bullets if _clean_model_text(b)]
+        if cleaned:
+            extra_sections.append(("Projects", cleaned))
+
+    for name, vals in (parsed.extra_sections or []):
+        clean_name = _clean_model_text(name)
+        if not clean_name:
+            continue
+        clean_vals = [_clean_model_text(v) for v in vals if _clean_model_text(v)]
+        if clean_vals:
+            extra_sections.append((clean_name, clean_vals))
+
     if parsed.education_lines:
-        clean_edu = [_clean_model_text(e) for e in parsed.education_lines if _clean_model_text(e)]
-        if clean_edu:
-            extra_sec.append(("Education", clean_edu))
+        cleaned = [_clean_model_text(e) for e in parsed.education_lines if _clean_model_text(e)]
+        if cleaned:
+            extra_sections.append(("Education", cleaned))
 
     return ResumeDocModel(
         full_name=full_name,
@@ -760,15 +638,10 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         phone=_clean_model_text(parsed.phone or ""),
         linkedin=_clean_model_text(parsed.linkedin or ""),
         github=_clean_model_text(parsed.github or ""),
-        website="",
         summary=summary,
         skills=skills,
         experience=experience_list,
-        extra_sections=[
-            (name, [_clean_model_text(v) for v in vals if _clean_model_text(v)])
-            for name, vals in extra_sec
-            if _clean_model_text(name)
-        ],
+        extra_sections=extra_sections,
     )
 
 # CORS: allow localhost dev + deployed frontend
@@ -859,7 +732,6 @@ async def api_generate_stream(request: Request):
     _tb = body.get("tailor_body_with_ai")
     tailor_body_with_ai = True if _tb is None else bool(_tb)
     use_jinja_renderer = True
-    user_email        = (body.get("user_email") or "").strip() or None
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
@@ -1059,8 +931,6 @@ async def api_generate_stream(request: Request):
                 asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
                 return
 
-        generation_status = "ok"
-
         for event in stream_latex_resume(
             company, role, jd,
             reference_folder=reference_folder,
@@ -1072,8 +942,6 @@ async def api_generate_stream(request: Request):
             tailor_body_with_ai=tailor_body_with_ai,
         ):
             ev_name = event.get("event")
-            if ev_name == "error":
-                generation_status = "error"
 
             if ev_name == "saved":
                 saved_folder   = event.get("folder")
@@ -1141,28 +1009,6 @@ async def api_generate_stream(request: Request):
                         }), loop).result()
 
             asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
-
-        try:
-            prompt_tokens_est = _estimate_prompt_tokens(jd, candidate_profile)
-            completion_tokens_est = _estimate_completion_tokens(saved_tex_path)
-            _track_usage_event(
-                user_id=user_id,
-                user_email=user_email,
-                tool_name="resume_tailor",
-                model_used=model,
-                prompt_tokens=prompt_tokens_est,
-                completion_tokens=completion_tokens_est,
-                total_tokens=prompt_tokens_est + completion_tokens_est,
-                token_source="estimated",
-                status=generation_status,
-                company=company,
-                role=role,
-                folder=saved_folder,
-                metadata={"base_folder": base_folder, "has_custom_profile": bool(candidate_profile)},
-            )
-        except Exception as exc:
-            logger.warning(f"usage tracking failed: {exc}")
-
         asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
 
     threading.Thread(target=run_sync, daemon=True).start()
@@ -1598,25 +1444,16 @@ def _share_table():
         return None
 
 
-def _get_supabase_client():
-    """Return service-role Supabase client or None when unavailable."""
+def _supabase_table(table_name: str):
+    """Return a Supabase table handle via service-role client, else None."""
     try:
         try:
             from resume_gui.storage import _get_client  # type: ignore
         except ImportError:
             from storage import _get_client  # type: ignore
-        return _get_client()
-    except Exception as exc:
-        logger.warning(f"supabase client unavailable: {exc}")
-        return None
-
-
-def _supabase_table(table_name: str):
-    """Return a Supabase table handle via service-role client, else None."""
-    client = _get_supabase_client()
-    if client is None:
-        return None
-    try:
+        client = _get_client()
+        if client is None:
+            return None
         return client.table(table_name)
     except Exception as exc:
         logger.warning(f"supabase table unavailable [{table_name}]: {exc}")
@@ -1651,173 +1488,6 @@ def _load_template_tex_from_supabase(reference_folder: str) -> Optional[str]:
     except Exception as exc:
         logger.warning(f"template lookup failed  |  reference_folder={rf}  |  {exc}")
     return None
-
-
-def _estimate_prompt_tokens(job_description: str, candidate_profile: Optional[str]) -> int:
-    total_chars = len(job_description or "") + len(candidate_profile or "")
-    return max(1, total_chars // 4)
-
-
-def _estimate_completion_tokens(saved_tex_path: Optional[str]) -> int:
-    if not saved_tex_path:
-        return 0
-    try:
-        text = Path(saved_tex_path).read_text(encoding="utf-8", errors="ignore")
-        return max(1, len(text) // 4)
-    except Exception:
-        return 0
-
-
-def _track_usage_event(
-    *,
-    user_id: str,
-    user_email: Optional[str],
-    tool_name: str,
-    model_used: Optional[str],
-    prompt_tokens: int,
-    completion_tokens: int,
-    total_tokens: int,
-    token_source: str,
-    status: str,
-    company: Optional[str],
-    role: Optional[str],
-    folder: Optional[str],
-    metadata: Optional[Dict[str, Any]] = None,
-) -> None:
-    client = _get_supabase_client()
-    if client is None:
-        return
-    client.table("usage_events").insert({
-        "user_id": user_id or "local",
-        "user_email": user_email,
-        "tool_name": tool_name,
-        "model_used": model_used,
-        "prompt_tokens": int(prompt_tokens or 0),
-        "completion_tokens": int(completion_tokens or 0),
-        "total_tokens": int(total_tokens or 0),
-        "token_source": token_source,
-        "status": status,
-        "company": company,
-        "role": role,
-        "folder": folder,
-        "metadata": metadata or {},
-    }).execute()
-
-
-def _admin_user_ids() -> set[str]:
-    raw = os.environ.get("ANALYTICS_ADMIN_USER_IDS", "")
-    return {u.strip() for u in raw.split(",") if u.strip()}
-
-
-def _is_analytics_admin(user_id: str) -> bool:
-    if not user_id:
-        return False
-    return user_id in _admin_user_ids()
-
-
-def _build_admin_analytics(rows: List[Dict[str, Any]], days: int) -> Dict[str, Any]:
-    total_runs = len(rows)
-    total_tokens = sum(int(r.get("total_tokens") or 0) for r in rows)
-    success_runs = sum(1 for r in rows if (r.get("status") or "").lower() == "ok")
-    failed_runs = total_runs - success_runs
-
-    users: Dict[str, Dict[str, Any]] = {}
-    tools: Dict[str, Dict[str, Any]] = {}
-    models: Dict[str, Dict[str, Any]] = {}
-    daily: Dict[str, Dict[str, int]] = {}
-
-    for r in rows:
-        uid = (r.get("user_id") or "unknown").strip() or "unknown"
-        email = (r.get("user_email") or "").strip() or None
-        tool = (r.get("tool_name") or "unknown").strip() or "unknown"
-        model = (r.get("model_used") or "unknown").strip() or "unknown"
-        toks = int(r.get("total_tokens") or 0)
-        status = (r.get("status") or "").lower()
-        day = (r.get("created_at") or "")[:10]
-
-        if uid not in users:
-            users[uid] = {"user_id": uid, "user_email": email, "runs": 0, "tokens": 0, "tools": {}}
-        users[uid]["runs"] += 1
-        users[uid]["tokens"] += toks
-        users[uid]["tools"][tool] = users[uid]["tools"].get(tool, 0) + 1
-
-        if tool not in tools:
-            tools[tool] = {"tool_name": tool, "runs": 0, "tokens": 0}
-        tools[tool]["runs"] += 1
-        tools[tool]["tokens"] += toks
-
-        if model not in models:
-            models[model] = {"model": model, "runs": 0, "tokens": 0}
-        models[model]["runs"] += 1
-        models[model]["tokens"] += toks
-
-        if day:
-            if day not in daily:
-                daily[day] = {"runs": 0, "tokens": 0, "failures": 0}
-            daily[day]["runs"] += 1
-            daily[day]["tokens"] += toks
-            if status != "ok":
-                daily[day]["failures"] += 1
-
-    user_rows = sorted(users.values(), key=lambda x: (x["tokens"], x["runs"]), reverse=True)
-    tool_rows = sorted(tools.values(), key=lambda x: (x["tokens"], x["runs"]), reverse=True)
-    model_rows = sorted(models.values(), key=lambda x: (x["tokens"], x["runs"]), reverse=True)
-    daily_rows = [
-        {"date": d, "runs": v["runs"], "tokens": v["tokens"], "failures": v["failures"]}
-        for d, v in sorted(daily.items(), key=lambda kv: kv[0], reverse=True)
-    ]
-
-    return {
-        "window_days": days,
-        "summary": {
-            "total_runs": total_runs,
-            "total_tokens": total_tokens,
-            "success_runs": success_runs,
-            "failed_runs": failed_runs,
-            "unique_users": len(user_rows),
-            "unique_tools": len(tool_rows),
-            "unique_models": len(model_rows),
-        },
-        "users": user_rows,
-        "tools": tool_rows,
-        "models": model_rows,
-        "daily": daily_rows,
-    }
-
-
-async def api_admin_analytics(request: Request):
-    """GET /api/admin/analytics?user_id=<uuid>&days=30"""
-    user_id = (request.query_params.get("user_id") or "").strip()
-    if not _is_analytics_admin(user_id):
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-
-    try:
-        days = int(request.query_params.get("days", "30"))
-    except ValueError:
-        days = 30
-    days = max(1, min(days, 365))
-
-    client = _get_supabase_client()
-    if client is None:
-        return JSONResponse({"error": "analytics storage not configured"}, status_code=503)
-
-    try:
-        from datetime import datetime, timedelta, timezone
-        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        res = (
-            client.table("usage_events")
-            .select("user_id,user_email,tool_name,model_used,total_tokens,status,created_at")
-            .gte("created_at", since)
-            .order("created_at", desc=True)
-            .limit(5000)
-            .execute()
-        )
-        rows = res.data or []
-    except Exception as exc:
-        logger.exception("admin analytics query failed")
-        return JSONResponse({"error": str(exc)}, status_code=500)
-
-    return JSONResponse(_build_admin_analytics(rows, days))
 
 
 async def api_share_create(request: Request):
@@ -2329,12 +1999,6 @@ _HEADER_JOB_ROLE = re.compile(
     re.IGNORECASE,
 )
 
-_HEADER_CONTACT_ANCHOR = re.compile(
-    r"@|linkedin\.com/|www\.linkedin\.com/|github\.com/|www\.github\.com/|"
-    r"\bportfolio\b|\bsite\b|\bmobile\b|\bphone\b|"
-    r"[\[\(]?\d{3}[\])]?[\s.\-]?\d{3}[\s.\-]?\d{4}",
-    re.IGNORECASE,
-)
 
 def _strip_header_candidate_lines(lines: list[str], start: int, end: int) -> list[str]:
     out: list[str] = []
@@ -3571,7 +3235,6 @@ routes = [
     Route("/api/version/{folder}",        api_version_list, methods=["GET"]),
     Route("/api/version/{folder}/{version}", api_version_load, methods=["GET"]),
     Route("/api/storage-status",            api_storage_status,methods=["GET"]),
-    Route("/api/admin/analytics",          api_admin_analytics, methods=["GET"]),
     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),

@@ -84,11 +84,8 @@
 \begin{document}
 
 \begin{center}
-    \textbf{\Huge {{ doc.full_name|latex }}} \\ \vspace{2pt}
-{% if doc.headline %}
-    {\color{dark-grey}\large {{ doc.headline|latex }}} \\ \vspace{3pt}
-{% endif %}
-    \small {{ doc.phone|latex }}{% if doc.phone %} $|$ {% endif %}{{ doc.email|latex }}{% if doc.email %} $|$ {% endif %}{% if doc.website %}{{ doc.website|latex }}{% if doc.linkedin or doc.github or doc.location %} $|$ {% endif %}{% endif %}{{ doc.linkedin|latex }}{% if doc.linkedin %} $|$ {% endif %}{{ doc.github|latex }}{% if doc.github %} $|$ {% endif %}{{ doc.location|latex }}
+    \textbf{\Huge {{ doc.full_name|latex }}} \\ \vspace{5pt}
+    \small {{ doc.phone|latex }}{% if doc.phone %} | {% endif %}{{ doc.email|latex }}{% if doc.email %} | {% endif %}{{ doc.linkedin|latex }}{% if doc.linkedin %} | {% endif %}{{ doc.github|latex }}{% if doc.github %} | {% endif %}{{ doc.location|latex }}
     \\ \vspace{-3pt}
 \end{center}
 

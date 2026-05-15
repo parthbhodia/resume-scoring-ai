@@ -18,7 +18,6 @@
 {% if doc.phone %}{% set _ = contact.append(doc.phone) %}{% endif %}
 {% if doc.linkedin %}{% set _ = contact.append(doc.linkedin) %}{% endif %}
 {% if doc.github %}{% set _ = contact.append(doc.github) %}{% endif %}
-{% if doc.website %}{% set _ = contact.append(doc.website) %}{% endif %}
 {% if contact|length %}{{ contact|join(' | ')|latex }}\\{% endif %}
 
 {% if doc.summary %}
