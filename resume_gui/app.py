@@ -805,7 +805,7 @@ async def api_generate_stream(request: Request):
                 }), loop).result()
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "rationales",
-                    "data": ratings_payload.get("gaps", [])[:4],
+                    "data": [{"type": "gap", "text": g} for g in (ratings_payload.get("gaps", []) if isinstance(ratings_payload.get("gaps"), list) else [])][:4],
                 }), loop).result()
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "ratings",
