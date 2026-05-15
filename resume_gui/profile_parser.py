@@ -29,6 +29,7 @@ class ParsedProfile:
     summary: str = ""
     skills_lines: list[str] = field(default_factory=list)
     experience_bullets: list[str] = field(default_factory=list)
+    experience_entries: list[tuple[str, str, str, str, list[str]]] = field(default_factory=list)
     projects_bullets: list[str] = field(default_factory=list)
     education_lines: list[str] = field(default_factory=list)
     extra_sections: list[tuple[str, list[str]]] = field(default_factory=list)
@@ -191,6 +192,78 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
         {"projects", "experience", "professional experience", "work experience", "technical skills", "skills"},
         12,
     )
+
+    # Parse multi-role experience entries.
+    # Work from original text (preserves blank-line separation between entries).
+    _MONTHS = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+    _DATE_RANGE_PAT = re.compile(
+        f"({_MONTHS}\\s+\\d{{4}})"
+        r"\s*[–-]\s*"
+        f"(present|now|current|{_MONTHS}\\s+\\d{{4}}|\\d{{4}})",
+        re.I,
+    )
+    raw_all = text.splitlines()
+    exp_start = -1
+    exp_end = -1
+    exp_lc = [ln.lower().strip() for ln in raw_all]
+    for i, low in enumerate(exp_lc):
+        if low in {"experience", "professional experience", "work experience"}:
+            exp_start = i
+        if exp_start >= 0 and low in {"projects", "project", "education", "technical skills", "skills"} and i > exp_start:
+            exp_end = i
+            break
+    if exp_end < 0:
+        exp_end = len(raw_all)
+    # Collect raw experience lines including blanks.
+    raw_exp_lines = raw_all[exp_start + 1:exp_end] if exp_start >= 0 else []
+    if raw_exp_lines:
+        entries: list[tuple[str, str, str, str, list[str]]] = []
+        current_role = ""
+        current_company = ""
+        current_location = ""
+        current_dates = ""
+        current_bullets: list[str] = []
+        blank_before = True  # First paragraph starts fresh.
+        for ln in raw_exp_lines:
+            stripped = ln.strip()
+            is_blank = not stripped
+            is_bullet = stripped and (ln.lstrip()[:1] in ("-", "•", "*"))
+            clean = stripped.lstrip("-•* ").strip()
+            dm = _DATE_RANGE_PAT.search(clean) if clean else None
+            has_dates = bool(dm)
+            if is_blank:
+                blank_before = True
+                continue
+            if blank_before and not is_bullet and current_role:
+                # Blank line then non-bullet → save previous entry, start new.
+                if current_role and current_bullets:
+                    entries.append((current_company, current_role, current_dates, current_location, current_bullets))
+                current_dates = ""
+                current_role = ""
+                current_company = ""
+                current_location = ""
+                current_bullets = []
+            blank_before = False
+            if has_dates and not is_bullet:
+                if current_role and current_bullets:
+                    entries.append((current_company, current_role, current_dates, current_location, current_bullets))
+                current_dates = dm.group(0).strip()
+                current_role = clean.replace(dm.group(0), "").strip().rstrip(",")
+                current_bullets = []
+                current_company = ""
+                current_location = ""
+            elif not is_bullet and current_role:
+                if not current_company:
+                    current_company = clean
+                elif not current_location:
+                    current_location = clean
+            elif is_bullet and current_role:
+                if clean and len(clean.split()) >= 4:
+                    current_bullets.append(clean)
+        if current_role and current_bullets:
+            entries.append((current_company, current_role, current_dates, current_location, current_bullets))
+        out.experience_entries = entries
+        out.experience_bullets = [b for e in entries for b in e[4]] or out.experience_bullets
 
     # Dynamic catch-all: capture additional headed sections so content is not lost.
     known = {

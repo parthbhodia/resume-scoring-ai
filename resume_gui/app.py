@@ -496,7 +496,6 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
     parsed = parse_profile_text(candidate_profile)
     full_name = _clean_model_text(parsed.full_name or "Candidate") or "Candidate"
     summary = _clean_model_text(parsed.summary or "")
-    bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
     skills = []
     for ln in parsed.skills_lines or []:
         clean = _clean_model_text(ln)
@@ -510,17 +509,39 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         else:
             skills.append(("Skills", normalize_skill_items([clean])))
 
-    extra_bullets: list[str] = []
-    for p in parsed.projects_bullets or []:
-        cp = _clean_model_text(p)
-        if cp:
-            extra_bullets.append(f"Project: {cp}")
-    for e in parsed.education_lines or []:
-        ce = _clean_model_text(e)
-        if ce:
-            extra_bullets.append(f"Education: {ce}")
+    # Multi-role experience from structured parser.
+    if parsed.experience_entries:
+        experience_list = [
+            ExperienceItem(
+                company=_clean_model_text(company) or "Experience",
+                role=_clean_model_text(role or ""),
+                dates=_clean_model_text(dates or ""),
+                location=_clean_model_text(location or ""),
+                bullets=[_clean_model_text(b) for b in bullets if _clean_model_text(b)],
+            )
+            for company, role, dates, location, bullets in parsed.experience_entries
+        ]
+    else:
+        bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
+        extra_bullets: list[str] = []
+        for p in parsed.projects_bullets or []:
+            cp = _clean_model_text(p)
+            if cp:
+                extra_bullets.append(f"Project: {cp}")
+        for e in parsed.education_lines or []:
+            ce = _clean_model_text(e)
+            if ce:
+                extra_bullets.append(f"Education: {ce}")
+        experience_list = [
+            ExperienceItem(
+                company=company or "Experience",
+                role=role or "Role",
+                dates="",
+                location="",
+                bullets=bullets + extra_bullets,
+            )
+        ]
 
-    merged_bullets = bullets + extra_bullets
     return ResumeDocModel(
         full_name=full_name,
         headline=_clean_model_text(parsed.headline or role or ""),
@@ -531,15 +552,7 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         github=_clean_model_text(parsed.github or ""),
         summary=summary,
         skills=skills,
-        experience=[
-            ExperienceItem(
-                company=company or "Experience",
-                role=role or "Role",
-                dates="",
-                location="",
-                bullets=merged_bullets,
-            )
-        ],
+        experience=experience_list,
         extra_sections=[
             (name, [
                 _clean_model_text(v) for v in vals if _clean_model_text(v)
