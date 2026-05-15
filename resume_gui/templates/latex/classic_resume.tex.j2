@@ -1,0 +1,60 @@
+\documentclass[letterpaper,10pt]{article}
+\usepackage[margin=0.7in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{enumitem}
+\setlist[itemize]{leftmargin=1.1em, itemsep=2pt, topsep=2pt}
+\pagenumbering{gobble}
+
+\begin{document}
+
+{\LARGE \textbf{ {{ doc.full_name|latex }} }}\\
+{% if doc.headline %}
+{{ doc.headline|latex }}\\
+{% endif %}
+{% set contact = [] %}
+{% if doc.location %}{% set _ = contact.append(doc.location) %}{% endif %}
+{% if doc.email %}{% set _ = contact.append(doc.email) %}{% endif %}
+{% if doc.phone %}{% set _ = contact.append(doc.phone) %}{% endif %}
+{% if doc.linkedin %}{% set _ = contact.append(doc.linkedin) %}{% endif %}
+{% if doc.github %}{% set _ = contact.append(doc.github) %}{% endif %}
+{% if contact|length %}{{ contact|join(' | ')|latex }}\\{% endif %}
+
+{% if doc.summary %}
+\vspace{0.5em}
+\section*{Summary}
+{{ doc.summary|latex }}
+{% endif %}
+
+{% if doc.skills|length %}
+\section*{Technical Skills}
+{% for skill in doc.skills %}
+\textbf{ {{ skill[0]|latex }} }: {{ skill[1]|join(', ')|latex }}\\
+{% endfor %}
+{% endif %}
+
+{% if doc.experience|length %}
+\section*{Experience}
+{% for exp in doc.experience %}
+\textbf{ {{ exp.company|latex }} }{% if exp.location %} --- {{ exp.location|latex }}{% endif %}\\
+\textit{ {{ exp.role|latex }}{% if exp.dates %} | {{ exp.dates|latex }}{% endif %} }\\
+\begin{itemize}
+{% for bullet in exp.bullets %}
+\item {{ bullet|latex }}
+{% endfor %}
+\end{itemize}
+{% endfor %}
+{% endif %}
+
+{% if doc.extra_sections|length %}
+{% for sec in doc.extra_sections %}
+\section*{ {{ sec[0]|latex }} }
+\begin{itemize}
+{% for line in sec[1] %}
+\item {{ line|latex }}
+{% endfor %}
+\end{itemize}
+{% endfor %}
+{% endif %}
+
+\end{document}
