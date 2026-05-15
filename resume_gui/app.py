@@ -78,9 +78,23 @@ from resume_library import (
     _optional_gemini_client,
 )
 try:
-    from resume_gui.renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items
+    from resume_gui.renderers.latex_renderer import (
+        JinjaLatexRenderer,
+        ResumeDocModel,
+        ExperienceItem,
+        EducationItem,
+        ProjectItem,
+        normalize_skill_items,
+    )
 except ImportError:
-    from renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items  # type: ignore
+    from renderers.latex_renderer import (  # type: ignore
+        JinjaLatexRenderer,
+        ResumeDocModel,
+        ExperienceItem,
+        EducationItem,
+        ProjectItem,
+        normalize_skill_items,
+    )
 try:
     from resume_gui.profile_parser import parse_profile_text
 except ImportError:
@@ -113,6 +127,99 @@ def _parse_entry_header(header: str) -> Tuple[str, str, str, str]:
     if len(parts) == 3:
         return parts[0], parts[1], "", parts[2]
     return parts[0], parts[1], parts[2], " | ".join(parts[3:])
+
+
+def _education_item_from_dict(edu: dict) -> Optional[EducationItem]:
+    inst = _clean_model_text(edu.get("institution") or "")
+    deg = _clean_model_text(edu.get("degree") or "")
+    dat = _clean_model_text(edu.get("dates") or "")
+    loc = _clean_model_text(edu.get("location") or "")
+    if not (inst or deg or dat or loc):
+        return None
+    return EducationItem(
+        institution=inst or "Education",
+        degree=deg,
+        dates=dat,
+        location=loc,
+    )
+
+
+def _education_item_from_csv_line(line: str) -> EducationItem:
+    """Best-effort split of a single-line education row (comma-separated) into hierarchy fields."""
+    raw = _clean_model_text(line)
+    if not raw:
+        return EducationItem(institution="")
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if len(parts) >= 4:
+        institution = parts[0]
+        location = parts[-1]
+        dates = parts[-2]
+        degree = ", ".join(parts[1:-2])
+        return EducationItem(
+            institution=institution,
+            degree=degree,
+            dates=dates,
+            location=location,
+        )
+    if len(parts) == 3:
+        return EducationItem(institution=parts[0], degree=parts[1], dates=parts[2])
+    if len(parts) == 2:
+        return EducationItem(institution=parts[0], degree=parts[1])
+    return EducationItem(institution=raw)
+
+
+def _project_items_from_llm_projects(raw_projects: Any) -> list[ProjectItem]:
+    out: list[ProjectItem] = []
+    for proj in raw_projects or []:
+        if not isinstance(proj, dict):
+            continue
+        name_p = _clean_model_text(proj.get("name") or "")
+        p_buls = [_clean_model_text(b) for b in (proj.get("bullets") or []) if _clean_model_text(b)]
+        if name_p and p_buls:
+            out.append(ProjectItem(name=name_p, bullets=p_buls))
+        elif name_p:
+            out.append(ProjectItem(name=name_p, bullets=[]))
+        elif p_buls:
+            out.append(ProjectItem(name="", bullets=p_buls))
+    return out
+
+
+def _project_items_from_prefixed_bullets(lines: list[str]) -> list[ProjectItem]:
+    """Group ``ProjectName: detail`` lines so the PDF shows one title and multiple bullets."""
+    grouped: list[ProjectItem] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = _clean_model_text(lines[i])
+        if not line:
+            i += 1
+            continue
+        if ":" in line:
+            head, rest = line.split(":", 1)
+            h, r = head.strip(), rest.strip()
+            if h and len(r) > 8:
+                bullets = [r]
+                i += 1
+                while i < n:
+                    nxt = _clean_model_text(lines[i])
+                    if not nxt:
+                        i += 1
+                        continue
+                    if ":" in nxt:
+                        nh, nr = nxt.split(":", 1)
+                        nh, nr = nh.strip(), nr.strip()
+                        if nh.lower() == h.lower() and len(nr) > 8:
+                            bullets.append(nr)
+                            i += 1
+                            continue
+                        break
+                    bullets.append(nxt)
+                    i += 1
+                grouped.append(ProjectItem(name=h, bullets=bullets))
+                continue
+        grouped.append(ProjectItem(name="", bullets=[line]))
+        i += 1
+    return grouped
 
 
 def _clean_model_text(value: str) -> str:
@@ -335,6 +442,15 @@ def _append_extra_section_line(doc: ResumeDocModel, section_title: str, line: st
     if not lt:
         return
     key = section_title.strip().lower()
+    if key in ("projects", "project"):
+        if doc.projects:
+            doc.projects[-1].bullets.append(lt)
+        else:
+            doc.projects.append(ProjectItem(name="", bullets=[lt]))
+        return
+    if key == "education":
+        doc.education.append(_education_item_from_csv_line(lt))
+        return
     for i, (name, lines) in enumerate(doc.extra_sections):
         nl = name.strip().lower()
         if nl == key or key in nl or nl in key:
@@ -524,6 +640,28 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
                         next_bullets.append(updated)
             if changed:
                 exp.bullets = [x for x in next_bullets if x]
+
+        for proj in doc.projects:
+            next_bullets = []
+            changed = False
+            for b in proj.bullets:
+                updated = _apply_line_suggestion(b, original, suggested)
+                if updated is None:
+                    next_bullets.append(b)
+                else:
+                    changed = True
+                    replaced = True
+                    if updated:
+                        next_bullets.append(updated)
+            if changed:
+                proj.bullets = [x for x in next_bullets if x]
+
+        for edu in doc.education:
+            for attr in ("institution", "degree", "dates", "location"):
+                cur = getattr(edu, attr, "") or ""
+                if cur and original in cur:
+                    setattr(edu, attr, cur.replace(original, suggested).strip())
+                    replaced = True
 
         # Coach quotes raw profile lines; structured doc may normalize wording — do not
         # route unrelated sections into ``summary``.
@@ -857,34 +995,23 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
             if _clean_model_text(name) and name.lower() not in ("projects", "project", "education")
         ]
 
-        proj_bullets: list[str] = []
-        for proj in llm_data.get("projects") or []:
-            if isinstance(proj, dict):
-                name_p = _clean_model_text(proj.get("name") or "")
-                p_buls = [_clean_model_text(b) for b in (proj.get("bullets") or []) if _clean_model_text(b)]
-                if name_p and p_buls:
-                    proj_bullets.extend(f"{name_p}: {b}" for b in p_buls)
-                elif name_p:
-                    proj_bullets.append(name_p)
-                else:
-                    proj_bullets.extend(p_buls)
-        if proj_bullets:
-            extra_sec.append(("Projects", proj_bullets))
+        structured_projects = _project_items_from_llm_projects(llm_data.get("projects"))
+        if not structured_projects and (parsed.projects_bullets or []):
+            cp = [_clean_model_text(b) for b in parsed.projects_bullets if _clean_model_text(b)]
+            if cp:
+                structured_projects = _project_items_from_prefixed_bullets(cp)
 
-        edu_lines: list[str] = []
+        structured_education: list[EducationItem] = []
         for edu in llm_data.get("education") or []:
             if isinstance(edu, dict):
-                parts = [
-                    _clean_model_text(edu.get("institution") or ""),
-                    _clean_model_text(edu.get("degree") or ""),
-                    _clean_model_text(edu.get("dates") or ""),
-                    _clean_model_text(edu.get("location") or ""),
-                ]
-                line = ", ".join(p for p in parts if p)
-                if line:
-                    edu_lines.append(line)
-        if edu_lines:
-            extra_sec.append(("Education", edu_lines))
+                row = _education_item_from_dict(edu)
+                if row:
+                    structured_education.append(row)
+        if not structured_education and (parsed.education_lines or []):
+            for e in parsed.education_lines:
+                ce = _clean_model_text(e)
+                if ce:
+                    structured_education.append(_education_item_from_csv_line(ce))
 
         return ResumeDocModel(
             full_name=full_name,
@@ -898,6 +1025,8 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
             summary=summary,
             skills=skills,
             experience=experience_list,
+            education=structured_education,
+            projects=structured_projects,
             extra_sections=extra_sec,
         )
 
@@ -940,16 +1069,47 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
             )
         ]
 
-    # ALWAYS add projects and education to extra_sections (not gated on experience_entries).
     extra_sec = list(parsed.extra_sections or [])
+    structured_projects: list[ProjectItem] = []
     if parsed.projects_bullets:
         clean_proj = [_clean_model_text(b) for b in parsed.projects_bullets if _clean_model_text(b)]
         if clean_proj:
-            extra_sec.append(("Projects", clean_proj))
+            structured_projects = _project_items_from_prefixed_bullets(clean_proj)
+            if not structured_projects:
+                structured_projects = [ProjectItem(name="", bullets=clean_proj)]
+    if not structured_projects:
+        for name, vals in extra_sec:
+            if (name or "").strip().lower() in ("projects", "project") and vals:
+                structured_projects = _project_items_from_prefixed_bullets(
+                    [_clean_model_text(v) for v in vals if _clean_model_text(v)]
+                )
+                break
+
+    structured_education: list[EducationItem] = []
     if parsed.education_lines:
-        clean_edu = [_clean_model_text(e) for e in parsed.education_lines if _clean_model_text(e)]
-        if clean_edu:
-            extra_sec.append(("Education", clean_edu))
+        for e in parsed.education_lines:
+            ce = _clean_model_text(e)
+            if ce:
+                structured_education.append(_education_item_from_csv_line(ce))
+    if not structured_education:
+        for name, vals in extra_sec:
+            if (name or "").strip().lower() == "education" and vals:
+                for e in vals:
+                    ce = _clean_model_text(str(e))
+                    if ce:
+                        structured_education.append(_education_item_from_csv_line(ce))
+                break
+
+    extra_sec_filtered: list[tuple[str, list[str]]] = []
+    for name, vals in extra_sec:
+        lname = (name or "").strip().lower()
+        if structured_projects and lname in ("projects", "project"):
+            continue
+        if structured_education and lname == "education":
+            continue
+        cleaned = (name, [_clean_model_text(v) for v in vals if _clean_model_text(v)])
+        if cleaned[0]:
+            extra_sec_filtered.append(cleaned)
 
     return ResumeDocModel(
         full_name=full_name,
@@ -963,11 +1123,9 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         summary=summary,
         skills=skills,
         experience=experience_list,
-        extra_sections=[
-            (name, [_clean_model_text(v) for v in vals if _clean_model_text(v)])
-            for name, vals in extra_sec
-            if _clean_model_text(name)
-        ],
+        education=structured_education,
+        projects=structured_projects,
+        extra_sections=extra_sec_filtered,
     )
 
 # CORS: allow localhost dev + deployed frontend

@@ -33,6 +33,24 @@ class ExperienceItem:
 
 
 @dataclass
+class EducationItem:
+    """One school row — maps to ``\\resumeSubheading`` in Harshibar (same 4-cell layout as jobs)."""
+
+    institution: str
+    degree: str = ""
+    dates: str = ""
+    location: str = ""
+
+
+@dataclass
+class ProjectItem:
+    """One project with a visible title and detail bullets (no repeated ``Name:`` on each bullet)."""
+
+    name: str
+    bullets: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ResumeDocModel:
     full_name: str
     headline: str = ""
@@ -45,6 +63,8 @@ class ResumeDocModel:
     summary: str = ""
     skills: list[tuple[str, list[str]]] = field(default_factory=list)
     experience: list[ExperienceItem] = field(default_factory=list)
+    education: list[EducationItem] = field(default_factory=list)
+    projects: list[ProjectItem] = field(default_factory=list)
     extra_sections: list[tuple[str, list[str]]] = field(default_factory=list)
 
 

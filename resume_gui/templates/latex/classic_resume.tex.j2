@@ -55,8 +55,40 @@
 {% endfor %}
 {% endif %}
 
+{% if doc.projects|length %}
+\needspace{6\baselineskip}
+\section*{Projects}
+{% for proj in doc.projects %}
+\needspace{4\baselineskip}
+{% if proj.name %}
+\textbf{ {{ proj.name|latex }} }\\[2pt]
+{% endif %}
+{% if proj.bullets|length %}
+\begin{itemize}
+{% for bullet in proj.bullets %}
+\needspace{2.8\baselineskip}
+\item {{ bullet|latex }}
+{% endfor %}
+\end{itemize}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if doc.education|length %}
+\needspace{6\baselineskip}
+\section*{Education}
+{% for edu in doc.education %}
+\needspace{4\baselineskip}
+\textbf{ {{ edu.institution|latex }} }{% if edu.dates %} --- {{ edu.dates|latex }}{% endif %}\\
+\textit{ {{ edu.degree|latex }} }{% if edu.location %} --- {{ edu.location|latex }}{% endif %}\\[6pt]
+{% endfor %}
+{% endif %}
+
 {% if doc.extra_sections|length %}
 {% for sec in doc.extra_sections %}
+{% set lname = sec[0]|lower %}
+{% if (doc.projects|length and lname in ['projects', 'project']) or (doc.education|length and lname == 'education') %}
+{% else %}
 \needspace{6\baselineskip}
 \section*{ {{ sec[0]|latex }} }
 \begin{itemize}
@@ -65,6 +97,7 @@
 \item {{ line|latex }}
 {% endfor %}
 \end{itemize}
+{% endif %}
 {% endfor %}
 {% endif %}
 

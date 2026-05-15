@@ -124,26 +124,42 @@
 \resumeSubHeadingListEnd
 {% endif %}
 
-{% set projects = [] %}
-{% set education = [] %}
+{% set projects_extra = [] %}
+{% set education_extra = [] %}
 {% set other = [] %}
 {% for sec in doc.extra_sections %}
   {% set lname = sec[0]|lower %}
   {% if lname in ['projects', 'project'] %}
-    {% set _ = projects.append(sec) %}
+    {% set _ = projects_extra.append(sec) %}
   {% elif lname == 'education' %}
-    {% set _ = education.append(sec) %}
+    {% set _ = education_extra.append(sec) %}
   {% else %}
     {% set _ = other.append(sec) %}
   {% endif %}
 {% endfor %}
 
-{% if projects|length %}
+{% if doc.projects|length %}
 \needspace{7\baselineskip}
 \section{PROJECTS}
 \resumeSubHeadingListStart
-{% for sec in projects %}
-  \resumeProjectHeading{\textbf{ {{ sec[0]|latex }} }}{}
+{% for proj in doc.projects %}
+  {% if proj.name %}
+  \resumeProjectHeading{\textbf{ {{ proj.name|latex }} }}{}
+  {% endif %}
+  {% if proj.bullets|length %}
+  \resumeItemListStart
+  {% for b in proj.bullets %}
+    \resumeItem{ {{ b|latex }} }
+  {% endfor %}
+  \resumeItemListEnd
+  {% endif %}
+{% endfor %}
+\resumeSubHeadingListEnd
+{% elif projects_extra|length %}
+\needspace{7\baselineskip}
+\section{PROJECTS}
+\resumeSubHeadingListStart
+{% for sec in projects_extra %}
   \resumeItemListStart
   {% for b in sec[1] %}
     \resumeItem{ {{ b|latex }} }
@@ -153,12 +169,25 @@
 \resumeSubHeadingListEnd
 {% endif %}
 
-{% if education|length %}
+{% if doc.education|length %}
 \needspace{6\baselineskip}
 \section{EDUCATION}
 \resumeSubHeadingListStart
-{% for sec in education %}
-  \resumeProjectHeading{\textbf{ {{ sec[0]|latex }} }}{}
+{% for edu in doc.education %}
+{% if edu.institution or edu.degree %}
+  \resumeSubheading
+    { {{ edu.institution|latex }} }
+    { {{ edu.dates|latex if edu.dates else '' }} }
+    { {{ edu.degree|latex }} }
+    { {{ edu.location|latex if edu.location else '' }} }
+{% endif %}
+{% endfor %}
+\resumeSubHeadingListEnd
+{% elif education_extra|length %}
+\needspace{6\baselineskip}
+\section{EDUCATION}
+\resumeSubHeadingListStart
+{% for sec in education_extra %}
   \resumeItemListStart
   {% for b in sec[1] %}
     \resumeItem{ {{ b|latex }} }
