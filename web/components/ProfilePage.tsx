@@ -8,7 +8,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getSupabaseClient, fetchUserProfile, upsertUserProfile } from "@/lib/supabase";
-import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
+import { apiUrl, isResumeUploadFile, parseJsonOrThrow } from "@/lib/utils";
 import { extractProfileHintsFromResumeText } from "@/lib/profileFromResumeText";
 import {
   type ProfileFormState,
@@ -551,8 +551,8 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
     setObUploadFileName(file.name);
     setObUploadErr(null);
     setObUploadOk(null);
-    if (!file.type.includes("pdf")) {
-      setObUploadErr("Please choose a PDF file.");
+    if (!isResumeUploadFile(file)) {
+      setObUploadErr("Please choose a PDF or Word (.doc/.docx) file.");
       return;
     }
     setObUploadBusy(true);
@@ -729,7 +729,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
                 </Link>
 
                 <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>Or upload a PDF</p>
-                <input ref={obFileRef} type="file" accept=".pdf,application/pdf" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleObPdf(f); e.target.value = ""; }} />
+                <input ref={obFileRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleObPdf(f); e.target.value = ""; }} />
                 <button
                   type="button"
                   className="rn-profile-dropzone"
@@ -867,7 +867,7 @@ export default function ProfilePage({ prefill }: { prefill: boolean }) {
               <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
                 Upload a <strong style={{ color: "var(--text)" }}>PDF</strong> below or use the <strong style={{ color: "var(--text)" }}>manual wizard</strong> — we only fill empty fields.
               </p>
-              <input ref={obFileRef} type="file" accept=".pdf,application/pdf" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleObPdf(f); e.target.value = ""; }} />
+              <input ref={obFileRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleObPdf(f); e.target.value = ""; }} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
                 <button
                   type="button"

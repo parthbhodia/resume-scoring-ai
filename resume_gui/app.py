@@ -71,14 +71,30 @@ from resume_library import (
     grok_preferred_for_throughput,
     run_tailor_research_job_context,
     coach_suggestions_llm,
+    coach_suggestions_llm_stream,
+    _sse_friendly_error,
     _get_resume_tex_for_user,
     _rate_resume,
     _optional_gemini_client,
 )
 try:
-    from resume_gui.renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items
+    from resume_gui.renderers.latex_renderer import (
+        JinjaLatexRenderer,
+        ResumeDocModel,
+        ExperienceItem,
+        EducationItem,
+        ProjectItem,
+        normalize_skill_items,
+    )
 except ImportError:
-    from renderers.latex_renderer import JinjaLatexRenderer, ResumeDocModel, ExperienceItem, normalize_skill_items  # type: ignore
+    from renderers.latex_renderer import (  # type: ignore
+        JinjaLatexRenderer,
+        ResumeDocModel,
+        ExperienceItem,
+        EducationItem,
+        ProjectItem,
+        normalize_skill_items,
+    )
 try:
     from resume_gui.profile_parser import parse_profile_text
 except ImportError:
@@ -111,6 +127,99 @@ def _parse_entry_header(header: str) -> Tuple[str, str, str, str]:
     if len(parts) == 3:
         return parts[0], parts[1], "", parts[2]
     return parts[0], parts[1], parts[2], " | ".join(parts[3:])
+
+
+def _education_item_from_dict(edu: dict) -> Optional[EducationItem]:
+    inst = _clean_model_text(edu.get("institution") or "")
+    deg = _clean_model_text(edu.get("degree") or "")
+    dat = _clean_model_text(edu.get("dates") or "")
+    loc = _clean_model_text(edu.get("location") or "")
+    if not (inst or deg or dat or loc):
+        return None
+    return EducationItem(
+        institution=inst or "Education",
+        degree=deg,
+        dates=dat,
+        location=loc,
+    )
+
+
+def _education_item_from_csv_line(line: str) -> EducationItem:
+    """Best-effort split of a single-line education row (comma-separated) into hierarchy fields."""
+    raw = _clean_model_text(line)
+    if not raw:
+        return EducationItem(institution="")
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if len(parts) >= 4:
+        institution = parts[0]
+        location = parts[-1]
+        dates = parts[-2]
+        degree = ", ".join(parts[1:-2])
+        return EducationItem(
+            institution=institution,
+            degree=degree,
+            dates=dates,
+            location=location,
+        )
+    if len(parts) == 3:
+        return EducationItem(institution=parts[0], degree=parts[1], dates=parts[2])
+    if len(parts) == 2:
+        return EducationItem(institution=parts[0], degree=parts[1])
+    return EducationItem(institution=raw)
+
+
+def _project_items_from_llm_projects(raw_projects: Any) -> list[ProjectItem]:
+    out: list[ProjectItem] = []
+    for proj in raw_projects or []:
+        if not isinstance(proj, dict):
+            continue
+        name_p = _clean_model_text(proj.get("name") or "")
+        p_buls = [_clean_model_text(b) for b in (proj.get("bullets") or []) if _clean_model_text(b)]
+        if name_p and p_buls:
+            out.append(ProjectItem(name=name_p, bullets=p_buls))
+        elif name_p:
+            out.append(ProjectItem(name=name_p, bullets=[]))
+        elif p_buls:
+            out.append(ProjectItem(name="", bullets=p_buls))
+    return out
+
+
+def _project_items_from_prefixed_bullets(lines: list[str]) -> list[ProjectItem]:
+    """Group ``ProjectName: detail`` lines so the PDF shows one title and multiple bullets."""
+    grouped: list[ProjectItem] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = _clean_model_text(lines[i])
+        if not line:
+            i += 1
+            continue
+        if ":" in line:
+            head, rest = line.split(":", 1)
+            h, r = head.strip(), rest.strip()
+            if h and len(r) > 8:
+                bullets = [r]
+                i += 1
+                while i < n:
+                    nxt = _clean_model_text(lines[i])
+                    if not nxt:
+                        i += 1
+                        continue
+                    if ":" in nxt:
+                        nh, nr = nxt.split(":", 1)
+                        nh, nr = nh.strip(), nr.strip()
+                        if nh.lower() == h.lower() and len(nr) > 8:
+                            bullets.append(nr)
+                            i += 1
+                            continue
+                        break
+                    bullets.append(nxt)
+                    i += 1
+                grouped.append(ProjectItem(name=h, bullets=bullets))
+                continue
+        grouped.append(ProjectItem(name="", bullets=[line]))
+        i += 1
+    return grouped
 
 
 def _clean_model_text(value: str) -> str:
@@ -305,6 +414,185 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
     return doc
 
 
+def _accepted_suggestion_section_bucket(section: Optional[str]) -> str:
+    """Where to apply a suggestion when verbatim ``original`` is not found in the structured doc.
+
+    Coach quotes ``original`` from raw profile text, while ``_resume_doc_from_profile_text`` may
+    normalize via LLM — substring matches often fail. A blanket ``doc.summary = suggested`` fallback
+    then pasted *skills* text into the summary (user-visible bug).
+    """
+    s = (section or "").strip().lower()
+    if not s:
+        return "other"
+    if "summary" in s or "profile" in s or "objective" in s:
+        return "summary"
+    if "skill" in s:
+        return "skills"
+    if "experience" in s or "employment" in s or ("work" in s and "project" not in s):
+        return "experience"
+    if "project" in s:
+        return "projects"
+    if "education" in s or "academic" in s:
+        return "education"
+    return "other"
+
+
+def _append_extra_section_line(doc: ResumeDocModel, section_title: str, line: str) -> None:
+    lt = (line or "").strip()
+    if not lt:
+        return
+    key = section_title.strip().lower()
+    if key in ("projects", "project"):
+        if doc.projects:
+            doc.projects[-1].bullets.append(lt)
+        else:
+            doc.projects.append(ProjectItem(name="", bullets=[lt]))
+        return
+    if key == "education":
+        doc.education.append(_education_item_from_csv_line(lt))
+        return
+    for i, (name, lines) in enumerate(doc.extra_sections):
+        nl = name.strip().lower()
+        if nl == key or key in nl or nl in key:
+            seq = list(lines)
+            if lt not in seq:
+                seq.append(lt)
+            doc.extra_sections[i] = (name, seq)
+            return
+    doc.extra_sections.append((section_title, [lt]))
+
+
+def _skills_fallback_replace_or_append(doc: ResumeDocModel, original: str, suggested: str) -> None:
+    """When ``original`` is not inside any skill line, still apply a skills-section approval."""
+    sug = (suggested or "").strip()
+    if not sug:
+        return
+    orig = (original or "").strip()
+    # Prefer replacing a line that shares a long prefix with what the coach quoted.
+    if orig and len(orig) >= 24:
+        prefix = orig[:48].lower()
+        for idx, (label, items) in enumerate(doc.skills):
+            next_items: list[str] = []
+            changed = False
+            for it in items:
+                if prefix in (it or "").lower():
+                    next_items.append(sug)
+                    changed = True
+                else:
+                    next_items.append(it)
+            if changed:
+                doc.skills[idx] = (label, [x for x in next_items if x])
+                return
+    # Parse "Category: a, b, c" like the profile parser.
+    if ":" in sug:
+        label, rest = sug.split(":", 1)
+        label = _clean_model_text(label)
+        rest = rest.strip()
+        if not label:
+            label = "Skills"
+        items = [x.strip() for x in rest.replace("·", ",").split(",") if x.strip()]
+        items = [x for x in items if not _is_structural_noise_line(x)]
+        normalized = normalize_skill_items(items)
+        if normalized:
+            doc.skills.append((label, normalized))
+            return
+    doc.skills.append(("Skills", [sug]))
+
+
+def _normalize_resume_line_for_suggestion(s: str) -> str:
+    """Align with ``web/lib/suggestionResumeMatch.ts`` ``normalizeResumeLineForSuggestion``."""
+    t = (s or "").strip().lower()
+    for a, b in (
+        ("\u2018", "'"),
+        ("\u2019", "'"),
+        ("\u201c", "'"),
+        ("\u201d", "'"),
+        ("\u2032", "'"),
+        ("\u2033", "'"),
+    ):
+        t = t.replace(a, b)
+    t = re.sub(
+        r"^[\s\u2022\u00b7\u2023\u2024\u2043\u2219\-\u2013\u2014*‧·.]+",
+        "",
+        t,
+    )
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _resume_line_matches_suggestion_original(line: str, original: str) -> bool:
+    """Same contract as ``resumeLineMatchesSuggestionOriginal`` in ``suggestionResumeMatch.ts``."""
+    no = _normalize_resume_line_for_suggestion(original)
+    nl = _normalize_resume_line_for_suggestion(line)
+    if not no or not nl:
+        return False
+    if nl == no:
+        return True
+
+    raw_line = line.strip().lower().replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", "'").replace("\u201d", "'")
+    raw_orig = original.strip().lower().replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", "'").replace("\u201d", "'")
+    if raw_line == raw_orig:
+        return True
+
+    min_contains = 8
+    if len(no) >= min_contains and len(nl) >= min_contains:
+        if no in nl or nl in no:
+            return True
+
+    pref_len = 55
+    pref_a = nl[:pref_len]
+    pref_b = no[:pref_len]
+    if len(pref_a) >= 12 and len(pref_b) >= 12:
+        if pref_a.startswith(pref_b) or pref_b.startswith(pref_a):
+            return True
+
+    if len(no) >= 14 and len(nl) >= 14:
+        shorter = nl if len(nl) <= len(no) else no
+        longer = no if len(nl) <= len(no) else nl
+        window = longer[: len(shorter) + 8]
+        if shorter in window:
+            return True
+
+    return False
+
+
+def _apply_line_suggestion(line: str, original: str, suggested: str) -> Optional[str]:
+    """If ``original`` matches this line (verbatim or fuzzy), return the new line text; else None."""
+    if not original:
+        return None
+    if original in line:
+        if suggested:
+            return line.replace(original, suggested).strip()
+        return ""
+    if _resume_line_matches_suggestion_original(line, original):
+        if suggested:
+            return suggested.strip()
+        return ""
+    return None
+
+
+def _experience_fallback_replace_by_prefix(doc: ResumeDocModel, original: str, suggested: str) -> bool:
+    """Last resort when fuzzy match failed: replace the bullet whose text contains a long prefix of ``original``."""
+    orig = (original or "").strip()
+    sug = (suggested or "").strip()
+    if not orig or not sug or len(orig) < 24:
+        return False
+    prefix = orig[:48].lower()
+    for exp in doc.experience:
+        next_bullets: list[str] = []
+        changed = False
+        for b in exp.bullets:
+            if prefix in (b or "").lower():
+                next_bullets.append(sug)
+                changed = True
+            else:
+                next_bullets.append(b)
+        if changed:
+            exp.bullets = [x for x in next_bullets if x]
+            return True
+    return False
+
+
 def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Optional[list]) -> None:
     if not isinstance(accepted_suggestions, list):
         return
@@ -327,13 +615,14 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
             next_items = []
             changed = False
             for it in items:
-                if original in it:
-                    if suggested:
-                        next_items.append(it.replace(original, suggested).strip())
+                updated = _apply_line_suggestion(it, original, suggested)
+                if updated is None:
+                    next_items.append(it)
+                else:
                     changed = True
                     replaced = True
-                else:
-                    next_items.append(it)
+                    if updated:
+                        next_items.append(updated)
             if changed:
                 doc.skills[idx] = (label, [x for x in next_items if x])
 
@@ -341,21 +630,65 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
             next_bullets = []
             changed = False
             for b in exp.bullets:
-                if original in b:
-                    if suggested:
-                        next_bullets.append(b.replace(original, suggested).strip())
+                updated = _apply_line_suggestion(b, original, suggested)
+                if updated is None:
+                    next_bullets.append(b)
+                else:
                     changed = True
                     replaced = True
-                else:
-                    next_bullets.append(b)
+                    if updated:
+                        next_bullets.append(updated)
             if changed:
                 exp.bullets = [x for x in next_bullets if x]
 
+        for proj in doc.projects:
+            next_bullets = []
+            changed = False
+            for b in proj.bullets:
+                updated = _apply_line_suggestion(b, original, suggested)
+                if updated is None:
+                    next_bullets.append(b)
+                else:
+                    changed = True
+                    replaced = True
+                    if updated:
+                        next_bullets.append(updated)
+            if changed:
+                proj.bullets = [x for x in next_bullets if x]
+
+        for edu in doc.education:
+            for attr in ("institution", "degree", "dates", "location"):
+                cur = getattr(edu, attr, "") or ""
+                if cur and original in cur:
+                    setattr(edu, attr, cur.replace(original, suggested).strip())
+                    replaced = True
+
+        # Coach quotes raw profile lines; structured doc may normalize wording — do not
+        # route unrelated sections into ``summary``.
         if not replaced and suggested:
-            if doc.summary:
-                doc.summary = suggested
+            bucket = _accepted_suggestion_section_bucket(str(item.get("section") or ""))
+            if bucket == "summary":
+                doc.summary = suggested.strip()
+            elif bucket == "skills":
+                _skills_fallback_replace_or_append(doc, original, suggested)
+            elif bucket == "projects":
+                _append_extra_section_line(doc, "Projects", suggested)
+            elif bucket == "education":
+                _append_extra_section_line(doc, "Education", suggested)
+            elif bucket == "experience":
+                if not _experience_fallback_replace_by_prefix(doc, original, suggested):
+                    logger.warning(
+                        "accepted_suggestion could not be matched to structured experience "
+                        "(no verbatim or fuzzy line match, prefix fallback failed); skipped id=%s section=%r",
+                        str(item.get("id") or "")[:32],
+                        (item.get("section") or "")[:80],
+                    )
             else:
-                doc.summary = suggested
+                logger.warning(
+                    "accepted_suggestion could not be matched in structured doc; skipped id=%s section=%r",
+                    str(item.get("id") or "")[:32],
+                    (item.get("section") or "")[:80],
+                )
 
 
 def _structured_ratings_from_ats(ats: dict) -> dict:
@@ -536,11 +869,15 @@ def _load_tex_from_candidate(folder: str, user_id: Optional[str]) -> Optional[st
 def _resolve_structured_source_folder(base_folder: Optional[str], reference_folder: Optional[str], user_id: Optional[str]) -> Tuple[str, str]:
     _ = user_id  # Structured template resolution is Supabase-driven.
     candidates: List[str] = []
+    ref_name = (reference_folder or "").strip()
     base_name = (base_folder or "").strip()
-    if base_name and "_structured_" not in base_name:
+    # Builder sends `reference_folder` as the explicit LaTeX style choice (e.g. Harshibar).
+    # `base_folder` is whichever library row backed the last compile (often Adobe_FullStack) — it must
+    # not override the user's selected reference style when loading `resume_templates` rows.
+    if ref_name:
+        candidates.append(ref_name)
+    if base_name and "_structured_" not in base_name and base_name not in candidates:
         candidates.append(base_name)
-    if (reference_folder or "").strip() and (reference_folder or "").strip() not in candidates:
-        candidates.append((reference_folder or "").strip())
     for fallback in ("Adobe_FullStack", "Harshibar_Template1", "MaltaCV_Modern"):
         if fallback not in candidates:
             candidates.append(fallback)
@@ -721,75 +1058,47 @@ Instructions:
 
 def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
     parsed = parse_profile_text(candidate_profile)
-    full_name = _clean_model_text(parsed.full_name or "Candidate") or "Candidate"
-    summary = _clean_model_text(parsed.summary or "")
-    skills = []
-    for ln in parsed.skills_lines or []:
-        clean = _clean_model_text(ln)
-        if not clean or _is_structural_noise_line(clean):
-            continue
-        if ":" in clean:
-            label, rest = clean.split(":", 1)
-            items = [x.strip() for x in rest.split(",") if x.strip()]
-            if items:
-                skills.append((_clean_model_text(label) or "Skills", normalize_skill_items(items)))
-        else:
-            skills.append(("Skills", normalize_skill_items([clean])))
+    extra_sec = list(parsed.extra_sections or [])
+    structured_projects: list[ProjectItem] = []
+    if parsed.projects_bullets:
+        clean_proj = [_clean_model_text(b) for b in parsed.projects_bullets if _clean_model_text(b)]
+        if clean_proj:
+            structured_projects = _project_items_from_prefixed_bullets(clean_proj)
+            if not structured_projects:
+                structured_projects = [ProjectItem(name="", bullets=clean_proj)]
+    if not structured_projects:
+        for name, vals in extra_sec:
+            if (name or "").strip().lower() in ("projects", "project") and vals:
+                structured_projects = _project_items_from_prefixed_bullets(
+                    [_clean_model_text(v) for v in vals if _clean_model_text(v)]
+                )
+                break
 
-    # Multi-role experience from structured parser.
-    if parsed.experience_entries:
-        experience_list = [
-            ExperienceItem(
-                company=_clean_model_text(company) or "Experience",
-                role=_clean_model_text(role or ""),
-                dates=_clean_model_text(dates or ""),
-                location=_clean_model_text(location or ""),
-                bullets=[_clean_model_text(b) for b in bullets if _clean_model_text(b)],
-            )
-            for company, role, dates, location, bullets in parsed.experience_entries
-        ]
-    else:
-        bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
-        extra_bullets: list[str] = []
-        for p in parsed.projects_bullets or []:
-            cp = _clean_model_text(p)
-            if cp:
-                extra_bullets.append(f"Project: {cp}")
-        for e in parsed.education_lines or []:
+    structured_education: list[EducationItem] = []
+    if parsed.education_lines:
+        for e in parsed.education_lines:
             ce = _clean_model_text(e)
             if ce:
-                extra_bullets.append(f"Education: {ce}")
-        experience_list = [
-            ExperienceItem(
-                company=company or "Experience",
-                role=role or "Role",
-                dates="",
-                location="",
-                bullets=bullets + extra_bullets,
-            )
-        ]
+                structured_education.append(_education_item_from_csv_line(ce))
+    if not structured_education:
+        for name, vals in extra_sec:
+            if (name or "").strip().lower() == "education" and vals:
+                for e in vals:
+                    ce = _clean_model_text(str(e))
+                    if ce:
+                        structured_education.append(_education_item_from_csv_line(ce))
+                break
 
-    extra_sections: list[tuple[str, list[str]]] = []
-
-    # Projects and Education live in extra_sections so the template can render them
-    # as their own LaTeX sections (the Harshibar template filters by name).
-    if parsed.projects_bullets:
-        cleaned = [_clean_model_text(b) for b in parsed.projects_bullets if _clean_model_text(b)]
-        if cleaned:
-            extra_sections.append(("Projects", cleaned))
-
-    for name, vals in (parsed.extra_sections or []):
-        clean_name = _clean_model_text(name)
-        if not clean_name:
+    extra_sec_filtered: list[tuple[str, list[str]]] = []
+    for name, vals in extra_sec:
+        lname = (name or "").strip().lower()
+        if structured_projects and lname in ("projects", "project"):
             continue
-        clean_vals = [_clean_model_text(v) for v in vals if _clean_model_text(v)]
-        if clean_vals:
-            extra_sections.append((clean_name, clean_vals))
-
-    if parsed.education_lines:
-        cleaned = [_clean_model_text(e) for e in parsed.education_lines if _clean_model_text(e)]
-        if cleaned:
-            extra_sections.append(("Education", cleaned))
+        if structured_education and lname == "education":
+            continue
+        cleaned = (name, [_clean_model_text(v) for v in vals if _clean_model_text(v)])
+        if cleaned[0]:
+            extra_sec_filtered.append(cleaned)
 
     return ResumeDocModel(
         full_name=full_name,
@@ -802,7 +1111,9 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         summary=summary,
         skills=skills,
         experience=experience_list,
-        extra_sections=extra_sections,
+        education=structured_education,
+        projects=structured_projects,
+        extra_sections=extra_sec_filtered,
     )
 
 # CORS: allow localhost dev + deployed frontend
@@ -1194,22 +1505,100 @@ async def api_generate_stream(request: Request):
 
 
 async def api_upload_resume(request: Request):
-    """Extract plain text from an uploaded PDF resume."""
+    """Extract résumé text from PDF or DOCX (MarkItDown + LLM structured parse).
+
+    Returns ``text`` (plain, builder-friendly), ``markdown`` (raw extract),
+    optional ``structured`` (JSON), ``parse_status`` (``ready`` | ``llm_failed``),
+    and optional ``hints`` when structured parsing did not complete.
+
+    Guards mirror common patterns from Resume Matcher (type, size, empty extract, clear errors).
+    """
     try:
-        form    = await request.form()
-        file    = form.get("file")
+        form = await request.form()
+        file = form.get("file")
         if file is None:
-            return JSONResponse({"error": "No file uploaded"}, status_code=400)
+            return JSONResponse({"error": "No file uploaded", "code": "no_file"}, status_code=400)
         content = await file.read()
-        with pdfplumber.open(io.BytesIO(content)) as pdf:
-            text = _extract_pdf_text(pdf)
-        if not text:
-            return JSONResponse({"error": "Could not extract text from PDF"}, status_code=422)
-        logger.info(f"PDF upload  |  {len(text)} chars extracted from {getattr(file, 'filename', 'upload.pdf')}")
-        return JSONResponse({"text": text})
-    except Exception as exc:
-        logger.exception("PDF upload failed")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        if not content:
+            return JSONResponse({"error": "Empty file", "code": "empty_file"}, status_code=400)
+
+        filename = getattr(file, "filename", None) or "resume.pdf"
+        content_type = getattr(file, "content_type", None)
+
+        from resume_upload_parse import (
+            RESUME_UPLOAD_MAX_BYTES,
+            extract_upload_markdown,
+            message_for_empty_resume_extract,
+            parse_upload_resume_full_pipeline,
+            validate_resume_upload_file,
+        )
+
+        try:
+            validate_resume_upload_file(content_type, filename)
+        except ValueError as ve:
+            return JSONResponse({"error": str(ve), "code": "invalid_file_type"}, status_code=400)
+
+        if len(content) > RESUME_UPLOAD_MAX_BYTES:
+            mb = RESUME_UPLOAD_MAX_BYTES // (1024 * 1024)
+            return JSONResponse(
+                {
+                    "error": f"File too large (maximum {mb} MB). Try compressing images or a shorter document.",
+                    "code": "file_too_large",
+                },
+                status_code=413,
+            )
+
+        loop = asyncio.get_event_loop()
+
+        def _extract_sync():
+            return extract_upload_markdown(content, filename, pdf_plain_fallback=None)
+
+        outcome = await loop.run_in_executor(None, _extract_sync)
+        if not (outcome.markdown or "").strip():
+            return JSONResponse(
+                {
+                    "error": message_for_empty_resume_extract(outcome.empty_reason),
+                    "code": "no_extractable_text",
+                    "detail": outcome.empty_reason,
+                },
+                status_code=422,
+            )
+
+        markdown_content = outcome.markdown
+
+        def _pipeline_sync():
+            return parse_upload_resume_full_pipeline(markdown_content)
+
+        structured, plain_text, parse_status, hints = await loop.run_in_executor(None, _pipeline_sync)
+
+        logger.info(
+            "Resume upload  |  %s  |  md_chars=%s  plain_chars=%s  parse_status=%s",
+            filename,
+            len(markdown_content),
+            len(plain_text or ""),
+            parse_status,
+        )
+
+        payload: Dict[str, Any] = {
+            "text": plain_text,
+            "markdown": markdown_content,
+            "parse_status": parse_status,
+        }
+        if parse_status == "ready" and structured:
+            payload["structured"] = structured
+        if hints:
+            payload["hints"] = hints
+
+        return JSONResponse(payload)
+    except Exception:
+        logger.exception("Resume upload failed")
+        return JSONResponse(
+            {
+                "error": "Something went wrong while processing your résumé. Please try again in a moment.",
+                "code": "server_error",
+            },
+            status_code=500,
+        )
 
 
 async def api_extract_jd(request: Request):
@@ -3280,46 +3669,18 @@ async def api_rewrite_role(request: Request):
     return JSONResponse({"bullets": rewritten})
 
 
-async def api_suggest_changes(request: Request):
-    """POST /api/suggest-changes — analyze resume vs JD and return per-bullet suggestions.
-
-    Body: { "candidate_profile": str, "job_description": str }
-    Returns: { "summary", "suggestions", optional "research_queries", "research_sources", "research_digest" }
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "invalid json"}, status_code=400)
-
-    candidate_profile = (body.get("candidate_profile") or "").strip()
-    job_description   = (body.get("job_description") or "").strip()
-
-    if not candidate_profile:
-        return JSONResponse({"error": "candidate_profile required"}, status_code=400)
-    if not job_description:
-        return JSONResponse({"error": "job_description required"}, status_code=400)
-
-    loop = asyncio.get_event_loop()
-    digest = ""
-    research_queries: List[str] = []
-    research_sources: List[dict] = []
-    try:
-        digest, research_queries, research_sources = await loop.run_in_executor(
-            None, run_tailor_research_job_context, job_description
-        )
-    except Exception as exc:
-        logger.warning("pre-suggestion web research failed (suggestions will use resume+JD only): %s", exc)
-
+def _resume_coach_prompt(candidate_profile: str, job_description: str, digest: str) -> str:
+    """Shared JD + résumé + optional web-digest prompt for suggest-changes (JSON coach)."""
     digest_block = ""
-    if digest.strip():
+    ds = (digest or "").strip()
+    if ds:
         digest_block = (
             "\n---\nJOB & MARKET CONTEXT (from live web search before this analysis — use for terminology, "
             "JD vocabulary, and honest keyword overlap only; do NOT add employers, degrees, dates, or metrics "
             "not already in the résumé or JD):\n"
-            f"{digest.strip()[:4500]}\n\n"
+            f"{ds[:4500]}\n\n"
         )
-
-    prompt = (
+    return (
         "You are an expert resume coach. Analyze this resume against the job description "
         "and return 5-8 specific, actionable improvements for individual bullets or sections.\n\n"
         f"RESUME:\n{candidate_profile[:6000]}\n\n"
@@ -3347,6 +3708,75 @@ async def api_suggest_changes(request: Request):
         "- Return ONLY the JSON object, no markdown fences."
     )
 
+
+def _sanitize_reuse_research_sources(raw: object) -> List[dict]:
+    out: List[dict] = []
+    if not isinstance(raw, list):
+        return out
+    for it in raw[:40]:
+        if not isinstance(it, dict):
+            continue
+        url = str(it.get("url") or "").strip()[:2000]
+        if not url:
+            continue
+        title = str(it.get("title") or "").strip()[:500] or None
+        out.append({"title": title, "url": url})
+    return out
+
+
+def _try_suggest_reuse_research(body: dict) -> Optional[Tuple[str, List[str], List[dict]]]:
+    """If the client sends a prior digest (same JD session), skip a second live web search."""
+    d = str(body.get("reuse_research_digest") or "").strip()
+    if len(d) < 40:
+        return None
+    rq_in = body.get("reuse_research_queries")
+    rq = [
+        str(q).strip()[:500]
+        for q in (rq_in if isinstance(rq_in, list) else [])
+        if str(q).strip()
+    ][:40]
+    rs = _sanitize_reuse_research_sources(body.get("reuse_research_sources"))
+    return (d[:5000], rq, rs)
+
+
+async def api_suggest_changes(request: Request):
+    """POST /api/suggest-changes — analyze resume vs JD and return per-bullet suggestions.
+
+    Body: { "candidate_profile": str, "job_description": str,
+            optional reuse_research_digest, reuse_research_queries, reuse_research_sources }
+    Returns: { "summary", "suggestions", optional "research_queries", "research_sources", "research_digest" }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+    candidate_profile = (body.get("candidate_profile") or "").strip()
+    job_description   = (body.get("job_description") or "").strip()
+
+    if not candidate_profile:
+        return JSONResponse({"error": "candidate_profile required"}, status_code=400)
+    if not job_description:
+        return JSONResponse({"error": "job_description required"}, status_code=400)
+
+    loop = asyncio.get_event_loop()
+    digest = ""
+    research_queries: List[str] = []
+    research_sources: List[dict] = []
+    reuse = _try_suggest_reuse_research(body)
+    if reuse:
+        digest, research_queries, research_sources = reuse
+        logger.info("suggest-changes: reusing client-provided research digest (%s chars)", len(digest))
+    else:
+        try:
+            digest, research_queries, research_sources = await loop.run_in_executor(
+                None, run_tailor_research_job_context, job_description
+            )
+        except Exception as exc:
+            logger.warning("pre-suggestion web research failed (suggestions will use resume+JD only): %s", exc)
+
+    prompt = _resume_coach_prompt(candidate_profile, job_description, digest)
+
     def _call():
         return coach_suggestions_llm(prompt)
 
@@ -3368,6 +3798,123 @@ async def api_suggest_changes(request: Request):
     except Exception as exc:
         logger.exception("suggest-changes failed")
         return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def api_suggest_changes_stream(request: Request):
+    """POST /api/suggest-changes-stream — same inputs as suggest-changes; SSE with live coach tokens.
+
+    Body may include reuse_research_digest (+ optional reuse_research_queries / reuse_research_sources)
+    to skip a second live JD web search when the job description is unchanged since the last pass.
+
+    Events (JSON per line after ``data: ``):
+      ``status`` {msg}
+      ``research`` {research_queries, research_sources, research_digest}
+      ``coach_delta`` {text} — fragment of the JSON response from the model
+      ``coach_done`` {summary, suggestions, research_*} — final structured payload
+      ``error`` {msg}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        async def err_gen():
+            yield {"data": json.dumps({"event": "error", "msg": "invalid json"})}
+        return EventSourceResponse(err_gen())
+
+    if not isinstance(body, dict):
+        async def err_gen():
+            yield {"data": json.dumps({"event": "error", "msg": "Expected a JSON object."})}
+        return EventSourceResponse(err_gen())
+
+    candidate_profile = (body.get("candidate_profile") or "").strip()
+    job_description = (body.get("job_description") or "").strip()
+    if not candidate_profile:
+        async def err_gen():
+            yield {"data": json.dumps({"event": "error", "msg": "candidate_profile required"})}
+        return EventSourceResponse(err_gen())
+    if not job_description:
+        async def err_gen():
+            yield {"data": json.dumps({"event": "error", "msg": "job_description required"})}
+        return EventSourceResponse(err_gen())
+
+    loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    reuse_pack = _try_suggest_reuse_research(body)
+
+    def producer():
+        try:
+            def qput(item: Dict[str, Any]) -> None:
+                asyncio.run_coroutine_threadsafe(queue.put(item), loop).result()
+
+            digest = ""
+            research_queries: List[str] = []
+            research_sources: List[dict] = []
+            if reuse_pack:
+                digest, research_queries, research_sources = reuse_pack
+                logger.info("suggest-changes-stream: reusing client research digest (%s chars)", len(digest))
+                qput({"event": "status", "msg": "Reusing web research from your last pass for this job…"})
+            else:
+                qput({"event": "status", "msg": "Gathering live context from the web…"})
+                try:
+                    digest, research_queries, research_sources = run_tailor_research_job_context(job_description)
+                except Exception as exc:
+                    logger.warning("pre-suggestion web research failed (suggestions stream): %s", exc)
+            rd = digest.strip()[:2500] if digest.strip() else ""
+            qput({
+                "event": "research",
+                "research_queries": research_queries,
+                "research_sources": research_sources,
+                "research_digest": rd,
+            })
+            qput({"event": "status", "msg": "Drafting tailored suggestions…"})
+            prompt = _resume_coach_prompt(candidate_profile, job_description, digest)
+
+            def on_delta(fragment: str) -> None:
+                qput({"event": "coach_delta", "text": fragment})
+
+            text = coach_suggestions_llm_stream(prompt, on_delta=on_delta)
+            if text.startswith("```"):
+                text = re.sub(r"^```[a-z]*\n?", "", text)
+                text = re.sub(r"\n?```$", "", text)
+            data = json.loads(text)
+            if not isinstance(data, dict):
+                raise RuntimeError("Coach returned non-object JSON")
+            data["research_queries"] = research_queries
+            data["research_sources"] = research_sources
+            if digest.strip():
+                data["research_digest"] = digest.strip()[:2500]
+            qput({
+                "event": "coach_done",
+                "summary": data.get("summary"),
+                "suggestions": data.get("suggestions"),
+                "research_queries": data.get("research_queries"),
+                "research_sources": data.get("research_sources"),
+                "research_digest": data.get("research_digest"),
+            })
+        except json.JSONDecodeError as exc:
+            logger.error("suggest-changes-stream JSON parse error: %s", exc)
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"event": "error", "msg": "AI response could not be parsed."}),
+                loop,
+            ).result()
+        except Exception as exc:
+            logger.exception("suggest-changes-stream failed")
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"event": "error", "msg": _sse_friendly_error(exc)}),
+                loop,
+            ).result()
+        finally:
+            asyncio.run_coroutine_threadsafe(queue.put(None), loop).result()
+
+    threading.Thread(target=producer, daemon=True).start()
+
+    async def event_gen():
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield {"data": json.dumps(item)}
+
+    return EventSourceResponse(event_gen())
 
 
 async def serve_pdf(request: Request):
@@ -3410,6 +3957,7 @@ routes = [
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
     Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),
     Route("/api/suggest-changes",         api_suggest_changes, methods=["POST"]),
+    Route("/api/suggest-changes-stream",  api_suggest_changes_stream, methods=["POST"]),
     Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
 

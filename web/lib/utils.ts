@@ -24,6 +24,14 @@ export function apiUrl(path: string): string {
   return `${base}${path}`;
 }
 
+/** Résumé upload to ``/api/upload-resume`` — PDF or Word (DOC/DOCX). */
+export function isResumeUploadFile(file: File): boolean {
+  const t = (file.type || "").toLowerCase();
+  if (t.includes("pdf")) return true;
+  if (t.includes("wordprocessingml") || t === "application/msword") return true;
+  return /\.(pdf|docx?)$/i.test(file.name || "");
+}
+
 /**
  * Parse a fetch Response as JSON, but fall back gracefully when the server
  * returns HTML/plain-text (e.g. a 404 "Not Found" page). Throws an Error with

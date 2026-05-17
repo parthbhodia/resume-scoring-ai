@@ -56,6 +56,8 @@ pydantic-settings>=2.1.0
 
 # PDF text extraction (for resume upload feature)
 pdfplumber>=0.11.0
+# Unified PDF/DOCX → markdown for upload pipeline (Resume-Matcher style)
+markitdown[docx]>=0.1.4
 pypdf>=4.2.0
 unstructured>=0.15.0
 python-multipart>=0.0.9

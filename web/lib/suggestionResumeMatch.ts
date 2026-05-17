@@ -16,7 +16,8 @@ function isAllCapsSectionLine(t: string): boolean {
 }
 
 function isBulletLine(t: string): boolean {
-  return /^[•\-–*\u2022\u00b7]/.test(t.trim());
+  const s = t.trim();
+  return /^[•\-–*|\u2022\u00b7]/.test(s) || /^\.\s+\S/.test(s);
 }
 
 function endsWithSentenceBoundary(t: string): boolean {
