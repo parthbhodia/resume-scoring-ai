@@ -4325,6 +4325,211 @@ async def api_export_docx(request: Request):
     )
 
 
+def _llm_tailor_to_jd(doc: "ResumeDocModel", jd: str, role: str, company: str) -> "ResumeDocModel":
+    """Re-tailor an already-extracted ResumeDocModel to a specific JD.
+
+    Returns the tailored doc, or the original doc unchanged if LLM fails.
+    """
+    jd_snippet     = (jd or "")[:3000].strip()
+    profile_snippet = (jd or "")[:100]  # just for context; real content is from doc
+
+    # Serialize the existing model's content into a compact profile block
+    lines: list[str] = []
+    if doc.summary:
+        lines.append(f"SUMMARY: {doc.summary}")
+    for exp in (doc.experience or []):
+        lines.append(f"\nROLE: {exp.role} at {exp.company} ({exp.dates})")
+        for b in exp.bullets:
+            lines.append(f"  - {b}")
+    serialized = "\n".join(lines)[:5000]
+
+    prompt = f"""You are an expert resume writer. Rewrite the professional summary and experience bullets
+to target this specific role and JD. Keep all dates, company names, and core facts exactly as given.
+Strengthen verbs, quantify where data is present, and naturally weave in 1-2 JD keywords per bullet.
+Do NOT fabricate metrics.
+
+TARGET ROLE: {role} at {company}
+
+JOB DESCRIPTION:
+{jd_snippet}
+
+CURRENT RESUME CONTENT:
+{serialized}
+
+Output ONLY valid JSON (no markdown) with this schema:
+{{
+  "summary": "string — new 2-3 sentence summary tailored to JD",
+  "experience": [
+    {{
+      "company": "string — exact original value",
+      "role": "string — exact original value",
+      "bullets": ["string — rewritten bullet"]
+    }}
+  ]
+}}"""
+
+    try:
+        raw = _llm_json_call(prompt)
+        if not raw or not isinstance(raw, dict):
+            return doc
+
+        new_summary = _clean_model_text(str(raw.get("summary") or ""))
+        if new_summary:
+            doc = doc._replace(summary=new_summary) if hasattr(doc, "_replace") else ResumeDocModel(
+                full_name=doc.full_name, headline=doc.headline, location=doc.location,
+                email=doc.email, phone=doc.phone, linkedin=doc.linkedin, github=doc.github,
+                summary=new_summary, skills=doc.skills, experience=doc.experience,
+                extra_sections=doc.extra_sections,
+            )
+
+        exp_list = raw.get("experience") or []
+        new_experience = list(doc.experience or [])
+        for ei, raw_exp in enumerate(exp_list):
+            if ei >= len(new_experience):
+                break
+            raw_bullets = [_clean_model_text(str(b)) for b in (raw_exp.get("bullets") or []) if _clean_model_text(str(b))]
+            if raw_bullets:
+                old = new_experience[ei]
+                new_experience[ei] = ExperienceItem(
+                    company=old.company, role=old.role, dates=old.dates,
+                    location=old.location, bullets=raw_bullets,
+                )
+
+        doc = ResumeDocModel(
+            full_name=doc.full_name, headline=doc.headline, location=doc.location,
+            email=doc.email, phone=doc.phone, linkedin=doc.linkedin, github=doc.github,
+            summary=doc.summary, skills=doc.skills, experience=new_experience,
+            extra_sections=doc.extra_sections,
+        )
+        return doc
+    except Exception as exc:
+        logger.warning(f"_llm_tailor_to_jd failed: {exc}")
+        return doc
+
+
+def _doc_from_structured_dict(
+    structured: dict,
+    accepted_edits: "dict[str, dict[str, str]]",
+) -> "ResumeDocModel":
+    """Rebuild a ResumeDocModel from a structuredResume dict (Phase 1 format),
+    patching in any accepted bullet edits from the Analyze UI.
+
+    accepted_edits format: { "<experienceIdx>": { "<bulletIdx>": "new text" } }
+    """
+    experience: list[ExperienceItem] = []
+    for ei, exp in enumerate(structured.get("experience") or []):
+        raw_bullets = list(exp.get("bullets") or [])
+        ei_key = str(ei)
+        patched = []
+        for bi, bullet in enumerate(raw_bullets):
+            override = (accepted_edits.get(ei_key) or {}).get(str(bi))
+            patched.append(_clean_model_text(override) if override else _clean_model_text(bullet))
+        experience.append(ExperienceItem(
+            company=_clean_model_text(str(exp.get("company") or "")) or "Company",
+            role=_clean_model_text(str(exp.get("role") or "")),
+            dates=_clean_model_text(str(exp.get("dates") or "")),
+            location=_clean_model_text(str(exp.get("location") or "")),
+            bullets=[b for b in patched if b],
+        ))
+
+    skills: list[tuple[str, list[str]]] = []
+    for sk in (structured.get("skills") or []):
+        cat   = _clean_model_text(str(sk.get("category") or "Skills"))
+        items = normalize_skill_items(str(i) for i in (sk.get("items") or []))
+        if items:
+            skills.append((cat or "Skills", items))
+
+    extra_sections: list[tuple[str, list[str]]] = []
+    for sec in (structured.get("extra_sections") or []):
+        title = str(sec.get("title") or "")
+        lines = [_clean_model_text(str(l)) for l in (sec.get("lines") or []) if _clean_model_text(str(l))]
+        if title and lines:
+            extra_sections.append((title, lines))
+
+    return ResumeDocModel(
+        full_name=_clean_model_text(str(structured.get("full_name") or "Candidate")) or "Candidate",
+        headline=_clean_model_text(str(structured.get("headline") or "")),
+        location=_clean_model_text(str(structured.get("location") or "")),
+        email=_clean_model_text(str(structured.get("email") or "")),
+        phone=_clean_model_text(str(structured.get("phone") or "")),
+        linkedin=_clean_model_text(str(structured.get("linkedin") or "")),
+        github=_clean_model_text(str(structured.get("github") or "")),
+        summary=_clean_model_text(str(structured.get("summary") or "")),
+        skills=skills,
+        experience=experience,
+        extra_sections=extra_sections,
+    )
+
+
+async def api_analyze_export_pdf(request: Request):
+    """POST /api/analyze-export-pdf — render accepted Analyze edits to a PDF.
+
+    Body (JSON):
+      structuredResume  — dict from /api/analyze-upload (required)
+      acceptedEdits     — { "<ei>": { "<bi>": "new text" } } (optional)
+      referenceFolder   — LaTeX template key, e.g. "Adobe_FullStack" (optional)
+      jd                — job description text; if present, runs _llm_tailor_to_jd first (optional)
+      role              — job title (optional, used for tailoring + folder naming)
+      company           — company name (optional, used for tailoring + folder naming)
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    structured = body.get("structuredResume")
+    if not structured or not isinstance(structured, dict):
+        return JSONResponse({"error": "structuredResume required"}, status_code=400)
+
+    accepted_edits: dict  = body.get("acceptedEdits") or {}
+    reference_folder: str = (body.get("referenceFolder") or "Adobe_FullStack").strip()
+    jd: str               = (body.get("jd") or "").strip()
+    role: str             = (body.get("role") or structured.get("headline") or "Candidate").strip()
+    company: str          = (body.get("company") or "").strip()
+
+    loop = asyncio.get_event_loop()
+
+    def _build_pdf() -> tuple[bytes, str]:
+        # 1. Rebuild ResumeDocModel from structured dict + accepted edits
+        doc = _doc_from_structured_dict(structured, accepted_edits)
+
+        # 2. Optionally tailor to JD
+        if jd:
+            doc = _llm_tailor_to_jd(doc, jd, role, company)
+
+        # 3. Render LaTeX
+        renderer = JinjaLatexRenderer()
+        template_name = _template_name_for_reference(reference_folder)
+        new_tex = renderer.render(doc, template_name=template_name)
+
+        # 4. Compile to PDF
+        out_folder, _ = _create_structured_output_folder(None, reference_folder, role, company or "export")
+        compiled = recompile_resume_from_tex(out_folder, new_tex)
+
+        pdf_path = compiled.get("pdf_path")
+        if not pdf_path or not os.path.isfile(pdf_path):
+            raise RuntimeError("PDF compilation failed — check pdflatex is installed.")
+
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        safe_name = (doc.full_name or "resume").replace(" ", "_")
+        filename  = f"{safe_name}_tailored.pdf"
+        return pdf_bytes, filename
+
+    try:
+        pdf_bytes, filename = await loop.run_in_executor(None, _build_pdf)
+    except Exception as exc:
+        logger.exception("analyze_export_pdf failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 routes = [
     Route("/",                              homepage),
     Route("/api/resumes",                   api_resumes),
@@ -4348,6 +4553,7 @@ routes = [
     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
     Route("/api/export-docx",             api_export_docx,     methods=["POST"]),
+    Route("/api/analyze-export-pdf",      api_analyze_export_pdf, methods=["POST"]),
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
     Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),
     Route("/api/rewrite-bullet",          api_rewrite_bullet,  methods=["POST"]),

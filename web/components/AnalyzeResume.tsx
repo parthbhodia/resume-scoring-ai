@@ -1772,6 +1772,7 @@ export default function AnalyzeResume() {
               sourcePdfUrl={sourcePdfUrl}
               sourcePdfFileName={sourcePdfFileName}
               restoredResumeNoPdfHint={historyRestoreActive && !sourcePdfUrl}
+              jd={jd}
             />
             </div>
           </div>

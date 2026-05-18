@@ -74,6 +74,12 @@ interface Props {
   sourcePdfFileName?: string | null;
   /** Explain why PDF / Original download toggles are missing after opening a saved analysis. */
   restoredResumeNoPdfHint?: boolean;
+  /** Export accepted edits to PDF via unified pipeline. Receives selected template folder. */
+  onExportPdf?: (opts: { referenceFolder: string }) => void;
+  /** Export accepted edits to DOCX. */
+  onExportDocx?: () => void;
+  /** True while an export is in progress. */
+  exportingResume?: boolean;
 }
 
 function scoreColor(score: number): string {
@@ -213,6 +219,9 @@ export default function AnnotatedResumePanel({
   sourcePdfUrl = null,
   sourcePdfFileName = null,
   restoredResumeNoPdfHint = false,
+  onExportPdf,
+  onExportDocx,
+  exportingResume = false,
 }: Props) {
   const styleTemplates = useMemo(() => distinctStyleTemplates(), []);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -905,6 +914,56 @@ export default function AnnotatedResumePanel({
             >
               {pdfExporting ? "Exporting…" : "Download preview PDF"}
             </button>
+            {(onExportPdf || onExportDocx) && (
+              <>
+                <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "2px 0" }} />
+                {onExportPdf && (
+                  <button
+                    type="button"
+                    disabled={exportingResume}
+                    onClick={() => onExportPdf({ referenceFolder: selectedReferenceFolder })}
+                    title="Export your resume with accepted edits applied, rendered via the full LaTeX pipeline."
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      padding: "5px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: exportingResume ? "var(--surface3)" : "var(--accent)",
+                      color: "#fff",
+                      cursor: exportingResume ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      whiteSpace: "nowrap",
+                      boxShadow: exportingResume ? "none" : "var(--shadow-sm)",
+                    }}
+                  >
+                    {exportingResume ? "Exporting…" : "Export PDF"}
+                  </button>
+                )}
+                {onExportDocx && (
+                  <button
+                    type="button"
+                    disabled={exportingResume}
+                    onClick={onExportDocx}
+                    title="Download your resume with accepted edits as a Word .docx file."
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      padding: "5px 12px",
+                      borderRadius: 8,
+                      border: "1px solid var(--border-h)",
+                      background: "var(--surface)",
+                      color: "var(--text)",
+                      cursor: exportingResume ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {exportingResume ? "Exporting…" : "Export DOCX"}
+                  </button>
+                )}
+              </>
+            )}
           </div>
         ) : null}
         {extractKind === "synthetic" && !presentationOnly ? (
