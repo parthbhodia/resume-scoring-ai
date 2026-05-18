@@ -381,7 +381,6 @@ export default function ResumeBuilder({
     setSuggestResearchDigest("");
     setSuggestResearchQueries([]);
     setSuggestResearchSources([]);
-    setAiJobFitWithoutTicks(false);
   }, [resetSuggestions, selectSuggestion]);
   const tryAnotherJob = useCallback(() => {
     clearSuggestionsState();
@@ -414,20 +413,6 @@ export default function ResumeBuilder({
   const [uploadLoaderStep, setUploadLoaderStep] = useState(0);
   const [uploadLoaderTipIdx, setUploadLoaderTipIdx] = useState(0);
   /** Linked selection: click a highlighted résumé line → scroll/highlight matching suggestion card (Analyze-style). */
-  /**
-   * When false (default), Generate after the coach uses the base library LaTeX body as-is (no model rewrite)
-   * unless the user ticks structured edits. When true, the model may reword for the JD even with zero ticks.
-   */
-  const [aiJobFitWithoutTicks, setAiJobFitWithoutTicks] = useState(false);
-  /** Beta path: deterministic backend renderer scaffold (Jinja2 + structured model). */
-  const [useStructuredRenderer, setUseStructuredRenderer] = useState(true);
-
-  /**
-   * Only the legacy LaTeX stream tends to emit live `search_query` / `search_source` SSE during PDF generation.
-   * Structured + digest-reuse runs should not show a second “waiting for web search” panel above the main progress card.
-   */
-  const pdfGenExpectsLiveWebSearch =
-    !studioHandoff && !useStructuredRenderer && !reusingSuggestWebForPdf;
 
   /** Template handoff — post-compile UI: HTML live paper (instant Style tab) + exported PDF; Save / Download run a fresh compile. */
   const [customizeTab, setCustomizeTab] = useState<"style" | "sections" | "add">("style");
@@ -854,7 +839,6 @@ export default function ResumeBuilder({
     setSuggestLoading(true);
     setSuggestError(null);
     resetSuggestions();
-    setAiJobFitWithoutTicks(false);
     scrollBuilderToTop("auto");
 
     setSuggestResearchQueries([]);
@@ -1140,7 +1124,7 @@ export default function ResumeBuilder({
       suggested: s.suggested,
       reason: s.reason,
     }));
-    const tailorBodyWithAi = acceptedList.length > 0 || aiJobFitWithoutTicks;
+    const tailorBodyWithAi = acceptedList.length > 0;
     const acc: GenerationResult =
       studioHandoff && result?.folder
         ? {
@@ -1271,7 +1255,7 @@ export default function ResumeBuilder({
                     acc.ratings,
                     effJd,
                     {
-                      renderer: useStructuredRenderer ? "structured" : "legacy",
+                      renderer: "structured",
                       schemaVersion: 1,
                       appliedPatch: acceptedList.length > 0
                         ? { edits: acceptedList, source: "accepted_suggestions" }
@@ -1316,7 +1300,7 @@ export default function ResumeBuilder({
       setStatusMsg("");
       return null;
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources, aiJobFitWithoutTicks, useStructuredRenderer]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources]);
 
   /** Template customize: run full compile, then optional blob download + toast. */
   const finalizeLayoutPdf = useCallback(
@@ -2111,10 +2095,6 @@ export default function ResumeBuilder({
               styleReferenceFolder={styleReferenceFolder}
               setStyleReferenceFolder={setStyleReferenceFolder}
               previewSectionAccentHex={previewAccentHex}
-              aiJobFitWithoutTicks={aiJobFitWithoutTicks}
-              setAiJobFitWithoutTicks={setAiJobFitWithoutTicks}
-              useStructuredRenderer={useStructuredRenderer}
-              setUseStructuredRenderer={setUseStructuredRenderer}
               onBackToInputs={clearSuggestionsState}
             />
           )}
@@ -2168,43 +2148,10 @@ export default function ResumeBuilder({
                   <>Layout and typography only — no job match or live web research on this path.</>
                 ) : reusingSuggestWebForPdf ? (
                   <>Research from <strong>Get suggestions</strong> is already included; the PDF step does not run a second web search.</>
-                ) : useStructuredRenderer ? (
-                  <>Structured PDF path: compile and scoring run on the server. A live LaTeX preview appears below when the stream starts.</>
                 ) : (
-                  <>The model may still run a live web search during this step if the server requests it. Otherwise your file finishes from résumé + job text alone.</>
+                  <>Your résumé is tailored to this job on the server, then compiled to PDF. Scoring runs when the file is ready.</>
                 )}
               </p>
-            </div>
-          )}
-
-          {/* Legacy PDF path only: placeholder until first search SSE arrives (structured/digest paths skip — see pdfGenExpectsLiveWebSearch). */}
-          {generating && !result && !hasWebResearch && pdfGenExpectsLiveWebSearch && (
-            <div style={{ marginBottom: 16 }} className="fade-in">
-              <div style={{
-                display: "flex", alignItems: "center", gap: 8,
-                fontSize: 11, fontWeight: 600, color: "var(--dim)",
-                letterSpacing: -0.1, marginBottom: 8, textTransform: "uppercase",
-              }}>
-                <span>Web research</span>
-                <span style={{
-                  fontSize: 9, padding: "2px 7px", borderRadius: 999,
-                  background: "var(--surface2)", color: "var(--muted)",
-                  letterSpacing: 0, textTransform: "none",
-                }}>
-                  Waiting for search signals…
-                </span>
-              </div>
-              <div style={{
-                background: "var(--surface)", border: "1px dashed var(--border)",
-                borderRadius: 10, padding: "14px 16px",
-                fontSize: 12, color: "var(--dim)", lineHeight: 1.55,
-              }}>
-                {hasSuggestResearch ? (
-                  <>No live searches from <strong>Generate PDF</strong> yet. Your suggestions step may already list queries above.</>
-                ) : (
-                  <>This panel fills in when the model runs web search during PDF generation.</>
-                )}
-              </div>
             </div>
           )}
 
@@ -4509,8 +4456,7 @@ function SuggestionsPanel({
   selectedSuggestionId, onSelectSuggestionCard,
   onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, generateStatusMsg, error, onBackToInputs,
   styleReferenceFolder, setStyleReferenceFolder,
-  previewSectionAccentHex, aiJobFitWithoutTicks, setAiJobFitWithoutTicks,
-  useStructuredRenderer, setUseStructuredRenderer,
+  previewSectionAccentHex,
 }: {
   summary: string;
   suggestions: Suggestion[];
@@ -4537,10 +4483,6 @@ function SuggestionsPanel({
   styleReferenceFolder: string;
   setStyleReferenceFolder: (folder: string) => void;
   previewSectionAccentHex: string;
-  aiJobFitWithoutTicks: boolean;
-  setAiJobFitWithoutTicks: (v: boolean) => void;
-  useStructuredRenderer: boolean;
-  setUseStructuredRenderer: (v: boolean) => void;
 }) {
   /** Prefer styled HTML preview: it follows `styleReferenceFolder` and dedupes repeated headers. Raw PDF is the upload as printed (often different fonts / duplicate header blocks). */
   const [resumePreviewTab, setResumePreviewTab] = useState<"pdf" | "text">(() => {
@@ -4583,7 +4525,7 @@ function SuggestionsPanel({
       `}</style>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", letterSpacing: -0.1 }}>
-          Tick edits to send them as structured instructions — or compile your saved LaTeX without changing the body (default below).
+          Accept the edits you want in your PDF, then generate. Skipped cards are not applied.
         </span>
         <button
           type="button"
@@ -4928,54 +4870,6 @@ function SuggestionsPanel({
             Clear accepts
           </button>
         </div>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 10,
-            fontSize: 12,
-            color: "var(--muted)",
-            lineHeight: 1.45,
-            cursor: generating || accepted.length > 0 ? "default" : "pointer",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={aiJobFitWithoutTicks}
-            onChange={e => { setAiJobFitWithoutTicks(e.target.checked); }}
-            disabled={generating || accepted.length > 0}
-            style={{ width: 18, height: 18, minWidth: 18, minHeight: 18, flexShrink: 0, marginTop: 2 }}
-          />
-          <span>
-            <strong style={{ color: "var(--text)", fontWeight: 600 }}>Allow AI job-fit pass</strong> without ticking cards (the model may reword bullets for the JD).
-            {accepted.length > 0
-              ? " Disabled while you have ticked edits — those always run through the model."
-              : " Leave off to compile the LaTeX body from your base library file as-is."}
-          </span>
-        </label>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 10,
-            fontSize: 12,
-            color: "var(--muted)",
-            lineHeight: 1.45,
-            cursor: generating ? "default" : "pointer",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={useStructuredRenderer}
-            onChange={e => { setUseStructuredRenderer(e.target.checked); }}
-            disabled={generating}
-            style={{ width: 18, height: 18, minWidth: 18, minHeight: 18, flexShrink: 0, marginTop: 2 }}
-          />
-          <span>
-            <strong style={{ color: "var(--text)", fontWeight: 600 }}>Use structured renderer (beta)</strong>.
-            Deterministic backend LaTeX path (Jinja scaffold) for cleaner, stable formatting.
-          </span>
-        </label>
         <button
           type="button"
           onClick={() => { void onGenerate(); }}
@@ -5001,9 +4895,7 @@ function SuggestionsPanel({
           ) : (
             accepted.length > 0
               ? `Apply ${accepted.length} accepted edit${accepted.length > 1 ? "s" : ""} & generate PDF →`
-              : aiJobFitWithoutTicks
-                ? "Generate PDF (AI may adjust wording for this job) →"
-                : "Compile PDF from your base LaTeX (no AI body rewrite) →"
+              : "Generate tailored PDF →"
           )}
         </button>
         {generating && (
@@ -5037,14 +4929,15 @@ function SuggestionsPanel({
         )}
       </div>
       <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginTop: 8, lineHeight: 1.5 }}>
-        {accepted.length} of {suggestions.length} accepted — ticked edits are sent to the server as structured instructions.
+        {accepted.length} of {suggestions.length} accepted.
         {accepted.length === 0 ? (
           <>
             {" "}
-            With none ticked and AI job-fit off, the server skips rewriting and runs pdflatex on your base document body. Use{" "}
-            <strong style={{ color: "var(--text)" }}>Accept all</strong> or the checkbox above when you want the model involved.
+            Your résumé is still tailored to this job from your profile and the posting; use <strong style={{ color: "var(--text)" }}>Accept all</strong> to apply these bullet edits too.
           </>
-        ) : null}{" "}
+        ) : (
+          <> Accepted edits are applied on top of the tailored draft.</>
+        )}{" "}
         <strong style={{ color: "var(--text)" }}>Empty suggested text</strong> counts as a <strong style={{ color: "var(--text)" }}>delete</strong> (that bullet is omitted from the PDF).
       </p>
     </div>
