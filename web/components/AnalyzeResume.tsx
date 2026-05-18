@@ -14,6 +14,7 @@ import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
 import { stripResumeBulletPrefix } from "@/lib/stripResumeBulletPrefix";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
+import type { StructuredResume, BulletMapEntry } from "@/store/resumeAnalyzeStore";
 import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
 import type { AnalyzeRecord } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD } from "@/lib/tailorPrefill";
@@ -61,6 +62,10 @@ interface AnalysisResult {
   extractedText?: string;
   /** Name + contact lines extracted before the first section heading. */
   resumeHeader?: string[];
+  /** Faithfully-extracted structured model (no JD tailoring). */
+  structuredResume?: StructuredResume | null;
+  /** Maps flat bulletAnalysis[i] → {experienceIdx, bulletIdx} in structuredResume. */
+  bulletMap?: BulletMapEntry[];
   sectionFeedback: Array<{ section: string; score: number; feedback: string }>;
   rewriteSuggestions: Array<{ before: string; after: string; reason: string }>;
   finalRecommendations: string[];
@@ -324,6 +329,8 @@ export default function AnalyzeResume() {
       extractedText: result.extractedText,
       bulletAnalysis: result.bulletAnalysis,
       resumeHeader: result.resumeHeader,
+      structuredResume: result.structuredResume,
+      bulletMap: result.bulletMap,
     });
   }, [result]);
 
@@ -393,7 +400,7 @@ export default function AnalyzeResume() {
       setResult(resWithMeta);
       setBuilderLinkReady(true);
       bindSourcePdf(file);
-      persistResult(file.name.replace(/\.pdf$/i, ""), resWithMeta, draftId);
+      persistResult(file.name.replace(/\.(pdf|docx)$/i, ""), resWithMeta, draftId);
     } catch (e: unknown) {
       setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Unknown error"));
       lastPdfRef.current = null;
@@ -701,7 +708,7 @@ export default function AnalyzeResume() {
   }, [activeCategory]);
 
   const onFile = (f: File | null | undefined) => {
-    if (!f || !f.name.endsWith(".pdf")) { setError("Please upload a PDF file."); return; }
+    if (!f || !/\.(pdf|docx)$/i.test(f.name)) { setError("Please upload a PDF or DOCX file."); return; }
     run(f);
   };
 
@@ -803,6 +810,8 @@ export default function AnalyzeResume() {
       extractedText: result.extractedText,
       bulletAnalysis: result.bulletAnalysis,
       resumeHeader: result.resumeHeader,
+      structuredResume: result.structuredResume,
+      bulletMap: result.bulletMap,
     });
     
     setEditDraftStatus("Cleared saved draft; preview reset to analysis text.");
@@ -2769,7 +2778,7 @@ export default function AnalyzeResume() {
       <input
         ref={fileRef}
         type="file"
-        accept=".pdf"
+        accept=".pdf,.docx"
         style={{ display: "none" }}
         onChange={e => onFile(e.target.files?.[0])}
       />

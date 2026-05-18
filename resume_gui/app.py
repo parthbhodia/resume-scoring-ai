@@ -916,6 +916,27 @@ _EXTRACT_SCHEMA = """{
   "education": [{"institution": "string", "degree": "string", "dates": "string", "details": ["string"]}]
 }"""
 
+_EXTRACT_SCHEMA_FAITHFUL = """{
+  "full_name": "string",
+  "headline": "string — candidate's current title/role copied exactly",
+  "location": "string",
+  "email": "string",
+  "phone": "string",
+  "linkedin": "string — URL or handle",
+  "github": "string — URL or handle",
+  "summary": "string — professional summary copied exactly from the resume",
+  "skills": [{"category": "string", "items": ["string"]}],
+  "experience": [{
+    "company": "string",
+    "role": "string",
+    "dates": "string",
+    "location": "string",
+    "bullets": ["string — bullet copied EXACTLY as written, no rewriting"]
+  }],
+  "projects": [{"name": "string", "bullets": ["string — copied exactly"]}],
+  "education": [{"institution": "string", "degree": "string", "dates": "string", "details": ["string"]}]
+}"""
+
 
 def _llm_extract_and_tailor(
     candidate_profile: str,
@@ -1033,6 +1054,135 @@ Instructions:
     except Exception as exc:
         logger.warning(f"LLM extract+tailor failed: {exc}")
         return None
+
+
+def _llm_extract(text: str) -> "Optional[ResumeDocModel]":
+    """Extract structured resume data faithfully — no tailoring or bullet rewriting.
+
+    Used by the Analyze path so the structured model mirrors what the user actually wrote.
+    Returns None on failure.
+    """
+    profile_snippet = (text or "")[:6000].strip()
+    if not profile_snippet:
+        return None
+
+    prompt = f"""You are a precise resume parser. Extract ALL content from this resume into structured JSON.
+IMPORTANT: Copy all bullets EXACTLY as written — do NOT rewrite, improve, or change any text.
+Copy the professional summary exactly as it appears. Preserve original phrasing throughout.
+
+RESUME TEXT:
+{profile_snippet}
+
+Output ONLY valid JSON matching this schema (no markdown, no explanation):
+
+{_EXTRACT_SCHEMA_FAITHFUL}"""
+
+    try:
+        raw = _llm_json_call(prompt)
+        if not raw or not isinstance(raw, dict):
+            return None
+
+        full_name = str(raw.get("full_name") or "Candidate").strip() or "Candidate"
+
+        skills: list[tuple[str, list[str]]] = []
+        for sk in (raw.get("skills") or []):
+            cat = _clean_model_text(str(sk.get("category") or "Skills"))
+            items = normalize_skill_items(str(i) for i in (sk.get("items") or []))
+            if items:
+                skills.append((cat or "Skills", items))
+
+        experience: list[ExperienceItem] = []
+        for exp in (raw.get("experience") or []):
+            bullets = [
+                _clean_model_text(str(b))
+                for b in (exp.get("bullets") or [])
+                if _clean_model_text(str(b))
+            ]
+            experience.append(ExperienceItem(
+                company=_clean_model_text(str(exp.get("company") or "")) or "Company",
+                role=_clean_model_text(str(exp.get("role") or "")),
+                dates=_clean_model_text(str(exp.get("dates") or "")),
+                location=_clean_model_text(str(exp.get("location") or "")),
+                bullets=bullets,
+            ))
+
+        extra_sections: list[tuple[str, list[str]]] = []
+        for proj in (raw.get("projects") or []):
+            name = _clean_model_text(str(proj.get("name") or "Project"))
+            pbullets = [_clean_model_text(str(b)) for b in (proj.get("bullets") or []) if _clean_model_text(str(b))]
+            if pbullets:
+                extra_sections.append((name, pbullets))
+        if extra_sections:
+            all_project_lines: list[str] = []
+            for pname, pbullets in extra_sections:
+                all_project_lines.append(pname)
+                all_project_lines.extend(pbullets)
+            extra_sections = [("Projects", all_project_lines)]
+
+        for edu in (raw.get("education") or []):
+            edu_lines: list[str] = []
+            degree = _clean_model_text(str(edu.get("degree") or ""))
+            institution = _clean_model_text(str(edu.get("institution") or ""))
+            dates = _clean_model_text(str(edu.get("dates") or ""))
+            if degree:
+                edu_lines.append(degree)
+            if institution:
+                line = institution
+                if dates:
+                    line += f" | {dates}"
+                edu_lines.append(line)
+            for detail in (edu.get("details") or []):
+                d = _clean_model_text(str(detail))
+                if d:
+                    edu_lines.append(d)
+            if edu_lines:
+                extra_sections.append(("Education", edu_lines))
+
+        return ResumeDocModel(
+            full_name=full_name,
+            headline=_clean_model_text(str(raw.get("headline") or "")),
+            location=_clean_model_text(str(raw.get("location") or "")),
+            email=_clean_model_text(str(raw.get("email") or "")),
+            phone=_clean_model_text(str(raw.get("phone") or "")),
+            linkedin=_clean_model_text(str(raw.get("linkedin") or "")),
+            github=_clean_model_text(str(raw.get("github") or "")),
+            summary=_clean_model_text(str(raw.get("summary") or "")),
+            skills=skills,
+            experience=experience,
+            extra_sections=extra_sections,
+        )
+    except Exception as exc:
+        logger.warning(f"LLM extract failed: {exc}")
+        return None
+
+
+def _resume_doc_to_dict(doc: "ResumeDocModel") -> dict:
+    """Serialize a ResumeDocModel to a plain dict for JSON transport."""
+    return {
+        "full_name": doc.full_name,
+        "headline": doc.headline,
+        "location": doc.location,
+        "email": doc.email,
+        "phone": doc.phone,
+        "linkedin": doc.linkedin,
+        "github": doc.github,
+        "summary": doc.summary,
+        "skills": [{"category": cat, "items": items} for cat, items in (doc.skills or [])],
+        "experience": [
+            {
+                "company": e.company,
+                "role": e.role,
+                "dates": e.dates,
+                "location": e.location,
+                "bullets": list(e.bullets),
+            }
+            for e in (doc.experience or [])
+        ],
+        "extra_sections": [
+            {"title": title, "lines": lines}
+            for title, lines in (doc.extra_sections or [])
+        ],
+    }
 
 
 def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
@@ -3520,10 +3670,10 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
 
 
 async def api_analyze_upload(request: Request):
-    """POST /api/analyze-upload — upload a PDF and run comprehensive AI analysis.
+    """POST /api/analyze-upload — upload a PDF or DOCX and run comprehensive AI analysis.
 
     Form fields:
-      file  — PDF binary
+      file  — PDF or DOCX binary
       jd    — optional job description text
     """
     try:
@@ -3532,16 +3682,53 @@ async def api_analyze_upload(request: Request):
         jd     = (form.get("jd") or "").strip()
         if not upload:
             return JSONResponse({"error": "No file provided"}, status_code=400)
-        data = await upload.read()
-        with pdfplumber.open(io.BytesIO(data)) as pdf:
-            text = _extract_pdf_text(pdf)
+        data     = await upload.read()
+        filename = getattr(upload, "filename", None) or "resume.pdf"
+
+        loop = asyncio.get_event_loop()
+
+        def _extract_text() -> str:
+            # Try MarkItDown (handles PDF + DOCX) first; fall back to pdfplumber for PDFs.
+            try:
+                from resume_upload_parse import extract_upload_markdown  # type: ignore
+                outcome = extract_upload_markdown(data, filename, pdf_plain_fallback=None)
+                text = (outcome.markdown or "").strip()
+                if text:
+                    return text
+            except Exception as exc:
+                logger.warning("MarkItDown extract failed for analyze_upload: %s", exc)
+            # pdfplumber fallback (PDF only)
+            if filename.lower().endswith(".pdf") or not filename.lower().endswith(".docx"):
+                try:
+                    with pdfplumber.open(io.BytesIO(data)) as pdf:
+                        return _extract_pdf_text(pdf)
+                except Exception as exc:
+                    logger.warning("pdfplumber fallback failed: %s", exc)
+            return ""
+
+        text = await loop.run_in_executor(None, _extract_text)
         if not text.strip():
-            return JSONResponse({"error": "Could not extract text from PDF"}, status_code=400)
-        loop   = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, _analyze_resume_comprehensive, text, jd)
+            return JSONResponse({"error": "Could not extract text from the uploaded file"}, status_code=400)
+
+        # Run comprehensive analysis and structured extraction concurrently
+        analysis_future = loop.run_in_executor(None, _analyze_resume_comprehensive, text, jd)
+        extract_future  = loop.run_in_executor(None, _llm_extract, text)
+
+        result, structured = await asyncio.gather(analysis_future, extract_future)
+
         if isinstance(result, dict):
             result["extractedText"] = text[:25000]
-            result["resumeHeader"] = _extract_resume_header(text)
+            result["resumeHeader"]  = _extract_resume_header(text)
+
+        if structured is not None:
+            # Build flat bulletMap: index in bulletAnalysis → {experienceIdx, bulletIdx}
+            bullet_map: list[dict] = []
+            for ei, exp in enumerate(structured.experience):
+                for bi in range(len(exp.bullets)):
+                    bullet_map.append({"experienceIdx": ei, "bulletIdx": bi})
+            result["structuredResume"] = _resume_doc_to_dict(structured)
+            result["bulletMap"]        = bullet_map
+
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("analyze_upload failed")
@@ -4003,6 +4190,141 @@ Return ONLY the JSON object."""
     })
 
 
+async def api_export_docx(request: Request):
+    """POST /api/export-docx — generate a DOCX from a ResumeDocModel JSON payload.
+
+    Body (JSON):
+      structuredResume — dict matching _resume_doc_to_dict() output
+      acceptedEdits    — optional {experienceIdx: {bulletIdx: newText}} patch map
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    structured = body.get("structuredResume")
+    if not structured or not isinstance(structured, dict):
+        return JSONResponse({"error": "structuredResume required"}, status_code=400)
+
+    accepted_edits: dict = body.get("acceptedEdits") or {}
+
+    def _build_docx() -> bytes:
+        try:
+            from docx import Document  # type: ignore
+            from docx.shared import Pt, RGBColor  # type: ignore
+            from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore
+        except ImportError:
+            raise RuntimeError("python-docx is not installed. Add 'python-docx' to requirements.txt.")
+
+        doc = Document()
+
+        # Narrow margins
+        for section in doc.sections:
+            section.top_margin    = Pt(36)
+            section.bottom_margin = Pt(36)
+            section.left_margin   = Pt(54)
+            section.right_margin  = Pt(54)
+
+        def _h(text: str, size: int = 11, bold: bool = False, color: tuple = (0, 0, 0), align=WD_ALIGN_PARAGRAPH.LEFT):
+            p = doc.add_paragraph()
+            p.alignment = align
+            run = p.add_run(text)
+            run.bold = bold
+            run.font.size = Pt(size)
+            run.font.color.rgb = RGBColor(*color)
+            return p
+
+        # Header — name
+        full_name = structured.get("full_name") or "Candidate"
+        _h(full_name, size=18, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+        # Contact line
+        contact_parts = [v for k in ("email", "phone", "linkedin", "github", "location")
+                         if (v := structured.get(k))]
+        if contact_parts:
+            _h(" | ".join(contact_parts), size=9, align=WD_ALIGN_PARAGRAPH.CENTER, color=(80, 80, 80))
+
+        # Summary
+        if structured.get("summary"):
+            doc.add_paragraph()
+            _h("SUMMARY", size=9, bold=True, color=(70, 70, 70))
+            doc.add_paragraph().add_run(structured["summary"]).font.size = Pt(10)
+
+        # Skills
+        skills = structured.get("skills") or []
+        if skills:
+            doc.add_paragraph()
+            _h("SKILLS", size=9, bold=True, color=(70, 70, 70))
+            for sk in skills:
+                cat   = sk.get("category", "")
+                items = sk.get("items") or []
+                p = doc.add_paragraph(style="List Bullet")
+                run = p.add_run(f"{cat}: " if cat else "")
+                run.bold = True
+                run.font.size = Pt(10)
+                p.add_run(", ".join(items)).font.size = Pt(10)
+
+        # Experience
+        experience = structured.get("experience") or []
+        if experience:
+            doc.add_paragraph()
+            _h("EXPERIENCE", size=9, bold=True, color=(70, 70, 70))
+            for ei, exp in enumerate(experience):
+                # Role | Company · Dates
+                header_parts = []
+                if exp.get("role"):
+                    header_parts.append(exp["role"])
+                if exp.get("company"):
+                    header_parts.append(exp["company"])
+                role_line = " | ".join(header_parts)
+                p = doc.add_paragraph()
+                r = p.add_run(role_line)
+                r.bold = True
+                r.font.size = Pt(10.5)
+                if exp.get("dates"):
+                    p.add_run(f"  {exp['dates']}").font.size = Pt(9)
+
+                bullets = exp.get("bullets") or []
+                ei_str  = str(ei)
+                for bi, bullet in enumerate(bullets):
+                    # Apply accepted edit if present
+                    bi_str = str(bi)
+                    text = accepted_edits.get(ei_str, {}).get(bi_str) or bullet
+                    p2 = doc.add_paragraph(style="List Bullet")
+                    p2.add_run(text).font.size = Pt(10)
+
+        # Extra sections (Projects, Education, etc.)
+        for sec in (structured.get("extra_sections") or []):
+            title = sec.get("title", "")
+            lines = sec.get("lines") or []
+            if not lines:
+                continue
+            doc.add_paragraph()
+            _h(title.upper(), size=9, bold=True, color=(70, 70, 70))
+            for line in lines:
+                p = doc.add_paragraph(style="List Bullet")
+                p.add_run(line).font.size = Pt(10)
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
+
+    try:
+        docx_bytes = await asyncio.get_event_loop().run_in_executor(None, _build_docx)
+    except RuntimeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=501)
+    except Exception as exc:
+        logger.exception("export_docx failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    filename = f"resume-{(structured.get('full_name') or 'export').replace(' ', '_')}.docx"
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 routes = [
     Route("/",                              homepage),
     Route("/api/resumes",                   api_resumes),
@@ -4025,6 +4347,7 @@ routes = [
     Route("/api/storage-status",            api_storage_status,methods=["GET"]),
     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
+    Route("/api/export-docx",             api_export_docx,     methods=["POST"]),
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
     Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),
     Route("/api/rewrite-bullet",          api_rewrite_bullet,  methods=["POST"]),

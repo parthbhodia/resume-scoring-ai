@@ -14,10 +14,51 @@ export interface AnalyzeBulletSnapshot {
 
 export type AnnotationTone = "weak" | "fair" | "strong";
 
+/** Structured resume model returned by the backend's _llm_extract(). */
+export interface StructuredResumeExperience {
+  company: string;
+  role: string;
+  dates: string;
+  location: string;
+  bullets: string[];
+}
+
+export interface StructuredResumeSkill {
+  category: string;
+  items: string[];
+}
+
+export interface StructuredResumeExtraSection {
+  title: string;
+  lines: string[];
+}
+
+export interface StructuredResume {
+  full_name: string;
+  headline: string;
+  location: string;
+  email: string;
+  phone: string;
+  linkedin: string;
+  github: string;
+  summary: string;
+  skills: StructuredResumeSkill[];
+  experience: StructuredResumeExperience[];
+  extra_sections: StructuredResumeExtraSection[];
+}
+
+/** Maps flat bulletAnalysis[flatIdx] → position in structuredResume.experience. */
+export interface BulletMapEntry {
+  experienceIdx: number;
+  bulletIdx: number;
+}
+
 export interface ResumeAnalyzeHydratePayload {
   extractedText?: string | null;
   bulletAnalysis: AnalyzeBulletSnapshot[];
   resumeHeader?: string[];
+  structuredResume?: StructuredResume | null;
+  bulletMap?: BulletMapEntry[];
 }
 
 // ─── LocalStorage persistence ─────────────────────────────────────────────────
@@ -90,6 +131,10 @@ export interface ResumeAnalyzeStore {
   resumeHeader: string[];
   analysisBullets: AnalyzeBulletSnapshot[];
   annotationByIndex: Record<number, AnnotationTone>;
+  /** Faithfully-extracted structured model (no JD tailoring). Available after analyze-upload. */
+  structuredResume: StructuredResume | null;
+  /** Maps flat bulletAnalysis index → {experienceIdx, bulletIdx} in structuredResume. */
+  bulletMap: BulletMapEntry[];
 
   // ── Edit state (single source of truth — replaces rewriteEdits useState + analyzeEditDraft.ts) ──
   /** Preview line overrides applied to the resume document. */
@@ -149,6 +194,8 @@ const initial = () => ({
   resumeHeader: [] as string[],
   analysisBullets: [] as AnalyzeBulletSnapshot[],
   annotationByIndex: {} as Record<number, AnnotationTone>,
+  structuredResume: null as StructuredResume | null,
+  bulletMap: [] as BulletMapEntry[],
   ...emptyEdits(),
   pulseBulletIndex: null as number | null,
   pulseToken: 0,
@@ -168,6 +215,8 @@ export const useResumeAnalyzeStore = create<ResumeAnalyzeStore>((set, get) => ({
       resumeHeader: payload.resumeHeader ?? [],
       analysisBullets: bullets,
       annotationByIndex,
+      structuredResume: payload.structuredResume ?? null,
+      bulletMap: payload.bulletMap ?? [],
       ...emptyEdits(),
       pulseBulletIndex: null,
       pulseToken: 0,
