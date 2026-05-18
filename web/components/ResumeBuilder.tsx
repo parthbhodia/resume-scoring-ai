@@ -28,6 +28,8 @@ import {
   computeCombinedMatchTextByLineIndex,
 } from "@/lib/suggestionResumeMatch";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
+import { useSuggestionsStore } from "@/store/suggestionsStore";
+import { useUploadResume } from "@/hooks/useUploadResume";
 import {
   nameAndSubtitleLineIndices,
   isPlaceholderResumeHeaderLine,
@@ -333,13 +335,30 @@ export default function ResumeBuilder({
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
 
-  // ── Suggestions state ──────────────────────────────────────────────────────
-  const [suggestions,    setSuggestions]    = useState<Suggestion[] | null>(() => builderSession0?.suggestions ?? null);
-  const [suggestSummary, setSuggestSummary] = useState(() => builderSession0?.suggestSummary ?? "");
-  const [suggestLoading, setSuggestLoading] = useState(false);
-  const [suggestCoachStreamText, setSuggestCoachStreamText] = useState("");
+  // ── Suggestions state (via useSuggestionsStore) ────────────────────────────
+  const suggestions        = useSuggestionsStore((s) => s.suggestions);
+  const suggestSummary     = useSuggestionsStore((s) => s.summary);
+  const suggestLoading     = useSuggestionsStore((s) => s.loading);
+  const suggestCoachStreamText = useSuggestionsStore((s) => s.streamText);
+  const suggestError       = useSuggestionsStore((s) => s.error);
+  const suggestLoaderStepsDone = useSuggestionsStore((s) => s.stepsDone);
+  const acceptedIds        = useSuggestionsStore((s) => s.acceptedIds);
+  const rejectedIds        = useSuggestionsStore((s) => s.rejectedIds);
+  const selectedSuggestionId = useSuggestionsStore((s) => s.selectedId);
+  const suggestActions     = useSuggestionsStore((s) => ({
+    hydrate: s.hydrate,
+    appendStream: s.appendStream,
+    setLoading: s.setLoading,
+    setError: s.setError,
+    incrementStep: s.incrementStep,
+    accept: s.accept,
+    reject: s.reject,
+    undoAccept: s.undoAccept,
+    undoReject: s.undoReject,
+    select: s.select,
+    reset: s.reset,
+  }));
   const suggestStreamAbortRef = useRef<AbortController | null>(null);
-  const [suggestError,   setSuggestError]   = useState<string | null>(null);
   /** When JD text matches ``jd``, a second coach call can POST ``reuse_research_*`` to skip another web search. */
   const suggestResearchReuseGateRef = useRef<{
     jd: string;
@@ -347,17 +366,8 @@ export default function ResumeBuilder({
     queries: string[];
     sources: { title: string | null; url: string }[];
   } | null>(null);
-  /** Phased checklist while suggestions API runs: 0 → 1 → 2 → 3 (timed), then hidden when done. */
-  const [suggestLoaderStepsDone, setSuggestLoaderStepsDone] = useState(0);
   const [suggestLoaderTipIdx, setSuggestLoaderTipIdx] = useState(0);
-  const [acceptedIds,    setAcceptedIds]    = useState<Set<string>>(
-    () => new Set(builderSession0?.acceptedSuggestionIds ?? []),
-  );
-  const [rejectedIds,    setRejectedIds]    = useState<Set<string>>(
-    () => new Set(builderSession0?.rejectedSuggestionIds ?? []),
-  );
   /** Linked selection: click a highlighted résumé line → scroll/highlight matching suggestion card (Analyze-style). */
-  const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
   /**
    * When false (default), Generate after the coach uses the base library LaTeX body as-is (no model rewrite)
    * unless the user ticks structured edits. When true, the model may reword for the JD even with zero ticks.
@@ -385,8 +395,7 @@ export default function ResumeBuilder({
   const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(
     () => builderSession0?.uploadedFileName ?? null,
   );
-  const [uploadingPdf,        setUploadingPdf]        = useState(false);
-  const [uploadError,         setUploadError]         = useState<string | null>(null);
+  const { upload: uploadResume, loading: uploadingPdf, error: uploadError, clearError: clearUploadError } = useUploadResume();
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Latest PDF extract text — used to merge into saved Profile */
   const lastResumeExtractRef = useRef<string>("");
@@ -460,19 +469,14 @@ export default function ResumeBuilder({
 
   useEffect(() => {
     if (!suggestLoading) {
-      setSuggestLoaderStepsDone(0);
+      
       setSuggestLoaderTipIdx(0);
       return;
     }
     const t0 = Date.now();
     const phaseTicker = setInterval(() => {
       const elapsed = Date.now() - t0;
-      setSuggestLoaderStepsDone(prev => {
-        if (elapsed >= 4500) return Math.max(prev, 3);
-        if (elapsed >= 3000) return Math.max(prev, 2);
-        if (elapsed >= 1500) return Math.max(prev, 1);
-        return prev;
-      });
+      suggestActions.incrementStep();
     }, 100);
     const tipTicker = setInterval(() => {
       setSuggestLoaderTipIdx(i => (i + 1) % SUGGEST_LOADER_TIPS.length);
@@ -770,8 +774,8 @@ export default function ResumeBuilder({
         ? "No specific job — optimize structure and measurable impact for a general application."
         : "No specific job posting yet.";
     }
-    if (!effJd) { setSuggestError("Please paste a job description first."); return; }
-    if (!candidateProfile) { setSuggestError("Please upload your resume first."); return; }
+    if (!effJd) { suggestActions.setError("Please paste a job description first."); return; }
+    if (!candidateProfile) { suggestActions.setError("Please upload your resume first."); return; }
 
     const jdKey = effJd.trim();
     const reuseGate = suggestResearchReuseGateRef.current;
@@ -791,13 +795,13 @@ export default function ResumeBuilder({
     const ac = new AbortController();
     suggestStreamAbortRef.current = ac;
 
-    setSuggestLoading(true);
-    setSuggestError(null);
-    setSuggestions(null);
-    setSuggestCoachStreamText("");
+    suggestActions.setLoading(true);
+    suggestActions.setError(null);
+    suggestActions.reset();
+    suggestActions.reset();
     setAiJobFitWithoutTicks(false);
-    setAcceptedIds(new Set());
-    setRejectedIds(new Set());
+    suggestActions.reset();
+    
     setSuggestResearchQueries([]);
     setSuggestResearchSources([]);
     setSuggestResearchDigest("");
@@ -873,16 +877,13 @@ export default function ResumeBuilder({
               setSuggestResearchQueries(rq);
               setSuggestResearchSources(rs);
               setSuggestResearchDigest(typeof ev.research_digest === "string" ? ev.research_digest : "");
-              setSuggestLoaderStepsDone(3);
+              suggestActions.setLoading(false); suggestActions.incrementStep(); suggestActions.incrementStep(); suggestActions.incrementStep();
               break;
             }
             case "coach_delta": {
               const t = typeof ev.text === "string" ? ev.text : "";
               if (!t) break;
-              setSuggestCoachStreamText(prev => {
-                const next = prev + t;
-                return next.length > 16000 ? next.slice(-16000) : next;
-              });
+              suggestActions.appendStream(chunk ?? "");
               break;
             }
             case "coach_done": {
@@ -890,8 +891,7 @@ export default function ResumeBuilder({
               const list = Array.isArray(ev.suggestions)
                 ? ev.suggestions.filter(isSuggestionRecord)
                 : [];
-              setSuggestions(list);
-              setSuggestSummary(typeof ev.summary === "string" ? ev.summary : "");
+              suggestActions.hydrate(list, typeof ev.summary === "string" ? ev.summary : "");
               const rq = Array.isArray(ev.research_queries)
                 ? ev.research_queries.filter((q): q is string => typeof q === "string")
                 : [];
@@ -912,7 +912,7 @@ export default function ResumeBuilder({
                   sources: rs,
                 };
               }
-              setSuggestCoachStreamText("");
+              suggestActions.reset();
               break;
             }
             case "error":
@@ -929,19 +929,17 @@ export default function ResumeBuilder({
       if (e instanceof Error && e.name === "AbortError") {
         return;
       }
-      setSuggestError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
+      suggestActions.setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
     } finally {
       if (suggestStreamAbortRef.current === ac) suggestStreamAbortRef.current = null;
-      setSuggestLoading(false);
+      suggestActions.setLoading(false);
     }
   }, [jd, candidateProfile, studioHandoff]);
 
   const patchSuggestionSuggested = useCallback((id: string, suggested: string) => {
-    setSuggestions((prev) => {
-      if (!prev) return prev;
-      return prev.map((s) => (s.id === id ? { ...s, suggested } : s));
-    });
-  }, []);
+    const updated = suggestions.map((s) => (s.id === id ? { ...s, suggested } : s));
+    suggestActions.hydrate(updated, suggestSummary);
+  }, [suggestions, suggestSummary, suggestActions]);
 
   const mergeProfileFromLastExtract = useCallback(() => {
     const text = lastResumeExtractRef.current.trim();
@@ -956,24 +954,13 @@ export default function ResumeBuilder({
 
   const handlePdfUpload = useCallback(async (file: File) => {
     if (!isResumeUploadFile(file)) {
-      setUploadError("Please upload a PDF or Word (.doc/.docx) file.");
+      clearUploadError();
+      // useUploadResume surfaces the error; show inline via uploadError
       return;
     }
-    setUploadingPdf(true);
-    setUploadError(null);
     setProfileSyncUpsell(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const resp = await fetch(apiUrl("/api/upload-resume"), { method: "POST", body: formData });
-      const json = await parseJsonOrThrow<{
-        error?: string;
-        text?: string;
-        parse_status?: string;
-        structured?: Record<string, unknown>;
-      }>(resp);
-      if (!resp.ok) throw new Error(toUserFriendlyErrorMessage(json.error ?? "Upload failed"));
-      const text = json.text ?? "";
+      const { text } = await uploadResume(file);
       setCandidateProfile(text);
       setUploadedFileName(file.name);
       lastResumeExtractRef.current = text;
@@ -1005,10 +992,10 @@ export default function ResumeBuilder({
       } else {
         setProfileSyncUpsell({ autoFilled: false, filledLabels: [], hintedCount });
       }
-    } catch (e: unknown) {
-      setUploadError(e instanceof Error ? e.message : String(e));
+    } catch {
+      // uploadError is set by useUploadResume hook automatically
     } finally {
-      setUploadingPdf(false);
+      void 0; // loading managed by useUploadResume
     }
   }, []);
 
@@ -1307,8 +1294,8 @@ export default function ResumeBuilder({
   const improveResumeAfterResult = useCallback(() => {
     setResult(null);
     setPreview("");
-    setSelectedSuggestionId(null);
-    setSuggestError(null);
+    suggestActions.select(null);
+    suggestActions.setError(null);
     void getSuggestions();
   }, [getSuggestions]);
 
@@ -2052,23 +2039,11 @@ export default function ResumeBuilder({
               pdfFileName={uploadedFileName}
               pdfDocumentKey={suggestionPdfDocKey}
               selectedSuggestionId={selectedSuggestionId}
-              onSelectSuggestionCard={setSelectedSuggestionId}
-              onToggleAccept={id => setAcceptedIds(prev => {
-                const next = new Set(prev);
-                if (next.has(id)) { next.delete(id); } else { next.add(id); setRejectedIds(r => { const rn = new Set(r); rn.delete(id); return rn; }); }
-                return next;
-              })}
-              onToggleReject={id => setRejectedIds(prev => {
-                const next = new Set(prev);
-                if (next.has(id)) { next.delete(id); } else { next.add(id); setAcceptedIds(a => { const an = new Set(a); an.delete(id); return an; }); }
-                return next;
-              })}
-              onAcceptAll={() => {
-                if (!suggestions?.length) return;
-                setAcceptedIds(new Set(suggestions.map(s => s.id)));
-                setRejectedIds(new Set());
-              }}
-              onClearAccepts={() => setAcceptedIds(new Set())}
+              onSelectSuggestionCard={suggestActions.select}
+              onToggleAccept={id => acceptedIds.has(id) ? suggestActions.undoAccept(id) : suggestActions.accept(id)}
+              onToggleReject={id => rejectedIds.has(id) ? suggestActions.undoReject(id) : suggestActions.reject(id)}
+              onAcceptAll={() => suggestions.forEach(s => suggestActions.accept(s.id))}
+              onClearAccepts={() => suggestions.forEach(s => suggestActions.undoAccept(s.id))}
               onEditSuggested={patchSuggestionSuggested}
               onGenerate={generate}
               generating={generating}
@@ -2081,13 +2056,13 @@ export default function ResumeBuilder({
               useStructuredRenderer={useStructuredRenderer}
               setUseStructuredRenderer={setUseStructuredRenderer}
               onBackToInputs={() => {
-                setSelectedSuggestionId(null);
-                setSuggestions(null);
-                setSuggestSummary("");
-                setSuggestError(null);
+                suggestActions.select(null);
+                suggestActions.reset();
+                suggestActions.hydrate(suggestions, "");
+                suggestActions.setError(null);
                 setAiJobFitWithoutTicks(false);
-                setAcceptedIds(new Set());
-                setRejectedIds(new Set());
+                suggestActions.reset();
+                
                 setSuggestResearchQueries([]);
                 setSuggestResearchSources([]);
                 setSuggestResearchDigest("");
@@ -2377,16 +2352,16 @@ export default function ResumeBuilder({
                   onClick={() => {
                     setResult(null);
                     setPreview("");
-                    setSuggestions(null);
-                    setSuggestSummary("");
-                    setSuggestError(null);
+                    suggestActions.reset();
+                    suggestActions.hydrate(suggestions, "");
+                    suggestActions.setError(null);
                     setSuggestResearchDigest("");
                     setSuggestResearchQueries([]);
                     setSuggestResearchSources([]);
                     setAiJobFitWithoutTicks(false);
-                    setAcceptedIds(new Set());
-                    setRejectedIds(new Set());
-                    setSelectedSuggestionId(null);
+                    suggestActions.reset();
+                    
+                    suggestActions.select(null);
                     setJd("");
                     setCompany("");
                     setRole("");
@@ -2836,16 +2811,16 @@ export default function ResumeBuilder({
                   type="button"
                   onClick={() => {
                     setResult(null);
-                    setSuggestions(null);
+                    suggestActions.reset();
                     setJd("");
                     setCompany("");
                     setRole("");
                     setPreview("");
                     setAiJobFitWithoutTicks(false);
-                    setAcceptedIds(new Set());
-                    setRejectedIds(new Set());
-                    setSelectedSuggestionId(null);
-                    setSuggestSummary("");
+                    suggestActions.reset();
+                    
+                    suggestActions.select(null);
+                    suggestActions.hydrate(suggestions, "");
                     setSuggestResearchDigest("");
                     setSuggestResearchQueries([]);
                     setSuggestResearchSources([]);
