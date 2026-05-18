@@ -75,6 +75,15 @@ const SUGGEST_LOADER_TIPS = [
   "Prioritizing what recruiters skim in the first pass…",
 ] as const;
 
+/** Rotating coach lines while a résumé file is uploaded and text is extracted. */
+const UPLOAD_LOADER_TIPS = [
+  "PDF and Word (.docx) both work — we pull plain text for tailoring.",
+  "Clean, selectable text scans better than image-only PDFs.",
+  "We keep your file on this device until you generate a tailored version.",
+  "Headings and bullet order help the coach match suggestions to sections.",
+  "After upload, you can merge contact fields into Profile in one click.",
+] as const;
+
 /** Accent swatches — template “Customize preview” (preview chrome only; PDF uses LaTeX template). */
 const CUSTOMIZE_ACCENT_SWATCHES: { id: string; hex: string }[] = [
   { id: "ink", hex: "#0f172a" },
@@ -367,6 +376,8 @@ export default function ResumeBuilder({
     sources: { title: string | null; url: string }[];
   } | null>(null);
   const [suggestLoaderTipIdx, setSuggestLoaderTipIdx] = useState(0);
+  const [uploadLoaderStep, setUploadLoaderStep] = useState(0);
+  const [uploadLoaderTipIdx, setUploadLoaderTipIdx] = useState(0);
   /** Linked selection: click a highlighted résumé line → scroll/highlight matching suggestion card (Analyze-style). */
   /**
    * When false (default), Generate after the coach uses the base library LaTeX body as-is (no model rewrite)
@@ -483,6 +494,24 @@ export default function ResumeBuilder({
       clearInterval(tipTicker);
     };
   }, [suggestLoading]);
+
+  useEffect(() => {
+    if (!uploadingPdf) {
+      setUploadLoaderStep(0);
+      setUploadLoaderTipIdx(0);
+      return;
+    }
+    const stepTicker = setInterval(() => {
+      setUploadLoaderStep((s) => Math.min(s + 1, 2));
+    }, 2200);
+    const tipTicker = setInterval(() => {
+      setUploadLoaderTipIdx((i) => (i + 1) % UPLOAD_LOADER_TIPS.length);
+    }, 3000);
+    return () => {
+      clearInterval(stepTicker);
+      clearInterval(tipTicker);
+    };
+  }, [uploadingPdf]);
 
   // Prefill from Analyze (`fromAnalyze=1`) or Template Studio (`fromTemplateStudio=1`) — run once.
   useEffect(() => {
@@ -1320,7 +1349,7 @@ export default function ResumeBuilder({
   /** Full-width suggestions review: hide hero + form so the two-column panel can use the width. */
   const suggestionsReviewMode =
     !studioHandoff &&
-    Boolean(suggestions && suggestions.length > 0 && !generating && !result);
+    Boolean(suggestions && suggestions.length > 0 && !result);
   const showBuilderInputs = !result && !generating && !suggestionsReviewMode;
 
   return (
@@ -1702,17 +1731,20 @@ export default function ResumeBuilder({
                 onDragOver={e => e.preventDefault()}
                 onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handlePdfUpload(f); }}
                 style={{
-                  border: "1.5px dashed var(--border-h)", borderRadius: 10,
-                  padding: "28px 20px", textAlign: "center",
+                  border: uploadingPdf ? "1.5px solid rgba(47,129,247,0.35)" : "1.5px dashed var(--border-h)",
+                  borderRadius: 12,
+                  padding: uploadingPdf ? 0 : "28px 20px",
+                  textAlign: uploadingPdf ? "left" : "center",
                   cursor: uploadingPdf ? "not-allowed" : "pointer",
                   transition: "border-color 0.15s, background 0.15s",
-                  background: "var(--surface2)",
+                  background: uploadingPdf ? "var(--surface)" : "var(--surface2)",
+                  overflow: "hidden",
                 }}
                 onMouseEnter={e => { if (!uploadingPdf) { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "var(--accent-bg)"; }}}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border-h)"; e.currentTarget.style.background = "var(--surface2)"; }}
+                onMouseLeave={e => { if (!uploadingPdf) { e.currentTarget.style.borderColor = "var(--border-h)"; e.currentTarget.style.background = "var(--surface2)"; }}}
               >
                 {uploadingPdf ? (
-                  <div style={{ color: "var(--muted)", fontSize: 13 }}>Extracting text…</div>
+                  <BuilderUploadExtractLoader stepsDone={uploadLoaderStep} tipIdx={uploadLoaderTipIdx} />
                 ) : (
                   <>
                     <div style={{
@@ -2015,6 +2047,7 @@ export default function ResumeBuilder({
               onEditSuggested={patchSuggestionSuggested}
               onGenerate={generate}
               generating={generating}
+              generateStatusMsg={statusMsg}
               error={error}
               styleReferenceFolder={styleReferenceFolder}
               setStyleReferenceFolder={setStyleReferenceFolder}
@@ -4480,7 +4513,7 @@ function SuggestionsPanel({
   summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
   pdfBlobUrl, pdfFileName, pdfDocumentKey,
   selectedSuggestionId, onSelectSuggestionCard,
-  onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, error, onBackToInputs,
+  onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, generateStatusMsg, error, onBackToInputs,
   styleReferenceFolder, setStyleReferenceFolder,
   previewSectionAccentHex, aiJobFitWithoutTicks, setAiJobFitWithoutTicks,
   useStructuredRenderer, setUseStructuredRenderer,
@@ -4504,6 +4537,7 @@ function SuggestionsPanel({
   onEditSuggested: (id: string, suggested: string) => void;
   onGenerate: () => void | Promise<unknown>;
   generating: boolean;
+  generateStatusMsg?: string;
   error: string | null;
   onBackToInputs: () => void;
   styleReferenceFolder: string;
@@ -4956,19 +4990,21 @@ function SuggestionsPanel({
           aria-busy={generating}
           style={{
             width: "100%", padding: "14px 20px", minHeight: 48,
-            background: generating ? "var(--surface2)" : "var(--accent)",
-            color: generating ? "var(--muted)" : "#fff",
+            background: generating ? "var(--accent)" : "var(--accent)",
+            color: "#fff",
             border: "none", borderRadius: 12,
-            fontSize: 15, fontWeight: 500, fontFamily: "inherit",
-            cursor: generating ? "not-allowed" : "pointer",
-            letterSpacing: -0.3, transition: "background 0.2s",
+            fontSize: 15, fontWeight: 600, fontFamily: "inherit",
+            cursor: generating ? "wait" : "pointer",
+            letterSpacing: -0.3, transition: "background 0.2s, opacity 0.2s",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            opacity: generating ? 0.92 : 1,
+            boxShadow: generating ? "0 0 0 3px rgba(47,129,247,0.25)" : "none",
           }}
           onMouseEnter={e => { if (!generating) e.currentTarget.style.background = "var(--accent-h)"; }}
           onMouseLeave={e => { if (!generating) e.currentTarget.style.background = "var(--accent)"; }}
         >
           {generating ? (
-            <><Spinner size={16} />Generating your resume…</>
+            <><Spinner size={16} />Generating your résumé PDF…</>
           ) : (
             accepted.length > 0
               ? `Apply ${accepted.length} accepted edit${accepted.length > 1 ? "s" : ""} & generate PDF →`
@@ -4977,6 +5013,35 @@ function SuggestionsPanel({
                 : "Compile PDF from your base LaTeX (no AI body rewrite) →"
           )}
         </button>
+        {generating && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="fade-in"
+            style={{
+              padding: "12px 14px",
+              borderRadius: 10,
+              background: "var(--surface2)",
+              border: "1px solid var(--border)",
+              fontSize: 12,
+              color: "var(--muted)",
+              lineHeight: 1.5,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+            }}
+          >
+            <Spinner size={14} />
+            <span>
+              <strong style={{ color: "var(--text)", fontWeight: 600 }}>Building your tailored PDF.</strong>
+              {generateStatusMsg ? (
+                <> <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 11 }}>{generateStatusMsg}</span></>
+              ) : (
+                <> This usually takes a minute — keep this tab open.</>
+              )}
+            </span>
+          </div>
+        )}
       </div>
       <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginTop: 8, lineHeight: 1.5 }}>
         {accepted.length} of {suggestions.length} accepted — ticked edits are sent to the server as structured instructions.
@@ -5104,6 +5169,128 @@ function InfoTip({ children, label }: { children: React.ReactNode; label?: strin
         </span>
       )}
     </span>
+  );
+}
+
+/** Drop-zone loader while résumé PDF/DOCX is read and text is extracted. */
+function BuilderUploadExtractLoader({
+  stepsDone,
+  tipIdx,
+}: {
+  stepsDone: number;
+  tipIdx: number;
+}) {
+  const tip = UPLOAD_LOADER_TIPS[tipIdx % UPLOAD_LOADER_TIPS.length];
+  const stepRow = (label: string, stepIndex: number, isLast: boolean) => {
+    const done = stepsDone > stepIndex;
+    const active = stepsDone === stepIndex;
+    return (
+      <div
+        key={label}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "6px 0",
+          borderBottom: isLast ? "none" : "1px solid var(--border)",
+          color: done || active ? "var(--text)" : "var(--dim)",
+        }}
+      >
+        <span style={{ width: 20, height: 20, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {done ? (
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+              <circle cx="10" cy="10" r="9" fill="rgba(52,211,153,0.2)" stroke="rgb(34,197,94)" strokeWidth="1.5" />
+              <path d="M6 10l2.5 2.5L14 7" stroke="rgb(22,101,52)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : active ? (
+            <Spinner size={16} />
+          ) : (
+            <span style={{
+              width: 16, height: 16, borderRadius: "50%",
+              border: "2px solid var(--border)",
+              background: "var(--surface2)",
+            }} aria-hidden />
+          )}
+        </span>
+        <span style={{ fontSize: 12.5, fontWeight: active || done ? 600 : 500, letterSpacing: -0.2, flex: 1 }}>
+          {label}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className="fade-in rb-suggest-loader-card"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div className="rb-suggest-loader-topshine" aria-hidden />
+      <div style={{ padding: "16px 18px 14px" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+            background: "var(--accent-bg)",
+            border: "1px solid rgba(47,129,247,0.2)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+          >
+            <Spinner size={20} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: -0.35, color: "var(--text)", marginBottom: 3 }}>
+              Reading your résumé
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.45, letterSpacing: -0.1 }}>
+              Extracting text so we can compare it to the job posting.
+            </p>
+          </div>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          {stepRow("Open and read your file", 0, false)}
+          {stepRow("Extract sections and bullets", 1, false)}
+          {stepRow("Prepare for tailoring", 2, true)}
+        </div>
+        <div
+          className="rb-upload-loader-skeleton"
+          aria-hidden
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            marginBottom: 12,
+            padding: "10px 12px",
+            borderRadius: 8,
+            background: "var(--surface2)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <div className="rb-upload-skel-line" style={{ width: "42%", height: 7 }} />
+          <div className="rb-upload-skel-line" style={{ width: "88%", height: 6 }} />
+          <div className="rb-upload-skel-line" style={{ width: "76%", height: 6 }} />
+          <div className="rb-upload-skel-line" style={{ width: "64%", height: 6 }} />
+        </div>
+        <div
+          key={tipIdx}
+          className="fade-in"
+          style={{
+            fontSize: 12,
+            color: "var(--accent)",
+            fontWeight: 500,
+            lineHeight: 1.5,
+            letterSpacing: -0.12,
+            padding: "10px 12px",
+            borderRadius: 8,
+            background: "var(--accent-bg)",
+            border: "1px solid rgba(47,129,247,0.18)",
+          }}
+        >
+          <span style={{ fontWeight: 700, marginRight: 6 }}>Tip:</span>
+          {tip}
+        </div>
+      </div>
+    </div>
   );
 }
 

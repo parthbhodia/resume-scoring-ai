@@ -519,6 +519,24 @@ select option { background: var(--surface); }
   animation: rb-suggest-loader-shimmer 2.2s ease-in-out infinite;
 }
 
+@keyframes rb-upload-skel-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+
+.rb-upload-skel-line {
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--border) 0%, var(--surface3) 50%, var(--border) 100%);
+  background-size: 200% 100%;
+  animation: rb-suggest-loader-shimmer 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rb-upload-skel-line {
+    animation: rb-upload-skel-pulse 1.6s ease-in-out infinite;
+  }
+}
+
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
