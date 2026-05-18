@@ -68,6 +68,16 @@ export function toUserFriendlyErrorMessage(raw: string): string {
     lower.includes("connection refused")
   ) {
     const base = apiBackendBaseUrl();
+    const hosted =
+      /railway\.app|render\.com|fly\.dev|herokuapp\.com/i.test(base);
+    if (hosted) {
+      return (
+        `Cannot reach the résumé API at ${base}. ` +
+        `If the browser console shows a CORS error, the API is often offline or restarting (502 from the host) — ` +
+        `check your Railway/deploy logs and restart the service. ` +
+        `When the API is healthy, GET ${base}/api/health should return {"ok":true}.`
+      );
+    }
     return (
       `Cannot reach the résumé API at ${base}. ` +
       `Check the server is running, the URL is correct, and nothing is blocking the connection (firewall or VPN). ` +

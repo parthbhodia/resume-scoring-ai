@@ -1245,23 +1245,26 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         extra_sections=extra_sec_filtered,
     )
 
-# CORS: allow localhost dev + deployed frontend
-_raw_origins    = os.environ.get(
-    "ALLOWED_ORIGINS",
-    ",".join([
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://localhost:8765",
-        "https://www.resunova.io",
-        "https://resunova.io",
-    ]),
-)
-ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+# CORS: localhost dev + production site (merge env extras; never drop defaults)
+_CORS_DEFAULT_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:8765",
+    "https://www.resunova.io",
+    "https://resunova.io",
+]
+_extra = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+ALLOWED_ORIGINS = list(dict.fromkeys(_CORS_DEFAULT_ORIGINS + _extra))
 
 
 async def homepage(request: Request):
     return HTMLResponse(HTML_FILE.read_text(encoding="utf-8"))
+
+
+async def api_health(_request: Request):
+    """GET /api/health — liveness probe for Railway / uptime checks."""
+    return JSONResponse({"ok": True, "service": "resume_gui"})
 
 
 async def api_resumes(request: Request):
@@ -4532,6 +4535,7 @@ async def api_analyze_export_pdf(request: Request):
 
 routes = [
     Route("/",                              homepage),
+    Route("/api/health",                    api_health,          methods=["GET"]),
     Route("/api/resumes",                   api_resumes),
     Route("/api/generate-stream",           api_generate_stream, methods=["POST"]),
     Route("/api/upload-resume",             api_upload_resume,   methods=["POST"]),
@@ -4569,7 +4573,7 @@ middleware = [
         # Allow any GitHub Pages domain + any resunova.io subdomain
         allow_origin_regex=r"https://(.*\.github\.io|(.*\.)?resunova\.io)",
         allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
-        allow_headers=["Content-Type"],
+        allow_headers=["*"],
         allow_credentials=False,
     ),
 ]
