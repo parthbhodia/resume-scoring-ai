@@ -82,6 +82,8 @@ _JD_WEAK_SINGLETONS: frozenset = frozenset({
     "machine", "learning", "data", "model", "models", "code", "tool", "tools",
     "cloud", "web", "mobile", "core", "base", "stack", "full", "end", "front",
     "back", "high", "level", "senior", "junior", "staff", "principal",
+    "years", "year", "yrs", "field", "fields", "information", "manage", "strong",
+    "ability", "related", "complex",
 })
 
 # Common given names in email/sign-off boilerplate (lowercase).
@@ -398,6 +400,10 @@ def _is_low_value_jd_keyword(term: str) -> bool:
         return True
     if re.match(r"^(?:requirements?|qualifications?|preferred|responsibilities)\s+", t):
         return True
+    if re.search(r"\s+(?:and|or|the|in|of|to|with|for|a|an|as|at|by|on)$", t):
+        return True
+    if re.match(r"^(?:and|or|the|in|of|to|with|for|a|an|as|at|by|on)\s+", t):
+        return True
     words = [w for w in t.split() if w]
     if len(words) >= 6:
         return True
@@ -443,6 +449,10 @@ def _prune_redundant_keywords(items: List[Dict]) -> List[Dict]:
 def _keyword_worth_displaying(keyword: str) -> bool:
     kl = (keyword or "").lower().strip()
     if not kl or _is_low_value_jd_keyword(kl):
+        return False
+    if " " not in kl and kl in _STOPWORDS:
+        return False
+    if " " not in kl and kl in _JD_WEAK_SINGLETONS:
         return False
     if " " not in kl and kl in _JD_DOMAIN_SINGLETON_NOISE:
         return False

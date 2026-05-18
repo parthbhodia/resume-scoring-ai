@@ -129,19 +129,156 @@ def _parse_entry_header(header: str) -> Tuple[str, str, str, str]:
     return parts[0], parts[1], parts[2], " | ".join(parts[3:])
 
 
+_DEGREE_LINE_RE = re.compile(
+    r"\b(?:"
+    r"B\.?\s*S\.?|B\.?\s*A\.?|Bachelor|M\.?\s*S\.?|M\.?\s*A\.?|MBA|Master'?s?|Ph\.?\s*D\.?|Doctorate|"
+    r"Associate|Diploma|PG\s+Diploma|Undergraduate|Postgraduate)\b",
+    re.I,
+)
+_SCHOOL_HINT_RE = re.compile(r"\b(?:university|college|institute|school|academy)\b", re.I)
+_EDU_DATE_HINT_RE = re.compile(
+    r"\b(?:19|20)\d{2}\b|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+    re.I,
+)
+
+
+def _parse_school_date_line(line: str) -> Tuple[str, str, str]:
+    """Parse ``School | May 2026`` or ``School | City | May 2026`` into institution, dates, location."""
+    raw = _clean_model_text(line)
+    if not raw or "|" not in raw:
+        return "", "", ""
+    parts = [p.strip() for p in raw.split("|") if p.strip()]
+    if len(parts) < 2 or not _EDU_DATE_HINT_RE.search(parts[-1]):
+        return "", "", ""
+    if len(parts) >= 3:
+        return " | ".join(parts[:-2]), parts[-2], parts[-1]
+    return parts[0], parts[1], ""
+
+
+def _looks_like_school_date_line(line: str) -> bool:
+    inst, dates, _ = _parse_school_date_line(line)
+    return bool(inst and dates)
+
+
+def _looks_like_degree_line(line: str) -> bool:
+    t = _clean_model_text(line)
+    if not t or _looks_like_school_date_line(t):
+        return False
+    if _SCHOOL_HINT_RE.search(t) and not _DEGREE_LINE_RE.search(t):
+        return False
+    if _DEGREE_LINE_RE.search(t):
+        return True
+    # "MS Clinical Mental Health Counseling" — degree keywords without word boundaries on "MS"
+    if re.match(r"^(?:M\.?\s*S\.?|M\.?\s*A\.?|B\.?\s*S\.?|B\.?\s*A\.?|PG)\b", t, re.I):
+        return True
+    return False
+
+
 def _education_item_from_dict(edu: dict) -> Optional[EducationItem]:
     inst = _clean_model_text(edu.get("institution") or "")
     deg = _clean_model_text(edu.get("degree") or "")
     dat = _clean_model_text(edu.get("dates") or "")
     loc = _clean_model_text(edu.get("location") or "")
-    if not (inst or deg or dat or loc):
+    bullets = [
+        _clean_model_text(str(d))
+        for d in (edu.get("details") or [])
+        if _clean_model_text(str(d))
+    ]
+    if not (inst or deg or dat or loc or bullets):
         return None
     return EducationItem(
-        institution=inst or "Education",
+        institution=inst,
         degree=deg,
         dates=dat,
         location=loc,
+        bullets=bullets,
     )
+
+
+def _education_items_from_flat_lines(lines: list[str]) -> list[EducationItem]:
+    """Group flat education lines (degree, school|date, detail bullets) into structured entries."""
+    items: list[EducationItem] = []
+    degree = ""
+    institution = ""
+    dates = ""
+    location = ""
+    bullets: list[str] = []
+
+    def flush() -> None:
+        nonlocal degree, institution, dates, location, bullets
+        if not (degree or institution or bullets):
+            return
+        items.append(
+            EducationItem(
+                institution=institution,
+                degree=degree,
+                dates=dates,
+                location=location,
+                bullets=list(bullets),
+            )
+        )
+        degree = ""
+        institution = ""
+        dates = ""
+        location = ""
+        bullets = []
+
+    for raw in lines:
+        line = _clean_model_text(raw)
+        if not line or _is_structural_noise_line(line):
+            continue
+
+        if _looks_like_degree_line(line):
+            flush()
+            degree = line
+            continue
+
+        inst, dat, loc = _parse_school_date_line(line)
+        if inst:
+            if degree or not items:
+                if institution:
+                    flush()
+                    degree = ""
+                institution = inst
+                dates = dat
+                location = loc
+                continue
+            institution = inst
+            dates = dat
+            location = loc
+            continue
+
+        if not degree and not institution:
+            row = _education_item_from_csv_line(line)
+            if row.institution or row.degree:
+                flush()
+                items.append(row)
+            continue
+
+        bullets.append(line)
+
+    flush()
+    return items
+
+
+def _collect_education_flat_lines(
+    education_lines: list[str],
+    extra_sections: list[tuple[str, list[str]]],
+) -> list[str]:
+    out: list[str] = []
+    for ln in education_lines or []:
+        ce = _clean_model_text(ln)
+        if ce:
+            out.append(ce)
+    for name, vals in extra_sections or []:
+        if (name or "").strip().lower() != "education":
+            continue
+        for v in vals:
+            ce = _clean_model_text(str(v))
+            if ce:
+                out.append(ce)
+    return out
 
 
 def _education_item_from_csv_line(line: str) -> EducationItem:
@@ -356,7 +493,23 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
                 )
             continue
 
-        # Dynamic catch-all sections for anything beyond summary/skills/experience.
+        if "education" in sec_name:
+            for ent in entries:
+                flat: list[str] = []
+                hdr = _clean_model_text(str(ent.get("header") or "")).strip()
+                if hdr and not _is_structural_noise_line(hdr):
+                    for part in re.split(r"\s*·\s*", hdr):
+                        p = part.strip()
+                        if p:
+                            flat.append(p)
+                for b in ent.get("bullets") or []:
+                    txt = _clean_model_text(str(b.get("text") or ""))
+                    if txt and not _is_structural_noise_line(txt):
+                        flat.append(txt)
+                doc.education.extend(_education_items_from_flat_lines(flat))
+            continue
+
+        # Dynamic catch-all sections for anything beyond summary/skills/experience/education.
         sec_label = _clean_model_text(str(sec.get("name") or "")).strip()
         if sec_label:
             extra_lines: list[str] = []
@@ -449,7 +602,10 @@ def _append_extra_section_line(doc: ResumeDocModel, section_title: str, line: st
             doc.projects.append(ProjectItem(name="", bullets=[lt]))
         return
     if key == "education":
-        doc.education.append(_education_item_from_csv_line(lt))
+        if doc.education:
+            doc.education[-1].bullets.append(lt)
+        else:
+            doc.education.extend(_education_items_from_flat_lines([lt]))
         return
     for i, (name, lines) in enumerate(doc.extra_sections):
         nl = name.strip().lower()
@@ -662,6 +818,19 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
                 if cur and original in cur:
                     setattr(edu, attr, cur.replace(original, suggested).strip())
                     replaced = True
+            next_bullets = []
+            changed = False
+            for b in edu.bullets:
+                updated = _apply_line_suggestion(b, original, suggested)
+                if updated is None:
+                    next_bullets.append(b)
+                else:
+                    changed = True
+                    replaced = True
+                    if updated:
+                        next_bullets.append(updated)
+            if changed:
+                edu.bullets = [x for x in next_bullets if x]
 
         # Coach quotes raw profile lines; structured doc may normalize wording — do not
         # route unrelated sections into ``summary``.
@@ -897,24 +1066,12 @@ Instructions:
                 all_project_lines.extend(pbullets)
             extra_sections = [("Projects", all_project_lines)]
 
+        education: list[EducationItem] = []
         for edu in (raw.get("education") or []):
-            edu_lines: list[str] = []
-            degree = _clean_model_text(str(edu.get("degree") or ""))
-            institution = _clean_model_text(str(edu.get("institution") or ""))
-            dates = _clean_model_text(str(edu.get("dates") or ""))
-            if degree:
-                edu_lines.append(degree)
-            if institution:
-                line = institution
-                if dates:
-                    line += f" | {dates}"
-                edu_lines.append(line)
-            for detail in (edu.get("details") or []):
-                d = _clean_model_text(str(detail))
-                if d:
-                    edu_lines.append(d)
-            if edu_lines:
-                extra_sections.append(("Education", edu_lines))
+            if isinstance(edu, dict):
+                row = _education_item_from_dict(edu)
+                if row:
+                    education.append(row)
 
         return ResumeDocModel(
             full_name=full_name,
@@ -927,6 +1084,7 @@ Instructions:
             summary=_clean_model_text(str(raw.get("summary") or "")),
             skills=skills,
             experience=experience,
+            education=education,
             extra_sections=extra_sections,
         )
     except Exception as exc:
@@ -997,24 +1155,14 @@ Output ONLY valid JSON matching this schema (no markdown, no explanation):
                 all_project_lines.extend(pbullets)
             extra_sections = [("Projects", all_project_lines)]
 
+        education: list[EducationItem] = []
         for edu in (raw.get("education") or []):
-            edu_lines: list[str] = []
-            degree = _clean_model_text(str(edu.get("degree") or ""))
-            institution = _clean_model_text(str(edu.get("institution") or ""))
-            dates = _clean_model_text(str(edu.get("dates") or ""))
-            if degree:
-                edu_lines.append(degree)
-            if institution:
-                line = institution
-                if dates:
-                    line += f" | {dates}"
-                edu_lines.append(line)
-            for detail in (edu.get("details") or []):
-                d = _clean_model_text(str(detail))
-                if d:
-                    edu_lines.append(d)
-            if edu_lines:
-                extra_sections.append(("Education", edu_lines))
+            if isinstance(edu, dict):
+                row = _education_item_from_dict(edu)
+                if row:
+                    education.append(row)
+
+        projects = _project_items_from_llm_projects(raw.get("projects"))
 
         return ResumeDocModel(
             full_name=full_name,
@@ -1027,6 +1175,8 @@ Output ONLY valid JSON matching this schema (no markdown, no explanation):
             summary=_clean_model_text(str(raw.get("summary") or "")),
             skills=skills,
             experience=experience,
+            education=education,
+            projects=projects,
             extra_sections=extra_sections,
         )
     except Exception as exc:
@@ -1056,6 +1206,20 @@ def _resume_doc_to_dict(doc: "ResumeDocModel") -> dict:
             }
             for e in (doc.experience or [])
         ],
+        "education": [
+            {
+                "institution": e.institution,
+                "degree": e.degree,
+                "dates": e.dates,
+                "location": e.location,
+                "bullets": list(e.bullets),
+            }
+            for e in (doc.education or [])
+        ],
+        "projects": [
+            {"name": p.name, "bullets": list(p.bullets)}
+            for p in (doc.projects or [])
+        ],
         "extra_sections": [
             {"title": title, "lines": lines}
             for title, lines in (doc.extra_sections or [])
@@ -1066,6 +1230,45 @@ def _resume_doc_to_dict(doc: "ResumeDocModel") -> dict:
 def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
     parsed = parse_profile_text(candidate_profile)
     extra_sec = list(parsed.extra_sections or [])
+
+    full_name = _clean_model_text(parsed.full_name or "Candidate") or "Candidate"
+    summary = _clean_model_text(parsed.summary or "")
+    skills: list[tuple[str, list[str]]] = []
+    for ln in parsed.skills_lines or []:
+        clean = _clean_model_text(ln)
+        if not clean or _is_structural_noise_line(clean):
+            continue
+        if ":" in clean:
+            label, rest = clean.split(":", 1)
+            items = [x.strip() for x in rest.split(",") if x.strip()]
+            if items:
+                skills.append((_clean_model_text(label) or "Skills", normalize_skill_items(items)))
+        else:
+            skills.append(("Skills", normalize_skill_items([clean])))
+
+    if parsed.experience_entries:
+        experience_list = [
+            ExperienceItem(
+                company=_clean_model_text(ec) or "Experience",
+                role=_clean_model_text(er or ""),
+                dates=_clean_model_text(ed or ""),
+                location=_clean_model_text(el or ""),
+                bullets=[_clean_model_text(b) for b in eb if _clean_model_text(b)],
+            )
+            for ec, er, ed, el, eb in parsed.experience_entries
+        ]
+    else:
+        reg_bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
+        experience_list = [
+            ExperienceItem(
+                company=company or "Experience",
+                role=role or "Role",
+                dates="",
+                location="",
+                bullets=reg_bullets,
+            )
+        ]
+
     structured_projects: list[ProjectItem] = []
     if parsed.projects_bullets:
         clean_proj = [_clean_model_text(b) for b in parsed.projects_bullets if _clean_model_text(b)]
@@ -1081,20 +1284,8 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
                 )
                 break
 
-    structured_education: list[EducationItem] = []
-    if parsed.education_lines:
-        for e in parsed.education_lines:
-            ce = _clean_model_text(e)
-            if ce:
-                structured_education.append(_education_item_from_csv_line(ce))
-    if not structured_education:
-        for name, vals in extra_sec:
-            if (name or "").strip().lower() == "education" and vals:
-                for e in vals:
-                    ce = _clean_model_text(str(e))
-                    if ce:
-                        structured_education.append(_education_item_from_csv_line(ce))
-                break
+    edu_flat = _collect_education_flat_lines(parsed.education_lines, extra_sec)
+    structured_education = _education_items_from_flat_lines(edu_flat)
 
     extra_sec_filtered: list[tuple[str, list[str]]] = []
     for name, vals in extra_sec:
@@ -4416,6 +4607,15 @@ def _doc_from_structured_dict(
         if items:
             skills.append((cat or "Skills", items))
 
+    education: list[EducationItem] = []
+    for edu in structured.get("education") or []:
+        if isinstance(edu, dict):
+            row = _education_item_from_dict(edu)
+            if row:
+                education.append(row)
+
+    projects = _project_items_from_llm_projects(structured.get("projects"))
+
     extra_sections: list[tuple[str, list[str]]] = []
     for sec in (structured.get("extra_sections") or []):
         title = str(sec.get("title") or "")
@@ -4434,6 +4634,8 @@ def _doc_from_structured_dict(
         summary=_clean_model_text(str(structured.get("summary") or "")),
         skills=skills,
         experience=experience,
+        education=education,
+        projects=projects,
         extra_sections=extra_sections,
     )
 

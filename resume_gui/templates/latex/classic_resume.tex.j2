@@ -79,7 +79,15 @@
 {% for edu in doc.education %}
 \needspace{4\baselineskip}
 \textbf{ {{ edu.institution|latex }} }{% if edu.dates %} --- {{ edu.dates|latex }}{% endif %}\\
-\textit{ {{ edu.degree|latex }} }{% if edu.location %} --- {{ edu.location|latex }}{% endif %}\\[6pt]
+\textit{ {{ edu.degree|latex }} }{% if edu.location %} --- {{ edu.location|latex }}{% endif %}\\[2pt]
+{% if edu.bullets|length %}
+\begin{itemize}
+{% for bullet in edu.bullets %}
+\needspace{2.8\baselineskip}
+\item {{ bullet|latex }}
+{% endfor %}
+\end{itemize}
+{% endif %}
 {% endfor %}
 {% endif %}
 

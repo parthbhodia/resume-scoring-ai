@@ -56,6 +56,19 @@ def test_generic_english_and_section_slice():
     assert "innovative" not in priority or priority.find("innovative") > priority.find("python")
 
 
+def test_jd_keywords_no_glue_bigrams_or_years():
+    jd = (
+        "Requirements: SEO and content marketing, 4 years of experience in content writing, "
+        "journalism or mass communication, social media storytelling.\n"
+        "SEO SEO content writing content writing.\n"
+    )
+    kws = _extract_jd_keywords(jd, max_keywords=20)
+    keys = {k["keyword"].lower() for k in kws}
+    assert "seo and" not in keys
+    assert "years" not in keys
+    assert "and" not in keys
+
+
 def test_jd_keywords_ignore_fluff_outside_requirements():
     jd = (
         "We are passionate about our collaborative culture and dynamic environment.\n"

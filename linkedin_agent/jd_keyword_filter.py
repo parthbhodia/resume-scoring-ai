@@ -140,6 +140,22 @@ _SECONDARY_SECTION_STARTS: Tuple[str, ...] = (
 
 _TOKEN_RE = re.compile(r"[a-z][a-z+#./-]{2,}")
 
+# Never surface alone or as the second half of a bigram (e.g. "seo and").
+_BIGRAM_EDGE_STOP: frozenset = frozenset({
+    "and", "or", "the", "a", "an", "in", "of", "to", "for", "with", "by", "on", "at",
+    "as", "is", "are", "was", "were", "be", "been", "being", "that", "this", "these",
+    "those", "it", "its", "your", "our", "we", "you", "they", "them", "their", "will",
+    "would", "can", "could", "should", "may", "might", "must", "have", "has", "had",
+    "not", "but", "if", "from", "into", "than", "then", "so", "such", "any", "all",
+})
+
+# Experience/meta tokens that are not skills when shown as chips.
+_WEAK_JD_SINGLETONS: frozenset = frozenset({
+    "years", "year", "yrs", "field", "fields", "information", "manage", "manages",
+    "managed", "strong", "ability", "related", "preferably", "including", "various",
+    "complex", "experience", "experiences", "required", "preferred", "plus",
+})
+
 
 def _jd_slice(lower: str, start_keys: Tuple[str, ...], end_keys: Tuple[str, ...]) -> str:
     idx = len(lower)
@@ -193,6 +209,27 @@ def tokenize_jd_text(text: str) -> List[str]:
     return [t.strip(".-/+#") for t in tokens if t and len(t.strip(".-/+#")) >= 3]
 
 
+def is_usable_jd_token(token: str) -> bool:
+    """Drop stopwords and experience fluff before TF / bigram pairing."""
+    t = (token or "").lower().strip(".,;:-·")
+    if len(t) < 3:
+        return False
+    if t in _BIGRAM_EDGE_STOP or t in _WEAK_JD_SINGLETONS:
+        return False
+    if t in JD_META_BLOCKLIST or is_generic_english(t):
+        return False
+    return True
+
+
+def is_usable_jd_bigram(a: str, b: str) -> bool:
+    """Reject glue bigrams like ``seo and`` from adjacent token pairing."""
+    if not is_usable_jd_token(a) or not is_usable_jd_token(b):
+        return False
+    if b in _BIGRAM_EDGE_STOP or a in _BIGRAM_EDGE_STOP:
+        return False
+    return True
+
+
 def build_term_frequencies(
     priority_text: str,
     secondary_text: str,
@@ -204,26 +241,33 @@ def build_term_frequencies(
     whole_n: Dict[str, int] = {}
 
     for t in tokenize_jd_text(whole_text):
+        if not is_usable_jd_token(t):
+            continue
         whole_n[t] = whole_n.get(t, 0) + 1
         weighted[t] = weighted.get(t, 0.0) + 1.0
 
     for t in tokenize_jd_text(secondary_text):
+        if not is_usable_jd_token(t):
+            continue
         weighted[t] = weighted.get(t, 0.0) + 2.0
 
     for t in tokenize_jd_text(priority_text):
+        if not is_usable_jd_token(t):
+            continue
         priority_n[t] = priority_n.get(t, 0) + 1
         weighted[t] = weighted.get(t, 0.0) + 3.0
 
     for label, blob in (("priority", priority_text), ("secondary", secondary_text)):
-        words = tokenize_jd_text(blob)
-        for a, b in zip(words, words[1:]):
-            if len(a) < 3 or len(b) < 3:
-                continue
-            bg = f"{a} {b}"
-            weighted[bg] = weighted.get(bg, 0.0) + 2.0
-            whole_n[bg] = whole_n.get(bg, 0) + 1
-            if label == "priority":
-                priority_n[bg] = priority_n.get(bg, 0) + 1
+        for segment in re.split(r"\s+(?:and|or)\s+", blob, flags=re.I):
+            words = [w for w in tokenize_jd_text(segment) if is_usable_jd_token(w)]
+            for a, b in zip(words, words[1:]):
+                if not is_usable_jd_bigram(a, b):
+                    continue
+                bg = f"{a} {b}"
+                weighted[bg] = weighted.get(bg, 0.0) + 2.0
+                whole_n[bg] = whole_n.get(bg, 0) + 1
+                if label == "priority":
+                    priority_n[bg] = priority_n.get(bg, 0) + 1
 
     return weighted, priority_n, whole_n
 

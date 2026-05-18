@@ -171,12 +171,19 @@
 \section{EDUCATION}
 \resumeSubHeadingListStart
 {% for edu in doc.education %}
-{% if edu.institution or edu.degree %}
+{% if edu.institution or edu.degree or edu.bullets|length %}
   \resumeSubheading
     { {{ edu.institution|latex }} }
     { {{ edu.dates|latex if edu.dates else '' }} }
     { {{ edu.degree|latex }} }
     { {{ edu.location|latex if edu.location else '' }} }
+  {% if edu.bullets|length %}
+  \resumeItemListStart
+  {% for bullet in edu.bullets %}
+    \resumeItem{ {{ bullet|latex }} }
+  {% endfor %}
+  \resumeItemListEnd
+  {% endif %}
 {% endif %}
 {% endfor %}
 \resumeSubHeadingListEnd

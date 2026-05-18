@@ -1475,18 +1475,24 @@ export default function ResumeBuilder({
     !studioHandoff &&
     Boolean(suggestions && suggestions.length > 0 && !result);
   const showBuilderInputs = !result && !generating && !suggestionsReviewMode;
+  /** Pin loaders at top of the page — form CTAs sit at the bottom and scroll-to-top hid them. */
+  const showSuggestLoaderAtTop = !studioHandoff && suggestLoading;
+  const showGenerateLoaderAtTop =
+    generating &&
+    !suggestionsReviewMode &&
+    (!studioHandoff || !result);
 
   useLayoutEffect(() => {
-    if (suggestLoading) scrollBuilderToTop("auto");
-  }, [suggestLoading, scrollBuilderToTop]);
+    if (showSuggestLoaderAtTop) scrollBuilderToTop("auto");
+  }, [showSuggestLoaderAtTop, scrollBuilderToTop]);
 
   useLayoutEffect(() => {
     if (suggestionsReviewMode) scrollBuilderToTop("smooth");
   }, [suggestionsReviewMode, scrollBuilderToTop]);
 
   useLayoutEffect(() => {
-    if (generating && !result) scrollBuilderToTop("smooth");
-  }, [generating, result, scrollBuilderToTop]);
+    if (showGenerateLoaderAtTop) scrollBuilderToTop("smooth");
+  }, [showGenerateLoaderAtTop, scrollBuilderToTop]);
 
   return (
     <div
@@ -1505,7 +1511,7 @@ export default function ResumeBuilder({
       <main
         ref={builderMainScrollRef}
         id="resume-builder-main"
-        aria-busy={generating}
+        aria-busy={generating || suggestLoading}
         style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}
       >
 
@@ -1577,8 +1583,27 @@ export default function ResumeBuilder({
             }
           `}</style>
 
+          {/* ── Busy loaders (top of page so scroll-to-top keeps them visible) ── */}
+          {showSuggestLoaderAtTop && (
+            <BuilderSuggestAnalysisLoader
+              stepsDone={suggestLoaderStepsDone}
+              tipIdx={suggestLoaderTipIdx}
+              coachStreamText={suggestCoachStreamText}
+            />
+          )}
+          {showGenerateLoaderAtTop && (
+            <BuilderGeneratePdfLoader
+              statusMsg={statusMsg}
+              tipIdx={generateLoaderTipIdx}
+              stepsDone={generateLoaderStepsDone}
+              reusingSuggestResearch={reusingSuggestWebForPdf}
+              studioHandoff={studioHandoff}
+              acceptedCount={acceptedIds.size}
+            />
+          )}
+
           {/* ── Hero (pre-generation) ── */}
-          {showBuilderInputs && (
+          {showBuilderInputs && !showSuggestLoaderAtTop && (
             <>
               {studioHandoff ? (
                 <div
@@ -2053,13 +2078,6 @@ export default function ResumeBuilder({
                   {suggestError}
                 </div>
               )}
-              {suggestLoading && (
-                <BuilderSuggestAnalysisLoader
-                  stepsDone={suggestLoaderStepsDone}
-                  tipIdx={suggestLoaderTipIdx}
-                  coachStreamText={suggestCoachStreamText}
-                />
-              )}
               <button
                 type="button"
                 onClick={getSuggestions}
@@ -2228,18 +2246,6 @@ export default function ResumeBuilder({
               setStyleReferenceFolder={setStyleReferenceFolder}
               previewSectionAccentHex={previewAccentHex}
               onBackToInputs={clearSuggestionsState}
-            />
-          )}
-
-          {/* Generate without suggestions (inputs) or template handoff — full-width loader */}
-          {generating && !result && !suggestionsReviewMode && (
-            <BuilderGeneratePdfLoader
-              statusMsg={statusMsg}
-              tipIdx={generateLoaderTipIdx}
-              stepsDone={generateLoaderStepsDone}
-              reusingSuggestResearch={reusingSuggestWebForPdf}
-              studioHandoff={studioHandoff}
-              acceptedCount={acceptedIds.size}
             />
           )}
 

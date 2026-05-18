@@ -40,6 +40,7 @@ class EducationItem:
     degree: str = ""
     dates: str = ""
     location: str = ""
+    bullets: list[str] = field(default_factory=list)
 
 
 @dataclass
