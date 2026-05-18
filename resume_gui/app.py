@@ -27,7 +27,7 @@ import sys
 import threading
 from uuid import uuid4
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pdfplumber
 
