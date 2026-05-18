@@ -1030,6 +1030,19 @@ export default function ResumeBuilder({
       }
     }
 
+    // If company/role are still missing but we have a JD, try to infer them from the text.
+    if (!effCompany && effJd) {
+      const m = effJd.match(/\bat\s+([A-Z][A-Za-z0-9\s&.,'-]{1,40}?)(?:\s*[,\n(]|$)/);
+      effCompany = m?.[1]?.trim() ?? "";
+      if (effCompany) setCompany(effCompany);
+    }
+    if (!effRole && effJd) {
+      const firstLine = effJd.split(/\n/)[0]?.trim() ?? "";
+      const m = effJd.match(/(?:role|position|title|job)[:\s]+([A-Za-z][A-Za-z\s/-]{2,50}?)(?:\s*[,\n(]|$)/i);
+      effRole = m?.[1]?.trim() || (firstLine.length < 60 ? firstLine : "");
+      if (effRole) setRole(effRole);
+    }
+
     // Collect whatever's still missing and ask for just those.
     const missing: string[] = [];
     if (!effCompany) missing.push("company");
