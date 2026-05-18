@@ -744,3 +744,275 @@ select option { background: var(--surface); }
   border-radius: 50%;
   flex-shrink: 0;
 }
+
+/* ── Analyze upload landing & coach loader ─────────────────────────────────── */
+.az-analyze-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.az-analyze-feature-card:hover {
+  border-color: rgba(47, 129, 247, 0.35);
+  transform: translateY(-2px);
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.az-analyze-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 99px;
+  border: 1px solid rgba(47, 129, 247, 0.22);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.az-analyze-hero-title {
+  margin: 0 0 10px;
+  font-size: clamp(1.55rem, 4vw, 2rem);
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  line-height: 1.15;
+  color: var(--text);
+  font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+}
+
+.az-analyze-hero-sub {
+  margin: 0 auto;
+  max-width: 480px;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.az-analyze-jd-card {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.az-analyze-jd-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.15px;
+}
+
+.az-analyze-jd-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--amber);
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--amber-bg);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.az-analyze-jd-textarea {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  min-height: 88px;
+}
+
+.az-analyze-dropzone {
+  position: relative;
+  overflow: hidden;
+  border: 2px dashed var(--border-h);
+  border-radius: 18px;
+  padding: clamp(32px, 6vw, 48px) clamp(20px, 4vw, 32px);
+  cursor: pointer;
+  background: var(--surface);
+  text-align: center;
+  transition: border-color 0.2s, background 0.2s, transform 0.2s;
+}
+
+.az-analyze-dropzone:hover,
+.az-analyze-dropzone.is-dragging {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  transform: translateY(-1px);
+}
+
+.az-analyze-dropzone-glow {
+  position: absolute;
+  inset: -40% auto auto 50%;
+  width: 280px;
+  height: 280px;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(47, 129, 247, 0.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.az-analyze-dropzone-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 16px;
+  background: var(--accent-bg);
+  border: 1px solid rgba(47, 129, 247, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  position: relative;
+  z-index: 1;
+}
+
+.az-analyze-dropzone-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+  letter-spacing: -0.3px;
+  position: relative;
+  z-index: 1;
+}
+
+.az-analyze-dropzone-hint {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+  position: relative;
+  z-index: 1;
+}
+
+.az-analyze-dropzone-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+}
+
+.az-analyze-upload-error {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--red-bg);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  font-size: 13px;
+  color: var(--red);
+  line-height: 1.45;
+}
+
+.az-analyze-loader-wrap {
+  max-width: 880px;
+  margin: 24px auto 0;
+  width: 100%;
+  padding: 0 4px;
+}
+
+.az-analyze-loader-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(220px, 0.9fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.az-analyze-loader-card {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.az-analyze-coach-tip {
+  font-size: 12.5px;
+  color: var(--text);
+  font-weight: 500;
+  line-height: 1.55;
+  letter-spacing: -0.12px;
+  padding: 14px 15px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent-bg) 0%, var(--surface2) 100%);
+  border: 1px solid rgba(47, 129, 247, 0.18);
+}
+
+.az-analyze-coach-tip-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.az-analyze-loader-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.az-analyze-loader-next {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.az-analyze-skeleton-paper {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 18px 16px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+  min-height: 280px;
+}
+
+.az-analyze-skeleton-line {
+  background: linear-gradient(90deg, var(--surface2) 25%, var(--border) 50%, var(--surface2) 75%);
+  background-size: 400% 100%;
+  animation: az-shimmer 1.6s ease-in-out infinite;
+}
+
+@media (max-width: 768px) {
+  .az-analyze-loader-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .az-analyze-skeleton-paper {
+    min-height: 200px;
+  }
+}

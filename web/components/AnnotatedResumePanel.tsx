@@ -12,7 +12,7 @@ import {
   bulletMatchesAnalysisCategory,
 } from "@/lib/analysisCategoryMatch";
 import { exportResumeAsPdf } from "@/lib/exportResumeAsPdf";
-import { distinctStyleTemplates } from "@/lib/resumeTemplates";
+import { DEFAULT_REFERENCE_FOLDER, distinctStyleTemplates, hasMultipleStyleTemplates } from "@/lib/resumeTemplates";
 
 const PdfViewerWithHighlights = dynamic(
   () => import("@/components/PdfViewerWithHighlights"),
@@ -228,9 +228,7 @@ export default function AnnotatedResumePanel({
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [pdfExporting, setPdfExporting] = useState(false);
   const [viewMode, setViewMode] = useState<"pdf" | "live">("live");
-  const [selectedReferenceFolder, setSelectedReferenceFolder] = useState<string>(
-    styleTemplates[0]?.referenceFolder ?? "Adobe_FullStack",
-  );
+  const [selectedReferenceFolder, setSelectedReferenceFolder] = useState<string>(DEFAULT_REFERENCE_FOLDER);
   const scrollRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
   const [mirrorBox, setMirrorBox] = useState<{
@@ -513,7 +511,7 @@ export default function AnnotatedResumePanel({
             Magic write
           </button>
           </div>
-          {builderReady && onOpenBuilder ? (
+          {builderReady && onOpenBuilder && hasMultipleStyleTemplates() ? (
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
               <span style={{
                 fontSize: 9.5,
@@ -801,7 +799,7 @@ export default function AnnotatedResumePanel({
             re-upload your PDF to enable the PDF tab and original download.
           </div>
         ) : null}
-        {presentationOnly && builderReady && onOpenBuilder ? (
+        {presentationOnly && builderReady && onOpenBuilder && hasMultipleStyleTemplates() ? (
           <div
             style={{
               padding: "8px 16px 10px",

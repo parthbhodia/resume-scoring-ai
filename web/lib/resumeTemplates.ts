@@ -1,7 +1,6 @@
 /**
  * LaTeX layout templates for Résumé Builder / generate-stream.
  * Each `referenceFolder` must exist under the backend LIBRARY_ROOT with a .tex file.
- * Add entries here when you add new reference folders on the server.
  */
 
 export interface ResumeStyleTemplate {
@@ -12,6 +11,7 @@ export interface ResumeStyleTemplate {
   referenceFolder: string;
 }
 
+/** Only Harshibar is exposed in the product UI for now (others kept commented for later). */
 export const RESUME_STYLE_TEMPLATES: ResumeStyleTemplate[] = [
   {
     id: "harshibar-ats",
@@ -20,28 +20,27 @@ export const RESUME_STYLE_TEMPLATES: ResumeStyleTemplate[] = [
       "MIT-style ATS layout: \\resumeSubheading, \\resumeProjectHeading, fontawesome5 icons, sans-serif (tgheros). Requires pdflatex + texlive-fontawesome5 + Fira Mono.",
     referenceFolder: "Harshibar_Template1",
   },
-  {
-    id: "ats-professional",
-    label: "Classic professional",
-    description: "Original library reference (often Adobe_FullStack on deployed servers).",
-    referenceFolder: "Adobe_FullStack",
-  },
-  {
-    id: "malta-modern",
-    label: "Malta Modern",
-    description:
-      "Accent-color section headers (flame orange), multi-column skills, bio summary block. Uses \\cvsection, \\cvexperience, \\cvuniversity, \\cvlistitem. Clean and visually distinctive.",
-    referenceFolder: "MaltaCV_Modern",
-  },
+  // {
+  //   id: "ats-professional",
+  //   label: "Classic professional",
+  //   description: "Original library reference (often Adobe_FullStack on deployed servers).",
+  //   referenceFolder: "Adobe_FullStack",
+  // },
+  // {
+  //   id: "malta-modern",
+  //   label: "Malta Modern",
+  //   description: "Accent-color section headers, multi-column skills.",
+  //   referenceFolder: "MaltaCV_Modern",
+  // },
 ];
 
-export const DEFAULT_REFERENCE_FOLDER = "Adobe_FullStack";
+export const DEFAULT_REFERENCE_FOLDER = "Harshibar_Template1";
 
 export function isValidResumeStyleFolder(folder: string): boolean {
   return RESUME_STYLE_TEMPLATES.some((t) => t.referenceFolder === folder);
 }
 
-/** One chip per distinct referenceFolder (multiple labels can share a folder while you grow the library). */
+/** One chip per distinct referenceFolder. */
 export function distinctStyleTemplates(): ResumeStyleTemplate[] {
   const seen = new Set<string>();
   const out: ResumeStyleTemplate[] = [];
@@ -51,4 +50,8 @@ export function distinctStyleTemplates(): ResumeStyleTemplate[] {
     out.push(t);
   }
   return out;
+}
+
+export function hasMultipleStyleTemplates(): boolean {
+  return distinctStyleTemplates().length > 1;
 }

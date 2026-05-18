@@ -288,7 +288,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <div className="app-sidebar-sublabel" style={{ paddingLeft: isTablet ? 0 : 4, display: "flex", flexDirection: "column", gap: 3 }}>
                   {[
                     { flow: "tailor" as const, label: "Tailor to a job" },
-                    { flow: "template" as const, label: "Template gallery" },
                   ].map(({ flow, label }) => {
                     const subActive = builderActive && navBuilderSubflow === flow;
                     return (

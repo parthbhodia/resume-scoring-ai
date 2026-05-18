@@ -12,6 +12,7 @@ import type { User } from "@supabase/supabase-js";
 import {
   DEFAULT_REFERENCE_FOLDER,
   distinctStyleTemplates,
+  hasMultipleStyleTemplates,
   isValidResumeStyleFolder,
 } from "@/lib/resumeTemplates";
 import {
@@ -883,7 +884,7 @@ export default function ResumeBuilder({
             case "coach_delta": {
               const t = typeof ev.text === "string" ? ev.text : "";
               if (!t) break;
-              suggestActions.appendStream(chunk ?? "");
+              suggestActions.appendStream(t);
               break;
             }
             case "coach_done": {
@@ -1492,7 +1493,7 @@ export default function ResumeBuilder({
           {/* ── Inputs (hidden once results are shown, or while reviewing suggestions) ── */}
           {showBuilderInputs && (<>
 
-          {studioHandoff && (
+          {studioHandoff && hasMultipleStyleTemplates() && (
           <>
           {/* ── Template studio: output layout (LaTeX on server) ── */}
           <StepCard
@@ -1753,7 +1754,7 @@ export default function ResumeBuilder({
               </div>
             )}
 
-            {!studioHandoff && (
+            {!studioHandoff && hasMultipleStyleTemplates() && (
               <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", letterSpacing: -0.2, marginBottom: 4 }}>
                   Template style
@@ -1776,43 +1777,7 @@ export default function ResumeBuilder({
             title="Target job"
             subtitle="Tell us what you're applying for"
           >
-            {/* URL import — auto-fills company/role/JD */}
-            <Field label="Job posting link (optional)">
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  value={jobUrl}
-                  onChange={e => setJobUrl(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" && !extractingJd) { e.preventDefault(); importFromUrl(); } }}
-                  placeholder="https://jobs.lever.co/..., https://boards.greenhouse.io/..., company career page"
-                  style={{ flex: 1 }}
-                />
-                <button
-                  type="button"
-                  onClick={importFromUrl}
-                  disabled={extractingJd || !jobUrl.trim()}
-                  style={{
-                    padding: "0 18px", minHeight: 44, fontSize: 13, fontWeight: 600, letterSpacing: -0.2,
-                    background: extractingJd ? "var(--surface2)" : "var(--accent)",
-                    color: extractingJd ? "var(--dim)" : "#fff",
-                    border: "none", borderRadius: 8, cursor: extractingJd || !jobUrl.trim() ? "not-allowed" : "pointer",
-                    fontFamily: "inherit", opacity: !jobUrl.trim() ? 0.55 : 1,
-                    whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
-                  }}
-                >
-                  {extractingJd ? (
-                    <>
-                      <span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
-                      Extracting…
-                    </>
-                  ) : "Import"}
-                </button>
-              </div>
-            </Field>
-            {extractError && (
-              <div style={{ marginTop: -6, marginBottom: 12, color: "var(--red)", fontSize: 12 }}>{extractError}</div>
-            )}
-
-            <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12, marginTop: 12 }}>
+            <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               <Field label="Company">
                 <input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Google" />
               </Field>
@@ -1826,7 +1791,7 @@ export default function ResumeBuilder({
                   data-rb-jd="1"
                   value={jd}
                   onChange={e => setJd(e.target.value)}
-                  placeholder="Paste the full job description here — or import from a link above."
+                  placeholder="Paste the full job description here."
                   style={{ minHeight: 140, lineHeight: 1.55 }}
                 />
               </Field>
@@ -4427,10 +4392,27 @@ function ResumeStyleTemplateGrid({
   styleReferenceFolder: string;
   setStyleReferenceFolder: (folder: string) => void;
 }) {
+  const templates = distinctStyleTemplates();
+
+  useEffect(() => {
+    const only = templates[0]?.referenceFolder;
+    if (only && styleReferenceFolder !== only) setStyleReferenceFolder(only);
+  }, [templates, styleReferenceFolder, setStyleReferenceFolder]);
+
+  if (!hasMultipleStyleTemplates()) {
+    const t = templates[0];
+    if (!t) return null;
+    return (
+      <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+        PDF layout: <strong style={{ color: "var(--text)" }}>{t.label}</strong> (ATS-friendly).
+      </p>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-        {distinctStyleTemplates().map((t) => {
+        {templates.map((t) => {
           const selected = styleReferenceFolder === t.referenceFolder;
           const isAts = true;
           const thumbKind = templateThumbKindFromFolder(t.referenceFolder);
@@ -4503,10 +4485,7 @@ function ResumeStyleTemplateGrid({
           );
         })}
       </div>
-      <div style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.5 }}>
-        Each thumbnail matches the <code style={{ fontSize: 10 }}>reference_folder</code> sent when you generate (Harshibar, Malta, or classic). Add more in{" "}
-        <code style={{ fontSize: 10 }}>web/lib/resumeTemplates.ts</code>.
-      </div>
+
     </div>
   );
 }
@@ -4876,6 +4855,7 @@ function SuggestionsPanel({
         </div>
       </div>
 
+      {hasMultipleStyleTemplates() && (
       <div
         style={{
           marginTop: 20,
@@ -4899,6 +4879,7 @@ function SuggestionsPanel({
           />
         </div>
       </div>
+      )}
 
       {/* Generate CTA */}
       {error && (

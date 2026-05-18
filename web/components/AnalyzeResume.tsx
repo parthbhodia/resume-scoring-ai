@@ -19,6 +19,12 @@ import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from
 import type { AnalyzeRecord } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD } from "@/lib/tailorPrefill";
 import AnalyzePreviewPane from "@/components/AnalyzePreviewPane";
+import {
+  AnalyzeUploadLanding,
+  AnalyzeCoachLoader,
+  ANALYZE_LOADER_STEPS,
+  ANALYZE_COACH_TIPS,
+} from "@/components/AnalyzeExperience";
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 // Full strongly-typed shape of the AI analysis response.
@@ -101,13 +107,6 @@ function severityBg(severity: "low" | "medium" | "high"): string {
   if (severity === "medium") return "rgba(245,158,11,0.12)";
   return "rgba(99,102,241,0.12)";
 }
-
-const LOADING_MESSAGES = [
-  "Extracting resume text…",
-  "Running structural checks…",
-  "AI is analyzing bullets…",
-  "Generating suggestions…",
-];
 
 const CATEGORY_LABELS: Array<{ key: keyof AnalysisResult["categoryScores"]; label: string }> = [
   { key: "readability", label: "Readability" },
@@ -230,6 +229,7 @@ export default function AnalyzeResume() {
   const [result, setResult]             = useState<AnalysisResult | null>(null);
   const [jd, setJd]                     = useState("");
   const [loadingMsg, setLoadingMsg]     = useState(0);
+  const [loadingTipIdx, setLoadingTipIdx] = useState(0);
   const [expandedBullets, setExpandedBullets] = useState<Record<number, boolean>>({});
   const [historyOpen, setHistoryOpen]   = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -313,12 +313,21 @@ export default function AnalyzeResume() {
     });
   }, []);
 
-  // Cycle loading messages every 3s
+  // Cycle loader steps and coach tips while analysis runs
   useEffect(() => {
-    if (!loading) { setLoadingMsg(0); return; }
-    const iv = setInterval(() => setLoadingMsg(m => (m + 1) % LOADING_MESSAGES.length), 3000);
-    return () => clearInterval(iv);
-  }, [loading]);
+    if (!loading) {
+      setLoadingMsg(0);
+      setLoadingTipIdx(0);
+      return;
+    }
+    const maxSteps = jd.trim() ? ANALYZE_LOADER_STEPS.length + 1 : ANALYZE_LOADER_STEPS.length;
+    const stepIv = setInterval(() => setLoadingMsg((m) => (m + 1) % maxSteps), 3200);
+    const tipIv = setInterval(() => setLoadingTipIdx((t) => (t + 1) % ANALYZE_COACH_TIPS.length), 4500);
+    return () => {
+      clearInterval(stepIv);
+      clearInterval(tipIv);
+    };
+  }, [loading, jd]);
 
   useLayoutEffect(() => {
     if (!result) {
@@ -1662,73 +1671,28 @@ export default function AnalyzeResume() {
 
         {/* Pre-result upload state */}
         {!result && !loading && (
-          <div style={{ maxWidth: 560, margin: "0 auto" }}>
-            {/* JD textarea */}
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--dim)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
-                Paste job description (optional — unlocks keyword analysis)
-              </label>
-              <textarea
-                value={jd}
-                onChange={e => setJd(e.target.value)}
-                placeholder="Paste the job description here to get tailored keyword matching and job fit scoring…"
-                rows={5}
-                style={{
-                  width: "100%",
-                  padding: "12px 14px",
-                  borderRadius: 10,
-                  border: "1px solid var(--border)",
-                  background: "var(--surface)",
-                  color: "var(--text)",
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
-
-            {/* Drop zone */}
-            <div
-              onDragOver={e => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={e => { e.preventDefault(); setDragging(false); onFile(e.dataTransfer.files[0]); }}
-              onClick={() => fileRef.current?.click()}
-              style={{
-                border: `2px dashed ${dragging ? "var(--accent)" : "var(--border)"}`,
-                borderRadius: 16,
-                padding: "56px 32px",
-                cursor: "pointer",
-                background: dragging ? "rgba(99,102,241,0.04)" : "var(--surface)",
-                transition: "border-color 0.15s, background 0.15s",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
-                Drop your resume PDF here
-              </div>
-              <div style={{ fontSize: 13, color: "var(--muted)" }}>
-                or click to browse — we&apos;ll give you a full AI-powered report
-              </div>
-            </div>
-
-            {error && (
-              <div style={{ marginTop: 12, fontSize: 13, color: "var(--red)" }}>{error}</div>
-            )}
-          </div>
+          <AnalyzeUploadLanding
+            jd={jd}
+            onJdChange={setJd}
+            dragging={dragging}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              onFile(e.dataTransfer.files[0]);
+            }}
+            onBrowseClick={() => fileRef.current?.click()}
+            error={error}
+          />
         )}
 
         {/* Loading state */}
         {loading && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, paddingTop: 100 }}>
-            <Spinner size={28} />
-            <span style={{ fontSize: 15, color: "var(--muted)", fontWeight: 500, transition: "opacity 0.3s" }}>
-              {LOADING_MESSAGES[loadingMsg]}
-            </span>
-          </div>
+          <AnalyzeCoachLoader stepIndex={loadingMsg} tipIndex={loadingTipIdx} hasJd={!!jd.trim()} />
         )}
 
         {result && workspaceSplit ? (

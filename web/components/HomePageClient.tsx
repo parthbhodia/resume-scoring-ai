@@ -74,7 +74,6 @@ function RouterView() {
   const rawView = (params?.get("view") || "analyze").toLowerCase();
   const view = useAppView();
   const base = (params?.get("base") || "").trim();
-  const resume = (params?.get("resume") || "").trim();
   const flow = (params?.get("flow") || "tailor").toLowerCase();
   const templateResumeStart = view === "builder" && flow === "template";
 
@@ -88,13 +87,6 @@ function RouterView() {
   }, [view, flow, router, searchQs]);
 
   if (view === "library") {
-    if (resume) {
-      return (
-        <ViewFill>
-          <ResumeView folder={resume} />
-        </ViewFill>
-      );
-    }
     return (
       <ViewFill>
         <ResumeLibrary />
