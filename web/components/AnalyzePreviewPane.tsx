@@ -65,7 +65,7 @@ export default function AnalyzePreviewPane({
   restoredResumeNoPdfHint = false,
   jd = "",
 }: Props) {
-  const { exportPdf, exportDocx, exporting, canExport } = useAnalyzeExport({ jd });
+  const { exportPdf, exportDocx, exporting, canExport, error: exportError } = useAnalyzeExport({ jd });
   const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
   const resumeHeaderStore = useResumeAnalyzeStore((s) => s.resumeHeader);
   const bulletsStore = useResumeAnalyzeStore((s) => s.analysisBullets);
@@ -115,6 +115,7 @@ export default function AnalyzePreviewPane({
       onExportPdf={canExport ? exportPdf : undefined}
       onExportDocx={canExport ? exportDocx : undefined}
       exportingResume={exporting}
+      exportError={exportError}
     />
   );
 }

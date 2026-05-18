@@ -21,14 +21,22 @@ export interface UseAnalyzeExportReturn {
 
 /** Builds the acceptedEdits map from Analyze store state for API transport. */
 function buildAcceptedEdits(): Record<string, Record<string, string>> {
-  const { bulletMap, acceptedBullets, rewriteEdits, analysisBullets } =
+  const { bulletMap, acceptedBullets, rewriteEdits, lineOverrides, analysisBullets } =
     useResumeAnalyzeStore.getState();
   const out: Record<string, Record<string, string>> = {};
-  for (const flatIdxStr of Object.keys(acceptedBullets)) {
-    const flatIdx = Number(flatIdxStr);
+  const indices = new Set<number>();
+  for (const k of Object.keys(acceptedBullets)) indices.add(Number(k));
+  for (const k of Object.keys(rewriteEdits)) indices.add(Number(k));
+  for (const k of Object.keys(lineOverrides)) indices.add(Number(k));
+  for (const flatIdx of indices) {
     const entry = bulletMap[flatIdx];
     if (!entry) continue;
-    const text = (rewriteEdits[flatIdx] ?? analysisBullets[flatIdx]?.improvedBullet ?? "").trim();
+    const text = (
+      rewriteEdits[flatIdx] ??
+      lineOverrides[flatIdx] ??
+      (acceptedBullets[flatIdx] ? analysisBullets[flatIdx]?.improvedBullet : "") ??
+      ""
+    ).trim();
     if (!text) continue;
     const ei = String(entry.experienceIdx);
     const bi = String(entry.bulletIdx);
