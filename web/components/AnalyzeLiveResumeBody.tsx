@@ -393,7 +393,7 @@ function shouldPrependIdentityHeader(blocks: Block[], headerLines: string[]): bo
   if (!first) return true;
   if (first.type === "section" || first.type === "bullets" || first.type === "paragraph") return true;
   if (first.type === "header") {
-    const blob = first.lines.join(" ").toLowerCase();
+    const blob = (first.lines ?? []).join(" ").toLowerCase();
     return !headerLines.some(
       (h) => h.trim().length >= 3 && blob.includes(h.trim().toLowerCase()),
     );
@@ -952,7 +952,8 @@ export default function AnalyzeLiveResumeBody({
                 : false;
               const isSelected = selectedBulletIndex === bulletIdx;
               const previewLineApplied = previewLineOverrides[bulletIdx] !== undefined;
-              const hasActionable = !!(bullet.improvedBullet || bullet.issues.length);
+              const issues = Array.isArray(bullet.issues) ? bullet.issues : [];
+              const hasActionable = !!(bullet.improvedBullet || issues.length);
               const isPulsing = pulseBulletIndex === bulletIdx;
 
               const borderColor = scoreBorderColor(bullet.score);

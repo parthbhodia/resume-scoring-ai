@@ -164,11 +164,30 @@ function detailsStyle(): CSSProperties {
   };
 }
 
-export default function AtsPanel({ result, onRecheck, rechecking }: {
+/** Coerce partial API payloads so UI never calls `.join` / `.filter` on undefined. */
+export function normalizeAtsResult(result: AtsResult): AtsResult {
+  const jd = result.jdMatch;
+  return {
+    ...result,
+    keywords: Array.isArray(result.keywords) ? result.keywords : [],
+    checks: Array.isArray(result.checks) ? result.checks : [],
+    jdMatch: jd
+      ? {
+          ...jd,
+          missingRequiredSkills: jd.missingRequiredSkills ?? [],
+          weakKeywords: jd.weakKeywords ?? [],
+          matchedKeywords: jd.matchedKeywords ?? [],
+        }
+      : jd,
+  };
+}
+
+export default function AtsPanel({ result: rawResult, onRecheck, rechecking }: {
   result: AtsResult;
   onRecheck?: () => void;
   rechecking?: boolean;
 }) {
+  const result = useMemo(() => normalizeAtsResult(rawResult), [rawResult]);
   const sortedKeywords = useMemo(() => {
     return [...result.keywords].sort((a, b) => {
       const rank: Record<AtsKeyword["status"], number> = { missing: 0, partial: 1, found: 2 };
@@ -272,11 +291,11 @@ export default function AtsPanel({ result, onRecheck, rechecking }: {
               )}
             </div>
           )}
-          {jd.missingRequiredSkills.length > 0 && (
+          {(jd.missingRequiredSkills?.length ?? 0) > 0 && (
             <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 11, color: "var(--dim)", marginBottom: 6 }}>Missing required-style skills (add only if true for you)</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {jd.missingRequiredSkills.map(s => (
+                {(jd.missingRequiredSkills ?? []).map(s => (
                   <span key={s} style={{
                     fontSize: 11, padding: "3px 8px", borderRadius: 6,
                     background: "rgba(255, 95, 95, 0.12)", color: "var(--red)", border: "1px solid rgba(255,95,95,0.25)",

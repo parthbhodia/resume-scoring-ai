@@ -207,7 +207,10 @@ export const useResumeAnalyzeStore = create<ResumeAnalyzeStore>((set, get) => ({
   ...initial(),
 
   hydrateFromAnalysis: (payload) => {
-    const bullets = (payload.bulletAnalysis ?? []).map((b) => ({ ...b }));
+    const bullets = (payload.bulletAnalysis ?? []).map((b) => ({
+      ...b,
+      issues: Array.isArray(b.issues) ? b.issues : [],
+    }));
     const annotationByIndex: Record<number, AnnotationTone> = {};
     bullets.forEach((b, i) => { annotationByIndex[i] = tierFromScore(b.score); });
     set({

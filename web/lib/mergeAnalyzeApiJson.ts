@@ -28,6 +28,8 @@ export function mergeAnalyzeApiJson(json: Record<string, unknown>): Record<strin
       if (cr && typeof cr === "object" && !Array.isArray(cr)) {
         b.categoryRewrites = cr;
       }
+      const rawIssues = b.issues;
+      b.issues = Array.isArray(rawIssues) ? rawIssues.filter((x): x is string => typeof x === "string") : [];
       return b;
     });
   }

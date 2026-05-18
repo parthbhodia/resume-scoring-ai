@@ -177,6 +177,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
       try {
         localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
       } catch { /* ignore */ }
+      if (next) {
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLButtonElement>(".app-shell-sidebar-reopen")?.focus();
+        });
+      }
       return next;
     });
   }, []);
@@ -302,7 +307,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         data-compact={isTablet ? "true" : "false"}
         data-collapsed={sidebarCollapsed ? "true" : "false"}
         aria-label="Primary navigation"
-        aria-hidden={sidebarCollapsed}
+        inert={sidebarCollapsed}
       >
         <div style={{ padding: "18px 14px 14px", flexShrink: 0 }}>
           <div

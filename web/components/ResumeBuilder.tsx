@@ -52,7 +52,7 @@ import ScoreRing    from "./ScoreRing";
 import MatchBreakdownCards from "./MatchBreakdownCards";
 import DiffView     from "./DiffView";
 import SourcesPanel from "./SourcesPanel";
-import AtsPanel, { type AtsResult } from "./AtsPanel";
+import AtsPanel, { normalizeAtsResult, type AtsResult } from "./AtsPanel";
 
 import ResumePublicLinkSettings from "./ResumePublicLinkSettings";
 
@@ -812,7 +812,7 @@ export default function ResumeBuilder({
         });
         const json = await parseJsonOrThrow<AtsResult & { error?: string }>(resp);
         if (resp.ok) {
-          setAtsResult(json);
+          setAtsResult(normalizeAtsResult(json));
           lastErr = null;
           break;
         }

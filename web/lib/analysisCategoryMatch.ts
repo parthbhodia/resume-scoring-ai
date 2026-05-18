@@ -71,9 +71,14 @@ export type CategoryRewriteBullet = {
   originalBullet: string;
   improvedBullet?: string;
   categoryRewrites?: Partial<Record<string, string>>;
-  issues: string[];
+  issues?: string[];
   score: number;
 };
+
+/** API / restored history rows may omit `issues`; treat as empty. */
+export function bulletIssueList(bullet: CategoryRewriteBullet): string[] {
+  return Array.isArray(bullet.issues) ? bullet.issues : [];
+}
 
 export type CategoryAssignmentOptions = {
   /** JD / keyword overlap boosts quant priority on relevant bullets. */
@@ -106,14 +111,14 @@ function issueMatchesCategoryKeywords(issueBlob: string, category: string): bool
 }
 
 function bulletSignalsAchievementWeakness(bullet: CategoryRewriteBullet): boolean {
-  const issueBlob = bullet.issues.join(" ").toLowerCase();
+  const issueBlob = bulletIssueList(bullet).join(" ").toLowerCase();
   if (ACHIEVEMENT_DUTY_PATTERNS.test(bullet.originalBullet)) return true;
   if (ACHIEVEMENT_ISSUE_RE.test(issueBlob)) return true;
   return issueMatchesCategoryKeywords(issueBlob, "achievementQuality");
 }
 
 function bulletSignalsExplicitQuantIssue(bullet: CategoryRewriteBullet): boolean {
-  const issueBlob = bullet.issues.join(" ").toLowerCase();
+  const issueBlob = bulletIssueList(bullet).join(" ").toLowerCase();
   if (QUANT_ISSUE_RE.test(issueBlob)) return true;
   return issueMatchesCategoryKeywords(issueBlob, "quantification");
 }
@@ -127,7 +132,7 @@ export function quantificationImpactScore(
 
   let score = 0;
   const text = bullet.originalBullet.toLowerCase();
-  const issueBlob = bullet.issues.join(" ").toLowerCase();
+  const issueBlob = bulletIssueList(bullet).join(" ").toLowerCase();
 
   if (bulletSignalsExplicitQuantIssue(bullet)) score += 45;
   score += Math.max(0, 88 - bullet.score);
@@ -147,7 +152,7 @@ export function quantificationImpactScore(
 
 /** Base category from issues/heuristics — never assigns quantification just for missing numbers. */
 function inferBaseCategory(bullet: CategoryRewriteBullet): string {
-  const issueBlob = bullet.issues.join(" ").toLowerCase();
+  const issueBlob = bulletIssueList(bullet).join(" ").toLowerCase();
   const text = bullet.originalBullet;
 
   if (bulletSignalsExplicitQuantIssue(bullet) && !bulletSignalsAchievementWeakness(bullet)) {
@@ -275,14 +280,15 @@ export function countBulletsInCategory(
 }
 
 /** Issue tags relevant to the active category. */
-export function filterIssuesForCategory(issues: string[], category: string): string[] {
-  if (!issues.length) return issues;
+export function filterIssuesForCategory(issues: string[] | undefined | null, category: string): string[] {
+  const list = Array.isArray(issues) ? issues : [];
+  if (!list.length) return list;
   const kws = CATEGORY_ISSUE_KEYWORDS[category] ?? [];
-  const filtered = issues.filter((iss) => {
+  const filtered = list.filter((iss) => {
     const low = iss.toLowerCase();
     return kws.some((kw) => low.includes(kw));
   });
-  return filtered.length > 0 ? filtered : issues;
+  return filtered.length > 0 ? filtered : list;
 }
 
 function bulletSignalsQuantificationWeakness(bullet: CategoryRewriteBullet): boolean {

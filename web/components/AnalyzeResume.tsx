@@ -1821,9 +1821,10 @@ export default function AnalyzeResume() {
                         )
                       : (bullet.improvedBullet ?? "");
                     const draft = rewriteEdits[safeIdx] ?? categoryRewriteBase;
+                    const bulletIssues = Array.isArray(bullet.issues) ? bullet.issues : [];
                     const categoryIssues = activeCategory
-                      ? filterIssuesForCategory(bullet.issues, activeCategory)
-                      : bullet.issues;
+                      ? filterIssuesForCategory(bulletIssues, activeCategory)
+                      : bulletIssues;
                     const previewMain = previewLineOverrides[safeIdx] ?? bullet.originalBullet;
                     const previewLineAppliedHere = previewLineOverrides[safeIdx] !== undefined;
                     const isFlaggedAccordionOpen = expandedFlaggedBulletIdx === safeIdx;
