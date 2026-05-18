@@ -19,6 +19,7 @@ import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from
 import type { AnalyzeRecord } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD } from "@/lib/tailorPrefill";
 import AnalyzePreviewPane from "@/components/AnalyzePreviewPane";
+import { useAppShellSidebar } from "@/contexts/AppShellSidebarContext";
 import {
   AnalyzeUploadLanding,
   AnalyzeCoachLoader,
@@ -235,8 +236,9 @@ export default function AnalyzeResume() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   /** Accordion for category-detail flagged bullets (`bulletAnalysis` index, or null = all collapsed). */
   const [expandedFlaggedBulletIdx, setExpandedFlaggedBulletIdx] = useState<number | null>(null);
-  /** Desktop: hide left improvement plan sidebar for more reading space (mobile overlay unchanged). Always starts open — not persisted across visits. */
-  const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
+  /** Desktop: improvement plan column — auto-hidden when analysis results load for more workspace width. */
+  const [improvementPlanVisible, setImprovementPlanVisible] = useState(false);
+  const appShellSidebar = useAppShellSidebar();
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
   /** Library folder when last run used analyze-folder; PDF file via lastPdfRef otherwise */
   const [linkedFolder, setLinkedFolder]               = useState<string | null>(null);
@@ -329,6 +331,13 @@ export default function AnalyzeResume() {
     };
   }, [loading, jd]);
 
+  /** When analysis finishes, collapse app nav + improvement plan for the split workspace. */
+  useEffect(() => {
+    if (!result || loading) return;
+    appShellSidebar?.collapseSidebar();
+    setImprovementPlanVisible(false);
+  }, [result, loading, appShellSidebar]);
+
   useLayoutEffect(() => {
     if (!result) {
       useResumeAnalyzeStore.getState().reset();
@@ -388,7 +397,7 @@ export default function AnalyzeResume() {
     
     setExpandedBullets({});
     setActiveCategory(null);
-    setImprovementPlanVisible(true);
+    setImprovementPlanVisible(false);
     setSelectedBulletIndex(null);
     setBuilderLinkReady(false);
     setHistoryRestoreActive(false);
@@ -427,7 +436,7 @@ export default function AnalyzeResume() {
     setExpandedBullets({});
     setActiveCategory(null);
     setSelectedBulletIndex(null);
-    setImprovementPlanVisible(true);
+    setImprovementPlanVisible(false);
     setBuilderLinkReady(false);
     setHistoryRestoreActive(false);
     setLinkedFolder(null);
@@ -1827,17 +1836,6 @@ export default function AnalyzeResume() {
             </div>
           </div>
           ) : null}
-
-        {workspaceSplit && (
-          <p style={{
-            margin: "-4px 0 18px",
-            fontSize: 12,
-            color: "var(--muted)",
-            lineHeight: 1.55,
-          }}>
-            Suggestions and rewrites stay in this column. The preview on the right mirrors your lines with score-based color (and a stronger tint for the category you’re viewing) — click a bullet to sync with the checklist here.
-          </p>
-        )}
 
         {/* ── Issue Detail View (shown when a category is selected) ── */}
         {activeCategory && (

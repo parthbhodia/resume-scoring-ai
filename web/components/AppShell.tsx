@@ -11,7 +11,8 @@
  *   ?view=library&resume=<folder>
  */
 
-import { useEffect, useState, useCallback, type ReactNode } from "react";
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from "react";
+import { AppShellSidebarContext } from "@/contexts/AppShellSidebarContext";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
@@ -100,6 +101,31 @@ const BADGES: Partial<Record<AppView, string>> = {
   jobs: "Soon",
 };
 
+const SIDEBAR_COLLAPSED_KEY = "rn-app-sidebar-collapsed";
+
+function readSidebarCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function NavMenuIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      {open ? (
+        <path d="M4.5 4.5l9 9M13.5 4.5l-9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      ) : (
+        <>
+          <path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 function readBuilderLayoutOnlyFlag(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -130,6 +156,33 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [theme, toggleTheme] = useTheme();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    setSidebarCollapsed(readSidebarCollapsed());
+  }, []);
+
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
+  const collapseSidebar = useCallback(() => {
+    setSidebarCollapsed(true);
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "1");
+    } catch { /* ignore */ }
+  }, []);
+
+  const sidebarContextValue = useMemo(
+    () => ({ collapseSidebar }),
+    [collapseSidebar],
+  );
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -229,37 +282,63 @@ export default function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="app-shell-root">
+    <AppShellSidebarContext.Provider value={sidebarContextValue}>
+    <div
+      className="app-shell-root"
+      data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}
+    >
       {/* ── Persistent sidebar (tablet + desktop) ───────────────── */}
       <aside
         className="app-shell-sidebar"
         data-compact={isTablet ? "true" : "false"}
+        data-collapsed={sidebarCollapsed ? "true" : "false"}
         aria-label="Primary navigation"
+        aria-hidden={sidebarCollapsed}
       >
         <div style={{ padding: "18px 14px 14px", flexShrink: 0 }}>
-          <button
-            type="button"
-            onClick={() => switchView("analyze")}
-            aria-label="Resunova — go to Analyze"
+          <div
             style={{
               display: "flex",
+              flexDirection: isTablet ? "column" : "row",
               alignItems: "center",
-              gap: 10,
-              background: "none",
-              border: "none",
-              padding: 0,
-              cursor: "pointer",
-              fontFamily: "inherit",
-              width: "100%",
-              justifyContent: isTablet ? "center" : "flex-start",
+              gap: 8,
+              justifyContent: isTablet ? "center" : "space-between",
             }}
           >
-            {isTablet ? (
-              <LogoMark size={28} />
-            ) : (
-              <LogoFull markSize={26} textColor="var(--text)" />
-            )}
-          </button>
+            <button
+              type="button"
+              onClick={() => switchView("analyze")}
+              aria-label="Resunova — go to Analyze"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                flex: isTablet ? undefined : 1,
+                minWidth: 0,
+                justifyContent: isTablet ? "center" : "flex-start",
+              }}
+            >
+              {isTablet ? (
+                <LogoMark size={28} />
+              ) : (
+                <LogoFull markSize={26} textColor="var(--text)" />
+              )}
+            </button>
+            <button
+              type="button"
+              className="app-shell-sidebar-toggle"
+              onClick={toggleSidebarCollapsed}
+              aria-label="Hide navigation"
+              title="Hide navigation"
+            >
+              <NavMenuIcon open />
+            </button>
+          </div>
         </div>
 
         <nav style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
@@ -428,6 +507,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* ── Main column ───────────────────────────────────────── */}
       <div className="app-shell-main">
+        <button
+          type="button"
+          className="app-shell-sidebar-reopen"
+          onClick={toggleSidebarCollapsed}
+          aria-label="Show navigation"
+          title="Show navigation"
+        >
+          <NavMenuIcon open={false} />
+        </button>
         <main
           key={active}
           className="app-shell-view-pane"
@@ -500,6 +588,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         />
       </div>
     </div>
+    </AppShellSidebarContext.Provider>
   );
 }
 
