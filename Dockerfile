@@ -28,6 +28,8 @@ ENV LIBRARY_ROOT=/app/resume_library
 
 RUN mkdir -p /app/resume_library
 
+# Railway injects $PORT; must listen on it (hardcoding 8080 causes 502 + bogus CORS errors).
+ENV PORT=8080
 EXPOSE 8080
 
-CMD ["uvicorn", "resume_gui.app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "exec uvicorn resume_gui.app:app --host 0.0.0.0 --port ${PORT:-8080}"]
