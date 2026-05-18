@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import type { ReactNode } from "react";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
@@ -650,6 +651,14 @@ export default function AnalyzeLiveResumeBody({
   pulseBulletIndex = null,
 }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  // Tracks which bullets are in "edit textarea" mode (after accepting or choosing to write own)
+  const [editingBullets, setEditingBullets] = useState<Record<number, boolean>>({});
+  // Local edit text per bullet (pre-filled from AI rewrite or empty for "write own")
+  const [editDrafts, setEditDrafts] = useState<Record<number, string>>({});
+
+  const acceptedBullets = useResumeAnalyzeStore((s) => s.acceptedBullets);
+  const acceptBullet = useResumeAnalyzeStore((s) => s.acceptBullet);
+  const unacceptBullet = useResumeAnalyzeStore((s) => s.unacceptBullet);
   const [popup, setPopup] = useState<PopupState | null>(null);
   const [popupDraft, setPopupDraft] = useState<string>("");
   const popupRef = useRef<HTMLDivElement>(null);
@@ -976,17 +985,7 @@ export default function AnalyzeLiveResumeBody({
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
                     {/* Score badge — visible in non-presentation mode only */}
                     {!presentationOnly && (
-                      <span className="az-score-badge" style={{
-                        flexShrink: 0,
-                        marginTop: 1,
-                        fontSize: 9,
-                        fontWeight: 800,
-                        padding: "1px 5px",
-                        borderRadius: 8,
-                        background: bullet.score >= 70 ? "rgba(52,211,153,0.14)" : bullet.score >= 55 ? "rgba(245,158,11,0.14)" : "rgba(248,113,113,0.14)",
-                        color: bullet.score >= 70 ? "var(--green)" : bullet.score >= 55 ? "var(--yellow)" : "var(--red)",
-                        fontFamily: "system-ui, sans-serif",
-                      }}>
+                      <span className={`az-score-badge az-score-badge--${bullet.score >= 70 ? "strong" : bullet.score >= 55 ? "fair" : "weak"}`} style={{ flexShrink: 0, marginTop: 1 }}>
                         {bullet.score}
                       </span>
                     )}
@@ -1007,35 +1006,143 @@ export default function AnalyzeLiveResumeBody({
                     </span>
                   </div>
 
-                  {/* Inline detail (non-presentation mode only) */}
-                  {!presentationOnly && expandedIdx === bulletIdx && bullet.issues.length > 0 && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6, paddingLeft: 2, fontFamily: "system-ui, sans-serif" }}>
-                      {bullet.issues.map((issue, ij) => (
-                        <span key={ij} style={{
-                          fontSize: 9, padding: "1px 6px", borderRadius: 8,
-                          background: "var(--red-bg)", color: "var(--red)", fontWeight: 500,
-                        }}>
-                          {issue}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {!presentationOnly && expandedIdx === bulletIdx && !!bullet.improvedBullet && (
-                    <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 4 }}>
-                      <BulletImprovedEditor
-                        layout="plain"
-                        minHeight={56}
-                        value={rewriteEdits[bulletIdx] ?? (bullet.improvedBullet ?? "")}
-                        onChange={v => patchBulletRewrite(bulletIdx, v)}
-                        onReset={() => patchBulletRewrite(bulletIdx, null)}
-                        canReset={rewriteEdits[bulletIdx] !== undefined}
-                        toolbarRight={<CopyTiny text={rewriteEdits[bulletIdx] ?? (bullet.improvedBullet ?? "")} />}
-                        previewLineApplied={previewLineApplied}
-                        onReplaceInPreview={() => patchPreviewLine(bulletIdx, (rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "").trim())}
-                        onRevertPreviewLine={() => patchPreviewLine(bulletIdx, null)}
-                      />
-                    </div>
-                  )}
+                  {/* ── Inline detail panel (non-presentation mode only) ── */}
+                  {!presentationOnly && expandedIdx === bulletIdx && (() => {
+                    const accepted = acceptedBullets[bulletIdx];
+                    const isEditing = editingBullets[bulletIdx];
+                    const editDraft = editDrafts[bulletIdx] ?? "";
+
+                    // ── State D: editing textarea ──
+                    if (isEditing) {
+                      return (
+                        <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 8 }} onClick={e => e.stopPropagation()}>
+                          <textarea
+                            autoFocus
+                            value={editDraft}
+                            onChange={e => setEditDrafts(prev => ({ ...prev, [bulletIdx]: e.target.value }))}
+                            placeholder="Write your improved bullet…"
+                            className="az-edit-textarea"
+                          />
+                          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                            <button
+                              onClick={() => {
+                                const t = editDraft.trim();
+                                if (!t) return;
+                                acceptBullet(bulletIdx, t, "custom");
+                                patchBulletRewrite(bulletIdx, t);
+                                setEditingBullets(prev => { const n = { ...prev }; delete n[bulletIdx]; return n; });
+                              }}
+                              className="az-btn az-btn--primary az-btn--sm"
+                            >Save</button>
+                            <button
+                              onClick={() => setEditingBullets(prev => { const n = { ...prev }; delete n[bulletIdx]; return n; })}
+                              className="az-btn az-btn--ghost az-btn--sm"
+                            >Cancel</button>
+                            {editDraft.trim() && (
+                              <CopyTiny text={editDraft} />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // ── State C: accepted ──
+                    if (accepted) {
+                      const acceptedText = previewLineOverrides[bulletIdx] ?? rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "";
+                      return (
+                        <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 6 }} onClick={e => e.stopPropagation()}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                            <span className={`az-score-badge az-score-badge--${accepted === "ai" ? "accepted" : "accepted"}`} style={{
+                              background: accepted === "ai" ? "var(--az-accepted-ai-bg)" : "var(--az-accepted-custom-bg)",
+                              borderColor: accepted === "ai" ? "var(--az-accepted-ai-border)" : "var(--az-accepted-custom-border)",
+                              color: accepted === "ai" ? "var(--az-strong-text)" : "#2563eb",
+                            }}>
+                              {accepted === "ai" ? "✓ AI" : "✓ Custom"}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setEditDrafts(prev => ({ ...prev, [bulletIdx]: acceptedText }));
+                                setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
+                              }}
+                              className="az-btn az-btn--ghost az-btn--sm"
+                            >Edit</button>
+                            <button
+                              onClick={() => {
+                                unacceptBullet(bulletIdx);
+                                patchBulletRewrite(bulletIdx, null);
+                              }}
+                              className="az-btn az-btn--ghost az-btn--sm"
+                            >Undo</button>
+                          </div>
+                          {acceptedText && (
+                            <div className="az-bullet-accepted-text">{acceptedText}</div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // ── State B: expanded suggestion view ──
+                    const MAX_CHIPS = 3;
+                    const visibleIssues = bullet.issues.slice(0, MAX_CHIPS);
+                    const overflowCount = bullet.issues.length - MAX_CHIPS;
+                    return (
+                      <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 6 }} onClick={e => e.stopPropagation()}>
+                        {/* Issues chips — max 3 + overflow pill */}
+                        {bullet.issues.length > 0 && (
+                          <div className="az-chips" style={{ marginBottom: 8, paddingLeft: 2 }}>
+                            {visibleIssues.map((issue, ij) => (
+                              <span key={ij} className="az-chip">{issue}</span>
+                            ))}
+                            {overflowCount > 0 && (
+                              <span className="az-chip az-chip--overflow">+{overflowCount} more</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* AI suggestion card */}
+                        {bullet.improvedBullet && (
+                          <div className="az-suggestion-card">
+                            <div className="az-suggestion-card__header">
+                              <span>✦</span> AI Suggestion
+                            </div>
+                            <div className="az-suggestion-card__body">
+                              {bullet.improvedBullet}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Action buttons */}
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {bullet.improvedBullet && (
+                            <button
+                              className="az-btn az-btn--primary az-btn--sm"
+                              onClick={() => {
+                                acceptBullet(bulletIdx, bullet.improvedBullet!, "ai");
+                                patchBulletRewrite(bulletIdx, bullet.improvedBullet!);
+                              }}
+                            >Accept AI</button>
+                          )}
+                          {bullet.improvedBullet && (
+                            <button
+                              className="az-btn az-btn--ghost az-btn--sm"
+                              onClick={() => {
+                                setEditDrafts(prev => ({ ...prev, [bulletIdx]: bullet.improvedBullet! }));
+                                setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
+                              }}
+                            >Edit draft</button>
+                          )}
+                          <button
+                            className="az-btn az-btn--ghost az-btn--sm"
+                            style={{ color: "var(--muted)" }}
+                            onClick={() => {
+                              setEditDrafts(prev => ({ ...prev, [bulletIdx]: "" }));
+                              setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
+                            }}
+                          >Write my own</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

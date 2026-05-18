@@ -74,6 +74,12 @@ interface Props {
   sourcePdfFileName?: string | null;
   /** Explain why PDF / Original download toggles are missing after opening a saved analysis. */
   restoredResumeNoPdfHint?: boolean;
+  /** Export accepted edits to PDF via unified pipeline. Receives selected template folder. */
+  onExportPdf?: (opts: { referenceFolder: string }) => void;
+  /** Export accepted edits to DOCX. */
+  onExportDocx?: () => void;
+  /** True while an export is in progress. */
+  exportingResume?: boolean;
 }
 
 function scoreColor(score: number): string {
@@ -213,6 +219,9 @@ export default function AnnotatedResumePanel({
   sourcePdfUrl = null,
   sourcePdfFileName = null,
   restoredResumeNoPdfHint = false,
+  onExportPdf,
+  onExportDocx,
+  exportingResume = false,
 }: Props) {
   const styleTemplates = useMemo(() => distinctStyleTemplates(), []);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -905,6 +914,56 @@ export default function AnnotatedResumePanel({
             >
               {pdfExporting ? "Exporting…" : "Download preview PDF"}
             </button>
+            {(onExportPdf || onExportDocx) && (
+              <>
+                <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "2px 0" }} />
+                {onExportPdf && (
+                  <button
+                    type="button"
+                    disabled={exportingResume}
+                    onClick={() => onExportPdf({ referenceFolder: selectedReferenceFolder })}
+                    title="Export your resume with accepted edits applied, rendered via the full LaTeX pipeline."
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      padding: "5px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: exportingResume ? "var(--surface3)" : "var(--accent)",
+                      color: "#fff",
+                      cursor: exportingResume ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      whiteSpace: "nowrap",
+                      boxShadow: exportingResume ? "none" : "var(--shadow-sm)",
+                    }}
+                  >
+                    {exportingResume ? "Exporting…" : "Export PDF"}
+                  </button>
+                )}
+                {onExportDocx && (
+                  <button
+                    type="button"
+                    disabled={exportingResume}
+                    onClick={onExportDocx}
+                    title="Download your resume with accepted edits as a Word .docx file."
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      padding: "5px 12px",
+                      borderRadius: 8,
+                      border: "1px solid var(--border-h)",
+                      background: "var(--surface)",
+                      color: "var(--text)",
+                      cursor: exportingResume ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {exportingResume ? "Exporting…" : "Export DOCX"}
+                  </button>
+                )}
+              </>
+            )}
           </div>
         ) : null}
         {extractKind === "synthetic" && !presentationOnly ? (
@@ -959,25 +1018,24 @@ export default function AnnotatedResumePanel({
       {/* Legend — hidden on PDF tab (viewer has its own legend + download) */}
       {!(sourcePdfUrl && viewMode === "pdf") && (
         <div style={{
-          padding: "7px 14px",
+          padding: "6px 14px",
           borderBottom: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
-          gap: 14,
+          gap: 6,
           flexShrink: 0,
           background: "var(--surface2)",
-          fontSize: 10,
-          color: "var(--muted)",
+          flexWrap: "wrap",
         }}>
           {[
-            { bg: "#ffcdd2", label: "Weak line", border: "#ef5350" },
-            { bg: "#fff9c4", label: "Fair", border: "#fbc02d" },
-            { bg: "#c8e6c9", label: "Strong / metrics", border: "#66bb6a" },
-          ].map(({ bg, label, border }) => (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <div style={{ width: 14, height: 6, borderRadius: 2, background: bg, boxShadow: `inset 0 0 0 1px ${border}55` }} />
-              <span>{label}</span>
-            </div>
+            { color: "var(--az-weak-text)", bg: "var(--az-weak-bg)", label: "Needs work" },
+            { color: "var(--az-fair-text)", bg: "var(--az-fair-bg)", label: "Fair" },
+            { color: "var(--az-strong-text)", bg: "var(--az-strong-bg)", label: "Strong" },
+          ].map(({ color, bg, label }) => (
+            <span key={label} className="az-legend-pill">
+              <span className="az-legend-dot" style={{ background: color, boxShadow: `0 0 0 1px ${color}66` }} />
+              {label}
+            </span>
           ))}
         </div>
       )}

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import AnnotatedResumePanel from "@/components/AnnotatedResumePanel";
 import { useResumeAnalyzeStore, type AnalyzeBulletSnapshot } from "@/store/resumeAnalyzeStore";
+import { useAnalyzeExport } from "@/hooks/useAnalyzeExport";
 
 const PULSE_MS = 850;
 
@@ -38,6 +39,8 @@ interface Props {
   sourcePdfFileName?: string | null;
   /** Shown when a saved analysis was restored — PDF bytes are not in storage. */
   restoredResumeNoPdfHint?: boolean;
+  /** Optional JD text — enables JD-tailored PDF export. */
+  jd?: string;
 }
 
 /**
@@ -60,7 +63,9 @@ export default function AnalyzePreviewPane({
   sourcePdfUrl = null,
   sourcePdfFileName = null,
   restoredResumeNoPdfHint = false,
+  jd = "",
 }: Props) {
+  const { exportPdf, exportDocx, exporting, canExport } = useAnalyzeExport({ jd });
   const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
   const resumeHeaderStore = useResumeAnalyzeStore((s) => s.resumeHeader);
   const bulletsStore = useResumeAnalyzeStore((s) => s.analysisBullets);
@@ -107,6 +112,9 @@ export default function AnalyzePreviewPane({
       sourcePdfUrl={sourcePdfUrl}
       sourcePdfFileName={sourcePdfFileName}
       restoredResumeNoPdfHint={restoredResumeNoPdfHint}
+      onExportPdf={canExport ? exportPdf : undefined}
+      onExportDocx={canExport ? exportDocx : undefined}
+      exportingResume={exporting}
     />
   );
 }
