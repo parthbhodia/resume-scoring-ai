@@ -1,6 +1,7 @@
 "use client";
 import React, { useMemo, useState } from "react";
 import type { DiffLine, ChangeRationale } from "@/lib/types";
+import { formatLibraryFolderLabel } from "@/lib/libraryFolderLabel";
 
 interface Props {
   diff: DiffLine[];
@@ -131,6 +132,8 @@ export default function DiffView({
   baseLoaded = null,
   jdKeywords = [],
 }: Props) {
+  const baseLabel = baseFolder ? formatLibraryFolderLabel(baseFolder) : "";
+
   const changes: Change[] = useMemo(() => {
     if (rationales && rationales.length) {
       const fromRat = rationales
@@ -157,7 +160,7 @@ export default function DiffView({
         <div style={{ padding: "32px 0", textAlign: "center", color: "var(--dim)", fontSize: 12, lineHeight: 1.6 }}>
           Couldn&apos;t load the previous resume source for comparison.<br />
           <span style={{ fontSize: 11 }}>
-            Selected base: <strong style={{ color: "var(--muted)" }}>{baseFolder}</strong>. Make sure its .tex file exists in Supabase Storage or on the backend.
+            Previous version: <strong style={{ color: "var(--muted)" }}>{baseLabel}</strong>. Make sure its file is still available in your library.
           </span>
         </div>
       );
@@ -166,7 +169,7 @@ export default function DiffView({
     if (baseFolder) {
       return (
         <div style={{ padding: "32px 0", textAlign: "center", color: "var(--dim)", fontSize: 12, lineHeight: 1.6 }}>
-          Compared against <strong style={{ color: "var(--muted)" }}>{baseFolder}</strong>, but no line changes were reported.<br />
+          Compared to <strong style={{ color: "var(--muted)" }}>{baseLabel}</strong>, but no line changes were reported.<br />
           <span style={{ fontSize: 11 }}>The generated content may be effectively unchanged, or only formatting changed.</span>
         </div>
       );
@@ -196,7 +199,7 @@ export default function DiffView({
         <span style={{ color: "var(--red)",   fontWeight: 600 }}>−{removes} removed</span>
         {baseFolder && (
           <span style={{ color: "var(--dim)" }}>
-            vs <strong style={{ color: "var(--muted)" }}>{baseFolder}</strong>
+            vs <strong style={{ color: "var(--muted)" }}>{baseLabel}</strong>
           </span>
         )}
         {changes.some(c => !!c.why) && (

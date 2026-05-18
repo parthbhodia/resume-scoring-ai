@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale, ParsedSection } from "@/lib/types";
 import { buildResumeFileStem } from "@/lib/resumeFileName";
+import { getBaseResumeBanner } from "@/lib/libraryFolderLabel";
 import { apiUrl, isResumeUploadFile, parseJsonOrThrow, scoreColor } from "@/lib/utils";
 import { toUserFriendlyErrorMessage, messageForNonJsonApiFailure } from "@/lib/userFriendlyError";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
@@ -1865,29 +1866,40 @@ export default function ResumeBuilder({
           )}
 
           {/* Base resume indicator */}
-          {baseFolder && (
+          {baseFolder && (() => {
+            const baseBanner = getBaseResumeBanner(baseFolder);
+            if (!baseBanner) return null;
+            return (
             <div style={{
-              display: "flex", alignItems: "center", gap: 8,
-              marginBottom: 12, padding: "8px 12px",
-              background: "var(--surface2)", borderRadius: 8,
+              display: "flex", alignItems: "center", gap: 10,
+              marginBottom: 12, padding: "10px 12px",
+              background: "var(--surface2)", borderRadius: 10,
               fontSize: 12, letterSpacing: -0.2,
+              border: "1px solid var(--border)",
             }}>
-              <span style={{ color: "var(--dim)" }}>Comparing against</span>
-              <span style={{ color: "var(--text)", fontWeight: 500, flex: 1 }}>{baseFolder}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", marginBottom: 2 }}>
+                  {baseBanner.heading}
+                </div>
+                <div style={{ color: "var(--text)", fontWeight: 600, lineHeight: 1.35 }}>
+                  {baseBanner.detail}
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setBaseFolder(null)}
-                aria-label="Clear base résumé comparison"
+                aria-label="Clear base résumé"
                 style={{
                   background: "none", border: "none", color: "var(--dim)", cursor: "pointer",
                   fontSize: 18, lineHeight: 1, minWidth: 44, minHeight: 44,
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                   borderRadius: 8, margin: "-8px -6px -8px 0",
                 }}
-                title="Clear base"
+                title="Use a fresh start (no prior version)"
               >×</button>
             </div>
-          )}
+            );
+          })()}
 
           {/* Error banner */}
           {error && (
