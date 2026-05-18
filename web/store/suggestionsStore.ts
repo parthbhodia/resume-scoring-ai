@@ -100,7 +100,7 @@ export const useSuggestionsStore = create<SuggestionsStore>((set, get) => ({
 
   setError: (error) => set({ error, loading: false }),
 
-  incrementStep: () => set((s) => ({ stepsDone: s.stepsDone + 1 })),
+  incrementStep: () => set((s) => ({ stepsDone: Math.min(s.stepsDone + 1, 3) })),
 
   reset: () => set(initial()),
 

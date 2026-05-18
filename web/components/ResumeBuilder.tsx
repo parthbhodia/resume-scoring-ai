@@ -360,6 +360,8 @@ export default function ResumeBuilder({
     reset: s.reset,
   }));
   const suggestStreamAbortRef = useRef<AbortController | null>(null);
+  /** Avoid re-running Analyze/Template session prefill + router.replace on every searchParams tick. */
+  const builderPrefillAppliedRef = useRef(false);
   /** When JD text matches ``jd``, a second coach call can POST ``reuse_research_*`` to skip another web search. */
   const suggestResearchReuseGateRef = useRef<{
     jd: string;
@@ -470,17 +472,14 @@ export default function ResumeBuilder({
 
   useEffect(() => {
     if (!suggestLoading) {
-      
       setSuggestLoaderTipIdx(0);
       return;
     }
-    const t0 = Date.now();
     const phaseTicker = setInterval(() => {
-      const elapsed = Date.now() - t0;
-      suggestActions.incrementStep();
-    }, 100);
+      useSuggestionsStore.getState().incrementStep();
+    }, 2800);
     const tipTicker = setInterval(() => {
-      setSuggestLoaderTipIdx(i => (i + 1) % SUGGEST_LOADER_TIPS.length);
+      setSuggestLoaderTipIdx((i) => (i + 1) % SUGGEST_LOADER_TIPS.length);
     }, 2600);
     return () => {
       clearInterval(phaseTicker);
@@ -488,11 +487,19 @@ export default function ResumeBuilder({
     };
   }, [suggestLoading]);
 
-  // Prefill from Analyze (`fromAnalyze=1`) or Template Studio (`fromTemplateStudio=1`).
+  // Prefill from Analyze (`fromAnalyze=1`) or Template Studio (`fromTemplateStudio=1`) — run once.
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || builderPrefillAppliedRef.current) return;
     const sp = new URLSearchParams(searchParams.toString());
     const intentJob = sp.get("intent") === "job";
+    const fromAnalyze = sp.get("fromAnalyze") === "1";
+    const fromTemplateStudio = sp.get("fromTemplateStudio") === "1";
+    const flow = (sp.get("flow") || "tailor").toLowerCase();
+
+    if (!intentJob && !fromAnalyze && !fromTemplateStudio) return;
+
+    builderPrefillAppliedRef.current = true;
+
     if (intentJob) {
       setStudioHandoff(false);
       try {
@@ -504,14 +511,6 @@ export default function ResumeBuilder({
       return;
     }
 
-    const fromAnalyze = sp.get("fromAnalyze") === "1";
-    const fromTemplateStudio = sp.get("fromTemplateStudio") === "1";
-    const flow = (sp.get("flow") || "tailor").toLowerCase();
-    let layoutOnly = false;
-    try {
-      layoutOnly = sessionStorage.getItem(RN_BUILDER_LAYOUT_ONLY_KEY) === "1";
-    } catch { /* ignore */ }
-
     try {
       const profile = sessionStorage.getItem("rn_builder_profile_prefill");
       const jdPre = sessionStorage.getItem(TAILOR_PREFILL_JD);
@@ -520,8 +519,6 @@ export default function ResumeBuilder({
       if ((fromAnalyze || fromTemplateStudio) && profile) {
         setCandidateProfile(profile);
         setUploadedFileName(fromTemplateStudio ? "From template studio" : "From Analyze");
-        // Previous `result.pdfUrl` is from an older compile (often another résumé / layout).
-        // HTML preview follows Style + profile immediately; keep PDF hidden until they generate again.
         setResult(null);
         setPreview("");
       }
@@ -558,7 +555,6 @@ export default function ResumeBuilder({
       router.replace(next);
     } else if (fromTemplateStudio) {
       setStudioHandoff(true);
-      // Even without a profile key (edge), do not show a PDF from a prior builder session.
       setResult(null);
       setPreview("");
       try {
@@ -567,14 +563,6 @@ export default function ResumeBuilder({
       sp.delete("fromTemplateStudio");
       const qs = sp.toString();
       router.replace(qs ? `/?${qs}` : "/?view=builder&flow=tailor");
-    }
-
-    // If we land on the tailor flow (from Analyze or plain navigation),
-    // do not keep a stale "template studio" UI mode from a previous run.
-    if (!fromTemplateStudio && flow === "tailor") {
-      if (!layoutOnly) {
-        setStudioHandoff(false);
-      }
     }
   }, [router, searchParams]);
 
@@ -799,9 +787,7 @@ export default function ResumeBuilder({
     suggestActions.setLoading(true);
     suggestActions.setError(null);
     suggestActions.reset();
-    suggestActions.reset();
     setAiJobFitWithoutTicks(false);
-    suggestActions.reset();
     
     setSuggestResearchQueries([]);
     setSuggestResearchSources([]);
@@ -913,7 +899,6 @@ export default function ResumeBuilder({
                   sources: rs,
                 };
               }
-              suggestActions.reset();
               break;
             }
             case "error":
@@ -4392,12 +4377,14 @@ function ResumeStyleTemplateGrid({
   styleReferenceFolder: string;
   setStyleReferenceFolder: (folder: string) => void;
 }) {
-  const templates = distinctStyleTemplates();
+  const templates = useMemo(() => distinctStyleTemplates(), []);
+  const defaultFolder = templates[0]?.referenceFolder;
 
   useEffect(() => {
-    const only = templates[0]?.referenceFolder;
-    if (only && styleReferenceFolder !== only) setStyleReferenceFolder(only);
-  }, [templates, styleReferenceFolder, setStyleReferenceFolder]);
+    if (defaultFolder && styleReferenceFolder !== defaultFolder) {
+      setStyleReferenceFolder(defaultFolder);
+    }
+  }, [defaultFolder, styleReferenceFolder, setStyleReferenceFolder]);
 
   if (!hasMultipleStyleTemplates()) {
     const t = templates[0];
