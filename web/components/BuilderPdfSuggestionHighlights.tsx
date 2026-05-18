@@ -8,23 +8,17 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "./PdfViewerWithHighlights.css";
 import "./BuilderPdfSuggestionHighlights.css";
 import { normalizeForMatch } from "@/components/AnalyzeLiveResumeBody";
+import {
+  normalizeSuggestionPriority,
+  PRIORITY_PDF_STRIPE,
+  type SuggestionPriority,
+} from "@/lib/suggestionPriorityStyles";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 type CustomTextRenderer = NonNullable<PageProps["customTextRenderer"]>;
 
-export type BuilderPdfSuggestion = { id: string; original: string };
-
-const STRIPE_PALETTE: ReadonlyArray<{ bg: string; border: string }> = [
-  { bg: "rgba(217, 119, 6, 0.32)", border: "rgba(217, 119, 6, 0.75)" },
-  { bg: "rgba(124, 58, 237, 0.28)", border: "rgba(124, 58, 237, 0.75)" },
-  { bg: "rgba(37, 99, 235, 0.28)", border: "rgba(37, 99, 235, 0.75)" },
-  { bg: "rgba(219, 39, 119, 0.26)", border: "rgba(219, 39, 119, 0.72)" },
-  { bg: "rgba(13, 148, 136, 0.30)", border: "rgba(13, 148, 136, 0.72)" },
-  { bg: "rgba(194, 65, 12, 0.30)", border: "rgba(194, 65, 12, 0.75)" },
-  { bg: "rgba(79, 70, 229, 0.28)", border: "rgba(79, 70, 229, 0.75)" },
-  { bg: "rgba(202, 138, 4, 0.32)", border: "rgba(202, 138, 4, 0.75)" },
-];
+export type BuilderPdfSuggestion = { id: string; original: string; priority?: SuggestionPriority };
 
 const ACCEPTED_BG = "rgba(52, 211, 153, 0.38)";
 const ACCEPTED_BORDER = "rgba(34, 197, 94, 0.85)";
@@ -99,7 +93,6 @@ export default function BuilderPdfSuggestionHighlights({
       border: string;
       accepted: boolean;
     }> = [];
-    let visualIdx = 0;
     for (const s of suggestions) {
       if (rejectedIds.has(s.id)) continue;
       const raw = s.original.trim();
@@ -107,8 +100,7 @@ export default function BuilderPdfSuggestionHighlights({
       const norm = normalizeForMatch(raw).toLowerCase();
       if (norm.length < 6) continue;
       const accepted = acceptedIds.has(s.id);
-      const pal = STRIPE_PALETTE[visualIdx % STRIPE_PALETTE.length];
-      visualIdx += 1;
+      const pal = PRIORITY_PDF_STRIPE[normalizeSuggestionPriority(s.priority)];
       rows.push({
         id: s.id,
         norm,

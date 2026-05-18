@@ -31,6 +31,13 @@ import {
 } from "@/lib/suggestionResumeMatch";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { useSuggestionsStore } from "@/store/suggestionsStore";
+import {
+  PRIORITY_BG,
+  PRIORITY_COLOR,
+  PRIORITY_STRIPE,
+  priorityLabel,
+  stripeStyleForPriority,
+} from "@/lib/suggestionPriorityStyles";
 import { useUploadResume } from "@/hooks/useUploadResume";
 import {
   nameAndSubtitleLineIndices,
@@ -366,6 +373,26 @@ export default function ResumeBuilder({
   const undoRejectSuggestion = useSuggestionsStore((s) => s.undoReject);
   const selectSuggestion = useSuggestionsStore((s) => s.select);
   const resetSuggestions = useSuggestionsStore((s) => s.reset);
+  /** Clear coach suggestions without re-applying the current list (reset + hydrate was re-opening review). */
+  const clearSuggestionsState = useCallback(() => {
+    selectSuggestion(null);
+    resetSuggestions();
+    setSuggestError(null);
+    setSuggestResearchDigest("");
+    setSuggestResearchQueries([]);
+    setSuggestResearchSources([]);
+    setAiJobFitWithoutTicks(false);
+  }, [resetSuggestions, selectSuggestion]);
+  const tryAnotherJob = useCallback(() => {
+    clearSuggestionsState();
+    setResult(null);
+    setPreview("");
+    setJd("");
+    setCompany("");
+    setRole("");
+    setAtsResult(null);
+    setAtsError(null);
+  }, [clearSuggestionsState]);
   const suggestStreamAbortRef = useRef<AbortController | null>(null);
   /** Avoid re-running Analyze/Template session prefill + router.replace on every searchParams tick. */
   const builderPrefillAppliedRef = useRef(false);
@@ -2071,16 +2098,7 @@ export default function ResumeBuilder({
               setAiJobFitWithoutTicks={setAiJobFitWithoutTicks}
               useStructuredRenderer={useStructuredRenderer}
               setUseStructuredRenderer={setUseStructuredRenderer}
-              onBackToInputs={() => {
-                selectSuggestion(null);
-                resetSuggestions();
-                hydrateSuggestions(suggestions, "");
-                setSuggestError(null);
-                setAiJobFitWithoutTicks(false);
-                setSuggestResearchQueries([]);
-                setSuggestResearchSources([]);
-                setSuggestResearchDigest("");
-              }}
+              onBackToInputs={clearSuggestionsState}
             />
           )}
 
@@ -2363,21 +2381,7 @@ export default function ResumeBuilder({
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setResult(null);
-                    setPreview("");
-                    resetSuggestions();
-                    hydrateSuggestions(suggestions, "");
-                    setSuggestError(null);
-                    setSuggestResearchDigest("");
-                    setSuggestResearchQueries([]);
-                    setSuggestResearchSources([]);
-                    setAiJobFitWithoutTicks(false);
-                    selectSuggestion(null);
-                    setJd("");
-                    setCompany("");
-                    setRole("");
-                  }}
+                  onClick={tryAnotherJob}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -2821,20 +2825,7 @@ export default function ResumeBuilder({
                 </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setResult(null);
-                    resetSuggestions();
-                    setJd("");
-                    setCompany("");
-                    setRole("");
-                    setPreview("");
-                    setAiJobFitWithoutTicks(false);
-                    selectSuggestion(null);
-                    hydrateSuggestions(suggestions, "");
-                    setSuggestResearchDigest("");
-                    setSuggestResearchQueries([]);
-                    setSuggestResearchSources([]);
-                  }}
+                  onClick={tryAnotherJob}
                   style={{
                     fontSize: 12,
                     fontWeight: 600,
@@ -3978,31 +3969,6 @@ type BuilderPaperInteractive = {
   onLineSelectSuggestion: (id: string) => void;
 };
 
-/** Distinct left-border tints per suggestion (pending lines) — pairs with list order / card index. */
-const RB_SUGGESTION_STRIPE_PALETTE: ReadonlyArray<{ border: string; bg: string }> = [
-  { border: "#d97706", bg: "rgba(217, 119, 6, 0.11)" },
-  { border: "#7c3aed", bg: "rgba(124, 58, 237, 0.09)" },
-  { border: "#2563eb", bg: "rgba(37, 99, 235, 0.09)" },
-  { border: "#db2777", bg: "rgba(219, 39, 119, 0.08)" },
-  { border: "#0d9488", bg: "rgba(13, 148, 136, 0.10)" },
-  { border: "#c2410c", bg: "rgba(194, 65, 12, 0.10)" },
-  { border: "#4f46e5", bg: "rgba(79, 70, 229, 0.09)" },
-  { border: "#ca8a04", bg: "rgba(202, 138, 4, 0.11)" },
-];
-
-function stripeStyleForSuggestion(sug: Suggestion | null, all: Suggestion[]): CSSProperties {
-  if (!sug || !all.length) return {};
-  const idx = Math.max(0, all.findIndex(s => s.id === sug.id));
-  const c = RB_SUGGESTION_STRIPE_PALETTE[idx % RB_SUGGESTION_STRIPE_PALETTE.length];
-  return {
-    background: c.bg,
-    borderLeft: `3px solid ${c.border}`,
-    paddingLeft: 6,
-    marginLeft: -9,
-    borderRadius: "0 3px 3px 0",
-  };
-}
-
 /** HTML paper: fix glued tokens, space before `**`, render `**x**` as <strong> */
 function normalizePaperLineDisplayString(raw: string): string {
   let s = raw.replace(/([A-Za-z0-9)])(\*\*)/g, "$1 $2");
@@ -4198,7 +4164,7 @@ function ResumePaperView({
           };
           let hlStyle: React.CSSProperties = {};
           if (acceptedSug) hlStyle = green;
-          else if (pendingHighlight && linkSug && ic) hlStyle = stripeStyleForSuggestion(linkSug, ic.suggestions);
+          else if (pendingHighlight && linkSug) hlStyle = stripeStyleForPriority(linkSug.priority);
           else if (pendingHighlight || highlightedPlain) hlStyle = amber;
 
           if (i === nameLineIndex) {
@@ -4323,19 +4289,6 @@ function ResumePaperView({
 }
 
 /* ── Suggestions panel ───────────────────────────────────────────────────── */
-
-const PRIORITY_COLOR: Record<string, string> = {
-  high: "var(--red)", medium: "var(--amber)", low: "var(--muted)",
-};
-const PRIORITY_BG: Record<string, string> = {
-  high: "var(--red-bg)", medium: "var(--amber-bg)", low: "rgba(148,163,184,0.12)",
-};
-
-function priorityLabel(p: Suggestion["priority"]): string {
-  if (p === "high") return "HIGH";
-  if (p === "medium") return "MEDIUM";
-  return "LOW";
-}
 
 /** Thumbnail art matches `referenceFolder` sent to the server — not hardcoded to one style. */
 type TemplateThumbKind = "classic" | "harshibar" | "malta";
@@ -4661,8 +4614,7 @@ function SuggestionsPanel({
               const isAccepted = acceptedIds.has(s.id);
               const isRejected = rejectedIds.has(s.id);
               const isLinked = selectedSuggestionId === s.id;
-              const si = suggestions.findIndex(x => x.id === s.id);
-              const stripe = RB_SUGGESTION_STRIPE_PALETTE[Math.max(0, si) % RB_SUGGESTION_STRIPE_PALETTE.length];
+              const stripe = PRIORITY_STRIPE[s.priority] ?? PRIORITY_STRIPE.medium;
               return (
                 <div
                   key={s.id}
@@ -4681,7 +4633,7 @@ function SuggestionsPanel({
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                     <span
-                      title="Same color as the matching line in the résumé preview"
+                      title={`${priorityLabel(s.priority)} severity — same tint on the matching line in the preview`}
                       aria-hidden
                       style={{
                         width: 5,
@@ -4867,7 +4819,7 @@ function SuggestionsPanel({
                 key={pdfDocumentKey}
                 pdfBlobUrl={pdfBlobUrl}
                 filename={pdfFileName ?? "resume.pdf"}
-                suggestions={suggestions.map(s => ({ id: s.id, original: s.original }))}
+                suggestions={suggestions.map(s => ({ id: s.id, original: s.original, priority: s.priority }))}
                 acceptedIds={acceptedIds}
                 rejectedIds={rejectedIds}
                 selectedSuggestionId={selectedSuggestionId}
@@ -4877,7 +4829,7 @@ function SuggestionsPanel({
           ) : (
             <>
               <div style={{ fontSize: 10, color: "var(--dim)", marginBottom: 6, lineHeight: 1.45 }}>
-                Same layout family as Generate (Style tab). Tinted lines match cards on the left — click a line to focus the matching suggestion.
+                Same layout family as Generate (Style tab). Line tints follow severity (red = high, amber = medium, gray = low) — click a line to focus the matching suggestion.
               </div>
               <div ref={textPreviewScrollRef} style={{ overflowY: "auto", maxHeight: panelScrollMax }}>
                 <ResumePaperView
