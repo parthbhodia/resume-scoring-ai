@@ -985,17 +985,7 @@ export default function AnalyzeLiveResumeBody({
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
                     {/* Score badge — visible in non-presentation mode only */}
                     {!presentationOnly && (
-                      <span className="az-score-badge" style={{
-                        flexShrink: 0,
-                        marginTop: 1,
-                        fontSize: 9,
-                        fontWeight: 800,
-                        padding: "1px 5px",
-                        borderRadius: 8,
-                        background: bullet.score >= 70 ? "rgba(52,211,153,0.14)" : bullet.score >= 55 ? "rgba(245,158,11,0.14)" : "rgba(248,113,113,0.14)",
-                        color: bullet.score >= 70 ? "var(--green)" : bullet.score >= 55 ? "var(--yellow)" : "var(--red)",
-                        fontFamily: "system-ui, sans-serif",
-                      }}>
+                      <span className={`az-score-badge az-score-badge--${bullet.score >= 70 ? "strong" : bullet.score >= 55 ? "fair" : "weak"}`} style={{ flexShrink: 0, marginTop: 1 }}>
                         {bullet.score}
                       </span>
                     )}
@@ -1031,13 +1021,7 @@ export default function AnalyzeLiveResumeBody({
                             value={editDraft}
                             onChange={e => setEditDrafts(prev => ({ ...prev, [bulletIdx]: e.target.value }))}
                             placeholder="Write your improved bullet…"
-                            style={{
-                              width: "100%", boxSizing: "border-box", minHeight: 64,
-                              fontSize: 11, lineHeight: 1.45, padding: "7px 9px",
-                              borderRadius: 5, border: "1.5px solid var(--border)",
-                              background: "var(--input-bg, var(--bg))", color: "var(--fg)",
-                              resize: "vertical", fontFamily: "inherit",
-                            }}
+                            className="az-edit-textarea"
                           />
                           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                             <button
@@ -1048,19 +1032,11 @@ export default function AnalyzeLiveResumeBody({
                                 patchBulletRewrite(bulletIdx, t);
                                 setEditingBullets(prev => { const n = { ...prev }; delete n[bulletIdx]; return n; });
                               }}
-                              style={{
-                                fontSize: 10, fontWeight: 700, padding: "4px 12px", borderRadius: 5,
-                                border: "none", cursor: "pointer",
-                                background: "var(--green)", color: "#fff",
-                              }}
+                              className="az-btn az-btn--primary az-btn--sm"
                             >Save</button>
                             <button
                               onClick={() => setEditingBullets(prev => { const n = { ...prev }; delete n[bulletIdx]; return n; })}
-                              style={{
-                                fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 5,
-                                border: "1px solid var(--border)", cursor: "pointer",
-                                background: "transparent", color: "var(--muted)",
-                              }}
+                              className="az-btn az-btn--ghost az-btn--sm"
                             >Cancel</button>
                             {editDraft.trim() && (
                               <CopyTiny text={editDraft} />
@@ -1072,73 +1048,64 @@ export default function AnalyzeLiveResumeBody({
 
                     // ── State C: accepted ──
                     if (accepted) {
+                      const acceptedText = previewLineOverrides[bulletIdx] ?? rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "";
                       return (
                         <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 6 }} onClick={e => e.stopPropagation()}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                            <span style={{
-                              fontSize: 9, fontWeight: 800, padding: "1px 7px", borderRadius: 8,
-                              background: accepted === "ai" ? "rgba(52,211,153,0.15)" : "rgba(96,165,250,0.15)",
-                              color: accepted === "ai" ? "var(--green)" : "#60a5fa",
-                              textTransform: "uppercase",
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                            <span className={`az-score-badge az-score-badge--${accepted === "ai" ? "accepted" : "accepted"}`} style={{
+                              background: accepted === "ai" ? "var(--az-accepted-ai-bg)" : "var(--az-accepted-custom-bg)",
+                              borderColor: accepted === "ai" ? "var(--az-accepted-ai-border)" : "var(--az-accepted-custom-border)",
+                              color: accepted === "ai" ? "var(--az-strong-text)" : "#2563eb",
                             }}>
-                              {accepted === "ai" ? "✓ AI Accepted" : "✓ Custom"}
+                              {accepted === "ai" ? "✓ AI" : "✓ Custom"}
                             </span>
                             <button
                               onClick={() => {
-                                const current = previewLineOverrides[bulletIdx] ?? rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "";
-                                setEditDrafts(prev => ({ ...prev, [bulletIdx]: current }));
+                                setEditDrafts(prev => ({ ...prev, [bulletIdx]: acceptedText }));
                                 setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
                               }}
-                              style={{
-                                fontSize: 9, fontWeight: 600, padding: "2px 8px", borderRadius: 5,
-                                border: "1px solid var(--border)", cursor: "pointer",
-                                background: "transparent", color: "var(--muted)",
-                              }}
+                              className="az-btn az-btn--ghost az-btn--sm"
                             >Edit</button>
                             <button
                               onClick={() => {
                                 unacceptBullet(bulletIdx);
                                 patchBulletRewrite(bulletIdx, null);
                               }}
-                              style={{
-                                fontSize: 9, fontWeight: 600, padding: "2px 8px", borderRadius: 5,
-                                border: "1px solid var(--border)", cursor: "pointer",
-                                background: "transparent", color: "var(--muted)",
-                              }}
+                              className="az-btn az-btn--ghost az-btn--sm"
                             >Undo</button>
                           </div>
+                          {acceptedText && (
+                            <div className="az-bullet-accepted-text">{acceptedText}</div>
+                          )}
                         </div>
                       );
                     }
 
                     // ── State B: expanded suggestion view ──
+                    const MAX_CHIPS = 3;
+                    const visibleIssues = bullet.issues.slice(0, MAX_CHIPS);
+                    const overflowCount = bullet.issues.length - MAX_CHIPS;
                     return (
                       <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 6 }} onClick={e => e.stopPropagation()}>
-                        {/* Issues chips */}
+                        {/* Issues chips — max 3 + overflow pill */}
                         {bullet.issues.length > 0 && (
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8, paddingLeft: 2 }}>
-                            {bullet.issues.map((issue, ij) => (
-                              <span key={ij} style={{
-                                fontSize: 9, padding: "1px 6px", borderRadius: 8,
-                                background: "var(--red-bg)", color: "var(--red)", fontWeight: 500,
-                              }}>
-                                {issue}
-                              </span>
+                          <div className="az-chips" style={{ marginBottom: 8, paddingLeft: 2 }}>
+                            {visibleIssues.map((issue, ij) => (
+                              <span key={ij} className="az-chip">{issue}</span>
                             ))}
+                            {overflowCount > 0 && (
+                              <span className="az-chip az-chip--overflow">+{overflowCount} more</span>
+                            )}
                           </div>
                         )}
 
-                        {/* AI suggestion box */}
+                        {/* AI suggestion card */}
                         {bullet.improvedBullet && (
-                          <div style={{
-                            padding: "8px 10px", borderRadius: 5, marginBottom: 8,
-                            border: "1px solid var(--border)",
-                            background: "rgba(52,211,153,0.06)",
-                          }}>
-                            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", marginBottom: 4 }}>
-                              AI Suggestion
+                          <div className="az-suggestion-card">
+                            <div className="az-suggestion-card__header">
+                              <span>✦</span> AI Suggestion
                             </div>
-                            <div style={{ fontSize: 10.5, lineHeight: 1.45, color: "var(--fg)" }}>
+                            <div className="az-suggestion-card__body">
                               {bullet.improvedBullet}
                             </div>
                           </div>
@@ -1148,39 +1115,28 @@ export default function AnalyzeLiveResumeBody({
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {bullet.improvedBullet && (
                             <button
+                              className="az-btn az-btn--primary az-btn--sm"
                               onClick={() => {
                                 acceptBullet(bulletIdx, bullet.improvedBullet!, "ai");
                                 patchBulletRewrite(bulletIdx, bullet.improvedBullet!);
-                              }}
-                              style={{
-                                fontSize: 10, fontWeight: 700, padding: "4px 12px", borderRadius: 5,
-                                border: "none", cursor: "pointer",
-                                background: "var(--green)", color: "#fff",
                               }}
                             >Accept AI</button>
                           )}
                           {bullet.improvedBullet && (
                             <button
+                              className="az-btn az-btn--ghost az-btn--sm"
                               onClick={() => {
                                 setEditDrafts(prev => ({ ...prev, [bulletIdx]: bullet.improvedBullet! }));
                                 setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
                               }}
-                              style={{
-                                fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 5,
-                                border: "1px solid var(--border)", cursor: "pointer",
-                                background: "transparent", color: "var(--fg)",
-                              }}
-                            >Edit AI draft</button>
+                            >Edit draft</button>
                           )}
                           <button
+                            className="az-btn az-btn--ghost az-btn--sm"
+                            style={{ color: "var(--muted)" }}
                             onClick={() => {
                               setEditDrafts(prev => ({ ...prev, [bulletIdx]: "" }));
                               setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
-                            }}
-                            style={{
-                              fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 5,
-                              border: "1px solid var(--border)", cursor: "pointer",
-                              background: "transparent", color: "var(--muted)",
                             }}
                           >Write my own</button>
                         </div>

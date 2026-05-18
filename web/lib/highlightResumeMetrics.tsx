@@ -14,16 +14,7 @@ export function highlightMetricSpans(text: string): ReactNode[] {
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) out.push(text.slice(last, m.index));
     out.push(
-      <mark
-        key={`hk-${key++}`}
-        style={{
-          background: "rgba(165, 214, 167, 0.55)",
-          color: "inherit",
-          padding: "0 2px",
-          borderRadius: 2,
-          fontWeight: 600,
-        }}
-      >
+      <mark key={`hk-${key++}`} className="az-metric">
         {m[0]}
       </mark>,
     );

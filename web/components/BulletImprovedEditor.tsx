@@ -145,22 +145,8 @@ export default function BulletImprovedEditor({
         onBlur={onTextareaBlur}
         spellCheck
         aria-label="Edit AI improved bullet"
-        style={{
-          display: "block",
-          width: "100%",
-          boxSizing: "border-box",
-          minHeight,
-          resize: "vertical",
-          fontSize: 12.5,
-          lineHeight: 1.65,
-          color: "var(--green)",
-          background: "rgba(52,211,153,0.06)",
-          border: "1px solid rgba(52,211,153,0.18)",
-          borderRadius: 8,
-          padding: "9px 12px",
-          fontFamily: "inherit",
-          margin: 0,
-        }}
+        className="az-edit-textarea"
+        style={{ minHeight }}
       />
       {(onReplaceInPreview || (previewLineApplied && onRevertPreviewLine)) && (
         <div style={{

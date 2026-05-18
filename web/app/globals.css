@@ -520,3 +520,227 @@ select option { background: var(--surface); }
 }
 
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Analyze Resume — Design System
+   Spacing scale: --az-1=4px  --az-2=8px  --az-3=12px  --az-4=16px  --az-5=24px
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --az-1: 4px;
+  --az-2: 8px;
+  --az-3: 12px;
+  --az-4: 16px;
+  --az-5: 24px;
+
+  /* Score tier palette */
+  --az-weak-bg:     rgba(239, 68, 68, 0.07);
+  --az-weak-border: #ef4444;
+  --az-weak-text:   #dc2626;
+  --az-fair-bg:     rgba(245, 158, 11, 0.07);
+  --az-fair-border: #f59e0b;
+  --az-fair-text:   #d97706;
+  --az-strong-bg:   rgba(34, 197, 94, 0.07);
+  --az-strong-border: #22c55e;
+  --az-strong-text:   #16a34a;
+
+  /* Accepted states */
+  --az-accepted-ai-bg:     rgba(34, 197, 94, 0.08);
+  --az-accepted-ai-border: #22c55e;
+  --az-accepted-custom-bg:     rgba(96, 165, 250, 0.08);
+  --az-accepted-custom-border: #60a5fa;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.az-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--az-1);
+  padding: 5px var(--az-3);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: system-ui, sans-serif;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.az-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.az-btn--primary {
+  background: var(--az-strong-border);
+  color: #fff;
+  border-color: var(--az-strong-border);
+}
+.az-btn--primary:hover:not(:disabled) { opacity: 0.88; }
+.az-btn--ghost {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--border);
+}
+.az-btn--ghost:hover:not(:disabled) { background: var(--surface2); color: var(--fg); }
+.az-btn--danger {
+  background: transparent;
+  color: var(--az-weak-text);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.az-btn--danger:hover:not(:disabled) { background: var(--az-weak-bg); }
+.az-btn--sm {
+  padding: 3px var(--az-2);
+  font-size: 10px;
+  border-radius: 5px;
+}
+
+/* ── Score badge ─────────────────────────────────────────────────────────── */
+.az-score-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: system-ui, sans-serif;
+  flex-shrink: 0;
+  letter-spacing: -0.3px;
+}
+.az-score-badge--weak   { background: var(--az-weak-bg);   color: var(--az-weak-text);   border: 1px solid rgba(239,68,68,0.25); }
+.az-score-badge--fair   { background: var(--az-fair-bg);   color: var(--az-fair-text);   border: 1px solid rgba(245,158,11,0.25); }
+.az-score-badge--strong { background: var(--az-strong-bg); color: var(--az-strong-text); border: 1px solid rgba(34,197,94,0.25); }
+.az-score-badge--accepted { background: var(--az-accepted-ai-bg); color: var(--az-strong-text); border: 1px solid rgba(34,197,94,0.35); }
+
+/* ── Issue chips ─────────────────────────────────────────────────────────── */
+.az-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--az-1);
+  margin-bottom: var(--az-2);
+}
+.az-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--az-2);
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: system-ui, sans-serif;
+  background: var(--az-weak-bg);
+  color: var(--az-weak-text);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.az-chip--overflow {
+  background: var(--surface2);
+  color: var(--muted);
+  border-color: var(--border);
+}
+
+/* ── AI suggestion card ──────────────────────────────────────────────────── */
+.az-suggestion-card {
+  border: 1.5px solid rgba(34, 197, 94, 0.3);
+  border-radius: 7px;
+  background: rgba(34, 197, 94, 0.05);
+  overflow: hidden;
+  margin-bottom: var(--az-2);
+}
+.az-suggestion-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--az-1);
+  padding: 5px var(--az-2);
+  background: rgba(34, 197, 94, 0.08);
+  border-bottom: 1px solid rgba(34, 197, 94, 0.15);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--az-strong-text);
+  font-family: system-ui, sans-serif;
+}
+.az-suggestion-card__body {
+  padding: var(--az-2) var(--az-3);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--fg);
+  font-family: 'Georgia', serif;
+}
+
+/* ── Bullet edit textarea ────────────────────────────────────────────────── */
+.az-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 68px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  padding: var(--az-2) var(--az-3);
+  border-radius: 6px;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+  font-family: 'Georgia', serif;
+  transition: border-color 0.15s;
+  outline: none;
+}
+.az-edit-textarea:focus { border-color: var(--accent, #3b82f6); }
+.az-edit-textarea::placeholder { color: var(--muted); font-style: italic; font-family: system-ui, sans-serif; font-size: 10px; }
+
+/* ── Metric highlight ────────────────────────────────────────────────────── */
+.az-metric {
+  font-weight: 700;
+  color: var(--az-fair-text);
+}
+
+/* ── Accepted bullet row ─────────────────────────────────────────────────── */
+.az-bullet-accepted-text {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--fg);
+  margin-bottom: var(--az-1);
+  word-break: break-word;
+}
+
+/* ── Skeleton loading ────────────────────────────────────────────────────── */
+@keyframes az-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.az-skeleton {
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--surface2) 25%,
+    var(--border) 50%,
+    var(--surface2) 75%
+  );
+  background-size: 400% 100%;
+  animation: az-shimmer 1.6s ease-in-out infinite;
+}
+
+/* ── Legend pill ─────────────────────────────────────────────────────────── */
+.az-legend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  font-size: 9.5px;
+  font-family: system-ui, sans-serif;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  cursor: default;
+  white-space: nowrap;
+}
+.az-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}

@@ -959,25 +959,24 @@ export default function AnnotatedResumePanel({
       {/* Legend — hidden on PDF tab (viewer has its own legend + download) */}
       {!(sourcePdfUrl && viewMode === "pdf") && (
         <div style={{
-          padding: "7px 14px",
+          padding: "6px 14px",
           borderBottom: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
-          gap: 14,
+          gap: 6,
           flexShrink: 0,
           background: "var(--surface2)",
-          fontSize: 10,
-          color: "var(--muted)",
+          flexWrap: "wrap",
         }}>
           {[
-            { bg: "#ffcdd2", label: "Weak line", border: "#ef5350" },
-            { bg: "#fff9c4", label: "Fair", border: "#fbc02d" },
-            { bg: "#c8e6c9", label: "Strong / metrics", border: "#66bb6a" },
-          ].map(({ bg, label, border }) => (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <div style={{ width: 14, height: 6, borderRadius: 2, background: bg, boxShadow: `inset 0 0 0 1px ${border}55` }} />
-              <span>{label}</span>
-            </div>
+            { color: "var(--az-weak-text)", bg: "var(--az-weak-bg)", label: "Needs work" },
+            { color: "var(--az-fair-text)", bg: "var(--az-fair-bg)", label: "Fair" },
+            { color: "var(--az-strong-text)", bg: "var(--az-strong-bg)", label: "Strong" },
+          ].map(({ color, bg, label }) => (
+            <span key={label} className="az-legend-pill">
+              <span className="az-legend-dot" style={{ background: color, boxShadow: `0 0 0 1px ${color}66` }} />
+              {label}
+            </span>
           ))}
         </div>
       )}
