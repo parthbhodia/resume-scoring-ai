@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale, ParsedSection } from "@/lib/types";
+import { buildResumeFileStem } from "@/lib/resumeFileName";
 import { apiUrl, isResumeUploadFile, parseJsonOrThrow, scoreColor } from "@/lib/utils";
 import { toUserFriendlyErrorMessage, messageForNonJsonApiFailure } from "@/lib/userFriendlyError";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
@@ -1291,7 +1292,7 @@ export default function ResumeBuilder({
         setCustomizeExportToast(null);
         return;
       }
-      const base = (out.folder ?? "resume").replace(/[^\w.-]+/g, "_").slice(0, 80) || "resume";
+      const base = out.folder ?? buildResumeFileStem(company, role, candidateProfile);
       if (mode === "download") {
         try {
           await fetchPdfAsDownload(out.pdfUrl, base);
@@ -1305,7 +1306,7 @@ export default function ResumeBuilder({
       }
       window.setTimeout(() => setCustomizeExportToast(null), 5500);
     },
-    [generating, generate],
+    [generating, generate, company, role, candidateProfile],
   );
 
   /** Re-upsert library row so POST /api/share/{folder} finds resumes (fixes race or retry after a hiccup). */
@@ -1334,6 +1335,20 @@ export default function ResumeBuilder({
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
+
+  const resumeDownloadStem = useMemo(
+    () => (result?.folder ? result.folder : buildResumeFileStem(company, role, candidateProfile)),
+    [result?.folder, company, role, candidateProfile],
+  );
+
+  const downloadResultPdf = useCallback(async () => {
+    if (!result?.pdfUrl) return;
+    try {
+      await fetchPdfAsDownload(result.pdfUrl, resumeDownloadStem);
+    } catch {
+      window.open(result.pdfUrl, "_blank", "noopener,noreferrer");
+    }
+  }, [result?.pdfUrl, resumeDownloadStem]);
 
   const selectedTemplateLabel = useMemo(() => {
     return distinctStyleTemplates().find((t) => t.referenceFolder === styleReferenceFolder)?.label ?? "Template";
@@ -2561,10 +2576,9 @@ export default function ResumeBuilder({
                         Customize template
                       </Link>
                       {result.pdfUrl ? (
-                        <a
-                          href={result.pdfUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => { void downloadResultPdf(); }}
                           style={{
                             display: "inline-flex",
                             alignItems: "center",
@@ -2576,12 +2590,13 @@ export default function ResumeBuilder({
                             color: "var(--muted)",
                             fontSize: 13,
                             fontWeight: 600,
-                            textDecoration: "none",
                             fontFamily: "inherit",
+                            background: "var(--surface2)",
+                            cursor: "pointer",
                           }}
                         >
                           Download PDF
-                        </a>
+                        </button>
                       ) : null}
                     </div>
                   </div>
@@ -2879,28 +2894,38 @@ export default function ResumeBuilder({
                         letterSpacing: -0.1,
                       }}
                     >
-                      PDF · Template:{" "}
+                      <span style={{ fontWeight: 600, color: "var(--text)" }}>{resumeDownloadStem}.pdf</span>
+                      {" · "}Template:{" "}
                       <span style={{ fontWeight: 600, color: "var(--text)" }}>{selectedTemplateLabel}</span>
                     </div>
                     {result.pdfUrl ? (
                       <div
+                        className="rb-pdf-preview-frame"
                         style={{
                           borderRadius: 12,
                           overflow: "hidden",
                           border: "1px solid var(--border)",
                           background: "var(--surface2)",
                           boxShadow: "var(--shadow-sm)",
-                          aspectRatio: "8.5 / 11",
-                          maxHeight: 520,
-                          minHeight: 280,
-                          padding: "8px 8px 20px",
+                          height: "min(78vh, 880px)",
+                          maxHeight: "min(78vh, 880px)",
                         }}
                       >
                         <iframe
                           title="Résumé PDF preview"
-                          src={result.pdfUrl.includes("#") ? result.pdfUrl : `${result.pdfUrl}#view=FitH`}
+                          src={
+                            result.pdfUrl.includes("#")
+                              ? result.pdfUrl
+                              : `${result.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1`
+                          }
                           loading="lazy"
-                          style={{ width: "100%", height: "100%", minHeight: 320, border: "none", display: "block", borderRadius: 6, background: "#fff" }}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            border: "none",
+                            display: "block",
+                            background: "#fff",
+                          }}
                         />
                       </div>
                     ) : (
@@ -2981,10 +3006,9 @@ export default function ResumeBuilder({
                       Customize template
                     </Link>
                     {result.pdfUrl ? (
-                      <a
-                        href={result.pdfUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => { void downloadResultPdf(); }}
                         style={{
                           display: "flex",
                           alignItems: "center",
@@ -2998,12 +3022,12 @@ export default function ResumeBuilder({
                           color: "var(--text)",
                           fontSize: 13,
                           fontWeight: 600,
-                          textDecoration: "none",
                           fontFamily: "inherit",
+                          cursor: "pointer",
                         }}
                       >
                         Download PDF
-                      </a>
+                      </button>
                     ) : null}
                     <button
                       type="button"

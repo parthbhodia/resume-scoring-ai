@@ -54,6 +54,7 @@ from sse_starlette.sse import EventSourceResponse
 
 import uvicorn
 
+from ats_service import ats_check, structured_ratings_from_ats
 from resume_library import (
     list_resumes,
     stream_latex_resume,
@@ -64,7 +65,6 @@ from resume_library import (
     recompile_resume_from_tex,
     ai_rewrite_bullet,
     ai_generate_skills,
-    ats_check,
     doctor_check_resume,
     primary_gemini_flash_model,
     primary_llm_model_for_resume_workloads,
@@ -689,128 +689,6 @@ def _apply_accepted_edits_to_doc(doc: ResumeDocModel, accepted_suggestions: Opti
                     str(item.get("id") or "")[:32],
                     (item.get("section") or "")[:80],
                 )
-
-
-def _structured_ratings_from_ats(ats: dict) -> dict:
-    checks = ats.get("checks") if isinstance(ats, dict) else []
-    jd_match = ats.get("jdMatch") if isinstance(ats, dict) else {}
-    keywords = ats.get("keywords") if isinstance(ats, dict) else []
-    score_breakdown = ats.get("scoreBreakdown") if isinstance(ats, dict) else {}
-    jd_signals = ats.get("jdAnalysis") if isinstance(ats, dict) else {}
-    criteria = []
-
-    # 1. JD-required skills (highest priority).
-    req_skills = jd_signals.get("requiredSkills") if isinstance(jd_signals, dict) else []
-    pref_skills = jd_signals.get("preferredSkills") if isinstance(jd_signals, dict) else []
-    certs = jd_signals.get("certifications") if isinstance(jd_signals, dict) else []
-    rep_kw = jd_signals.get("repeatedKeywords") if isinstance(jd_signals, dict) else []
-    req_years = jd_signals.get("minYearsExperience") if isinstance(jd_signals, dict) else None
-
-    # Required skills from JD.
-    for sk in (req_skills or [])[:6]:
-        kw_state = None
-        for k in (keywords or []):
-            if isinstance(k, dict) and sk.lower() in str(k.get("keyword") or "").lower():
-                kw_state = k.get("status")
-                break
-        if kw_state == "found":
-            criteria.append({"name": f"Required: {sk}", "weight": "High", "score": 9, "notes": "Skill detected in resume", "text": f"Required skill \"{sk}\" found ✓"})
-        elif kw_state == "partial":
-            criteria.append({"name": f"Required: {sk}", "weight": "High", "score": 5, "notes": "Partial match detected", "text": f"Required skill \"{sk}\" partially found"})
-        else:
-            criteria.append({"name": f"Required: {sk}", "weight": "High", "score": 2, "notes": "Not detected in resume text", "text": f"Missing required skill: {sk}"})
-
-    # Preferred/nice-to-have skills.
-    for sk in (pref_skills or [])[:3]:
-        kw_state = None
-        for k in (keywords or []):
-            if isinstance(k, dict) and sk.lower() in str(k.get("keyword") or "").lower():
-                kw_state = k.get("status")
-                break
-        if kw_state == "found":
-            criteria.append({"name": f"Preferred: {sk}", "weight": "Low", "score": 8, "notes": "Nice-to-have skill found", "text": f"Preferred skill \"{sk}\" found ✓"})
-        else:
-            criteria.append({"name": f"Preferred: {sk}", "weight": "Low", "score": 4, "notes": "Nice-to-have skill not detected", "text": f"Preferred skill \"{sk}\" not found"})
-
-    # Repeated keywords (high JD emphasis).
-    for rk in (rep_kw or [])[:3]:
-        kw = rk.get("keyword", "") if isinstance(rk, dict) else ""
-        if kw:
-            kw_state = None
-            for k in (keywords or []):
-                if isinstance(k, dict) and kw.lower() == str(k.get("keyword") or "").lower():
-                    kw_state = k.get("status")
-                    break
-            score = 8 if kw_state == "found" else 3
-            criteria.append({"name": f"Emphasized: {kw}", "weight": "High", "score": score, "notes": f"Mentioned {rk.get('count', '?')}x in JD" if isinstance(rk, dict) else "", "text": f"JD emphasizes \"{kw}\" ({rk.get('count', '?')}x) {'✓' if kw_state == 'found' else '△'}"})
-
-    # Certifications.
-    for cert in (certs or [])[:2]:
-        kw_state = None
-        for k in (keywords or []):
-            if isinstance(k, dict) and cert.lower() in str(k.get("keyword") or "").lower():
-                kw_state = k.get("status")
-                break
-        criteria.append({"name": f"Cert: {cert}", "weight": "Medium", "score": 8 if kw_state else 4, "notes": "Certification mentioned in JD", "text": f"JD mentions {cert} {'✓' if kw_state else '△'}"})
-
-    if req_years:
-        criteria.append({"name": "Years of Experience", "weight": "Medium", "score": 8, "notes": f"JD asks for {req_years}+ years", "text": f"JD requires {req_years}+ years experience"})
-
-    # 2. JD match score.
-    if isinstance(jd_match, dict):
-        ms = jd_match.get("matchScore")
-        if ms is not None:
-            try:
-                ms_int = int(ms)
-            except Exception:
-                ms_int = 0
-            criteria.append({"name": "Overall JD Match", "weight": "High", "score": min(10, max(1, int(ms_int / 10))), "notes": f"Match score: {ms_int}/100" if ms_int else "", "text": f"JD Match Score: {ms_int}/100"})
-
-    # 3. Score breakdown categories.
-    if isinstance(score_breakdown, dict):
-        for cat, val in list(score_breakdown.items())[:5]:
-            if cat in ("redFlagPenalty", "keywordTypeWeights"):
-                continue
-            try:
-                s = int(val) if isinstance(val, (int, float)) else 0
-            except Exception:
-                continue
-            cat_score = min(10, max(1, int(s / 10)))
-            criteria.append({"name": f"Metric: {cat}", "weight": "Medium", "score": cat_score, "notes": f"Score: {s}/100", "text": f"{cat}: {s}/100 {'✓' if cat_score >= 7 else '△'}"})
-
-    # 4. Structural checks (fill remaining slots).
-    for chk in (checks or [])[:6]:
-        if len(criteria) >= 14:
-            break
-        name = str(chk.get("name") or "").strip()
-        if not name:
-            continue
-        note = str(chk.get("detail") or "").strip()
-        passed = bool(chk.get("pass"))
-        criteria.append({"name": name, "weight": "Medium", "score": 10 if passed else 4, "notes": note, "text": f"{name}: {note}" if note else name})
-
-    # Build gaps/whats_working from criteria scores.
-    whats_working = [c["text"] for c in criteria if c.get("score", 0) >= 7][:5]
-    gaps = [c["text"] for c in criteria if c.get("score", 0) < 7][:5]
-
-    score = ats.get("score") if isinstance(ats, dict) else 0
-    try:
-        match_score = int(score)
-    except Exception:
-        match_score = 0
-
-    verdict = "Strong alignment with this role." if match_score >= 75 else (
-        "Decent alignment; filling key gaps will strengthen candidacy." if match_score >= 55 else
-        "Low alignment; prioritize addressing missing JD requirements."
-    )
-
-    return {
-        "match_score": match_score,
-        "criteria": criteria[:15],
-        "whats_working": whats_working,
-        "gaps": gaps,
-        "verdict": verdict,
-    }
 
 
 def _template_name_for_reference(reference_folder: Optional[str]) -> str:
@@ -1499,7 +1377,7 @@ async def api_generate_stream(request: Request):
                         out_folder, jd, storage_user or user_id,
                         target_role=role, parsed=parse_resume_tex(new_tex),
                     )
-                    ratings_payload = _structured_ratings_from_ats(ats)
+                    ratings_payload = structured_ratings_from_ats(ats)
 
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "base",

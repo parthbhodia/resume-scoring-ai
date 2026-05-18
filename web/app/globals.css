@@ -494,6 +494,11 @@ select option { background: var(--surface); }
   opacity: 1;
 }
 
+/* ── Resume Builder: PDF result preview (scroll inside iframe viewer) ── */
+.rb-pdf-preview-frame {
+  contain: layout paint;
+}
+
 /* ── Resume Builder: “Analyze & get suggestions” loader (shimmer bar) ── */
 @keyframes rb-suggest-loader-shimmer {
   0% {
