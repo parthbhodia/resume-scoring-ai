@@ -33,9 +33,11 @@ export interface ResumeAnalyzeStore {
   analysisBullets: AnalyzeBulletSnapshot[];
   /** Session-only preview replacements (Analyze column, not PDF). */
   lineOverrides: Record<number, string>;
+  /** Tracks which bullets the user formally accepted and what kind: "ai" | "custom". */
+  acceptedBullets: Record<number, "ai" | "custom">;
   /** Maps bullet index → tone for future overlays / consistent legend. */
   annotationByIndex: Record<number, AnnotationTone>;
-  /** Transient “flash” target after an override or touch (ms timestamp + index). */
+  /** Transient "flash" target after an override or touch (ms timestamp + index). */
   pulseBulletIndex: number | null;
   pulseToken: number;
 
@@ -45,6 +47,10 @@ export interface ResumeAnalyzeStore {
   clearLineOverride: (index: number) => void;
   /** Replace preview line overrides (e.g. after loading a local draft). */
   replaceLineOverrides: (map: Record<number, string>) => void;
+  /** Mark a bullet as accepted (also applies the text to the preview). */
+  acceptBullet: (index: number, text: string, kind: "ai" | "custom") => void;
+  /** Remove accepted state and clear the preview override for a bullet. */
+  unacceptBullet: (index: number) => void;
   /** Call when user focuses a bullet on the left to nudge preview focus. */
   pulseBullet: (index: number) => void;
   clearPulse: () => void;
@@ -56,6 +62,7 @@ const initial = (): Pick<
   | "resumeHeader"
   | "analysisBullets"
   | "lineOverrides"
+  | "acceptedBullets"
   | "annotationByIndex"
   | "pulseBulletIndex"
   | "pulseToken"
@@ -64,6 +71,7 @@ const initial = (): Pick<
   resumeHeader: [],
   analysisBullets: [],
   lineOverrides: {},
+  acceptedBullets: {},
   annotationByIndex: {},
   pulseBulletIndex: null,
   pulseToken: 0,
@@ -83,6 +91,7 @@ export const useResumeAnalyzeStore = create<ResumeAnalyzeStore>((set) => ({
       resumeHeader: payload.resumeHeader ?? [],
       analysisBullets: bullets,
       lineOverrides: {},
+      acceptedBullets: {},
       annotationByIndex,
       pulseBulletIndex: null,
       pulseToken: 0,
@@ -90,6 +99,32 @@ export const useResumeAnalyzeStore = create<ResumeAnalyzeStore>((set) => ({
   },
 
   reset: () => set(initial()),
+
+  acceptBullet: (index, text, kind) => {
+    const t = text.trim();
+    if (!t) return;
+    set((s) => ({
+      lineOverrides: { ...s.lineOverrides, [index]: t },
+      acceptedBullets: { ...s.acceptedBullets, [index]: kind },
+      pulseBulletIndex: index,
+      pulseToken: s.pulseToken + 1,
+    }));
+  },
+
+  unacceptBullet: (index) => {
+    set((s) => {
+      const nextOverrides = { ...s.lineOverrides };
+      const nextAccepted = { ...s.acceptedBullets };
+      delete nextOverrides[index];
+      delete nextAccepted[index];
+      return {
+        lineOverrides: nextOverrides,
+        acceptedBullets: nextAccepted,
+        pulseBulletIndex: index,
+        pulseToken: s.pulseToken + 1,
+      };
+    });
+  },
 
   setLineOverride: (index, text) => {
     const t = text.trim();

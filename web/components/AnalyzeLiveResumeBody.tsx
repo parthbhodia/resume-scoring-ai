@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import type { ReactNode } from "react";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
@@ -650,6 +651,14 @@ export default function AnalyzeLiveResumeBody({
   pulseBulletIndex = null,
 }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  // Tracks which bullets are in "edit textarea" mode (after accepting or choosing to write own)
+  const [editingBullets, setEditingBullets] = useState<Record<number, boolean>>({});
+  // Local edit text per bullet (pre-filled from AI rewrite or empty for "write own")
+  const [editDrafts, setEditDrafts] = useState<Record<number, string>>({});
+
+  const acceptedBullets = useResumeAnalyzeStore((s) => s.acceptedBullets);
+  const acceptBullet = useResumeAnalyzeStore((s) => s.acceptBullet);
+  const unacceptBullet = useResumeAnalyzeStore((s) => s.unacceptBullet);
   const [popup, setPopup] = useState<PopupState | null>(null);
   const [popupDraft, setPopupDraft] = useState<string>("");
   const popupRef = useRef<HTMLDivElement>(null);
@@ -1007,35 +1016,177 @@ export default function AnalyzeLiveResumeBody({
                     </span>
                   </div>
 
-                  {/* Inline detail (non-presentation mode only) */}
-                  {!presentationOnly && expandedIdx === bulletIdx && bullet.issues.length > 0 && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6, paddingLeft: 2, fontFamily: "system-ui, sans-serif" }}>
-                      {bullet.issues.map((issue, ij) => (
-                        <span key={ij} style={{
-                          fontSize: 9, padding: "1px 6px", borderRadius: 8,
-                          background: "var(--red-bg)", color: "var(--red)", fontWeight: 500,
-                        }}>
-                          {issue}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {!presentationOnly && expandedIdx === bulletIdx && !!bullet.improvedBullet && (
-                    <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 4 }}>
-                      <BulletImprovedEditor
-                        layout="plain"
-                        minHeight={56}
-                        value={rewriteEdits[bulletIdx] ?? (bullet.improvedBullet ?? "")}
-                        onChange={v => patchBulletRewrite(bulletIdx, v)}
-                        onReset={() => patchBulletRewrite(bulletIdx, null)}
-                        canReset={rewriteEdits[bulletIdx] !== undefined}
-                        toolbarRight={<CopyTiny text={rewriteEdits[bulletIdx] ?? (bullet.improvedBullet ?? "")} />}
-                        previewLineApplied={previewLineApplied}
-                        onReplaceInPreview={() => patchPreviewLine(bulletIdx, (rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "").trim())}
-                        onRevertPreviewLine={() => patchPreviewLine(bulletIdx, null)}
-                      />
-                    </div>
-                  )}
+                  {/* ── Inline detail panel (non-presentation mode only) ── */}
+                  {!presentationOnly && expandedIdx === bulletIdx && (() => {
+                    const accepted = acceptedBullets[bulletIdx];
+                    const isEditing = editingBullets[bulletIdx];
+                    const editDraft = editDrafts[bulletIdx] ?? "";
+
+                    // ── State D: editing textarea ──
+                    if (isEditing) {
+                      return (
+                        <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 8 }} onClick={e => e.stopPropagation()}>
+                          <textarea
+                            autoFocus
+                            value={editDraft}
+                            onChange={e => setEditDrafts(prev => ({ ...prev, [bulletIdx]: e.target.value }))}
+                            placeholder="Write your improved bullet…"
+                            style={{
+                              width: "100%", boxSizing: "border-box", minHeight: 64,
+                              fontSize: 11, lineHeight: 1.45, padding: "7px 9px",
+                              borderRadius: 5, border: "1.5px solid var(--border)",
+                              background: "var(--input-bg, var(--bg))", color: "var(--fg)",
+                              resize: "vertical", fontFamily: "inherit",
+                            }}
+                          />
+                          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                            <button
+                              onClick={() => {
+                                const t = editDraft.trim();
+                                if (!t) return;
+                                acceptBullet(bulletIdx, t, "custom");
+                                patchBulletRewrite(bulletIdx, t);
+                                setEditingBullets(prev => { const n = { ...prev }; delete n[bulletIdx]; return n; });
+                              }}
+                              style={{
+                                fontSize: 10, fontWeight: 700, padding: "4px 12px", borderRadius: 5,
+                                border: "none", cursor: "pointer",
+                                background: "var(--green)", color: "#fff",
+                              }}
+                            >Save</button>
+                            <button
+                              onClick={() => setEditingBullets(prev => { const n = { ...prev }; delete n[bulletIdx]; return n; })}
+                              style={{
+                                fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 5,
+                                border: "1px solid var(--border)", cursor: "pointer",
+                                background: "transparent", color: "var(--muted)",
+                              }}
+                            >Cancel</button>
+                            {editDraft.trim() && (
+                              <CopyTiny text={editDraft} />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // ── State C: accepted ──
+                    if (accepted) {
+                      return (
+                        <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 6 }} onClick={e => e.stopPropagation()}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                            <span style={{
+                              fontSize: 9, fontWeight: 800, padding: "1px 7px", borderRadius: 8,
+                              background: accepted === "ai" ? "rgba(52,211,153,0.15)" : "rgba(96,165,250,0.15)",
+                              color: accepted === "ai" ? "var(--green)" : "#60a5fa",
+                              textTransform: "uppercase",
+                            }}>
+                              {accepted === "ai" ? "✓ AI Accepted" : "✓ Custom"}
+                            </span>
+                            <button
+                              onClick={() => {
+                                const current = previewLineOverrides[bulletIdx] ?? rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "";
+                                setEditDrafts(prev => ({ ...prev, [bulletIdx]: current }));
+                                setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
+                              }}
+                              style={{
+                                fontSize: 9, fontWeight: 600, padding: "2px 8px", borderRadius: 5,
+                                border: "1px solid var(--border)", cursor: "pointer",
+                                background: "transparent", color: "var(--muted)",
+                              }}
+                            >Edit</button>
+                            <button
+                              onClick={() => {
+                                unacceptBullet(bulletIdx);
+                                patchBulletRewrite(bulletIdx, null);
+                              }}
+                              style={{
+                                fontSize: 9, fontWeight: 600, padding: "2px 8px", borderRadius: 5,
+                                border: "1px solid var(--border)", cursor: "pointer",
+                                background: "transparent", color: "var(--muted)",
+                              }}
+                            >Undo</button>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // ── State B: expanded suggestion view ──
+                    return (
+                      <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 6 }} onClick={e => e.stopPropagation()}>
+                        {/* Issues chips */}
+                        {bullet.issues.length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8, paddingLeft: 2 }}>
+                            {bullet.issues.map((issue, ij) => (
+                              <span key={ij} style={{
+                                fontSize: 9, padding: "1px 6px", borderRadius: 8,
+                                background: "var(--red-bg)", color: "var(--red)", fontWeight: 500,
+                              }}>
+                                {issue}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* AI suggestion box */}
+                        {bullet.improvedBullet && (
+                          <div style={{
+                            padding: "8px 10px", borderRadius: 5, marginBottom: 8,
+                            border: "1px solid var(--border)",
+                            background: "rgba(52,211,153,0.06)",
+                          }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", marginBottom: 4 }}>
+                              AI Suggestion
+                            </div>
+                            <div style={{ fontSize: 10.5, lineHeight: 1.45, color: "var(--fg)" }}>
+                              {bullet.improvedBullet}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Action buttons */}
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {bullet.improvedBullet && (
+                            <button
+                              onClick={() => {
+                                acceptBullet(bulletIdx, bullet.improvedBullet!, "ai");
+                                patchBulletRewrite(bulletIdx, bullet.improvedBullet!);
+                              }}
+                              style={{
+                                fontSize: 10, fontWeight: 700, padding: "4px 12px", borderRadius: 5,
+                                border: "none", cursor: "pointer",
+                                background: "var(--green)", color: "#fff",
+                              }}
+                            >Accept AI</button>
+                          )}
+                          {bullet.improvedBullet && (
+                            <button
+                              onClick={() => {
+                                setEditDrafts(prev => ({ ...prev, [bulletIdx]: bullet.improvedBullet! }));
+                                setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
+                              }}
+                              style={{
+                                fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 5,
+                                border: "1px solid var(--border)", cursor: "pointer",
+                                background: "transparent", color: "var(--fg)",
+                              }}
+                            >Edit AI draft</button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setEditDrafts(prev => ({ ...prev, [bulletIdx]: "" }));
+                              setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
+                            }}
+                            style={{
+                              fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 5,
+                              border: "1px solid var(--border)", cursor: "pointer",
+                              background: "transparent", color: "var(--muted)",
+                            }}
+                          >Write my own</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
