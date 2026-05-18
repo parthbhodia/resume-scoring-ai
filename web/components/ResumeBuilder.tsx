@@ -346,19 +346,16 @@ export default function ResumeBuilder({
   const acceptedIds        = useSuggestionsStore((s) => s.acceptedIds);
   const rejectedIds        = useSuggestionsStore((s) => s.rejectedIds);
   const selectedSuggestionId = useSuggestionsStore((s) => s.selectedId);
-  const suggestActions     = useSuggestionsStore((s) => ({
-    hydrate: s.hydrate,
-    appendStream: s.appendStream,
-    setLoading: s.setLoading,
-    setError: s.setError,
-    incrementStep: s.incrementStep,
-    accept: s.accept,
-    reject: s.reject,
-    undoAccept: s.undoAccept,
-    undoReject: s.undoReject,
-    select: s.select,
-    reset: s.reset,
-  }));
+  const hydrateSuggestions = useSuggestionsStore((s) => s.hydrate);
+  const appendSuggestStream = useSuggestionsStore((s) => s.appendStream);
+  const setSuggestLoading = useSuggestionsStore((s) => s.setLoading);
+  const setSuggestError = useSuggestionsStore((s) => s.setError);
+  const acceptSuggestion = useSuggestionsStore((s) => s.accept);
+  const rejectSuggestion = useSuggestionsStore((s) => s.reject);
+  const undoAcceptSuggestion = useSuggestionsStore((s) => s.undoAccept);
+  const undoRejectSuggestion = useSuggestionsStore((s) => s.undoReject);
+  const selectSuggestion = useSuggestionsStore((s) => s.select);
+  const resetSuggestions = useSuggestionsStore((s) => s.reset);
   const suggestStreamAbortRef = useRef<AbortController | null>(null);
   /** Avoid re-running Analyze/Template session prefill + router.replace on every searchParams tick. */
   const builderPrefillAppliedRef = useRef(false);
@@ -733,28 +730,34 @@ export default function ResumeBuilder({
     }
   }, [jd, user, role]);
 
+  const atsAutoRanForRef = useRef<string | null>(null);
+
   // Drop ATS when signed out (API requires a real user id).
   useEffect(() => {
     if (!authReady) return;
     if (!user?.id) {
+      atsAutoRanForRef.current = null;
       setAtsResult(null);
       setAtsError(null);
     }
   }, [authReady, user?.id]);
 
-  // Auto-run ATS after generation completes (signed-in users only). Skip for template/layout handoff.
+  // Reset ATS when a new résumé folder is generated
   useEffect(() => {
-    if (studioHandoff) return;
-    // Wait for PDF URL so ATS does not race before compile/upload finishes.
-    if (!authReady || !user?.id || !result?.folder || !result?.pdfUrl || atsLoading || atsResult || atsError) return;
-    void runAtsCheck(result.folder);
-  }, [authReady, user?.id, result?.folder, result?.pdfUrl, atsLoading, atsResult, atsError, runAtsCheck]);
-
-  // Reset ATS when a new generation starts
-  useEffect(() => {
+    atsAutoRanForRef.current = null;
     setAtsResult(null);
     setAtsError(null);
   }, [result?.folder]);
+
+  // Auto-run ATS once per folder + PDF (signed-in users only). Skip for template/layout handoff.
+  useEffect(() => {
+    if (studioHandoff) return;
+    if (!authReady || !user?.id || !result?.folder || !result?.pdfUrl || atsLoading) return;
+    const runKey = `${result.folder}|${result.pdfUrl}`;
+    if (atsAutoRanForRef.current === runKey) return;
+    atsAutoRanForRef.current = runKey;
+    void runAtsCheck(result.folder);
+  }, [authReady, user?.id, result?.folder, result?.pdfUrl, atsLoading, studioHandoff, runAtsCheck]);
 
   const getSuggestions = useCallback(async () => {
     let effJd = jd.trim();
@@ -763,8 +766,8 @@ export default function ResumeBuilder({
         ? "No specific job — optimize structure and measurable impact for a general application."
         : "No specific job posting yet.";
     }
-    if (!effJd) { suggestActions.setError("Please paste a job description first."); return; }
-    if (!candidateProfile) { suggestActions.setError("Please upload your resume first."); return; }
+    if (!effJd) { setSuggestError("Please paste a job description first."); return; }
+    if (!candidateProfile) { setSuggestError("Please upload your resume first."); return; }
 
     const jdKey = effJd.trim();
     const reuseGate = suggestResearchReuseGateRef.current;
@@ -784,9 +787,9 @@ export default function ResumeBuilder({
     const ac = new AbortController();
     suggestStreamAbortRef.current = ac;
 
-    suggestActions.setLoading(true);
-    suggestActions.setError(null);
-    suggestActions.reset();
+    setSuggestLoading(true);
+    setSuggestError(null);
+    resetSuggestions();
     setAiJobFitWithoutTicks(false);
     
     setSuggestResearchQueries([]);
@@ -864,13 +867,15 @@ export default function ResumeBuilder({
               setSuggestResearchQueries(rq);
               setSuggestResearchSources(rs);
               setSuggestResearchDigest(typeof ev.research_digest === "string" ? ev.research_digest : "");
-              suggestActions.setLoading(false); suggestActions.incrementStep(); suggestActions.incrementStep(); suggestActions.incrementStep();
+              useSuggestionsStore.getState().incrementStep();
+              useSuggestionsStore.getState().incrementStep();
+              useSuggestionsStore.getState().incrementStep();
               break;
             }
             case "coach_delta": {
               const t = typeof ev.text === "string" ? ev.text : "";
               if (!t) break;
-              suggestActions.appendStream(t);
+              appendSuggestStream(t);
               break;
             }
             case "coach_done": {
@@ -878,7 +883,7 @@ export default function ResumeBuilder({
               const list = Array.isArray(ev.suggestions)
                 ? ev.suggestions.filter(isSuggestionRecord)
                 : [];
-              suggestActions.hydrate(list, typeof ev.summary === "string" ? ev.summary : "");
+              hydrateSuggestions(list, typeof ev.summary === "string" ? ev.summary : "");
               const rq = Array.isArray(ev.research_queries)
                 ? ev.research_queries.filter((q): q is string => typeof q === "string")
                 : [];
@@ -915,17 +920,17 @@ export default function ResumeBuilder({
       if (e instanceof Error && e.name === "AbortError") {
         return;
       }
-      suggestActions.setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
+      setSuggestError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
     } finally {
       if (suggestStreamAbortRef.current === ac) suggestStreamAbortRef.current = null;
-      suggestActions.setLoading(false);
+      setSuggestLoading(false);
     }
-  }, [jd, candidateProfile, studioHandoff]);
+  }, [jd, candidateProfile, studioHandoff, hydrateSuggestions, appendSuggestStream, setSuggestLoading, setSuggestError, resetSuggestions]);
 
   const patchSuggestionSuggested = useCallback((id: string, suggested: string) => {
     const updated = suggestions.map((s) => (s.id === id ? { ...s, suggested } : s));
-    suggestActions.hydrate(updated, suggestSummary);
-  }, [suggestions, suggestSummary, suggestActions]);
+    hydrateSuggestions(updated, suggestSummary);
+  }, [suggestions, suggestSummary, hydrateSuggestions]);
 
   const mergeProfileFromLastExtract = useCallback(() => {
     const text = lastResumeExtractRef.current.trim();
@@ -1293,10 +1298,10 @@ export default function ResumeBuilder({
   const improveResumeAfterResult = useCallback(() => {
     setResult(null);
     setPreview("");
-    suggestActions.select(null);
-    suggestActions.setError(null);
+    selectSuggestion(null);
+    setSuggestError(null);
     void getSuggestions();
-  }, [getSuggestions]);
+  }, [getSuggestions, selectSuggestion, setSuggestError]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -1990,7 +1995,7 @@ export default function ResumeBuilder({
           )}
 
           {/* ── Suggestions review panel (JD tailor flow only) ── */}
-          {!studioHandoff && suggestions && !generating && !result && (
+          {!studioHandoff && suggestionsReviewMode && (
             <SuggestionsPanel
               key={sourcePdfBlobUrl ?? "rb-sug-no-pdf"}
               summary={suggestSummary}
@@ -2002,11 +2007,11 @@ export default function ResumeBuilder({
               pdfFileName={uploadedFileName}
               pdfDocumentKey={suggestionPdfDocKey}
               selectedSuggestionId={selectedSuggestionId}
-              onSelectSuggestionCard={suggestActions.select}
-              onToggleAccept={id => acceptedIds.has(id) ? suggestActions.undoAccept(id) : suggestActions.accept(id)}
-              onToggleReject={id => rejectedIds.has(id) ? suggestActions.undoReject(id) : suggestActions.reject(id)}
-              onAcceptAll={() => suggestions.forEach(s => suggestActions.accept(s.id))}
-              onClearAccepts={() => suggestions.forEach(s => suggestActions.undoAccept(s.id))}
+              onSelectSuggestionCard={selectSuggestion}
+              onToggleAccept={id => acceptedIds.has(id) ? undoAcceptSuggestion(id) : acceptSuggestion(id)}
+              onToggleReject={id => rejectedIds.has(id) ? undoRejectSuggestion(id) : rejectSuggestion(id)}
+              onAcceptAll={() => suggestions.forEach(s => acceptSuggestion(s.id))}
+              onClearAccepts={() => suggestions.forEach(s => undoAcceptSuggestion(s.id))}
               onEditSuggested={patchSuggestionSuggested}
               onGenerate={generate}
               generating={generating}
@@ -2019,13 +2024,11 @@ export default function ResumeBuilder({
               useStructuredRenderer={useStructuredRenderer}
               setUseStructuredRenderer={setUseStructuredRenderer}
               onBackToInputs={() => {
-                suggestActions.select(null);
-                suggestActions.reset();
-                suggestActions.hydrate(suggestions, "");
-                suggestActions.setError(null);
+                selectSuggestion(null);
+                resetSuggestions();
+                hydrateSuggestions(suggestions, "");
+                setSuggestError(null);
                 setAiJobFitWithoutTicks(false);
-                suggestActions.reset();
-                
                 setSuggestResearchQueries([]);
                 setSuggestResearchSources([]);
                 setSuggestResearchDigest("");
@@ -2315,16 +2318,14 @@ export default function ResumeBuilder({
                   onClick={() => {
                     setResult(null);
                     setPreview("");
-                    suggestActions.reset();
-                    suggestActions.hydrate(suggestions, "");
-                    suggestActions.setError(null);
+                    resetSuggestions();
+                    hydrateSuggestions(suggestions, "");
+                    setSuggestError(null);
                     setSuggestResearchDigest("");
                     setSuggestResearchQueries([]);
                     setSuggestResearchSources([]);
                     setAiJobFitWithoutTicks(false);
-                    suggestActions.reset();
-                    
-                    suggestActions.select(null);
+                    selectSuggestion(null);
                     setJd("");
                     setCompany("");
                     setRole("");
@@ -2774,16 +2775,14 @@ export default function ResumeBuilder({
                   type="button"
                   onClick={() => {
                     setResult(null);
-                    suggestActions.reset();
+                    resetSuggestions();
                     setJd("");
                     setCompany("");
                     setRole("");
                     setPreview("");
                     setAiJobFitWithoutTicks(false);
-                    suggestActions.reset();
-                    
-                    suggestActions.select(null);
-                    suggestActions.hydrate(suggestions, "");
+                    selectSuggestion(null);
+                    hydrateSuggestions(suggestions, "");
                     setSuggestResearchDigest("");
                     setSuggestResearchQueries([]);
                     setSuggestResearchSources([]);

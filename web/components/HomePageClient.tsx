@@ -14,7 +14,7 @@
  * `output: "export"` build, which can't enumerate runtime-minted IDs.
  */
 
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import AppShell, { useAppView } from "@/components/AppShell";
 import ResumeBuilder from "@/components/ResumeBuilder";
@@ -78,13 +78,15 @@ function RouterView() {
   const templateResumeStart = view === "builder" && flow === "template";
 
   /** Legacy `flow=scratch` matched tailor; normalize URL so bookmarks still work. */
-  const searchQs = params.toString();
+  const scratchNormalizedRef = useRef(false);
   useEffect(() => {
     if (view !== "builder" || flow !== "scratch") return;
-    const q = new URLSearchParams(searchQs);
+    if (scratchNormalizedRef.current) return;
+    scratchNormalizedRef.current = true;
+    const q = new URLSearchParams(params?.toString() ?? "");
     q.set("flow", "tailor");
     router.replace(`/?${q.toString()}`);
-  }, [view, flow, router, searchQs]);
+  }, [view, flow, router, params]);
 
   if (view === "library") {
     return (
