@@ -394,6 +394,13 @@ export default function ResumeBuilder({
     setAtsError(null);
   }, [clearSuggestionsState]);
   const suggestStreamAbortRef = useRef<AbortController | null>(null);
+  const builderMainScrollRef = useRef<HTMLElement | null>(null);
+  const scrollBuilderToTop = useCallback((behavior: ScrollBehavior = "auto") => {
+    builderMainScrollRef.current?.scrollTo({ top: 0, behavior });
+    if (typeof document !== "undefined") {
+      document.getElementById("resume-builder-main")?.scrollTo({ top: 0, behavior });
+    }
+  }, []);
   /** Avoid re-running Analyze/Template session prefill + router.replace on every searchParams tick. */
   const builderPrefillAppliedRef = useRef(false);
   /** When JD text matches ``jd``, a second coach call can POST ``reuse_research_*`` to skip another web search. */
@@ -848,7 +855,8 @@ export default function ResumeBuilder({
     setSuggestError(null);
     resetSuggestions();
     setAiJobFitWithoutTicks(false);
-    
+    scrollBuilderToTop("auto");
+
     setSuggestResearchQueries([]);
     setSuggestResearchSources([]);
     setSuggestResearchDigest("");
@@ -982,7 +990,7 @@ export default function ResumeBuilder({
       if (suggestStreamAbortRef.current === ac) suggestStreamAbortRef.current = null;
       setSuggestLoading(false);
     }
-  }, [jd, candidateProfile, studioHandoff, hydrateSuggestions, appendSuggestStream, setSuggestLoading, setSuggestError, resetSuggestions]);
+  }, [jd, candidateProfile, studioHandoff, hydrateSuggestions, appendSuggestStream, setSuggestLoading, setSuggestError, resetSuggestions, scrollBuilderToTop]);
 
   const patchSuggestionSuggested = useCallback((id: string, suggested: string) => {
     const updated = suggestions.map((s) => (s.id === id ? { ...s, suggested } : s));
@@ -1394,6 +1402,14 @@ export default function ResumeBuilder({
     Boolean(suggestions && suggestions.length > 0 && !result);
   const showBuilderInputs = !result && !generating && !suggestionsReviewMode;
 
+  useLayoutEffect(() => {
+    if (suggestLoading) scrollBuilderToTop("auto");
+  }, [suggestLoading, scrollBuilderToTop]);
+
+  useLayoutEffect(() => {
+    if (suggestionsReviewMode) scrollBuilderToTop("smooth");
+  }, [suggestionsReviewMode, scrollBuilderToTop]);
+
   return (
     <div
       className="rb-root"
@@ -1409,6 +1425,7 @@ export default function ResumeBuilder({
 
       {/* ── Main — landmark + busy state for assistive tech (WCAG 4.1.3) */}
       <main
+        ref={builderMainScrollRef}
         id="resume-builder-main"
         aria-busy={generating}
         style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}
