@@ -12,9 +12,10 @@ const PUBLIC_ROUTES = new Set<string>([
   "/terms",
   "/privacy",
   "/contact",
+  "/blog",
 ]);
 // Path prefixes that bypass auth — recipient share pages live at /r/<shortid>.
-const PUBLIC_PREFIXES = ["/r/"];
+const PUBLIC_PREFIXES = ["/r/", "/blog/"];
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

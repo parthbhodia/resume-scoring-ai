@@ -5,8 +5,14 @@ import type { FocusEvent } from "react";
 import ScoreRing from "./ScoreRing";
 import BulletImprovedEditor from "./BulletImprovedEditor";
 import {
+  buildBulletPrimaryCategories,
   bulletMatchesAnalysisCategory,
+  countBulletsInCategory,
+  filterIssuesForCategory,
+  getRewriteForCategory,
   inferPrimaryCategoryFromBullet,
+  CATEGORY_REWRITE_HINTS,
+  type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
 import { apiUrl } from "@/lib/utils";
 import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
@@ -17,7 +23,6 @@ import type { StructuredResume, BulletMapEntry } from "@/store/resumeAnalyzeStor
 import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
 import type { AnalyzeRecord } from "@/lib/supabase";
 import AnalyzePreviewPane from "@/components/AnalyzePreviewPane";
-import { useAppShellSidebar } from "@/contexts/AppShellSidebarContext";
 import {
   AnalyzeUploadLanding,
   AnalyzeCoachLoader,
@@ -62,6 +67,7 @@ interface AnalysisResult {
     score: number;
     issues: string[];
     improvedBullet: string;
+    categoryRewrites?: Partial<Record<string, string>>;
   }>;
   /** Plain text from PDF/LaTeX extraction — drives live preview when present. */
   extractedText?: string;
@@ -131,20 +137,26 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 };
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
-  quantification:     "Recruiters look for hard numbers, percentages, and metrics that prove scale and impact. Bullets without data are forgettable — bullets with data are memorable.",
-  achievementQuality: "Your resume should be achievement-focused, not task-focused. Great bullets describe outcomes and impact, not just responsibilities you held.",
-  languageQuality:    "Strong resumes use active, powerful language. Passive voice, clichés, and filler words weaken your narrative and make it harder to stand out.",
-  readability:        "A readable resume can be skimmed in 6 seconds by a recruiter. Short, clear bullets with strong openers help you get noticed faster.",
-  atsCompatibility:   "ATS systems scan resumes before a human sees them. Poor formatting, missing keywords, or non-standard headings can get you filtered out automatically.",
-  sectionStructure:   "A well-structured resume has the right sections in the right order, making it easy for recruiters to find what they need quickly.",
-  technicalBranding:  "Recruiters should quickly see how your training, tools, and credentials fit the role—whether that is clinical systems, creative software, research methods, languages, or a code portfolio. Thin or vague professional signals make it harder to match you to the right jobs.",
-  jobMatch:           "How well your resume keywords and experience match the target job description. Higher match means a higher chance of passing ATS filters.",
+  quantification:     "Aim for metrics on ~half of experience bullets—prioritize your biggest wins.",
+  achievementQuality: "Outcomes and ownership, not duty lists.",
+  languageQuality:    "Active verbs; less passive voice and filler.",
+  readability:        "Short, clear bullets recruiters can skim fast.",
+  atsCompatibility:   "ATS-safe layout and standard section headings.",
+  sectionStructure:   "Right sections, in the order recruiters expect.",
+  technicalBranding:  "Clear tools, credentials, and field signals.",
+  jobMatch:           "Keywords and experience that match the job.",
 };
 
 // Map top-issue text keywords to category keys for smart linking
 const ISSUE_TEXT_TO_CATEGORY: Array<{ patterns: string[]; key: keyof AnalysisResult["categoryScores"] }> = [
-  { patterns: ["quantif", "metric", "number", "data", "measur"], key: "quantification" },
-  { patterns: ["achievement", "impact", "action", "result", "accomplishment"], key: "achievementQuality" },
+  {
+    patterns: [
+      "weak action", "weak verb", "duty-only", "responsible for", "task-focused",
+      "vague outcome", "no achievement", "duty list",
+    ],
+    key: "achievementQuality",
+  },
+  { patterns: ["quantif", "metric", "no numbers", "measur", "lack of data", "numeric", "no metrics"], key: "quantification" },
   { patterns: ["language", "verb", "passive", "buzzword", "communication", "word"], key: "languageQuality" },
   { patterns: ["readab", "length", "format", "clarity", "long", "short"], key: "readability" },
   { patterns: ["ats", "applicant", "tracking", "keyword", "scan"], key: "atsCompatibility" },
@@ -171,9 +183,10 @@ function guessIssueCategory(issueText: string): keyof AnalysisResult["categorySc
 
 function getBulletsForCategory(
   key: string,
-  bulletAnalysis: AnalysisResult["bulletAnalysis"]
+  bulletAnalysis: AnalysisResult["bulletAnalysis"],
+  primaryCategories: string[],
 ): AnalysisResult["bulletAnalysis"] {
-  return bulletAnalysis.filter((b) => bulletMatchesAnalysisCategory(b, key));
+  return bulletAnalysis.filter((_, i) => primaryCategories[i] === key);
 }
 
 // ── Spinner ───────────────────────────────────────────────────────────────────
@@ -217,10 +230,6 @@ function lsPush(uid: string, rec: AnalyzeRecord) {
 
 export default function AnalyzeResume() {
   const fileRef = useRef<HTMLInputElement>(null);
-  const lastPdfRef = useRef<File | null>(null);
-  const sourcePdfBlobUrlRef = useRef<string | null>(null);
-  const [sourcePdfUrl, setSourcePdfUrl] = useState<string | null>(null);
-  const [sourcePdfFileName, setSourcePdfFileName] = useState<string | null>(null);
   const [dragging, setDragging]         = useState(false);
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState<string | null>(null);
@@ -233,11 +242,10 @@ export default function AnalyzeResume() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   /** Accordion for category-detail flagged bullets (`bulletAnalysis` index, or null = all collapsed). */
   const [expandedFlaggedBulletIdx, setExpandedFlaggedBulletIdx] = useState<number | null>(null);
-  /** Desktop: improvement plan column — auto-hidden when analysis results load for more workspace width. */
-  const [improvementPlanVisible, setImprovementPlanVisible] = useState(false);
-  const appShellSidebar = useAppShellSidebar();
+  /** Desktop: improvement plan column (scores + category fixes). */
+  const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
-  /** User picked a row from Recent Analyses — original PDF blob is not available until they upload again. */
+  /** User picked a row from Recent Analyses — original upload file is not available until they upload again. */
   const [historyRestoreActive, setHistoryRestoreActive] = useState(false);
   /** Keys local preview-edit drafts (`rn_az_edit_v1_*` in localStorage); set to history row id or optimistic `local_*` id. */
   const [activeEditDraftId, setActiveEditDraftId] = useState<string | null>(null);
@@ -264,28 +272,6 @@ export default function AnalyzeResume() {
         : null,
     [result],
   );
-
-  const bindSourcePdf = useCallback((file: File | null) => {
-    if (sourcePdfBlobUrlRef.current) {
-      URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
-      sourcePdfBlobUrlRef.current = null;
-    }
-    if (!file) {
-      setSourcePdfUrl(null);
-      setSourcePdfFileName(null);
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    sourcePdfBlobUrlRef.current = url;
-    setSourcePdfUrl(url);
-    setSourcePdfFileName(file.name);
-  }, []);
-
-  useEffect(() => () => {
-    if (sourcePdfBlobUrlRef.current) {
-      URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
-    }
-  }, []);
 
   // Load user + history on mount: Supabase first, localStorage fallback
   useEffect(() => {
@@ -322,13 +308,6 @@ export default function AnalyzeResume() {
       clearInterval(tipIv);
     };
   }, [loading, jd]);
-
-  /** When analysis finishes, collapse app nav + improvement plan for the split workspace. */
-  useEffect(() => {
-    if (!result || loading) return;
-    appShellSidebar?.collapseSidebar();
-    setImprovementPlanVisible(false);
-  }, [result, loading, appShellSidebar]);
 
   useLayoutEffect(() => {
     if (!result) {
@@ -389,11 +368,8 @@ export default function AnalyzeResume() {
     
     setExpandedBullets({});
     setActiveCategory(null);
-    setImprovementPlanVisible(false);
     setSelectedBulletIndex(null);
     setHistoryRestoreActive(false);
-    lastPdfRef.current = file;
-    bindSourcePdf(null);
     const fd = new FormData();
     fd.append("file", file);
     if (jd.trim()) fd.append("jd", jd);
@@ -406,16 +382,13 @@ export default function AnalyzeResume() {
       const draftId = `local_${Date.now()}`;
       setActiveEditDraftId(draftId);
       setResult(resWithMeta);
-      bindSourcePdf(file);
       persistResult(file.name.replace(/\.(pdf|docx)$/i, ""), resWithMeta, draftId);
     } catch (e: unknown) {
       setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Unknown error"));
-      lastPdfRef.current = null;
-      bindSourcePdf(null);
     } finally {
       setLoading(false);
     }
-  }, [jd, persistResult, bindSourcePdf]);
+  }, [jd, persistResult]);
 
   const runFolder = useCallback(async (folder: string) => {
     setLoading(true);
@@ -425,10 +398,7 @@ export default function AnalyzeResume() {
     setExpandedBullets({});
     setActiveCategory(null);
     setSelectedBulletIndex(null);
-    setImprovementPlanVisible(false);
     setHistoryRestoreActive(false);
-    lastPdfRef.current = null;
-    bindSourcePdf(null);
     try {
       const supabase = getSupabaseClient();
       const { data: { user } } = await supabase.auth.getUser();
@@ -450,7 +420,7 @@ export default function AnalyzeResume() {
     } finally {
       setLoading(false);
     }
-  }, [jd, persistResult, bindSourcePdf]);
+  }, [jd, persistResult]);
 
   // Restore a cached result instantly — no re-analysis needed
   const restoreRecord = useCallback((rec: AnalyzeRecord) => {
@@ -462,10 +432,9 @@ export default function AnalyzeResume() {
     setHistoryOpen(false);
     setActiveCategory(null);
     setSelectedBulletIndex(null);
-    lastPdfRef.current = null;
-    bindSourcePdf(null);
     setHistoryRestoreActive(true);
-  }, [bindSourcePdf]);
+    setImprovementPlanVisible(true);
+  }, []);
 
   const deleteRecord = useCallback(async (id: string) => {
     // Optimistic remove
@@ -591,6 +560,24 @@ export default function AnalyzeResume() {
     [azHistory, restoreRecord, deleteRecord],
   );
 
+  const categoryAssignmentOpts = useMemo((): CategoryAssignmentOptions => {
+    if (!result) return {};
+    const kw = [
+      ...(result.keywordAnalysis?.matchedKeywords ?? []),
+      ...(result.keywordAnalysis?.missingKeywords ?? []),
+    ]
+      .map((k) => k.trim())
+      .filter((k) => k.length >= 2);
+    return { jdKeywords: kw };
+  }, [result]);
+
+  const bulletPrimaryCategories = useMemo(
+    () => (result?.bulletAnalysis?.length
+      ? buildBulletPrimaryCategories(result.bulletAnalysis, categoryAssignmentOpts)
+      : []),
+    [result, categoryAssignmentOpts],
+  );
+
   const handleBulletLinkedSelect = useCallback(
     (index: number) => {
       useResumeAnalyzeStore.getState().pulseBullet(index);
@@ -599,15 +586,21 @@ export default function AnalyzeResume() {
       if (!b) return;
       if (
         activeCategory
-        && bulletMatchesAnalysisCategory(b, activeCategory)
+        && result
+        && bulletMatchesAnalysisCategory(b, activeCategory, result.bulletAnalysis, index, categoryAssignmentOpts)
       ) {
         return;
       }
       setActiveCategory(
-        inferPrimaryCategoryFromBullet(b) as keyof AnalysisResult["categoryScores"],
+        inferPrimaryCategoryFromBullet(
+          b,
+          result?.bulletAnalysis,
+          index,
+          categoryAssignmentOpts,
+        ) as keyof AnalysisResult["categoryScores"],
       );
     },
-    [result, activeCategory],
+    [result, activeCategory, categoryAssignmentOpts],
   );
 
   const bulletBlurClearRef = useRef<number | null>(null);
@@ -691,10 +684,14 @@ export default function AnalyzeResume() {
   // For the active category detail view
   const activeCategoryLabel = CATEGORY_LABELS.find(c => c.key === activeCategory)?.label ?? "";
   const activeCategoryScore = activeCategory && result ? result.categoryScores[activeCategory as keyof AnalysisResult["categoryScores"]] : null;
-  const activeBullets = activeCategory && result ? getBulletsForCategory(activeCategory, result.bulletAnalysis) : [];
+  const activeBullets = activeCategory && result
+    ? getBulletsForCategory(activeCategory, result.bulletAnalysis, bulletPrimaryCategories)
+    : [];
   const relatedTopIssues = activeCategory && result
     ? result.topIssues.filter(issue => {
-        const guessed = guessIssueCategory(issue.issue + " " + issue.whyItMatters);
+        const guessed = guessIssueCategory(
+          `${issue.issue} ${issue.whyItMatters} ${issue.suggestion}`,
+        );
         return guessed === activeCategory;
       })
     : [];
@@ -729,14 +726,11 @@ export default function AnalyzeResume() {
     setHistoryOpen(false);
     setActiveCategory(null);
     setSelectedBulletIndex(null);
-    lastPdfRef.current = null;
-    bindSourcePdf(null);
-    
     setHistoryRestoreActive(false);
     setActiveEditDraftId(null);
     setEditDraftStatus(null);
     setImprovementPlanVisible(true);
-  }, [bindSourcePdf]);
+  }, []);
 
   const saveLocalPreviewDraft = useCallback(() => {
     if (!activeEditDraftId) {
@@ -894,7 +888,7 @@ export default function AnalyzeResume() {
                 {topFixCategories.map(({ key, label }) => {
                   const score = result.categoryScores[key];
                   const isActive = activeCategory === key;
-                  const affectedCount = getBulletsForCategory(key, result.bulletAnalysis).length;
+                  const affectedCount = countBulletsInCategory(bulletPrimaryCategories, key);
                   return (
                     <button
                       key={key}
@@ -1530,9 +1524,6 @@ export default function AnalyzeResume() {
                   onClick={() => {
                     setResult(null); setError(null); setExpandedBullets({});
                     setActiveCategory(null); setSelectedBulletIndex(null);
-                    lastPdfRef.current = null;
-                    bindSourcePdf(null);
-                    
                     setHistoryRestoreActive(false);
                   }}
                   style={{
@@ -1665,10 +1656,9 @@ export default function AnalyzeResume() {
               selectedBulletIndex={selectedBulletIndex}
               onBulletLinkedSelect={handleBulletLinkedSelect}
               presentationOnly
-              sourcePdfUrl={sourcePdfUrl}
-              sourcePdfFileName={sourcePdfFileName}
-              restoredResumeNoPdfHint={historyRestoreActive && !sourcePdfUrl}
+              restoredResumeNoPdfHint={historyRestoreActive}
               jd={jd}
+              categoryAssignmentOpts={categoryAssignmentOpts}
             />
             </div>
           </div>
@@ -1748,95 +1738,20 @@ export default function AnalyzeResume() {
               </div>
             </div>
 
-            {/* "Here's what we found" — bullet impact stat */}
             {result.bulletAnalysis.length > 0 && (
               <div style={{
-                padding: "18px 20px",
+                padding: "14px 16px",
                 background: "var(--surface2)",
                 border: "1px solid var(--border)",
                 borderRadius: 12,
-                boxShadow: "var(--shadow-sm)",
               }}>
-                <div style={{
-                  fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.75,
-                  color: "var(--muted)",
-                  marginBottom: 12,
-                  fontFamily: "system-ui, sans-serif",
-                }}>
-                  Here&apos;s what we found
-                </div>
-
-                <div style={{
-                  display: "flex", alignItems: "flex-start",
-                  gap: 12, marginBottom: 14,
-                }}>
-                  <div style={{
-                    width: 34, height: 34, borderRadius: "50%",
-                    background: "var(--red-bg)",
-                    color: "var(--red)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    flexShrink: 0,
-                    fontWeight: 800,
-                    fontSize: 15,
-                    lineHeight: 1,
-                  }} aria-hidden>
-                    ×
-                  </div>
-                  <p style={{ margin: 0, fontSize: 14, color: "var(--text)", lineHeight: 1.65 }}>
-                    {activeBullets.length > 0
-                      ? `We compared your bullets to what hiring managers expect for ${activeCategoryLabel.toLowerCase()}. Weak lines use a blush highlight in the preview; numbers and percentages get a soft green cue — typical of annotated résumé scorecards.`
-                      : `Strong — most bullets already meet expectations for ${activeCategoryLabel.toLowerCase()}. Keep this consistency in every section.`}
-                  </p>
-                </div>
-
-                <details style={{
-                  marginBottom: 14,
-                  border: "1px solid var(--border)",
-                  borderRadius: 10,
-                  background: "var(--surface)",
-                  padding: "0 14px",
-                  fontSize: 13,
-                  color: "var(--muted)",
-                }}>
-                  <summary style={{
-                    cursor: "pointer",
-                    fontWeight: 600,
-                    color: "var(--text)",
-                    padding: "11px 0",
-                  }}>
-                    What do we mean by {activeCategoryLabel.toLowerCase()}?
-                  </summary>
-                  <div style={{
-                    padding: "0 0 14px",
-                    borderTop: "1px solid var(--border)",
-                    paddingTop: 12,
-                    lineHeight: 1.65,
-                    color: "var(--muted)",
-                  }}>
-                    {CATEGORY_DESCRIPTIONS[activeCategory] ?? ""}
-                  </div>
-                </details>
-
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.06 }}>
-                    Sample line mapping
-                  </span>
-                  <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 600, color: "var(--text)", textAlign: "right" }}>
-                    {activeBullets.length > 0 ? (
-                      <>
-                        <span style={{ color: "var(--accent)", fontWeight: 800 }}>{activeBullets.length}</span>
-                        {" "}of {result.bulletAnalysis.length} deep-reviewed lines map to this topic
-                      </>
-                    ) : (
-                      <>None of {result.bulletAnalysis.length} sample lines map here — feedback may sit in other sections.</>
-                    )}
-                  </span>
-                </div>
-                <p style={{ margin: "0 0 12px", fontSize: 11.5, lineHeight: 1.55, color: "var(--dim)" }}>
-                  The score above reflects your whole résumé for this pillar. This bar only shows how many of the weakest-line samples flagged by AI for this topic are used for highlighting — not the same calculation as the score.
+                <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                  {activeBullets.length > 0
+                    ? `${activeBullets.length} of ${result.bulletAnalysis.length} reviewed bullets flagged`
+                    : "No sample bullets flagged here"}
                 </p>
                 <div style={{
-                  height: 10,
+                  height: 8,
                   borderRadius: 6,
                   overflow: "hidden",
                   background: "var(--surface3)",
@@ -1860,12 +1775,12 @@ export default function AnalyzeResume() {
             {relatedTopIssues.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <h3 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", margin: "0 0 4px" }}>
-                  What you need to do
+                  Next steps
                 </h3>
                 {relatedTopIssues.map((issue, i) => (
                   <div key={i} style={{
                     border: "1px solid var(--border)", borderRadius: 12,
-                    padding: "14px 16px", background: "var(--surface)",
+                    padding: "12px 14px", background: "var(--surface)",
                   }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                       <span style={{
@@ -1877,16 +1792,9 @@ export default function AnalyzeResume() {
                       </span>
                       <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>{issue.issue}</span>
                     </div>
-                    <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 10px", lineHeight: 1.6 }}>
-                      {issue.whyItMatters}
-                    </p>
-                    <div style={{
-                      background: "var(--surface2)", borderRadius: 8, padding: "10px 14px",
-                      fontSize: 13, color: "var(--text)", lineHeight: 1.6,
-                      borderLeft: "3px solid var(--accent)",
-                    }}>
+                    <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", lineHeight: 1.55 }}>
                       {issue.suggestion}
-                    </div>
+                    </p>
                   </div>
                 ))}
               </div>
@@ -1902,8 +1810,20 @@ export default function AnalyzeResume() {
                   {activeBullets.map((bullet, i) => {
                     const gi = result.bulletAnalysis.indexOf(bullet);
                     const safeIdx = gi >= 0 ? gi : i;
-                    const baseImproved = bullet.improvedBullet ?? "";
-                    const draft = rewriteEdits[safeIdx] ?? baseImproved;
+                    const categoryRewriteBase = activeCategory
+                      ? getRewriteForCategory(
+                          bullet,
+                          activeCategory,
+                          undefined,
+                          result.bulletAnalysis,
+                          safeIdx,
+                          categoryAssignmentOpts,
+                        )
+                      : (bullet.improvedBullet ?? "");
+                    const draft = rewriteEdits[safeIdx] ?? categoryRewriteBase;
+                    const categoryIssues = activeCategory
+                      ? filterIssuesForCategory(bullet.issues, activeCategory)
+                      : bullet.issues;
                     const previewMain = previewLineOverrides[safeIdx] ?? bullet.originalBullet;
                     const previewLineAppliedHere = previewLineOverrides[safeIdx] !== undefined;
                     const isFlaggedAccordionOpen = expandedFlaggedBulletIdx === safeIdx;
@@ -2013,9 +1933,9 @@ export default function AnalyzeResume() {
                       </button>
                       {isFlaggedAccordionOpen && (
                         <div style={{ padding: "0 14px 14px 14px" }}>
-                      {bullet.issues.length > 0 && (
+                      {categoryIssues.length > 0 && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
-                          {bullet.issues.map((iss, j) => (
+                          {categoryIssues.map((iss, j) => (
                             <span key={j} style={{
                               fontSize: 10, fontWeight: 500, padding: "2px 8px", borderRadius: 10,
                               background: "rgba(248,113,113,0.10)", color: "var(--red)",
@@ -2025,7 +1945,21 @@ export default function AnalyzeResume() {
                           ))}
                         </div>
                       )}
-                      {bullet.improvedBullet && (
+                      {activeCategory && CATEGORY_REWRITE_HINTS[activeCategory] && (
+                        <p style={{
+                          fontSize: 12,
+                          color: "var(--muted)",
+                          lineHeight: 1.55,
+                          margin: "0 0 10px",
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          background: "var(--surface2)",
+                          borderLeft: "3px solid var(--accent)",
+                        }}>
+                          {CATEGORY_REWRITE_HINTS[activeCategory]}
+                        </p>
+                      )}
+                      {(draft.trim() || categoryRewriteBase.trim()) && (
                         <BulletImprovedEditor
                           layout="card"
                           value={draft}

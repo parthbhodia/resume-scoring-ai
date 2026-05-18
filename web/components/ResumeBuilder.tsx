@@ -56,6 +56,11 @@ import AtsPanel, { type AtsResult } from "./AtsPanel";
 
 import ResumePublicLinkSettings from "./ResumePublicLinkSettings";
 
+const TailoredPdfPreview = dynamic(
+  () => import("@/components/TailoredPdfPreview"),
+  { ssr: false, loading: () => <div style={{ padding: 24, color: "var(--muted)", fontSize: 12 }}>Loading preview…</div> },
+);
+
 const BuilderPdfSuggestionHighlights = dynamic(
   () => import("@/components/BuilderPdfSuggestionHighlights"),
   {
@@ -82,6 +87,15 @@ const SUGGEST_LOADER_TIPS = [
   "Checking impact lines vs plain responsibilities…",
   "Spotting gaps between your story and this role…",
   "Prioritizing what recruiters skim in the first pass…",
+] as const;
+
+/** Rotating coach lines while “Generate tailored PDF” runs (Resume Builder). */
+const GENERATE_LOADER_TIPS = [
+  "Tailoring your experience to this job posting…",
+  "Applying your template layout and ATS structure…",
+  "Strengthening bullets with role-specific keywords…",
+  "Compiling LaTeX to a print-ready PDF…",
+  "Scoring how well your résumé matches the role…",
 ] as const;
 
 /** Rotating coach lines while a résumé file is uploaded and text is extracted. */
@@ -168,6 +182,22 @@ async function fetchPdfAsDownload(url: string, downloadBaseName: string): Promis
   a.click();
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
+}
+
+async function downloadBlobFromApiResponse(resp: Response, fallbackFilename: string): Promise<void> {
+  const disposition = resp.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  const filename = match?.[1] ?? fallbackFilename;
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 const SS_KEY = "rn_builder_draft";
@@ -347,6 +377,7 @@ export default function ResumeBuilder({
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
   /** Right-panel “Save to library” re-upsert (compile already upserts; this is explicit retry). */
   const [libraryReSaveBusy, setLibraryReSaveBusy] = useState(false);
+  const [docxExportBusy, setDocxExportBusy] = useState(false);
   const [libraryToast, setLibraryToast] = useState<string | null>(null);
   /** Toast for template customize flow (Save / Download with fresh compile). */
   const [customizeExportToast, setCustomizeExportToast] = useState<string | null>(null);
@@ -411,6 +442,8 @@ export default function ResumeBuilder({
     sources: { title: string | null; url: string }[];
   } | null>(null);
   const [suggestLoaderTipIdx, setSuggestLoaderTipIdx] = useState(0);
+  const [generateLoaderTipIdx, setGenerateLoaderTipIdx] = useState(0);
+  const [generateLoaderStepsDone, setGenerateLoaderStepsDone] = useState(0);
   const [uploadLoaderStep, setUploadLoaderStep] = useState(0);
   const [uploadLoaderTipIdx, setUploadLoaderTipIdx] = useState(0);
   /** Linked selection: click a highlighted résumé line → scroll/highlight matching suggestion card (Analyze-style). */
@@ -515,6 +548,24 @@ export default function ResumeBuilder({
       clearInterval(tipTicker);
     };
   }, [suggestLoading]);
+
+  useEffect(() => {
+    if (!generating) {
+      setGenerateLoaderTipIdx(0);
+      setGenerateLoaderStepsDone(0);
+      return;
+    }
+    const phaseTicker = setInterval(() => {
+      setGenerateLoaderStepsDone((s) => Math.min(s + 1, 3));
+    }, 3200);
+    const tipTicker = setInterval(() => {
+      setGenerateLoaderTipIdx((i) => (i + 1) % GENERATE_LOADER_TIPS.length);
+    }, 2800);
+    return () => {
+      clearInterval(phaseTicker);
+      clearInterval(tipTicker);
+    };
+  }, [generating]);
 
   useEffect(() => {
     if (!uploadingPdf) {
@@ -1041,6 +1092,11 @@ export default function ResumeBuilder({
   }, []);
 
   const generate = useCallback(async (): Promise<GeneratePdfOutcome | null> => {
+    setGenerating(true);
+    setError(null);
+    setStatusMsg("Connecting…");
+    scrollBuilderToTop("smooth");
+
     let effCompany = company.trim();
     let effRole    = role.trim();
     let effJd      = jd.trim();
@@ -1058,12 +1114,8 @@ export default function ResumeBuilder({
 
     // If the user pasted a URL but any of the fields is empty, auto-import first.
     if (jobUrl.trim() && (!effCompany || !effRole || !effJd)) {
-      setError(null);
       setStatusMsg("Reading the job posting…");
-      setGenerating(true);
       const extracted = await importFromUrl();
-      setGenerating(false);
-      setStatusMsg("");
       if (extracted) {
         if (!effCompany && extracted.company)         effCompany = extracted.company.trim();
         if (!effRole    && extracted.role)            effRole    = extracted.role.trim();
@@ -1099,11 +1151,12 @@ export default function ResumeBuilder({
           ? `We couldn't pull the ${label} from that link — please fill it in manually.`
           : `Please fill in the ${label}.`
       );
+      setGenerating(false);
+      setStatusMsg("");
       return null;
     }
 
-    setGenerating(true);
-    setError(null);
+    setStatusMsg("Connecting…");
     // Clearing `result` here used to unmount the template customize screen entirely (because the
     // results branch is `result ? … : inputs`). Keep the last successful payload visible during
     // studioHandoff recompiles so PDF/controls stay on-screen while SSE runs.
@@ -1111,7 +1164,6 @@ export default function ResumeBuilder({
       setResult(null);
     }
     setPreview("");
-    setStatusMsg("Connecting…");
     setJdKeywords(extractJdKeywords(effJd));
     const digestTrim = suggestResearchDigest.trim();
     setSearchQueries([]);
@@ -1301,7 +1353,7 @@ export default function ResumeBuilder({
       setStatusMsg("");
       return null;
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources, scrollBuilderToTop]);
 
   /** Template customize: run full compile, then optional blob download + toast. */
   const finalizeLayoutPdf = useCallback(
@@ -1370,6 +1422,43 @@ export default function ResumeBuilder({
     }
   }, [result?.pdfUrl, resumeDownloadStem]);
 
+  const downloadResultDocx = useCallback(async () => {
+    if (!result?.folder) return;
+    const acceptedList = (suggestions ?? [])
+      .filter((s) => acceptedIds.has(s.id))
+      .map((s) => ({
+        id: s.id,
+        section: s.section,
+        original: s.original,
+        suggested: s.suggested,
+        reason: s.reason,
+      }));
+    setDocxExportBusy(true);
+    setError(null);
+    try {
+      const resp = await fetch(apiUrl("/api/builder-export-docx"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          folder: result.folder,
+          user_id: user?.id ?? null,
+          accepted_suggestions: acceptedList.length > 0 ? acceptedList : undefined,
+          download_name: resumeDownloadStem,
+        }),
+      });
+      if (!resp.ok) {
+        const json = await resp.json().catch(() => ({})) as { error?: string };
+        throw new Error(json.error ?? "DOCX export failed");
+      }
+      const safe = (resumeDownloadStem || "resume").replace(/[^\w.-]+/g, "_").slice(0, 80) || "resume";
+      await downloadBlobFromApiResponse(resp, `${safe}.docx`);
+    } catch (e: unknown) {
+      setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
+    } finally {
+      setDocxExportBusy(false);
+    }
+  }, [result?.folder, suggestions, acceptedIds, user?.id, resumeDownloadStem]);
+
   const selectedTemplateLabel = useMemo(() => {
     return distinctStyleTemplates().find((t) => t.referenceFolder === styleReferenceFolder)?.label ?? "Template";
   }, [styleReferenceFolder]);
@@ -1394,6 +1483,10 @@ export default function ResumeBuilder({
   useLayoutEffect(() => {
     if (suggestionsReviewMode) scrollBuilderToTop("smooth");
   }, [suggestionsReviewMode, scrollBuilderToTop]);
+
+  useLayoutEffect(() => {
+    if (generating && !result) scrollBuilderToTop("smooth");
+  }, [generating, result, scrollBuilderToTop]);
 
   return (
     <div
@@ -1990,11 +2083,35 @@ export default function ResumeBuilder({
                   "Get suggestions for this job →"
                 )}
               </button>
-              {!suggestLoading && (
-                <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 24, letterSpacing: -0.1 }}>
+              {!suggestLoading && !generating && (
+                <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 12, letterSpacing: -0.1 }}>
                   The first pass runs live web research on the posting, then compares your résumé to the job and lists edits.
                   When you generate the PDF after that, we <strong style={{ color: "var(--text)" }}>reuse</strong> the same research digest — no second live search.
                 </p>
+              )}
+              {!suggestLoading && !generating && (
+                <button
+                  type="button"
+                  onClick={() => { void generate(); }}
+                  disabled={!(candidateProfile ?? "").trim() || !jd.trim()}
+                  style={{
+                    width: "100%",
+                    padding: "12px 16px",
+                    marginBottom: 24,
+                    minHeight: 44,
+                    borderRadius: 12,
+                    border: "1px solid var(--border)",
+                    background: "var(--surface)",
+                    color: !(candidateProfile ?? "").trim() || !jd.trim() ? "var(--dim)" : "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    cursor: !(candidateProfile ?? "").trim() || !jd.trim() ? "not-allowed" : "pointer",
+                    letterSpacing: -0.2,
+                  }}
+                >
+                  Skip suggestions — generate tailored PDF now →
+                </button>
               )}
             </>
           )}
@@ -2103,6 +2220,9 @@ export default function ResumeBuilder({
               onGenerate={generate}
               generating={generating}
               generateStatusMsg={statusMsg}
+              generateLoaderTipIdx={generateLoaderTipIdx}
+              generateLoaderStepsDone={generateLoaderStepsDone}
+              reusingSuggestResearch={reusingSuggestWebForPdf}
               error={error}
               styleReferenceFolder={styleReferenceFolder}
               setStyleReferenceFolder={setStyleReferenceFolder}
@@ -2111,60 +2231,16 @@ export default function ResumeBuilder({
             />
           )}
 
-          {/* During generation (before results): one primary progress card — status line is technical detail, not the headline */}
-          {generating && !result && (
-            <div
-              className="fade-in"
-              role="status"
-              aria-live="polite"
-              aria-busy="true"
-              style={{
-                marginBottom: 24,
-                padding: "24px 22px",
-                borderRadius: 16,
-                background: "linear-gradient(180deg, var(--surface) 0%, var(--surface2) 100%)",
-                border: "1px solid var(--border)",
-                boxShadow: "var(--shadow-card)",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 12,
-                textAlign: "center",
-              }}
-            >
-              <Spinner size={28} />
-              <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", letterSpacing: -0.4, lineHeight: 1.25 }}>
-                {studioHandoff ? "Applying your template" : "Building your résumé"}
-              </div>
-              {statusMsg ? (
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 500,
-                    color: "var(--muted)",
-                    lineHeight: 1.5,
-                    maxWidth: 520,
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {statusMsg}
-                </div>
-              ) : null}
-              <p style={{ fontSize: 13, color: "var(--dim)", lineHeight: 1.55, maxWidth: 500, margin: 0 }}>
-                {studioHandoff ? (
-                  <>Layout and typography only — no job match or live web research on this path.</>
-                ) : reusingSuggestWebForPdf ? (
-                  <>Research from <strong>Get suggestions</strong> is already included; the PDF step does not run a second web search.</>
-                ) : (
-                  <>Your résumé is tailored to this job on the server, then compiled to PDF. Scoring runs when the file is ready.</>
-                )}
-              </p>
-            </div>
+          {/* Generate without suggestions (inputs) or template handoff — full-width loader */}
+          {generating && !result && !suggestionsReviewMode && (
+            <BuilderGeneratePdfLoader
+              statusMsg={statusMsg}
+              tipIdx={generateLoaderTipIdx}
+              stepsDone={generateLoaderStepsDone}
+              reusingSuggestResearch={reusingSuggestWebForPdf}
+              studioHandoff={studioHandoff}
+              acceptedCount={acceptedIds.size}
+            />
           )}
 
           {/* Live web search during PDF generation (SSE), or the same queries/sources reused from suggestions */}
@@ -2578,6 +2654,31 @@ export default function ResumeBuilder({
                           Download PDF
                         </button>
                       ) : null}
+                      {result.folder ? (
+                        <button
+                          type="button"
+                          disabled={docxExportBusy}
+                          onClick={() => { void downloadResultDocx(); }}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "10px 16px",
+                            minHeight: 44,
+                            borderRadius: 10,
+                            border: "1px solid var(--border)",
+                            color: "var(--muted)",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            fontFamily: "inherit",
+                            background: "var(--surface2)",
+                            cursor: docxExportBusy ? "wait" : "pointer",
+                            opacity: docxExportBusy ? 0.7 : 1,
+                          }}
+                        >
+                          {docxExportBusy ? "Preparing DOCX…" : "Download DOCX"}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -2866,35 +2967,10 @@ export default function ResumeBuilder({
                       <span style={{ fontWeight: 600, color: "var(--text)" }}>{selectedTemplateLabel}</span>
                     </div>
                     {result.pdfUrl ? (
-                      <div
-                        className="rb-pdf-preview-frame"
-                        style={{
-                          borderRadius: 12,
-                          overflow: "hidden",
-                          border: "1px solid var(--border)",
-                          background: "var(--surface2)",
-                          boxShadow: "var(--shadow-sm)",
-                          height: "min(78vh, 880px)",
-                          maxHeight: "min(78vh, 880px)",
-                        }}
-                      >
-                        <iframe
-                          title="Résumé PDF preview"
-                          src={
-                            result.pdfUrl.includes("#")
-                              ? result.pdfUrl
-                              : `${result.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1`
-                          }
-                          loading="lazy"
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            border: "none",
-                            display: "block",
-                            background: "#fff",
-                          }}
-                        />
-                      </div>
+                      <TailoredPdfPreview
+                        pdfUrl={result.pdfUrl}
+                        filename={`${resumeDownloadStem}.pdf`}
+                      />
                     ) : (
                       <div
                         style={{
@@ -2994,6 +3070,32 @@ export default function ResumeBuilder({
                         }}
                       >
                         Download PDF
+                      </button>
+                    ) : null}
+                    {result.folder ? (
+                      <button
+                        type="button"
+                        disabled={docxExportBusy}
+                        onClick={() => { void downloadResultDocx(); }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          padding: "11px 14px",
+                          minHeight: 44,
+                          borderRadius: 10,
+                          border: "1px solid var(--border)",
+                          background: "var(--surface2)",
+                          color: "var(--text)",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          fontFamily: "inherit",
+                          cursor: docxExportBusy ? "wait" : "pointer",
+                          opacity: docxExportBusy ? 0.7 : 1,
+                        }}
+                      >
+                        {docxExportBusy ? "Preparing DOCX…" : "Download DOCX"}
                       </button>
                     ) : null}
                     <button
@@ -4466,7 +4568,9 @@ function SuggestionsPanel({
   summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
   pdfBlobUrl, pdfFileName, pdfDocumentKey,
   selectedSuggestionId, onSelectSuggestionCard,
-  onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, generateStatusMsg, error, onBackToInputs,
+  onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, generateStatusMsg,
+  generateLoaderTipIdx, generateLoaderStepsDone, reusingSuggestResearch,
+  error, onBackToInputs,
   styleReferenceFolder, setStyleReferenceFolder,
   previewSectionAccentHex,
 }: {
@@ -4490,6 +4594,9 @@ function SuggestionsPanel({
   onGenerate: () => void | Promise<unknown>;
   generating: boolean;
   generateStatusMsg?: string;
+  generateLoaderTipIdx: number;
+  generateLoaderStepsDone: number;
+  reusingSuggestResearch: boolean;
   error: string | null;
   onBackToInputs: () => void;
   styleReferenceFolder: string;
@@ -4521,6 +4628,20 @@ function SuggestionsPanel({
     }
     document.getElementById(`rb-sug-${selectedSuggestionId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selectedSuggestionId, resumePreviewTab]);
+
+  if (generating) {
+    return (
+      <div className="fade-in" style={{ marginBottom: 32 }}>
+        <BuilderGeneratePdfLoader
+          statusMsg={generateStatusMsg ?? ""}
+          tipIdx={generateLoaderTipIdx}
+          stepsDone={generateLoaderStepsDone}
+          reusingSuggestResearch={reusingSuggestResearch}
+          acceptedCount={accepted.length}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="fade-in" style={{ marginBottom: 32 }}>
@@ -5187,6 +5308,145 @@ function BuilderUploadExtractLoader({
           <span style={{ fontWeight: 700, marginRight: 6 }}>Tip:</span>
           {tip}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Full-width loader while generate-stream runs (tailor / template compile). */
+function BuilderGeneratePdfLoader({
+  statusMsg,
+  tipIdx,
+  stepsDone,
+  reusingSuggestResearch,
+  studioHandoff = false,
+  acceptedCount = 0,
+}: {
+  statusMsg: string;
+  tipIdx: number;
+  stepsDone: number;
+  reusingSuggestResearch: boolean;
+  studioHandoff?: boolean;
+  acceptedCount?: number;
+}) {
+  const tip = GENERATE_LOADER_TIPS[tipIdx % GENERATE_LOADER_TIPS.length];
+  const stepRow = (label: string, stepIndex: number, isLast: boolean) => {
+    const done = stepsDone > stepIndex;
+    const active = stepsDone === stepIndex;
+    return (
+      <div
+        key={label}
+        className="rb-suggest-loader-step"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "8px 0",
+          borderBottom: isLast ? "none" : "1px solid var(--border)",
+          color: done ? "var(--text)" : active ? "var(--text)" : "var(--dim)",
+        }}
+      >
+        <span style={{ width: 22, height: 22, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {done ? (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
+              <circle cx="10" cy="10" r="9" fill="rgba(52,211,153,0.2)" stroke="rgb(34,197,94)" strokeWidth="1.5" />
+              <path d="M6 10l2.5 2.5L14 7" stroke="rgb(22,101,52)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : active ? (
+            <Spinner size={18} />
+          ) : (
+            <span style={{
+              width: 18, height: 18, borderRadius: "50%",
+              border: "2px solid var(--border)",
+              background: "var(--surface2)",
+            }} aria-hidden />
+          )}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: active || done ? 600 : 500, letterSpacing: -0.2, flex: 1 }}>
+          {label}
+        </span>
+      </div>
+    );
+  };
+
+  const title = studioHandoff ? "Compiling your résumé PDF" : "Building your tailored résumé";
+  const subtitle = studioHandoff
+    ? "Applying your template layout and typography — no job tailoring on this path."
+    : reusingSuggestResearch
+      ? "Using research from Get suggestions — no second live web search during this step."
+      : acceptedCount > 0
+        ? `Applying ${acceptedCount} accepted edit${acceptedCount > 1 ? "s" : ""}, then compiling PDF and match score.`
+        : "Tailoring to the job from your profile, then compiling PDF and match score.";
+
+  return (
+    <div
+      className="fade-in rb-suggest-loader-card"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      style={{
+        position: "relative",
+        marginBottom: 24,
+        borderRadius: 16,
+        border: "1px solid var(--border)",
+        background: "var(--surface)",
+        boxShadow: "var(--shadow-card)",
+        overflow: "hidden",
+      }}
+    >
+      <div className="rb-suggest-loader-topshine" aria-hidden />
+      <div style={{ padding: "18px 20px 16px" }}>
+        <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.45, color: "var(--text)", marginBottom: 4 }}>
+          {title}
+        </div>
+        <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, letterSpacing: -0.1 }}>
+          {subtitle}
+        </p>
+        <div style={{ marginBottom: 14 }}>
+          {stepRow(studioHandoff ? "Load profile into template" : "Tailor content to job posting", 0, false)}
+          {stepRow(acceptedCount > 0 && !studioHandoff ? "Apply accepted edits" : "Apply template & ATS layout", 1, false)}
+          {stepRow("Compile PDF on server", 2, false)}
+          {stepRow("Score match & save", 3, true)}
+        </div>
+        {statusMsg.trim() ? (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              lineHeight: 1.45,
+              marginBottom: 12,
+              padding: "8px 12px",
+              borderRadius: 8,
+              background: "var(--surface2)",
+              border: "1px solid var(--border)",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              wordBreak: "break-word",
+            }}
+          >
+            {statusMsg}
+          </div>
+        ) : null}
+        <div
+          key={tipIdx}
+          className="fade-in"
+          style={{
+            fontSize: 12.5,
+            color: "var(--accent)",
+            fontWeight: 500,
+            lineHeight: 1.5,
+            letterSpacing: -0.12,
+            padding: "10px 12px",
+            borderRadius: 8,
+            background: "var(--accent-bg)",
+            border: "1px solid rgba(47,129,247,0.18)",
+          }}
+        >
+          <span style={{ fontWeight: 700, marginRight: 6 }}>Working:</span>
+          {tip}
+        </div>
+        <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--dim)", lineHeight: 1.45 }}>
+          This usually takes about a minute — keep this tab open.
+        </p>
       </div>
     </div>
   );

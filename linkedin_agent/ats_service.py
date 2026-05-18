@@ -19,6 +19,17 @@ from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
+from ats_best_practices import evaluate_ats_best_practices
+from jd_keyword_filter import (
+    GENERIC_ENGLISH,
+    JD_META_BLOCKLIST,
+    build_term_frequencies,
+    is_generic_english,
+    jd_keyword_is_scorable as _filter_jd_keyword_is_scorable,
+    rank_keyword_candidates,
+    slice_jd_keyword_regions,
+)
+
 LIBRARY_ROOT = os.environ.get("LIBRARY_ROOT", str(Path(__file__).parent.parent / "resumes"))
 
 # ============================================================================
@@ -50,32 +61,8 @@ _STOPWORDS = {
     "already","looking","seeking","join","apply","hiring","posted",
 }
 
-# JD filler + generic nouns/verbs — excluded unless token is a known tech skill.
-_JD_KEYWORD_BLOCKLIST: frozenset = _STOPWORDS | frozenset({
-    "building", "systems", "workflows", "already", "solutions", "environment",
-    "collaborative", "stakeholders", "responsibilities", "qualifications",
-    "opportunity", "innovative", "dynamic", "passionate", "driven",
-    "business", "company", "digital", "technology", "technical", "general",
-    "various", "multiple", "effective", "efficient", "quality", "global",
-    "growing", "leading", "customers", "clients", "partners", "services",
-    "products", "processes", "workflow", "system", "solution", "service",
-    "product", "process", "scale", "scaling", "deliver", "delivering",
-    "ensure", "ensuring", "maintain", "maintaining", "supporting",
-    "implementing", "developing", "designing", "creating", "managing",
-    "providing", "helping", "improving", "driving", "leading", "working",
-    "looking", "seeking", "join", "apply", "hiring", "recruiting",
-    "posted", "location", "remote", "hybrid", "onsite", "benefits",
-    "salary", "compensation", "mission", "values", "culture", "teamwork",
-    "communication", "interpersonal", "organizational", "analytical",
-    "problem", "solving", "detail", "oriented", "fast", "paced",
-    "self", "starter", "motivated", "excellent", "strong", "solid",
-    "proven", "track", "record", "ability", "understanding", "knowledge",
-    "familiarity", "comfortable", "working", "closely", "cross",
-    "functional", "multidisciplinary", "agile", "lean", "practices",
-    "methodology", "methodologies", "principles", "standards", "best",
-    "practices", "industry", "standard", "standards", "enterprise",
-    "commercial", "production", "real", "world", "fast", "growing",
-})
+# Legacy alias: stopwords + HR meta + generic English (see jd_keyword_filter.py).
+_JD_KEYWORD_BLOCKLIST: frozenset = _STOPWORDS | JD_META_BLOCKLIST | GENERIC_ENGLISH
 
 _SHORT_TECH_ALLOW: frozenset = frozenset({
     "llm", "llms", "nlp", "api", "apis", "sql", "aws", "gcp", "css", "html",
@@ -143,94 +130,76 @@ def _is_tech_skill_token(token: str) -> bool:
     return False
 
 
-def _jd_keyword_is_scorable(term: str, jd_count: int, blocked_names: Set[str]) -> bool:
-    """Keep skills, repeated meaningful phrases, and drop generic English / person names."""
+def _jd_keyword_is_scorable(
+    term: str,
+    jd_count: int,
+    blocked_names: Set[str],
+    priority_count: int = 0,
+) -> bool:
+    """Keep skills and priority-section terms; drop generic English / person names."""
     t = (term or "").lower().strip()
-    if not t or len(t) < 2:
+    if t in _JD_LIKELY_PERSON_NAMES:
         return False
-    if t in blocked_names or t in _JD_LIKELY_PERSON_NAMES:
+    if t in _JD_DOMAIN_SINGLETON_NOISE and " " not in t:
         return False
-    if " " in t:
-        parts = [p for p in t.split() if p]
-        if not parts:
-            return False
-        if all(p in _JD_KEYWORD_BLOCKLIST for p in parts):
-            return False
-        if any(_is_tech_skill_token(p) for p in parts):
-            return True
-        return jd_count >= 2 and not all(p in _JD_LIKELY_PERSON_NAMES for p in parts)
-    if _is_tech_skill_token(t):
-        return True
-    if t in _JD_KEYWORD_BLOCKLIST or t in _JD_WEAK_SINGLETONS:
+    if " " not in t and t in _JD_WEAK_SINGLETONS:
         return False
-    if jd_count < 2:
-        return False
-    if len(t) <= 4:
-        return False
-    return True
+    return _filter_jd_keyword_is_scorable(
+        term,
+        whole_count=jd_count,
+        priority_count=priority_count,
+        blocked_names=blocked_names,
+        is_tech_skill=_is_tech_skill_token,
+        is_low_value_phrase=_is_low_value_jd_keyword,
+    )
 
 
 def _extract_jd_keywords(jd: str, max_keywords: int = 25) -> List[Dict]:
-    """Pull weighted keywords from a JD. Frequency-based, with multi-word phrase
-    promotion so "machine learning" beats "machine" + "learning" separately.
+    """Pull weighted keywords from a JD using section-weighted TF + allowlist-first filtering.
 
-    Returns: [{"keyword": "...", "weight": 1-3}, ...] sorted by weight desc.
+    Returns: [{"keyword": "...", "weight": 1-3, "jd_count": n}, ...] sorted by weight desc.
     """
     text = (jd or "").lower()
     if not text.strip():
         return []
 
     blocked_names = _blocked_name_tokens_from_jd(jd)
-
-    # 1. Single tokens (alpha-words 3+ chars, no stopwords)
-    tokens = re.findall(r"[a-z][a-z+#./-]{2,}", text)
-    tokens = [t.strip(".-/+#") for t in tokens]
-    tokens = [
-        t for t in tokens
-        if t and t not in _JD_KEYWORD_BLOCKLIST and len(t) >= 3
-        and t not in blocked_names and t not in _JD_LIKELY_PERSON_NAMES
-    ]
-
-    freq: Dict[str, int] = {}
-    for t in tokens:
-        freq[t] = freq.get(t, 0) + 1
-
-    # 2. Bigrams — only when both halves aren't stopwords
-    raw_words = re.findall(r"[a-z][a-z+#./-]{1,}", text)
-    bigram_freq: Dict[str, int] = {}
-    for a, b in zip(raw_words, raw_words[1:]):
-        if a in _JD_KEYWORD_BLOCKLIST or b in _JD_KEYWORD_BLOCKLIST:
-            continue
-        if a in blocked_names or b in blocked_names:
-            continue
-        if len(a) < 3 or len(b) < 3:
-            continue
-        bg = f"{a} {b}"
-        bigram_freq[bg] = bigram_freq.get(bg, 0) + 1
+    priority, secondary, whole = slice_jd_keyword_regions(jd)
+    weighted, priority_n, whole_n = build_term_frequencies(priority, secondary, text)
 
     phrase_lc = {p.lower() for p in _COMMON_SKILL_PHRASES}
-    for bg, count in list(bigram_freq.items()):
-        if bg.lower() in phrase_lc:
-            freq[bg] = max(freq.get(bg, 0), count + 3)
-        elif count >= 2:
-            freq[bg] = max(freq.get(bg, 0), count + 1)
+    for phrase in _COMMON_SKILL_PHRASES:
+        pl = phrase.lower()
+        if pl in text:
+            weighted[pl] = max(weighted.get(pl, 0), 5.0)
+            whole_n[pl] = max(whole_n.get(pl, 0), 2)
+            if pl in priority or pl in secondary:
+                priority_n[pl] = max(priority_n.get(pl, 0), 1)
 
-    for bg in list(freq.keys()):
+    for bg in list(weighted.keys()):
         if " " not in bg:
             continue
+        if bg.lower() in phrase_lc:
+            weighted[bg] = max(weighted.get(bg, 0), 4.0)
         for part in bg.split():
-            if part in freq and part in _JD_WEAK_SINGLETONS:
-                del freq[part]
+            if part in weighted and part in _JD_WEAK_SINGLETONS:
+                del weighted[part]
 
-    # Sort: most-frequent first; keep only scorable terms (skills / real phrases)
-    items = sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))
-    items = [
-        (k, c) for k, c in items
-        if _jd_keyword_is_scorable(k, c, blocked_names)
-    ][:max_keywords]
+    ranked = rank_keyword_candidates(
+        weighted,
+        priority_n,
+        whole_n,
+        blocked_names=blocked_names,
+        is_tech_skill=_is_tech_skill_token,
+        is_low_value_phrase=_is_low_value_jd_keyword,
+        max_keywords=max_keywords,
+    )
 
     out: List[Dict] = []
-    for k, c in items:
+    for k, c, _score in ranked[:max_keywords]:
+        pc = priority_n.get(k, 0)
+        if not _jd_keyword_is_scorable(k, c, blocked_names, priority_count=pc):
+            continue
         if c >= 4:
             w = 3
         elif c >= 2:
@@ -326,7 +295,21 @@ _COMMON_SKILL_PHRASES: Tuple[str, ...] = (
     "ci/cd", "object oriented", "object-oriented", "rest api", "rest apis", "graphql",
     "react native", "next.js", "node.js", "vue.js", "ruby on rails", "spring boot",
     "power bi", "google cloud", "aws lambda", "kubernetes",
+    "credit cards", "financial services", "business analyst", "data analyst",
+    "regulatory compliance", "risk management",
 )
+
+# Lone JD tokens that are noise unless part of a phrase (e.g. keep "credit cards", drop "cards").
+_JD_DOMAIN_SINGLETON_NOISE: frozenset = frozenset({
+    "domain", "credit", "cards", "card", "margin", "performance", "challenges", "challenge",
+    "banking", "financial", "business", "industry", "services", "service", "analyst",
+})
+
+# Job-title words that should not appear as standalone keyword chips.
+_JD_TITLE_FRAGMENT_WORDS: frozenset = frozenset({
+    "business", "analyst", "senior", "junior", "associate", "manager", "engineer",
+    "developer", "specialist", "consultant", "lead", "staff", "principal", "director",
+})
 
 _COMMON_SKILL_TOKENS: frozenset = frozenset({
     "python", "java", "kotlin", "swift", "go", "golang", "rust", "ruby", "php", "scala", "r",
@@ -379,6 +362,277 @@ _US_CITY_STATE_RE = re.compile(
 )
 
 
+_JD_PROSE_CLAUSE_RE = re.compile(
+    r"^(?:and|or|but|with|in|to|for|at|the|a|an)\b|"
+    r"^\d+[\).\]]?\s*[-–]?\s*|"
+    r"\b(?:years?|yrs?)\s+of\s+experience\b|"
+    r"^ability\s+to\b|"
+    r"^preferably\b|"
+    r"^requirements?\b$|"
+    r"^related\s+field\b|"
+    r"^or\s+a\s+related\b",
+    re.I,
+)
+
+_MAX_JD_KEYWORD_CHARS = 48
+
+
+def _normalize_keyword_phrase(raw: str) -> str:
+    t = re.sub(r"^[\s•\-–—*●◦▪·\d.)]+", "", (raw or "").strip())
+    t = re.sub(r"\s+", " ", t)
+    t = t.strip(".,;:-·")
+    t = re.sub(r"\s+experience\s*$", "", t, flags=re.I).strip()
+    return t
+
+
+def _is_low_value_jd_keyword(term: str) -> bool:
+    """Drop sentence fragments and HR boilerplate mistaken for skills."""
+    t = _normalize_keyword_phrase(term).lower()
+    if not t or len(t) < 3:
+        return True
+    if len(t) > _MAX_JD_KEYWORD_CHARS:
+        return True
+    if _JD_PROSE_CLAUSE_RE.search(t):
+        return True
+    if re.match(r"^(\w+)\s+\1$", t):
+        return True
+    if re.match(r"^(?:requirements?|qualifications?|preferred|responsibilities)\s+", t):
+        return True
+    words = [w for w in t.split() if w]
+    if len(words) >= 6:
+        return True
+    if len(words) >= 4:
+        stop = sum(
+            1 for w in words
+            if w in _STOPWORDS or is_generic_english(w) or w in JD_META_BLOCKLIST
+        )
+        if stop / len(words) >= 0.55:
+            return True
+    if is_generic_english(t) or t in JD_META_BLOCKLIST:
+        return True
+    return False
+
+
+def _prune_redundant_keywords(items: List[Dict]) -> List[Dict]:
+    """Drop single words already covered by a longer phrase in the same list."""
+    if not items:
+        return items
+    phrases = [
+        i["keyword"].lower()
+        for i in items
+        if " " in (i.get("keyword") or "")
+    ]
+    out: List[Dict] = []
+    for item in items:
+        kw = _normalize_keyword_phrase(str(item.get("keyword") or ""))
+        if not kw or _is_low_value_jd_keyword(kw):
+            continue
+        kl = kw.lower()
+        if " " not in kl and phrases:
+            if any(
+                re.search(r"\b" + re.escape(kl) + r"\b", ph)
+                for ph in phrases
+            ) and not _is_tech_skill_token(kl):
+                continue
+        if kl in _JD_DOMAIN_SINGLETON_NOISE or kl in _JD_TITLE_FRAGMENT_WORDS:
+            continue
+        out.append({**item, "keyword": kw})
+    return out
+
+
+def _keyword_worth_displaying(keyword: str) -> bool:
+    kl = (keyword or "").lower().strip()
+    if not kl or _is_low_value_jd_keyword(kl):
+        return False
+    if " " not in kl and kl in _JD_DOMAIN_SINGLETON_NOISE:
+        return False
+    if " " not in kl and kl in _JD_TITLE_FRAGMENT_WORDS:
+        return False
+    return True
+
+
+_LATEX_ENV_RE = re.compile(
+    r"\\begin\{(?:itemize|enumerate|description)\}(?:\[[^\]]*\])?|"
+    r"\\end\{(?:itemize|enumerate|description)\}",
+    re.I,
+)
+
+
+def _sanitize_recruiter_display_text(raw: str, max_len: int = 200) -> str:
+    """Plain text for recruiter-scan UI — strip LaTeX / markup from PDF or parsed bullets."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    if _LATEX_ENV_RE.search(s) or "\\item" in s or "\\resumeItem" in s:
+        s = _LATEX_ENV_RE.sub(" ", s)
+        s = re.sub(r"\\item\s*\{?", " ", s, flags=re.I)
+        s = re.sub(r"\\resumeItem\s*\{?", " ", s, flags=re.I)
+        s = re.sub(r"\\small\s*\{?", " ", s, flags=re.I)
+    for _ in range(10):
+        prev = s
+        s = re.sub(r"\\[a-zA-Z@]+(?:\*)?(?:\[[^\]]*\])?\{([^{}]*)\}", r"\1", s)
+        s = re.sub(r"\{([^{}]*)\}", r"\1", s)
+        if s == prev:
+            break
+    s = re.sub(r"\\[a-zA-Z@]+(?:\*)?(?:\[[^\]]*\])?", " ", s)
+    s = re.sub(r"\*\*", " ", s)
+    s = re.sub(r"\{:\s*", ": ", s)
+    s = re.sub(r"[{}]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip(" ,;:-·")
+    return s[:max_len]
+
+
+def _line_looks_like_location_only(line: str) -> bool:
+    s = (line or "").strip()
+    if not s or len(s) > 80:
+        return False
+    if re.search(r"\b(University|College|Institute|Bachelor|Master|B\.?S\.?|M\.?A\.?|MBA|Ph\.?D\.?)\b", s, re.I):
+        return False
+    if _US_CITY_STATE_RE.search(s):
+        return True
+    if re.match(
+        r"^[A-Za-z][A-Za-z\s.'-]{1,40},\s*(?:[A-Z]{2}|[A-Za-z]{4,})(?:\s*,\s*(?:USA|US|U\.S\.?))?\s*$",
+        s,
+        re.I,
+    ):
+        return True
+    return False
+
+
+def _line_looks_like_education_entry(line: str) -> bool:
+    s = (line or "").strip()
+    if len(s) < 8:
+        return False
+    if _line_looks_like_location_only(s):
+        return False
+    return bool(
+        re.search(
+            r"\b(B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?A\.?|MBA|Ph\.?D\.?|Bachelor|Master|"
+            r"University|College|Institute|School of)\b",
+            s,
+            re.I,
+        )
+    )
+
+
+def _education_line_score(line: str) -> int:
+    s = _sanitize_recruiter_display_text(line, max_len=220)
+    if not s or not _line_looks_like_education_entry(s):
+        return -1
+    score = 0
+    if re.search(r"\b(University|College|Institute)\b", s, re.I):
+        score += 3
+    if re.search(r"\b(B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?A\.?|MBA|Ph\.?D\.?|Bachelor|Master)\b", s, re.I):
+        score += 4
+    if re.search(r"\b(19|20)\d{2}\b", s):
+        score += 1
+    if _line_looks_like_location_only(s):
+        score -= 6
+    return score
+
+
+def _extract_education_line(full_text: str) -> str:
+    """Education snippet — degree/school lines only; not city/state contact rows."""
+    text = full_text or ""
+    lower = text.lower()
+    candidates: List[str] = []
+
+    for marker in ("education", "academic background", "academics"):
+        idx = lower.find(marker)
+        if idx == -1:
+            continue
+        for raw in text[idx: idx + 800].splitlines()[1:14]:
+            line = _sanitize_recruiter_display_text(raw.strip(), max_len=220)
+            if len(line) < 8 or len(line) > 200:
+                continue
+            if _line_looks_like_education_entry(line):
+                candidates.append(line)
+
+    for m in re.finditer(
+        r"(?i)(?:[^\n]{0,30}\b(?:B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?A\.?|MBA|Ph\.?D\.?|Bachelor|Master)\b[^\n]{0,90})",
+        text,
+    ):
+        snippet = _sanitize_recruiter_display_text(m.group(0).strip(), max_len=200)
+        if snippet and "margin" not in snippet.lower() and _line_looks_like_education_entry(snippet):
+            candidates.append(snippet)
+
+    for m in re.finditer(
+        r"(?i)[^\n]{0,50}\b(University|College|Institute)\b[^\n]{0,90}",
+        text,
+    ):
+        snippet = _sanitize_recruiter_display_text(m.group(0).strip(), max_len=200)
+        if snippet and _line_looks_like_education_entry(snippet):
+            candidates.append(snippet)
+
+    if not candidates:
+        return ""
+
+    best = max(candidates, key=_education_line_score)
+    return best if _education_line_score(best) >= 0 else ""
+
+
+def _skills_plain_from_latex_or_text(raw: str) -> str:
+    """Turn a skills block (often LaTeX) into a short comma-separated line."""
+    s = _sanitize_recruiter_display_text(raw, max_len=400)
+    if not s:
+        return ""
+    if "\\" in (raw or "") or "{" in (raw or ""):
+        chunks: List[str] = []
+        for m in re.finditer(r"\\textbf\{([^}]*)\}", raw or "", re.I):
+            label = _sanitize_recruiter_display_text(m.group(1), max_len=80)
+            if label:
+                chunks.append(label.rstrip(":"))
+        tail = re.split(r"\{:\s*", raw or "", maxsplit=1)
+        if len(tail) > 1:
+            body = _sanitize_recruiter_display_text(tail[-1], max_len=300)
+            if body:
+                chunks.append(body)
+        if chunks:
+            s = ", ".join(c for c in chunks if c)[:200]
+    tokens = _tokenize_skill_line(s)
+    if len(tokens) >= 2:
+        return ", ".join(tokens)[:200]
+    return s[:200]
+
+
+def _line_has_latex_markup(line: str) -> bool:
+    s = line or ""
+    return bool(
+        _LATEX_ENV_RE.search(s)
+        or "\\item" in s
+        or "\\resumeItem" in s
+        or re.search(r"\\[a-zA-Z@]+\{", s)
+    )
+
+
+def _sanitize_evidence_line(b: str) -> str:
+    return _sanitize_recruiter_display_text(b, max_len=160)
+
+
+def _bullet_quantification_ux_hint(metrics_n: int, n_bul: int) -> str:
+    if not n_bul:
+        return "Fewer bullet-like lines detected in the PDF — confirm experience uses clear accomplishment bullets."
+    if metrics_n >= n_bul:
+        return (
+            f"All {n_bul} accomplishment line{'s' if n_bul != 1 else ''} include measurable numbers — "
+            "strong for ATS and recruiter scan."
+        )
+    need = max(1, int(n_bul * 0.5) - metrics_n)
+    return (
+        f"{metrics_n} of {n_bul} lines include measurable impact — "
+        f"aim to add numbers to about {need} more bullet{'s' if need != 1 else ''}."
+    )
+
+
+def _action_verb_tip_for_role(cat_name: str, sw_category: str) -> str:
+    cat = (cat_name or "").lower()
+    if sw_category == "software" or "engineering" in cat or "software" in cat:
+        return "Prefer verbs like Built, Shipped, Automated, Optimized, and Integrated."
+    if "finance" in cat or "analyst" in cat or "banking" in cat or "data" in cat:
+        return "Prefer verbs like Analyzed, Modeled, Quantified, Streamlined, and Delivered."
+    return "Lead bullets with strong verbs (Led, Delivered, Improved, Reduced) plus a clear outcome."
+
+
 def _jd_slice(lower: str, start_keys: Tuple[str, ...], end_keys: Tuple[str, ...]) -> str:
     """Return substring of JD between first start marker and earliest end marker."""
     idx = len(lower)
@@ -396,14 +650,64 @@ def _jd_slice(lower: str, start_keys: Tuple[str, ...], end_keys: Tuple[str, ...]
     return lower[idx:end]
 
 
+def _skill_chunks_from_clause(clause: str) -> List[str]:
+    """Break one clause into display-sized skill phrases."""
+    t = _normalize_keyword_phrase(clause)
+    if not t:
+        return []
+
+    m = re.search(r"\b(?:experience|exp)\s+in\s+(.+)$", t, re.I)
+    if m:
+        return _skill_chunks_from_clause(m.group(1))
+
+    m = re.search(r"\b(?:degree|bachelor|master|phd)\s+(?:['\u2019]s\s+)?in\s+(.+)$", t, re.I)
+    if m:
+        return _skill_chunks_from_clause(m.group(1))
+
+    if re.search(r"\s+(?:and|or)\s+", t, re.I):
+        out: List[str] = []
+        for sub in re.split(r"\s+(?:and|or|/)\s+", t, flags=re.I):
+            out.extend(_skill_chunks_from_clause(sub))
+        if out:
+            return out
+
+    if _is_low_value_jd_keyword(t):
+        return []
+
+    if len(t) <= _MAX_JD_KEYWORD_CHARS:
+        return [t]
+
+    out = []
+    for sub in re.split(r"\s+(?:and|or|/)\s+", t, flags=re.I):
+        out.extend(_skill_chunks_from_clause(sub))
+    if out:
+        return out
+
+    for sub in re.split(r"\s+(?:in|for|with|to)\s+", t, flags=re.I):
+        sub = _normalize_keyword_phrase(sub)
+        if sub and not _is_low_value_jd_keyword(sub) and len(sub) <= _MAX_JD_KEYWORD_CHARS:
+            out.append(sub)
+    return out
+
+
 def _tokenize_skill_line(line: str) -> List[str]:
-    parts = re.split(r"[,;|/•\n]+", line)
+    """Split a JD requirement line into short skill-like phrases (not full sentences)."""
+    line = (line or "").strip()
+    if not line:
+        return []
+    parts = re.split(
+        r"[,;|/•\n]+|(?<=[.!?])\s+(?=[A-Za-z0-9\"'(])",
+        line,
+    )
     out: List[str] = []
+    seen: Set[str] = set()
     for p in parts:
-        t = re.sub(r"^[\s\d.\-+*)]+", "", p).strip()
-        t = re.sub(r"\s+", " ", t)
-        if 2 <= len(t) <= 60:
-            out.append(t)
+        for chunk in _skill_chunks_from_clause(p):
+            k = chunk.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(chunk)
     return out
 
 
@@ -411,6 +715,8 @@ def _line_looks_like_skills_list(line: str) -> bool:
     """Heuristic: comma/pipe-separated tools or a short run of skill-like tokens."""
     s = (line or "").strip()
     if len(s) < 10 or len(s) > 280:
+        return False
+    if _line_has_latex_markup(s):
         return False
     low = s.lower()
     if re.match(
@@ -441,12 +747,14 @@ def _skills_line_from_parsed(parsed: Optional[Dict]) -> str:
             for b in ent.get("bullets") or []:
                 t = (b.get("text") or "").strip()
                 if len(t) >= 2:
-                    chunks.append(t)
+                    plain = _skills_plain_from_latex_or_text(t)
+                    if plain:
+                        chunks.append(plain)
     if not chunks:
         return ""
-    if len(chunks) == 1 and len(chunks[0]) <= 200:
-        return chunks[0]
-    return ", ".join(chunks[:10])[:200]
+    if len(chunks) == 1:
+        return chunks[0][:200]
+    return ", ".join(chunks[:8])[:200]
 
 
 def _mine_resume_skill_tokens(resume_lower: str, max_items: int = 12) -> List[str]:
@@ -486,13 +794,19 @@ def _recruiter_top_skills_line(
     )
     if m_blk:
         block = " ".join(ln.strip() for ln in m_blk.group(1).splitlines() if ln.strip())
-        if block and (_line_looks_like_skills_list(block) or len(_tokenize_skill_line(block)) >= 2):
-            return block[:200]
+        plain = _skills_plain_from_latex_or_text(block)
+        if plain and (_line_looks_like_skills_list(plain) or len(_tokenize_skill_line(plain)) >= 2):
+            return plain[:200]
 
     best_ln = ""
     best_score = 0
     for ln in (full_text or "").splitlines():
         s = ln.strip()
+        if _line_has_latex_markup(s):
+            plain = _skills_plain_from_latex_or_text(s)
+            if not plain:
+                continue
+            s = plain
         if not _line_looks_like_skills_list(s):
             continue
         score = len(_tokenize_skill_line(s))
@@ -533,7 +847,12 @@ def _extract_jd_skill_phrases(jd_lower: str) -> Tuple[List[str], List[str]]:
             if line_l.startswith(("•", "-", "*")):
                 line_l = line_l.lstrip("•-* ").strip()
             for tok in _tokenize_skill_line(line_l):
-                if len(tok) >= 3 and tok not in _STOPWORDS:
+                if (
+                    len(tok) >= 3
+                    and tok not in _STOPWORDS
+                    and not _is_low_value_jd_keyword(tok)
+                    and not (is_generic_english(tok) and not _is_tech_skill_token(tok))
+                ):
                     found.append(tok)
         # De-dupe preserving order
         seen: Set[str] = set()
@@ -628,6 +947,132 @@ _JD_EMPLOYER_PROBLEM_PATTERNS: Tuple[Tuple[re.Pattern, int], ...] = (
 )
 
 
+def _shorten_display_line(text: str, max_len: int = 100) -> str:
+    s = _sanitize_recruiter_display_text(text, max_len=max_len + 40)
+    if not s:
+        return ""
+    if len(s) <= max_len:
+        return s
+    cut = s[: max_len - 1].rsplit(" ", 1)[0]
+    return (cut or s[: max_len - 1]) + "…"
+
+
+def _employer_problem_short(jd: str) -> str:
+    """One short line for what the posting emphasizes."""
+    hint = _employer_problem_hint_from_jd(jd)
+    return _shorten_display_line(hint, 120)
+
+
+def _employer_fit_evidence_lines(
+    bullets: List[str],
+    jd_lower: str,
+    *,
+    max_lines: int = 3,
+) -> List[str]:
+    """Best resume bullets that overlap JD language — sanitized and brief."""
+    if not bullets or not jd_lower:
+        return []
+
+    focus: Set[str] = set()
+    for t in re.findall(r"[a-z][a-z+#.-]{3,}", jd_lower):
+        t = t.strip(".,;:-·")
+        if t in _STOPWORDS or is_generic_english(t) or t in JD_META_BLOCKLIST:
+            continue
+        if len(t) >= 4:
+            focus.add(t)
+            if t.endswith("s") and len(t) > 4:
+                focus.add(t[:-1])
+
+    scored: List[Tuple[int, str]] = []
+    for b in bullets:
+        plain = _sanitize_recruiter_display_text(b, max_len=320)
+        if len(plain) < 28:
+            continue
+        if _bullet_looks_like_education_or_date_row(plain):
+            continue
+        low = plain.lower()
+        hits = sum(1 for t in focus if re.search(r"\b" + re.escape(t) + r"\b", low))
+        role_match = bool(
+            re.search(
+                r"\b(content|writing|social|blog|campaign|marketing|healthcare|patient|seo)\b",
+                low,
+            )
+        )
+        if hits < 1 and not role_match:
+            continue
+        if re.search(r"\b(content|writing|social|blog|campaign|marketing|healthcare|patient)\b", low):
+            hits += 2
+        if _ATS_NUMBER_RE.search(plain) or "%" in plain:
+            hits += 8
+        if re.match(
+            r"^(?:Increased|Reduced|Delivered|Developed|Led|Built|Translated|Created|Improved|Supported)\b",
+            plain,
+            re.I,
+        ):
+            hits += 4
+        if re.search(r"\b(?:detail-driven|summary|objective)\b", low) and not _ATS_NUMBER_RE.search(plain):
+            hits -= 4
+        scored.append((hits, plain))
+
+    scored.sort(key=lambda x: (-x[0], -len(x[1])))
+    seen: Set[str] = set()
+    out: List[str] = []
+    for _hits, plain in scored:
+        key = plain.lower()[:60]
+        if key in seen:
+            continue
+        seen.add(key)
+        line = _shorten_display_line(plain, 100)
+        if line:
+            out.append(line)
+        if len(out) >= max_lines:
+            break
+    return out
+
+
+def _employer_fit_gap_labels(missing_req: List[str]) -> List[str]:
+    """Human-readable gap chips — drop JD parsing noise."""
+    out: List[str] = []
+    seen: Set[str] = set()
+    for raw in missing_req:
+        raw_s = re.sub(r"^[\s–—\-]+", "", str(raw or "").strip())
+        if not raw_s or len(raw_s) < 4:
+            continue
+        m_years = re.search(
+            r"\d+\+?\s*(?:years?|yrs?)\b[^.]{0,90}\b(?:content writing|healthcare|marketing|digital)\b",
+            raw_s,
+            re.I,
+        )
+        if m_years:
+            label = _shorten_display_line(m_years.group(0).strip(), 72)
+        else:
+            s = _normalize_keyword_phrase(raw_s)
+            if not s or len(s) < 4:
+                continue
+            sl = s.lower()
+            if sl in ("requirements", "qualifications", "responsibilities", "preferred"):
+                continue
+            if _is_low_value_jd_keyword(s) and not re.search(
+                r"\b(\d+\+?\s*years?|bachelor|master|degree|journalism|communication|content writing)\b",
+                sl,
+            ):
+                continue
+            if re.search(r"\b(bachelor|master|degree|journalism|communication)\b", sl):
+                label = _shorten_display_line(s, 72)
+            else:
+                label = _shorten_display_line(s, 56)
+        if not label:
+            continue
+        k = label.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(label)
+        if len(out) >= 4:
+            break
+    return out
+
+
 def _employer_problem_hint_from_jd(jd: str) -> str:
     """Best-effort one-liner for what the posting emphasizes (ATS panel). Not LLM-generated."""
     jd = (jd or "").strip()
@@ -699,13 +1144,24 @@ def _classify_keyword_type(
         cl = c.lower()
         if cl in kl or kl in cl or re.search(r"\b" + re.escape(kl) + r"\b", cl):
             return "certifications"
-    if kl in title_l or (len(kl) > 3 and kl in title_l.replace("-", " ")):
+    if (
+        (" " in kl or kl not in _JD_TITLE_FRAGMENT_WORDS)
+        and (kl in title_l or (len(kl) > 3 and kl in title_l.replace("-", " ")))
+    ):
         return "jobTitle"
-    req_l = {s.lower() for s in (signals.get("requiredSkills") or [])}
-    if kl in req_l or any(kl in r or r in kl for r in req_l if len(r) >= 5):
+    req_l = [_normalize_keyword_phrase(s).lower() for s in (signals.get("requiredSkills") or [])]
+    if kl in req_l or any(
+        re.search(r"\b" + re.escape(kl) + r"\b", r)
+        for r in req_l
+        if len(kl) >= 4 and len(r) >= len(kl)
+    ):
         return "requiredSkills"
-    pref_l = {s.lower() for s in (signals.get("preferredSkills") or [])}
-    if kl in pref_l or any(kl in r or r in kl for r in pref_l if len(r) >= 5):
+    pref_l = [_normalize_keyword_phrase(s).lower() for s in (signals.get("preferredSkills") or [])]
+    if kl in pref_l or any(
+        re.search(r"\b" + re.escape(kl) + r"\b", r)
+        for r in pref_l
+        if len(kl) >= 4 and len(r) >= len(kl)
+    ):
         return "preferredSkills"
     rep = signals.get("repeatedKeywords") or []
     if any(r.get("keyword", "").lower() == kl for r in rep):
@@ -769,6 +1225,30 @@ def _token_is_long_bare_id_or_phone(token: str) -> bool:
     return bool(core.isdigit() and len(core) >= 7)
 
 
+def _token_is_year_not_impact_metric(token: str) -> bool:
+    t = (token or "").strip()
+    if re.fullmatch(r"(?:19|20)\d{2}\+?", t):
+        return True
+    if re.fullmatch(r"(?:19|20)\d{2}", re.sub(r"[^\d]", "", t)):
+        return True
+    return False
+
+
+def _bullet_looks_like_education_or_date_row(b: str) -> bool:
+    s = _sanitize_recruiter_display_text(b, max_len=220)
+    if not s:
+        return True
+    if _line_looks_like_education_entry(s) and not re.search(r"[%$]|\d+\s*x\b", s, re.I):
+        return True
+    if re.search(r"\b(University|College|Institute)\b", s, re.I) and re.search(r"\b(19|20)\d{2}\b", s):
+        if not re.search(r"[%$]|\b\d{1,3}%\b", s):
+            return True
+    if re.search(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(19|20)\d{2}\b", s, re.I):
+        if re.search(r"\b(University|College|Graduat)\b", s, re.I):
+            return True
+    return False
+
+
 def _pick_strongest_metric_snippet(bullets: List[str]) -> str:
     """Pick a number that reads like an accomplishment metric — not longest digit substring."""
     best_key: Tuple[int, float] = (-1, -1.0)
@@ -777,9 +1257,15 @@ def _pick_strongest_metric_snippet(bullets: List[str]) -> str:
     for b in bullets:
         if _bullet_looks_like_contact_or_latex_noise(b):
             continue
-        for mm in _ATS_NUMBER_RE.finditer(b):
+        plain_b = _sanitize_recruiter_display_text(b, max_len=220)
+        if _bullet_looks_like_education_or_date_row(plain_b or b):
+            continue
+        scan_b = plain_b or b
+        for mm in _ATS_NUMBER_RE.finditer(scan_b):
             tok = mm.group(0).strip()
             if _token_is_long_bare_id_or_phone(tok):
+                continue
+            if _token_is_year_not_impact_metric(tok):
                 continue
             prio = 1
             tie = 0.0
@@ -818,7 +1304,7 @@ def _pick_strongest_metric_snippet(bullets: List[str]) -> str:
                 prio = 2 if "+" in tok else 1
             if (prio, tie) > best_key:
                 best_key = (prio, tie)
-                best_snip = tok + " — " + b[:100]
+                best_snip = tok + " — " + _sanitize_evidence_line(scan_b)[:100]
     return best_snip
 
 
@@ -1118,14 +1604,20 @@ def ats_check(
         kw_merge.append(dict(item))
         seen_kw.add(item["keyword"].lower())
     for s in jd_signals.get("requiredSkills") or []:
-        sl = s.lower()
-        if sl not in seen_kw and len(sl) >= 2:
+        norm = _normalize_keyword_phrase(s)
+        if not norm or _is_low_value_jd_keyword(norm):
+            continue
+        sl = norm.lower()
+        if sl not in seen_kw:
             kw_merge.append({
-                "keyword": s,
+                "keyword": norm,
                 "weight": 3,
                 "jd_count": len(re.findall(re.escape(sl), jd_lower)) or 1,
             })
             seen_kw.add(sl)
+
+    kw_merge = _prune_redundant_keywords(kw_merge)
+    kw_merge = [k for k in kw_merge if _keyword_worth_displaying(k.get("keyword", ""))]
 
     kw_results: List[Dict] = []
     w_num = 0.0
@@ -1245,7 +1737,10 @@ def ats_check(
     email_m = _EMAIL_RE.search(full_text)
     email_val = email_m.group(0) if email_m else ""
     bad_email = bool(email_val and _UNPROFESSIONAL_EMAIL_LOCAL.search(email_val.split("@")[0]))
-    linkedin_ok = bool(re.search(r"linkedin\.com/[\w./-]+", full_text, re.I))
+    linkedin_ok = bool(
+        re.search(r"linkedin\.com[/\w.-]*", full_text, re.I)
+        or re.search(r"\blinkedin\b", full_text, re.I)
+    )
     github_ok = bool(re.search(r"github\.com/[\w./-]+", full_text, re.I))
     portfolio_ok = bool(re.search(r"(?:portfolio|personal site|behance\.com|dribbble\.com)", lower_text))
     city_state_ok = bool(_US_CITY_STATE_RE.search(full_text))
@@ -1295,11 +1790,12 @@ def ats_check(
         bullets_per_job_hint = f"{n_bul} accomplishment lines detected — consider trimming older roles if any section feels long."
 
     # --- Employer problem fit (lightweight) ------------------------------------
-    top_evidence: List[str] = []
-    for b in bullets[:12]:
-        if any(re.search(r"\b" + re.escape(t) + r"\b", b.lower()) for t in list(jd_term_set)[:12] if len(t) > 3):
-            top_evidence.append(b[:160])
-    missing_evidence = missing_req[:6]
+    top_evidence = (
+        _employer_fit_evidence_lines(bullets, jd_lower, max_lines=3)
+        if jd_stripped
+        else []
+    )
+    missing_evidence = _employer_fit_gap_labels(missing_req) if jd_stripped else []
 
     # --- Recruiter 6-second scan ------------------------------------------------
     scan_name = ""
@@ -1308,12 +1804,12 @@ def ats_check(
         if 4 < len(s) < 56 and re.match(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+){1,4}$", s):
             scan_name = s
             break
-    skills_line = _recruiter_top_skills_line(full_text, parsed, resume_lower)
-    edu_line = ""
-    m_edu = re.search(r"(?i)\b(B\.?S\.?|M\.?S\.?|B\.?A\.?|M\.?A\.?|Ph\.?D\.?)[^\n]{0,120}", full_text)
-    if m_edu:
-        edu_line = m_edu.group(0).strip()[:160]
-    strongest_metric = _pick_strongest_metric_snippet(bullets)
+    skills_line = _sanitize_recruiter_display_text(
+        _recruiter_top_skills_line(full_text, parsed, resume_lower),
+        max_len=200,
+    )
+    edu_line = _extract_education_line(full_text)
+    strongest_metric = _sanitize_evidence_line(_pick_strongest_metric_snippet(bullets))
 
     recruiter_scan = {
         "name": scan_name or "(not detected from PDF text)",
@@ -1342,12 +1838,35 @@ def ats_check(
         100 * (0.52 * jd_kw_ratio + 0.24 * req_ratio + 0.12 * min(1.0, title_ratio * 1.4) + 0.12 * min(1.0, cat_strength * 2.2))
     ) if jd_stripped else 0
 
+    jd_keywords_found = sum(1 for k in kw_results if k.get("status") == "found")
+
+    # --- Best-practice checks (blog: /blog/how-ats-really-works, /blog/optimizing-resumes-for-ats)
+    best_practices = evaluate_ats_best_practices(
+        full_text,
+        page_count=page_count,
+        layout_single_column=bool(layout.get("single_column")),
+        target_role=target_role,
+        title_guess=title_guess,
+        has_jd=bool(jd_stripped),
+        jd_kw_ratio=jd_kw_ratio,
+        jd_keywords_found=jd_keywords_found,
+        has_objective=has_objective,
+        bullets=bullets,
+        jd_terms=jd_term_set,
+        quant_ratio=quant_ratio if n_bul else 0.0,
+        action_ratio=action_ratio if n_bul else 0.0,
+        from_resunova_pdf=True,
+        has_email=has_email,
+        has_phone=has_phone,
+    )
+
     # --- Score breakdown (max 95 before penalty) --------------------------------
     fmt_ids = {"text_extractable", "single_column", "required_sections", "word_count", "page_count"}
     fmt_checks = [c for c in checks if c["id"] in fmt_ids]
-    fmt_pts = _ATS_SCORE_WEIGHTS["formattingAndParseability"] * (
-        sum(1 for c in fmt_checks if c["pass"]) / max(1, len(fmt_checks))
-    )
+    structural_fmt_ratio = sum(1 for c in fmt_checks if c["pass"]) / max(1, len(fmt_checks))
+    bp_ratio = (best_practices.get("passed", 0) / max(1, best_practices.get("total", 1)))
+    fmt_blend = 0.72 * structural_fmt_ratio + 0.28 * bp_ratio
+    fmt_pts = _ATS_SCORE_WEIGHTS["formattingAndParseability"] * fmt_blend
 
     ct_pts = 0.0
     if has_email:
@@ -1398,7 +1917,6 @@ def ats_check(
         {"id": "verbs", "label": "Strong action verbs on accomplishments", "pass": n_bul == 0 or (action_n / n_bul) >= 0.35},
         {"id": "metrics", "label": "Quantified impact on most bullets", "pass": n_bul == 0 or quant_ratio >= 0.35},
     ]
-
     disclaimer = (
         "Resunova scores how well your résumé text aligns with this job description and common ATS parsing patterns. "
         "It does not guarantee passage of any specific applicant tracking system."
@@ -1442,10 +1960,7 @@ def ats_check(
             "quantifiedCount": metrics_n,
             "weakOpenersCount": len(set(weak_starts)),
             "weakOpenersSample": weak_starts[:4],
-            "uxHint": (
-                f"{metrics_n} of {n_bul} lines include measurable impact — aim to add numbers to more accomplishment lines."
-                if n_bul else "Fewer bullet-like lines detected in the PDF — confirm experience uses clear accomplishment bullets."
-            ),
+            "uxHint": _bullet_quantification_ux_hint(metrics_n, n_bul),
         },
         "quantification": {
             "withMetric": metrics_n,
@@ -1455,7 +1970,7 @@ def ats_check(
         "actionVerbs": {
             "strongVerbRatio": round(action_ratio, 2) if n_bul else None,
             "weakStartsFound": weak_starts[:6],
-            "tip": "Prefer verbs like Built, Delivered, Reduced, Launched, Automated — especially for technical roles.",
+            "tip": _action_verb_tip_for_role(cat_name, sw_category),
         },
         "skillSuggestions": _skill_suggestion_rows(jd_lower, resume_lower, req_skills, list(jd_signals.get("preferredSkills") or [])),
         "redFlags": red_flags,
@@ -1466,16 +1981,18 @@ def ats_check(
             "bulletsPerJobHint": bullets_per_job_hint,
         },
         "employerProblemFit": {
-            "employerProblem": jd_signals.get("employerProblemHint") or "",
-            "candidateEvidence": top_evidence[:5],
+            "employerProblem": _employer_problem_short(jd_stripped) if jd_stripped else "",
+            "candidateEvidence": top_evidence,
             "missingEvidence": missing_evidence,
             "rewriteHint": (
-                "Tie one more bullet to the outcomes this posting emphasizes — mirror their language where it matches your real work."
-                if jd_stripped else ""
+                "Add one bullet using the JD’s channel words (social, blog, campaign) where accurate."
+                if jd_stripped and (missing_evidence or len(top_evidence) < 2)
+                else ""
             ),
         },
         "recruiterScan": recruiter_scan,
         "exportChecklist": export_checklist,
+        "bestPractices": best_practices,
     }
 
 

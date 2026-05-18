@@ -5,6 +5,7 @@
  * Shows weighted JD match, structure, bullets, recruiter scan, and export checklist.
  */
 
+import Link from "next/link";
 import { useMemo, type CSSProperties } from "react";
 
 export interface AtsCheck {
@@ -105,6 +106,21 @@ export interface AtsResult {
     signals?: { label: string; ok: boolean }[];
   };
   exportChecklist?: { id: string; label: string; pass: boolean }[];
+  bestPractices?: {
+    score?: number;
+    passed?: number;
+    total?: number;
+    guidePath?: string;
+    secondaryGuidePath?: string;
+    attribution?: string;
+    checks?: Array<{
+      id: string;
+      name: string;
+      pass: boolean;
+      detail: string;
+      category?: string;
+    }>;
+  };
 }
 
 const SEV_COLOR = {
@@ -377,7 +393,9 @@ export default function AtsPanel({ result, onRecheck, rechecking }: {
           </summary>
           <div style={{ padding: "0 16px 14px", fontSize: 12, color: "var(--dim)", lineHeight: 1.55 }}>
             <p style={{ margin: "0 0 8px", color: "var(--text)" }}>{result.bulletStrength.uxHint}</p>
-            {result.quantification?.total != null && result.quantification.total > 0 && (
+            {result.quantification?.total != null
+              && result.quantification.total > 0
+              && (result.quantification.withMetric ?? 0) < result.quantification.total && (
               <p style={{ margin: 0 }}>
                 {result.quantification.withMetric} of {result.quantification.total} lines include measurable numbers.
               </p>
@@ -465,33 +483,84 @@ export default function AtsPanel({ result, onRecheck, rechecking }: {
 
       {result.employerProblemFit?.employerProblem && (
         <details style={detailsStyle()}>
-          <summary style={{ padding: "12px 16px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Employer need vs your evidence</summary>
-          <div style={{ padding: "0 16px 14px", fontSize: 12, lineHeight: 1.55, color: "var(--dim)" }}>
-            <p style={{ margin: "0 0 8px", color: "var(--text)" }}><b>Posting emphasis</b>: {result.employerProblemFit.employerProblem}</p>
+          <summary style={{ padding: "12px 16px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>JD fit</summary>
+          <div style={{ padding: "0 16px 14px", fontSize: 12, lineHeight: 1.5, color: "var(--dim)" }}>
+            <p style={{ margin: "0 0 10px", color: "var(--text)" }}>
+              <span style={{ color: "var(--dim)" }}>Want: </span>
+              {result.employerProblemFit.employerProblem}
+            </p>
             {(result.employerProblemFit.candidateEvidence?.length ?? 0) > 0 && (
               <div style={{ marginBottom: 8 }}>
-                <b style={{ color: "var(--text)" }}>Lines that echo the JD</b>
-                <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>You show</div>
+                <ul style={{ margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 4 }}>
                   {(result.employerProblemFit.candidateEvidence ?? []).map((e, i) => (
-                    <li key={i}>{e}</li>
+                    <li key={i} style={{ color: "var(--text)" }}>{e}</li>
                   ))}
                 </ul>
               </div>
             )}
             {(result.employerProblemFit.missingEvidence?.length ?? 0) > 0 && (
               <div style={{ marginBottom: 8 }}>
-                <b style={{ color: "var(--text)" }}>Gaps to address honestly</b>: {(result.employerProblemFit.missingEvidence ?? []).join(", ")}
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>Gap</div>
+                <ul style={{ margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 2 }}>
+                  {(result.employerProblemFit.missingEvidence ?? []).map((g, i) => (
+                    <li key={i}>{g}</li>
+                  ))}
+                </ul>
               </div>
             )}
             {result.employerProblemFit.rewriteHint && (
-              <p style={{ margin: 0, fontStyle: "italic" }}>{result.employerProblemFit.rewriteHint}</p>
+              <p style={{ margin: 0, fontSize: 11, color: "var(--dim)" }}>{result.employerProblemFit.rewriteHint}</p>
             )}
           </div>
         </details>
       )}
 
-      {(result.exportChecklist?.length ?? 0) > 0 && (
+      {result.bestPractices && (result.bestPractices.checks?.length ?? 0) > 0 && (
         <details style={detailsStyle()} open>
+          <summary style={{ padding: "12px 16px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
+            ATS best practices
+            {typeof result.bestPractices.score === "number" && (
+              <span style={{ marginLeft: 8, fontWeight: 500, color: "var(--dim)" }}>
+                {result.bestPractices.passed}/{result.bestPractices.total} · {result.bestPractices.score}%
+              </span>
+            )}
+          </summary>
+          <div style={{ padding: "0 16px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {(result.bestPractices.checks ?? []).map((bp) => (
+              <div key={bp.id} style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <span style={{ flexShrink: 0, color: bp.pass ? "var(--green)" : "var(--dim)" }}>
+                  {bp.pass ? "✓" : "○"}
+                </span>
+                <div>
+                  <div style={{ color: bp.pass ? "var(--dim)" : "var(--text)", fontWeight: 500 }}>{bp.name}</div>
+                  <div style={{ color: "var(--dim)", marginTop: 2, lineHeight: 1.45 }}>{bp.detail}</div>
+                </div>
+              </div>
+            ))}
+            <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--dim)", lineHeight: 1.5 }}>
+              {result.bestPractices.attribution}{" "}
+              <Link href={result.bestPractices.guidePath ?? "/blog/how-ats-really-works"} style={{ color: "var(--accent)" }}>
+                Read the guide
+              </Link>
+              {result.bestPractices.secondaryGuidePath && (
+                <>
+                  {" · "}
+                  <Link href={result.bestPractices.secondaryGuidePath} style={{ color: "var(--accent)" }}>
+                    UIC checklist
+                  </Link>
+                </>
+              )}
+            </p>
+          </div>
+        </details>
+      )}
+
+      {(result.exportChecklist?.length ?? 0) > 0 && (
+        <details style={detailsStyle()}>
+          <summary style={{ padding: "12px 16px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
+            Pre-export checklist
+          </summary>
           <div style={{ padding: "0 16px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
             {(result.exportChecklist ?? []).map(item => (
               <div key={item.id} style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "flex-start", color: item.pass ? "var(--green)" : "var(--text)" }}>
@@ -499,9 +568,6 @@ export default function AtsPanel({ result, onRecheck, rechecking }: {
                 <span style={{ color: item.pass ? "var(--dim)" : "var(--text)" }}>{item.label}</span>
               </div>
             ))}
-            <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--dim)", fontStyle: "italic" }}>
-              Cover letter: customize separately — not scored from the PDF.
-            </p>
           </div>
         </details>
       )}

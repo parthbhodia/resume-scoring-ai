@@ -8,6 +8,7 @@
  *   /?view=library               -> library grid (+ optional right detail panel when resume=<f>)
  *   /?view=profile&prefill=1     -> Profile page + optional session prefill from Analyze / template flow
  *   /?view=jobs                  -> jobs (placeholder for now)
+ *   /?view=cover-letter          -> cover letter builder (coming soon)
  *   /?view=builder&flow=tailor&base=<folder> -> builder with folder pre-loaded
  *
  * Query params instead of dynamic routes because GH Pages serves the
@@ -110,6 +111,18 @@ function RouterView() {
       <ViewFill>
         <ScrollPane>
           <PlaceholderPanel title="Jobs" subtitle="Coming soon — autoapply will live here once your profile is set up." />
+        </ScrollPane>
+      </ViewFill>
+    );
+  }
+  if (view === "cover-letter") {
+    return (
+      <ViewFill>
+        <ScrollPane>
+          <PlaceholderPanel
+            title="Cover letter builder"
+            subtitle="Coming soon — tailor cover letters to each job using the same profile and job description as your résumé."
+          />
         </ScrollPane>
       </ViewFill>
     );

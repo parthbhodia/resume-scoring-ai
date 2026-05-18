@@ -433,6 +433,7 @@ export default function LandingPage() {
         </div>
         <nav className="lp-footer-nav" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }} aria-label="Legal">
           {[
+            ["Blog", "/blog"],
             ["Contact", "/contact"],
             ["Privacy Policy", "/privacy"],
             ["Terms of Service", "/terms"],

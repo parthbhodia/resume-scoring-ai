@@ -19,5 +19,18 @@ export function mergeAnalyzeApiJson(json: Record<string, unknown>): Record<strin
   const bm = json.bulletMap ?? json.bullet_map;
   if (Array.isArray(bm)) out.bulletMap = bm;
 
+  const bullets = json.bulletAnalysis ?? json.bullet_analysis;
+  if (Array.isArray(bullets)) {
+    out.bulletAnalysis = bullets.map((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+      const b = { ...(row as Record<string, unknown>) };
+      const cr = b.categoryRewrites ?? b.category_rewrites;
+      if (cr && typeof cr === "object" && !Array.isArray(cr)) {
+        b.categoryRewrites = cr;
+      }
+      return b;
+    });
+  }
+
   return out;
 }

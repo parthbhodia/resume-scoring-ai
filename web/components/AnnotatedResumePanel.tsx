@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import dynamic from "next/dynamic";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import AnalyzeLiveResumeBody, {
   lineLooksLikeStandaloneSectionHeading,
@@ -9,21 +8,11 @@ import AnalyzeLiveResumeBody, {
 } from "@/components/AnalyzeLiveResumeBody";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
+  buildBulletPrimaryCategories,
   bulletMatchesAnalysisCategory,
+  type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
 import { DEFAULT_REFERENCE_FOLDER, distinctStyleTemplates, hasMultipleStyleTemplates } from "@/lib/resumeTemplates";
-
-const PdfViewerWithHighlights = dynamic(
-  () => import("@/components/PdfViewerWithHighlights"),
-  {
-    ssr: false,
-    loading: () => (
-      <div style={{ padding: 32, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
-        Loading PDF viewer…
-      </div>
-    ),
-  },
-);
 
 // Re-export for legacy imports from this file path
 export { CATEGORY_ISSUE_KEYWORDS } from "@/lib/analysisCategoryMatch";
@@ -68,10 +57,7 @@ interface Props {
   presentationOnly?: boolean;
   /** Brief highlight on the mirrored bullet after an override syncs from the left. */
   pulseBulletIndex?: number | null;
-  /** Present after a successful Analyze PDF upload — original file as blob URL. */
-  sourcePdfUrl?: string | null;
-  sourcePdfFileName?: string | null;
-  /** Explain why PDF / Original download toggles are missing after opening a saved analysis. */
+  /** Shown when a saved analysis was restored (no upload on this session). */
   restoredResumeNoPdfHint?: boolean;
   /** Export accepted edits to PDF via LaTeX (Harshibar) + pdflatex. */
   onExportPdf?: (opts?: { referenceFolder?: string }) => void;
@@ -85,6 +71,8 @@ interface Props {
   exportingResume?: boolean;
   /** Server-side export error (LaTeX / DOCX). */
   exportError?: string | null;
+  /** JD keywords + quant targeting for category highlights. */
+  categoryAssignmentOpts?: CategoryAssignmentOptions;
 }
 
 function scoreColor(score: number): string {
@@ -221,8 +209,6 @@ export default function AnnotatedResumePanel({
   builderOpening = false,
   presentationOnly = false,
   pulseBulletIndex = null,
-  sourcePdfUrl = null,
-  sourcePdfFileName = null,
   restoredResumeNoPdfHint = false,
   onExportPdf,
   exportPdfEnabled = true,
@@ -230,11 +216,15 @@ export default function AnnotatedResumePanel({
   exportDocxEnabled = true,
   exportingResume = false,
   exportError = null,
+  categoryAssignmentOpts,
 }: Props) {
   const styleTemplates = useMemo(() => distinctStyleTemplates(), []);
+  const bulletPrimaryCategories = useMemo(
+    () => buildBulletPrimaryCategories(bulletAnalysis, categoryAssignmentOpts),
+    [bulletAnalysis, categoryAssignmentOpts],
+  );
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<"pdf" | "live">("live");
   const [selectedReferenceFolder, setSelectedReferenceFolder] = useState<string>(DEFAULT_REFERENCE_FOLDER);
   const scrollRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
@@ -317,13 +307,8 @@ export default function AnnotatedResumePanel({
         : "none";
   const useLiveDoc = extractKind !== "none";
 
-  useEffect(() => {
-    if (sourcePdfUrl) setViewMode("pdf");
-    else setViewMode("live");
-  }, [sourcePdfUrl]);
-
   const flaggedCount = activeCategory
-    ? bulletAnalysis.filter(b => bulletMatchesAnalysisCategory(b, activeCategory)).length
+    ? bulletPrimaryCategories.filter((c) => c === activeCategory).length
     : 0;
   const totalCount = bulletAnalysis.length;
 
@@ -331,10 +316,6 @@ export default function AnnotatedResumePanel({
   const updateMirrorPosition = useCallback(() => {
     if (!presentationOnly) {
       setMirrorBox((b) => (b.opacity === 0 ? b : { ...b, opacity: 0 }));
-      return;
-    }
-    if (sourcePdfUrl && viewMode === "pdf") {
-      setMirrorBox((b) => ({ ...b, opacity: 0 }));
       return;
     }
     const idx = selectedBulletIndex;
@@ -357,7 +338,7 @@ export default function AnnotatedResumePanel({
     const score = bullet?.score ?? 60;
     const tone = mirrorToneStyles(score);
     setMirrorBox({ top, height, opacity: 1, ...tone });
-  }, [presentationOnly, selectedBulletIndex, bulletAnalysis, effectiveExtracted, previewLineOverrides, sourcePdfUrl, viewMode]);
+  }, [presentationOnly, selectedBulletIndex, bulletAnalysis, effectiveExtracted, previewLineOverrides]);
 
   useLayoutEffect(() => {
     updateMirrorPosition();
@@ -389,10 +370,8 @@ export default function AnnotatedResumePanel({
 
   // Scroll first highlighted bullet when category changes (sidebar drives preview).
   useEffect(() => {
-    if (!activeCategory || (sourcePdfUrl && viewMode === "pdf")) return;
-    const idx = bulletAnalysis.findIndex(b =>
-      bulletMatchesAnalysisCategory(b, activeCategory)
-    );
+    if (!activeCategory) return;
+    const idx = bulletPrimaryCategories.findIndex((c) => c === activeCategory);
     if (idx < 0) return;
     const id = window.setTimeout(() => {
       scrollRef.current
@@ -400,11 +379,11 @@ export default function AnnotatedResumePanel({
         ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 60);
     return () => window.clearTimeout(id);
-  }, [activeCategory, bulletAnalysis, sourcePdfUrl, viewMode]);
+  }, [activeCategory, bulletPrimaryCategories]);
 
   // Scroll selected bullet into view (preview drives sidebar).
   useEffect(() => {
-    if (selectedBulletIndex == null || (sourcePdfUrl && viewMode === "pdf")) return;
+    if (selectedBulletIndex == null) return;
     const idx = selectedBulletIndex;
     const id = window.setTimeout(() => {
       scrollRef.current
@@ -412,7 +391,7 @@ export default function AnnotatedResumePanel({
         ?.scrollIntoView({ behavior: "smooth", block: presentationOnly ? "center" : "nearest" });
     }, 40);
     return () => window.clearTimeout(id);
-  }, [selectedBulletIndex, presentationOnly, sourcePdfUrl, viewMode]);
+  }, [selectedBulletIndex, presentationOnly]);
 
   return (
     <div
@@ -584,42 +563,7 @@ export default function AnnotatedResumePanel({
           flexWrap: "wrap",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {sourcePdfUrl ? (
-              <div style={{
-                display: "flex",
-                gap: 2,
-                background: "var(--surface2)",
-                borderRadius: 8,
-                padding: 2,
-                border: "1px solid var(--border)",
-              }}
-              >
-                {(["pdf", "live"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setViewMode(mode)}
-                    style={{
-                      fontSize: 10.5,
-                      fontWeight: 700,
-                      letterSpacing: 0.2,
-                      padding: "4px 12px",
-                      borderRadius: 6,
-                      border: "none",
-                      background: viewMode === mode ? "var(--surface3)" : "transparent",
-                      color: viewMode === mode ? "var(--text)" : "var(--muted)",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      boxShadow: viewMode === mode ? "var(--shadow-sm)" : "none",
-                      transition: "all 0.15s",
-                    }}
-                  >
-                    {mode === "pdf" ? "PDF" : "Edit"}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div style={{
+            <div style={{
                 fontSize: 10,
                 fontWeight: 800,
                 color: "var(--muted)",
@@ -632,9 +576,8 @@ export default function AnnotatedResumePanel({
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
                   <path d="M3 14V3a1 1 0 011-1h8a1 1 0 011 1v11l-2.5-1.5L8 14l-2.5-1.5L3 14z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"/>
                 </svg>
-                {presentationOnly ? "Résumé" : useLiveDoc ? "Live résumé" : "Analyzed lines"}
+                {presentationOnly ? "Résumé" : useLiveDoc ? "Edit" : "Analyzed lines"}
               </div>
-            )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginLeft: "auto" }}>
           {activeCategory ? (
@@ -658,7 +601,7 @@ export default function AnnotatedResumePanel({
               {totalCount} lines scored
             </div>
           )}
-          {useLiveDoc && (!sourcePdfUrl || viewMode === "live") ? (
+          {useLiveDoc ? (
             <div
               style={{
                 display: "flex",
@@ -668,30 +611,6 @@ export default function AnnotatedResumePanel({
                 justifyContent: "flex-end",
               }}
             >
-              {sourcePdfUrl ? (
-                <a
-                  href={sourcePdfUrl}
-                  download={sourcePdfFileName ?? "resume.pdf"}
-                  title="Your uploaded file — identical formatting to what you analyzed."
-                  style={{
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    letterSpacing: 0.08,
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "1px solid var(--border-h)",
-                    background: "var(--surface3)",
-                    color: "var(--text)",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    flexShrink: 0,
-                    whiteSpace: "nowrap",
-                    textDecoration: "none",
-                  }}
-                >
-                  Original PDF
-                </a>
-              ) : null}
               {onExportPdf ? (
                 <button
                   type="button"
@@ -784,24 +703,7 @@ export default function AnnotatedResumePanel({
               background: "var(--surface2)",
             }}
           >
-            Opened from saved analysis — the original PDF is not stored. Use <strong style={{ color: "var(--text)" }}>Download PDF</strong> on the Edit tab for a compiled export;
-            re-upload your file to enable the PDF tab and original download.
-          </div>
-        ) : null}
-        {presentationOnly && useLiveDoc && sourcePdfUrl && viewMode === "pdf" ? (
-          <div
-            role="note"
-            style={{
-              padding: "8px 16px",
-              borderTop: "1px solid var(--border)",
-              fontSize: 11,
-              lineHeight: 1.45,
-              color: "var(--muted)",
-              background: "var(--surface2)",
-            }}
-          >
-            Switch to the <strong style={{ color: "var(--text)" }}>Edit</strong> tab and use <strong style={{ color: "var(--text)" }}>Download PDF</strong> for a Harshibar LaTeX export with your edits.
-            The PDF tab shows your original upload only.
+            Opened from saved analysis — your original file is not stored. Use <strong style={{ color: "var(--text)" }}>Download PDF</strong> for a Harshibar LaTeX export with your edits, or re-upload to analyze a new file.
           </div>
         ) : null}
         {extractKind === "synthetic" && !presentationOnly ? (
@@ -853,9 +755,8 @@ export default function AnnotatedResumePanel({
         </div>
       )}
 
-      {/* Legend — hidden on PDF tab (viewer has its own legend + download) */}
-      {!(sourcePdfUrl && viewMode === "pdf") && (
-        <div style={{
+      {/* Legend */}
+      <div style={{
           padding: "6px 14px",
           borderBottom: "1px solid var(--border)",
           display: "flex",
@@ -876,7 +777,6 @@ export default function AnnotatedResumePanel({
             </span>
           ))}
         </div>
-      )}
 
       {activeCategory && (
         <div style={{
@@ -896,19 +796,7 @@ export default function AnnotatedResumePanel({
         </div>
       )}
 
-      {/* PDF viewer — shown when in "pdf" mode and a blob URL is available */}
-      {sourcePdfUrl && viewMode === "pdf" && (
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <PdfViewerWithHighlights
-            pdfBlobUrl={sourcePdfUrl}
-            bulletAnalysis={bulletAnalysis}
-            filename={sourcePdfFileName ?? "resume.pdf"}
-          />
-        </div>
-      )}
-
-      {/* Document card + bullets — shown in "live" mode or when no PDF available */}
-      {(!sourcePdfUrl || viewMode === "live") && (
+      {/* Document preview with score highlights */}
       <div
         ref={scrollRef}
         style={{
@@ -970,6 +858,7 @@ export default function AnnotatedResumePanel({
                 onBulletLinkedSelect={onBulletLinkedSelect}
                 presentationOnly={presentationOnly}
                 pulseBulletIndex={pulseBulletIndex}
+                categoryAssignmentOpts={categoryAssignmentOpts}
               />
           ) : (
           <>
@@ -996,7 +885,7 @@ export default function AnnotatedResumePanel({
         ) : (
           bulletAnalysis.map((bullet, i) => {
             const isHighlighted = activeCategory
-              ? bulletMatchesAnalysisCategory(bullet, activeCategory)
+              ? bulletMatchesAnalysisCategory(bullet, activeCategory, bulletAnalysis, i, categoryAssignmentOpts)
               : false;
             const isHovered = hoveredIdx === i;
             const isExpanded = expandedIdx === i;
@@ -1139,7 +1028,6 @@ export default function AnnotatedResumePanel({
           )}
         </div>
       </div>
-      )}
     </div>
   );
 }

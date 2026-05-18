@@ -568,9 +568,9 @@ select option { background: var(--surface); }
   opacity: 1;
 }
 
-/* ── Resume Builder: PDF result preview (scroll inside iframe viewer) ── */
-.rb-pdf-preview-frame {
-  contain: layout paint;
+/* ── Resume Builder: tailored PDF preview (react-pdf scroll area) ── */
+.rb-pdf-preview-scroll {
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ── Resume Builder: “Analyze & get suggestions” loader (shimmer bar) ── */

@@ -1,8 +1,7 @@
 /**
  * Links sidebar analysis categories to bulletAnalysis rows.
- * Uses LLM issue strings plus lightweight heuristics so "Quantification"
- * highlights every bullet that still lacks metrics (not only rows where
- * the model happened to type "quantif…" in issues).
+ * Achievement vs quantification are distinct. Quantification flags only
+ * high-impact opportunities (~50% target), not every bullet without numbers.
  */
 
 /** Matches passive/copula patterns mirrored from backend `_PASSIVE_BULLET_RE`. */
@@ -13,6 +12,18 @@ const PASSIVE_BULLET_RE =
 const BULLET_DATE_LEAD_RE =
   /^[•\-–*▪▸]\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[,. ]+\d{4}\b|(?:19|20)\d{2}\s*[-–/]\s*(?:(?:19|20)\d{2}|[Pp]resent|[Cc]urrent)|(?:19|20)\d{2}\b\s*[,–-]\s*(?:19|20)\d{2}\b)/i;
 
+const QUANT_ISSUE_RE =
+  /\b(?:quantif|metric|measur|no numbers|lack of data|specific metrics|numeric|no metrics|percent|%|scale|figure)\b/i;
+
+const ACHIEVEMENT_ISSUE_RE =
+  /\b(?:weak action|weak verb|responsible for|duty-only|task-focused|vague outcome|helped with|assisted with|no achievement|duty list|passive)\b/i;
+
+const IMPACT_VERB_RE =
+  /\b(led|managed|developed|built|designed|implemented|delivered|achieved|increased|reduced|improved|launched|optimized|streamlined|grew|saved|generated)\b/i;
+
+/** Recruiter-style target: roughly half of experience bullets benefit from metrics. */
+export const TARGET_QUANTIFIED_BULLET_SHARE = 0.5;
+
 export const CATEGORY_ISSUE_KEYWORDS: Record<string, string[]> = {
   quantification: [
     "quantif", "metric", "measur", "percent", "%",
@@ -22,8 +33,8 @@ export const CATEGORY_ISSUE_KEYWORDS: Record<string, string[]> = {
   ],
   achievementQuality: [
     "weak action", "weak verb", "responsible for", "no achievement",
-    "duty", "task", "vague outcome", "responsibilit", "unclear impact",
-    "passive", "owned", "outcome", "impact", "narrative", "results",
+    "duty", "task-focused", "vague outcome", "responsibilit",
+    "passive", "owned", "narrative", "accomplishment", "outcome-focused",
   ],
   languageQuality: [
     "passive voice", "active voice", "buzzword", "first person", "filler", "cliché", "cliche",
@@ -56,6 +67,21 @@ export const CATEGORY_ISSUE_KEYWORDS: Record<string, string[]> = {
   ],
 };
 
+export type CategoryRewriteBullet = {
+  originalBullet: string;
+  improvedBullet?: string;
+  categoryRewrites?: Partial<Record<string, string>>;
+  issues: string[];
+  score: number;
+};
+
+export type CategoryAssignmentOptions = {
+  /** JD / keyword overlap boosts quant priority on relevant bullets. */
+  jdKeywords?: string[];
+  /** Target share of sample bullets to flag for metrics (default 0.5). */
+  targetQuantShare?: number;
+};
+
 /** True if the bullet text already shows measurable / scale signals. */
 export function hasStrongQuantification(text: string): boolean {
   const t = text.trim();
@@ -74,82 +100,229 @@ export function hasStrongQuantification(text: string): boolean {
 const ACHIEVEMENT_DUTY_PATTERNS =
   /\b(responsible\s+for|helped\s+with|assisted\s+with|worked\s+on|participated\s+in|involved\s+in|supported\s+the|duties\s+included)\b/i;
 
-/** Whether this bullet belongs to `category` for highlighting / filtering. */
-export function bulletMatchesAnalysisCategory(
-  bullet: { issues: string[]; originalBullet: string; score: number },
-  category: string | null,
-): boolean {
-  if (!category) return false;
-  const issueBlob = bullet.issues.join(" ").toLowerCase();
+function issueMatchesCategoryKeywords(issueBlob: string, category: string): boolean {
   const kws = CATEGORY_ISSUE_KEYWORDS[category] ?? [];
-  if (kws.some((kw) => issueBlob.includes(kw))) return true;
-
-  switch (category) {
-    case "quantification":
-      return !hasStrongQuantification(bullet.originalBullet);
-    case "achievementQuality":
-      if (ACHIEVEMENT_DUTY_PATTERNS.test(bullet.originalBullet)) return true;
-      return /\b(achievement|outcome|impact|responsibilit|duty|weak verb|specific|measurable outcome)\b/i.test(
-        issueBlob,
-      );
-    case "languageQuality":
-      if (PASSIVE_BULLET_RE.test(bullet.originalBullet)) return true;
-      return /\b(?:grammar|spelling|punctuation|tense|pronoun|passive|unclear|buzzword|wordy|weak\s+language|sentence|fluency|clarity|capitali[sz]ation|hyphen|word\s+choice|tone|flowery|slang)\b|passive\s+voice/i.test(
-        issueBlob,
-      );
-    case "readability":
-      if (BULLET_DATE_LEAD_RE.test(bullet.originalBullet.trim())) return true;
-      return (
-        bullet.originalBullet.trim().split(/\s+/).length > 55 ||
-        bullet.originalBullet.length > 420
-      );
-    default:
-      return false;
-  }
+  return kws.some((kw) => issueBlob.includes(kw));
 }
 
-/** Best sidebar category for a bullet (reverse link: preview → left rail). */
-export function inferPrimaryCategoryFromBullet(bullet: {
-  issues: string[];
-  originalBullet: string;
-  score: number;
-}): string {
+function bulletSignalsAchievementWeakness(bullet: CategoryRewriteBullet): boolean {
+  const issueBlob = bullet.issues.join(" ").toLowerCase();
+  if (ACHIEVEMENT_DUTY_PATTERNS.test(bullet.originalBullet)) return true;
+  if (ACHIEVEMENT_ISSUE_RE.test(issueBlob)) return true;
+  return issueMatchesCategoryKeywords(issueBlob, "achievementQuality");
+}
+
+function bulletSignalsExplicitQuantIssue(bullet: CategoryRewriteBullet): boolean {
+  const issueBlob = bullet.issues.join(" ").toLowerCase();
+  if (QUANT_ISSUE_RE.test(issueBlob)) return true;
+  return issueMatchesCategoryKeywords(issueBlob, "quantification");
+}
+
+/** Priority score for adding metrics (higher = flag under Quantification first). */
+export function quantificationImpactScore(
+  bullet: CategoryRewriteBullet,
+  jdKeywords: string[] = [],
+): number {
+  if (hasStrongQuantification(bullet.originalBullet)) return 0;
+
+  let score = 0;
+  const text = bullet.originalBullet.toLowerCase();
   const issueBlob = bullet.issues.join(" ").toLowerCase();
 
-  // Hard-priority: explicit quantification language should always classify as Quantification,
-  // even when the same issue text also contains words like "generic" that map to Language.
-  if (/\b(?:quantif|metric|measur|no numbers|lack of data|specific metrics|numeric)\b/i.test(issueBlob)) {
+  if (bulletSignalsExplicitQuantIssue(bullet)) score += 45;
+  score += Math.max(0, 88 - bullet.score);
+  if (IMPACT_VERB_RE.test(text)) score += 18;
+  if (ACHIEVEMENT_DUTY_PATTERNS.test(text)) score -= 30;
+
+  for (const kw of jdKeywords) {
+    const k = kw.toLowerCase().trim();
+    if (k.length >= 3 && text.includes(k)) score += 14;
+  }
+
+  const wc = text.split(/\s+/).filter(Boolean).length;
+  if (wc >= 10 && wc <= 40) score += 6;
+
+  return Math.max(0, score);
+}
+
+/** Base category from issues/heuristics — never assigns quantification just for missing numbers. */
+function inferBaseCategory(bullet: CategoryRewriteBullet): string {
+  const issueBlob = bullet.issues.join(" ").toLowerCase();
+  const text = bullet.originalBullet;
+
+  if (bulletSignalsExplicitQuantIssue(bullet) && !bulletSignalsAchievementWeakness(bullet)) {
+    return "quantification";
+  }
+  if (bulletSignalsAchievementWeakness(bullet) && !bulletSignalsExplicitQuantIssue(bullet)) {
+    return "achievementQuality";
+  }
+  if (bulletSignalsAchievementWeakness(bullet) && bulletSignalsExplicitQuantIssue(bullet)) {
+    if (ACHIEVEMENT_DUTY_PATTERNS.test(text) || ACHIEVEMENT_ISSUE_RE.test(issueBlob)) {
+      return "achievementQuality";
+    }
     return "quantification";
   }
 
-  /* Match issue-text keywords — language / structure before quantification so
-   * words like “data” in “consumer data” do not classify as Quantification. */
   const keywordOrder = [
     "languageQuality",
     "readability",
-    "achievementQuality",
     "atsCompatibility",
     "sectionStructure",
-    "quantification",
     "technicalBranding",
     "jobMatch",
   ] as const;
   for (const cat of keywordOrder) {
-    const kws = CATEGORY_ISSUE_KEYWORDS[cat] ?? [];
-    if (kws.some((kw) => issueBlob.includes(kw))) return cat;
+    if (issueMatchesCategoryKeywords(issueBlob, cat)) return cat;
   }
 
-  /* Issue heuristics (no keyword hit) — still before blanket “needs metrics”. */
-  if (bulletMatchesAnalysisCategory(bullet, "languageQuality")) return "languageQuality";
-  const text = bullet.originalBullet;
+  if (PASSIVE_BULLET_RE.test(text) || /\b(?:grammar|spelling|passive|buzzword)\b/i.test(issueBlob)) {
+    return "languageQuality";
+  }
   const wc = text.trim().split(/\s+/).length;
-  if (wc > 45 || text.length > 320) return "readability";
-  if (ACHIEVEMENT_DUTY_PATTERNS.test(text)) return "achievementQuality";
-  if (bulletMatchesAnalysisCategory(bullet, "achievementQuality")) return "achievementQuality";
-
-  if (!hasStrongQuantification(text)) return "quantification";
+  if (wc > 45 || text.length > 320 || BULLET_DATE_LEAD_RE.test(text.trim())) {
+    return "readability";
+  }
 
   if (bullet.score < 52) return "achievementQuality";
-
   return "languageQuality";
 }
+
+/**
+ * One primary pillar per bullet. Quantification is capped (~50% of sample) and
+ * prefers JD-relevant, high-impact lines — not every unquantified bullet.
+ */
+export function buildBulletPrimaryCategories(
+  bullets: CategoryRewriteBullet[],
+  opts: CategoryAssignmentOptions = {},
+): string[] {
+  if (!bullets.length) return [];
+
+  const jdKeywords = opts.jdKeywords ?? [];
+  const targetShare = opts.targetQuantShare ?? TARGET_QUANTIFIED_BULLET_SHARE;
+  const categories = bullets.map((b) => inferBaseCategory(b));
+
+  const targetQuantCount = Math.max(
+    categories.filter((c) => c === "quantification").length,
+    Math.min(
+      bullets.length,
+      Math.max(1, Math.ceil(bullets.length * targetShare)),
+    ),
+  );
+
+  const explicitQuant = new Set<number>();
+  categories.forEach((cat, i) => {
+    if (cat === "quantification") explicitQuant.add(i);
+  });
+
+  const candidates = bullets
+    .map((b, i) => ({ b, i, score: quantificationImpactScore(b, jdKeywords) }))
+    .filter(
+      ({ b, i, score }) =>
+        score > 0
+        && !explicitQuant.has(i)
+        && !hasStrongQuantification(b.originalBullet)
+        && categories[i] !== "achievementQuality",
+    )
+    .sort((a, b) => b.score - a.score);
+
+  let quantAssigned = explicitQuant.size;
+  for (const { i } of candidates) {
+    if (quantAssigned >= targetQuantCount) break;
+    categories[i] = "quantification";
+    quantAssigned += 1;
+  }
+
+  return categories;
+}
+
+/** @deprecated Prefer buildBulletPrimaryCategories for lists; kept for single-bullet fallback. */
+export function inferPrimaryCategoryFromBullet(
+  bullet: CategoryRewriteBullet,
+  allBullets?: CategoryRewriteBullet[],
+  index?: number,
+  opts?: CategoryAssignmentOptions,
+): string {
+  if (allBullets?.length) {
+    const idx = index ?? allBullets.indexOf(bullet);
+    if (idx >= 0) return buildBulletPrimaryCategories(allBullets, opts)[idx] ?? inferBaseCategory(bullet);
+  }
+  return inferBaseCategory(bullet);
+}
+
+/** Whether this bullet belongs to `category` for highlighting / filtering. */
+export function bulletMatchesAnalysisCategory(
+  bullet: CategoryRewriteBullet,
+  category: string | null,
+  allBullets?: CategoryRewriteBullet[],
+  bulletIndex?: number,
+  opts?: CategoryAssignmentOptions,
+): boolean {
+  if (!category) return false;
+  if (allBullets?.length) {
+    const idx = bulletIndex ?? allBullets.indexOf(bullet);
+    if (idx >= 0) {
+      return buildBulletPrimaryCategories(allBullets, opts)[idx] === category;
+    }
+  }
+  return inferBaseCategory(bullet) === category;
+}
+
+export function countBulletsInCategory(
+  primaryCategories: string[],
+  category: string,
+): number {
+  return primaryCategories.filter((c) => c === category).length;
+}
+
+/** Issue tags relevant to the active category. */
+export function filterIssuesForCategory(issues: string[], category: string): string[] {
+  if (!issues.length) return issues;
+  const kws = CATEGORY_ISSUE_KEYWORDS[category] ?? [];
+  const filtered = issues.filter((iss) => {
+    const low = iss.toLowerCase();
+    return kws.some((kw) => low.includes(kw));
+  });
+  return filtered.length > 0 ? filtered : issues;
+}
+
+function bulletSignalsQuantificationWeakness(bullet: CategoryRewriteBullet): boolean {
+  if (hasStrongQuantification(bullet.originalBullet)) return false;
+  return bulletSignalsExplicitQuantIssue(bullet);
+}
+
+/** Rewrite text for the active category. */
+export function getRewriteForCategory(
+  bullet: CategoryRewriteBullet,
+  category: string,
+  userDraft?: string | null,
+  allBullets?: CategoryRewriteBullet[],
+  bulletIndex?: number,
+  opts?: CategoryAssignmentOptions,
+): string {
+  if (userDraft != null && userDraft.trim() !== "") return userDraft.trim();
+  const focused = bullet.categoryRewrites?.[category]?.trim();
+  if (focused) return focused;
+
+  const primary = allBullets?.length
+    ? buildBulletPrimaryCategories(allBullets, opts)[bulletIndex ?? allBullets.indexOf(bullet)]
+    : inferBaseCategory(bullet);
+
+  if (primary === category && bullet.improvedBullet?.trim()) {
+    return bullet.improvedBullet.trim();
+  }
+  const general = bullet.improvedBullet?.trim() ?? "";
+  if (!general) return "";
+  if (category === "quantification" && bulletSignalsQuantificationWeakness(bullet)) {
+    return general;
+  }
+  if (category === "achievementQuality" && bulletSignalsAchievementWeakness(bullet)) {
+    return general;
+  }
+  return "";
+}
+
+export const CATEGORY_REWRITE_HINTS: Record<string, string> = {
+  quantification:
+    "Add a number where it helps—%, $, scale, or time saved. Not every bullet needs one; use [X%] if unknown.",
+  achievementQuality: "Start with a strong verb and what you delivered—not duties.",
+};

@@ -3198,9 +3198,13 @@ headings; standard sections (Experience, Education, Skills); contact lines machi
 3. JOB MATCH: If a JD is provided — keywords, tools, responsibilities overlap; natural \
 keyword placement (no stuffing). If no JD: null scores as specified below.
 4. ACHIEVEMENT QUALITY: Outcomes and ownership vs. vague duties (“responsible for”, \
-“worked on”, task lists without impact). Align with results-focused bullet craft.
+“worked on”, task lists without impact). Align with results-focused bullet craft. \
+Do NOT fold this into quantification — weak verbs and duty-only wording are achievement problems even when numbers exist.
 5. QUANTIFICATION: %, $, scale, time saved, users, rankings, before/after — reward \
-truthful metrics; flag truthful opportunities to add numbers.
+truthful metrics. Aim for roughly 50% of experience bullets with measurable results (not 100%). \
+Flag only the highest-impact opportunities to add numbers—especially bullets that match the JD or already show strong verbs/outcomes. \
+Do NOT tag every unquantified line for quantification. \
+This is separate from achievement quality: duty-language is achievement; missing metrics on a strong outcome bullet is quantification.
 6. SECTION STRUCTURE: Sections and order aligned with the UMBC checklist above (header, optional Objective/Summary, \
 education, optional certs/research/projects/coursework, skills, professional vs additional experience, honors, activities, \
 service); enforce bullet-count norms where visible (Summary 2–5; Professional 2–5; Additional 1–3; Activities 1–3; \
@@ -3231,6 +3235,11 @@ Infer the field from the résumé text and score against that field's expectatio
   as "[X%]", "[$Y]", or "[~N]".
 - For bulletAnalysis: analyze ONLY the 8 WEAKEST bullets (lowest-quality ones). \
   Skip good bullets.
+- For each weak bullet, label issues clearly (quantification vs achievement vs language). \
+  improvedBullet must match the primary weakness. Only ~half of weak bullets should carry a \
+  quantification issue; pick JD-relevant, high-impact lines first. categoryRewrites.quantification and \
+  categoryRewrites.achievementQuality must be DIFFERENT rewrites when both weaknesses apply — \
+  never paste the same text into both fields.
 - For each originalBullet field: copy the wording EXACTLY from RESUME TEXT (including • or -), \
   after normalizing; do not drop the first letters of words.
 - If no JD is provided: set jobMatch in categoryScores to null, set \
@@ -3281,7 +3290,11 @@ Return ONLY this JSON (no markdown fences, no explanation):
       "originalBullet": "<exact bullet text, truncated to 150 chars>",
       "score": <0-100>,
       "issues": ["<issue 1>", "<issue 2>"],
-      "improvedBullet": "<stronger rewritten version>"
+      "improvedBullet": "<rewrite for the bullet's PRIMARY weakness only>",
+      "categoryRewrites": {{
+        "quantification": "<when metrics are missing: add [X%]/[$Y]/[~N] placeholders; do not invent facts>",
+        "achievementQuality": "<when verbs/duties are weak: strong verb + owned outcome; omit invented metrics unless in original>"
+      }}
     }}
   ],
   "sectionFeedback": [
@@ -3397,6 +3410,14 @@ def _normalize_analysis(raw: dict) -> dict:
             if isinstance(ba, dict):
                 ba["originalBullet"] = _sanitize_bullet_display(ba.get("originalBullet", ""))
                 ba["improvedBullet"] = _sanitize_bullet_display(ba.get("improvedBullet", ""))
+                cr = ba.get("categoryRewrites") or ba.get("category_rewrites")
+                if isinstance(cr, dict):
+                    cleaned = {}
+                    for ck, cv in cr.items():
+                        if isinstance(cv, str) and cv.strip():
+                            cleaned[str(ck)] = _sanitize_bullet_display(cv)
+                    if cleaned:
+                        ba["categoryRewrites"] = cleaned
 
     # Calibrate overall score so it reflects visible weaknesses.
     # This prevents inflated "90+" overall when there are many weak bullets/issues.
@@ -4089,6 +4110,109 @@ Return ONLY the JSON object."""
     })
 
 
+def _build_docx_bytes_from_structured(
+    structured: dict,
+    accepted_edits: Optional[dict] = None,
+) -> bytes:
+    """Render a Word document from a structured resume dict (Analyze / Builder export)."""
+    accepted_edits = accepted_edits or {}
+    try:
+        from docx import Document  # type: ignore
+        from docx.shared import Pt, RGBColor  # type: ignore
+        from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore
+    except ImportError:
+        raise RuntimeError("python-docx is not installed. Add 'python-docx' to requirements.txt.")
+
+    doc = Document()
+
+    for section in doc.sections:
+        section.top_margin    = Pt(36)
+        section.bottom_margin = Pt(36)
+        section.left_margin   = Pt(54)
+        section.right_margin  = Pt(54)
+
+    def _h(text: str, size: int = 11, bold: bool = False, color: tuple = (0, 0, 0), align=WD_ALIGN_PARAGRAPH.LEFT):
+        p = doc.add_paragraph()
+        p.alignment = align
+        run = p.add_run(text)
+        run.bold = bold
+        run.font.size = Pt(size)
+        run.font.color.rgb = RGBColor(*color)
+        return p
+
+    full_name = structured.get("full_name") or "Candidate"
+    _h(full_name, size=18, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+    contact_parts = [v for k in ("email", "phone", "linkedin", "github", "location")
+                     if (v := structured.get(k))]
+    if contact_parts:
+        _h(" | ".join(contact_parts), size=9, align=WD_ALIGN_PARAGRAPH.CENTER, color=(80, 80, 80))
+
+    if structured.get("summary"):
+        doc.add_paragraph()
+        _h("SUMMARY", size=9, bold=True, color=(70, 70, 70))
+        doc.add_paragraph().add_run(structured["summary"]).font.size = Pt(10)
+
+    skills = structured.get("skills") or []
+    if skills:
+        doc.add_paragraph()
+        _h("SKILLS", size=9, bold=True, color=(70, 70, 70))
+        for sk in skills:
+            cat   = sk.get("category", "")
+            items = sk.get("items") or []
+            p = doc.add_paragraph(style="List Bullet")
+            run = p.add_run(f"{cat}: " if cat else "")
+            run.bold = True
+            run.font.size = Pt(10)
+            p.add_run(", ".join(items)).font.size = Pt(10)
+
+    experience = structured.get("experience") or []
+    if experience:
+        doc.add_paragraph()
+        _h("EXPERIENCE", size=9, bold=True, color=(70, 70, 70))
+        for ei, exp in enumerate(experience):
+            header_parts = []
+            if exp.get("role"):
+                header_parts.append(exp["role"])
+            if exp.get("company"):
+                header_parts.append(exp["company"])
+            role_line = " | ".join(header_parts)
+            p = doc.add_paragraph()
+            r = p.add_run(role_line)
+            r.bold = True
+            r.font.size = Pt(10.5)
+            if exp.get("dates"):
+                p.add_run(f"  {exp['dates']}").font.size = Pt(9)
+
+            bullets = exp.get("bullets") or []
+            ei_str  = str(ei)
+            for bi, bullet in enumerate(bullets):
+                bi_str = str(bi)
+                text = accepted_edits.get(ei_str, {}).get(bi_str) or bullet
+                p2 = doc.add_paragraph(style="List Bullet")
+                p2.add_run(text).font.size = Pt(10)
+
+    for sec in (structured.get("extra_sections") or []):
+        title = sec.get("title", "")
+        lines = sec.get("lines") or []
+        if not lines:
+            continue
+        doc.add_paragraph()
+        _h(title.upper(), size=9, bold=True, color=(70, 70, 70))
+        for line in lines:
+            p = doc.add_paragraph(style="List Bullet")
+            p.add_run(line).font.size = Pt(10)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _docx_attachment_filename(stem: str, fallback: str = "resume") -> str:
+    safe = re.sub(r"[^\w.\-]+", "_", (stem or "").strip()).strip("._")[:80] or fallback
+    return safe if safe.lower().endswith(".docx") else f"{safe}.docx"
+
+
 async def api_export_docx(request: Request):
     """POST /api/export-docx — generate a DOCX from a ResumeDocModel JSON payload.
 
@@ -4107,109 +4231,11 @@ async def api_export_docx(request: Request):
 
     accepted_edits: dict = body.get("acceptedEdits") or {}
 
-    def _build_docx() -> bytes:
-        try:
-            from docx import Document  # type: ignore
-            from docx.shared import Pt, RGBColor  # type: ignore
-            from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore
-        except ImportError:
-            raise RuntimeError("python-docx is not installed. Add 'python-docx' to requirements.txt.")
-
-        doc = Document()
-
-        # Narrow margins
-        for section in doc.sections:
-            section.top_margin    = Pt(36)
-            section.bottom_margin = Pt(36)
-            section.left_margin   = Pt(54)
-            section.right_margin  = Pt(54)
-
-        def _h(text: str, size: int = 11, bold: bool = False, color: tuple = (0, 0, 0), align=WD_ALIGN_PARAGRAPH.LEFT):
-            p = doc.add_paragraph()
-            p.alignment = align
-            run = p.add_run(text)
-            run.bold = bold
-            run.font.size = Pt(size)
-            run.font.color.rgb = RGBColor(*color)
-            return p
-
-        # Header — name
-        full_name = structured.get("full_name") or "Candidate"
-        _h(full_name, size=18, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
-
-        # Contact line
-        contact_parts = [v for k in ("email", "phone", "linkedin", "github", "location")
-                         if (v := structured.get(k))]
-        if contact_parts:
-            _h(" | ".join(contact_parts), size=9, align=WD_ALIGN_PARAGRAPH.CENTER, color=(80, 80, 80))
-
-        # Summary
-        if structured.get("summary"):
-            doc.add_paragraph()
-            _h("SUMMARY", size=9, bold=True, color=(70, 70, 70))
-            doc.add_paragraph().add_run(structured["summary"]).font.size = Pt(10)
-
-        # Skills
-        skills = structured.get("skills") or []
-        if skills:
-            doc.add_paragraph()
-            _h("SKILLS", size=9, bold=True, color=(70, 70, 70))
-            for sk in skills:
-                cat   = sk.get("category", "")
-                items = sk.get("items") or []
-                p = doc.add_paragraph(style="List Bullet")
-                run = p.add_run(f"{cat}: " if cat else "")
-                run.bold = True
-                run.font.size = Pt(10)
-                p.add_run(", ".join(items)).font.size = Pt(10)
-
-        # Experience
-        experience = structured.get("experience") or []
-        if experience:
-            doc.add_paragraph()
-            _h("EXPERIENCE", size=9, bold=True, color=(70, 70, 70))
-            for ei, exp in enumerate(experience):
-                # Role | Company · Dates
-                header_parts = []
-                if exp.get("role"):
-                    header_parts.append(exp["role"])
-                if exp.get("company"):
-                    header_parts.append(exp["company"])
-                role_line = " | ".join(header_parts)
-                p = doc.add_paragraph()
-                r = p.add_run(role_line)
-                r.bold = True
-                r.font.size = Pt(10.5)
-                if exp.get("dates"):
-                    p.add_run(f"  {exp['dates']}").font.size = Pt(9)
-
-                bullets = exp.get("bullets") or []
-                ei_str  = str(ei)
-                for bi, bullet in enumerate(bullets):
-                    # Apply accepted edit if present
-                    bi_str = str(bi)
-                    text = accepted_edits.get(ei_str, {}).get(bi_str) or bullet
-                    p2 = doc.add_paragraph(style="List Bullet")
-                    p2.add_run(text).font.size = Pt(10)
-
-        # Extra sections (Projects, Education, etc.)
-        for sec in (structured.get("extra_sections") or []):
-            title = sec.get("title", "")
-            lines = sec.get("lines") or []
-            if not lines:
-                continue
-            doc.add_paragraph()
-            _h(title.upper(), size=9, bold=True, color=(70, 70, 70))
-            for line in lines:
-                p = doc.add_paragraph(style="List Bullet")
-                p.add_run(line).font.size = Pt(10)
-
-        buf = io.BytesIO()
-        doc.save(buf)
-        return buf.getvalue()
-
     try:
-        docx_bytes = await asyncio.get_event_loop().run_in_executor(None, _build_docx)
+        docx_bytes = await asyncio.get_event_loop().run_in_executor(
+            None,
+            partial(_build_docx_bytes_from_structured, structured, accepted_edits),
+        )
     except RuntimeError as exc:
         return JSONResponse({"error": str(exc)}, status_code=501)
     except Exception as exc:
@@ -4217,6 +4243,58 @@ async def api_export_docx(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
     filename = f"resume-{(structured.get('full_name') or 'export').replace(' ', '_')}.docx"
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+async def api_builder_export_docx(request: Request):
+    """POST /api/builder-export-docx — DOCX for a tailored résumé folder (Builder flow).
+
+    Loads the generated .tex, applies accepted coach suggestions, and returns Word.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    folder = (body.get("folder") or "").strip()
+    if not folder or ".." in folder or "/" in folder:
+        return JSONResponse({"error": "folder required"}, status_code=400)
+
+    user_id = (body.get("user_id") or "").strip()
+    if user_id == "local":
+        user_id = ""
+    accepted = body.get("accepted_suggestions")
+    download_stem = (body.get("download_name") or "").strip()
+
+    tex = get_resume_tex(folder)
+    if tex is None and user_id:
+        tex = download_tex(user_id, folder)
+    if not tex:
+        return JSONResponse({"error": "resume not found"}, status_code=404)
+
+    def _build() -> bytes:
+        parsed = parse_resume_tex(tex)
+        doc = _resume_doc_from_parsed(parsed)
+        _apply_accepted_edits_to_doc(doc, accepted if isinstance(accepted, list) else None)
+        structured = _resume_doc_to_dict(doc)
+        return _build_docx_bytes_from_structured(structured, {})
+
+    try:
+        docx_bytes = await asyncio.get_event_loop().run_in_executor(None, _build)
+    except RuntimeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=501)
+    except Exception as exc:
+        logger.exception("builder_export_docx failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    filename = _docx_attachment_filename(
+        download_stem or folder,
+        fallback=(folder.split("_")[0] if "_" in folder else folder) or "resume",
+    )
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -4453,6 +4531,7 @@ routes = [
     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
     Route("/api/export-docx",             api_export_docx,     methods=["POST"]),
+    Route("/api/builder-export-docx",     api_builder_export_docx, methods=["POST"]),
     Route("/api/analyze-export-pdf",      api_analyze_export_pdf, methods=["POST"]),
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
     Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),

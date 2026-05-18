@@ -7,6 +7,7 @@ import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
   bulletMatchesAnalysisCategory,
+  type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
 import { looksLikeStructuredEmploymentLine } from "@/lib/profileFromResumeText";
 import {
@@ -633,6 +634,7 @@ interface Props {
   onBulletLinkedSelect?: (index: number) => void;
   pulseBulletIndex?: number | null;
   presentationOnly?: boolean;
+  categoryAssignmentOpts?: CategoryAssignmentOptions;
 }
 
 export default function AnalyzeLiveResumeBody({
@@ -649,6 +651,7 @@ export default function AnalyzeLiveResumeBody({
   onBulletLinkedSelect,
   presentationOnly = false,
   pulseBulletIndex = null,
+  categoryAssignmentOpts,
 }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   // Tracks which bullets are in "edit textarea" mode (after accepting or choosing to write own)
@@ -938,7 +941,15 @@ export default function AnalyzeLiveResumeBody({
               const nm = normalizeForMatch(rawLine);
               const showTextRaw = previewLineOverrides[bulletIdx] ?? (nm.length >= 8 ? nm : bullet.originalBullet);
               const showText = softenRunOnExtractLine(showTextRaw);
-              const isHighlighted = activeCategory ? bulletMatchesAnalysisCategory(bullet, activeCategory) : false;
+              const isHighlighted = activeCategory
+                ? bulletMatchesAnalysisCategory(
+                    bullet,
+                    activeCategory,
+                    bulletAnalysis,
+                    bulletIdx,
+                    categoryAssignmentOpts,
+                  )
+                : false;
               const isSelected = selectedBulletIndex === bulletIdx;
               const previewLineApplied = previewLineOverrides[bulletIdx] !== undefined;
               const hasActionable = !!(bullet.improvedBullet || bullet.issues.length);

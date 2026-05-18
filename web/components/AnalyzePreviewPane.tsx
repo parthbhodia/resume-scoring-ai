@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import AnnotatedResumePanel from "@/components/AnnotatedResumePanel";
+import type { CategoryAssignmentOptions } from "@/lib/analysisCategoryMatch";
 import { useResumeAnalyzeStore, type AnalyzeBulletSnapshot } from "@/store/resumeAnalyzeStore";
 import { useAnalyzeExport } from "@/hooks/useAnalyzeExport";
 
@@ -34,16 +35,14 @@ interface Props {
   onOpenBuilder?: (opts?: { referenceFolder?: string }) => void;
   builderReady?: boolean;
   builderOpening?: boolean;
-  /** Original upload as blob URL (PDF upload flow). */
-  sourcePdfUrl?: string | null;
-  sourcePdfFileName?: string | null;
-  /** Shown when a saved analysis was restored — PDF bytes are not in storage. */
+  /** Shown when a saved analysis was restored — original upload bytes are not in storage. */
   restoredResumeNoPdfHint?: boolean;
   /** Optional JD text — enables JD-tailored PDF export. */
   jd?: string;
   /** Passed through to preview panel; defaults to export readiness from structured resume. */
   exportPdfEnabled?: boolean;
   exportDocxEnabled?: boolean;
+  categoryAssignmentOpts?: CategoryAssignmentOptions;
 }
 
 /**
@@ -63,12 +62,11 @@ export default function AnalyzePreviewPane({
   onOpenBuilder,
   builderReady,
   builderOpening,
-  sourcePdfUrl = null,
-  sourcePdfFileName = null,
   restoredResumeNoPdfHint = false,
   jd = "",
   exportPdfEnabled,
   exportDocxEnabled,
+  categoryAssignmentOpts,
 }: Props) {
   const { exportPdf, exportDocx, exporting, canExport, error: exportError } = useAnalyzeExport({ jd });
   const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
@@ -114,8 +112,6 @@ export default function AnalyzePreviewPane({
       builderReady={builderReady}
       builderOpening={builderOpening}
       pulseBulletIndex={pulseBulletIndex}
-      sourcePdfUrl={sourcePdfUrl}
-      sourcePdfFileName={sourcePdfFileName}
       restoredResumeNoPdfHint={restoredResumeNoPdfHint}
       onExportPdf={exportPdf}
       exportPdfEnabled={exportPdfEnabled !== false && canExport}
@@ -123,6 +119,7 @@ export default function AnalyzePreviewPane({
       exportDocxEnabled={exportDocxEnabled !== false && canExport}
       exportingResume={exporting}
       exportError={exportError}
+      categoryAssignmentOpts={categoryAssignmentOpts}
     />
   );
 }

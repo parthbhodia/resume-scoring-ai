@@ -5,7 +5,7 @@
  * Design reference: docs/PRODUCT_DESIGN.md (Linear × Notion × career coach).
  *
  * Routing (static export):
- *   ?view=builder|library|analyze|profile|jobs  (default: analyze)
+ *   ?view=builder|library|analyze|profile|jobs|cover-letter  (default: analyze)
  *   ?view=builder&flow=tailor|template
  *   Template customize may keep flow=tailor; session rn_builder_layout_only=1 → highlight Template gallery.
  *   ?view=library&resume=<folder>
@@ -23,7 +23,7 @@ import ResumeSidebar from "./ResumeSidebar";
 import { useAppBreakpoints } from "@/hooks/useAppBreakpoints";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 
-export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs";
+export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs" | "cover-letter";
 
 type Theme = "dark" | "light";
 
@@ -57,7 +57,8 @@ const VIEW_LABELS: Record<AppView, string> = {
   library:  "Library",
   analyze:  "Analyze",
   profile:  "Profile",
-  jobs:     "Jobs",
+  jobs:          "Jobs",
+  "cover-letter": "Cover letter",
 };
 
 const VIEW_ICONS: Record<AppView, ReactNode> = {
@@ -95,10 +96,18 @@ const VIEW_ICONS: Record<AppView, ReactNode> = {
       <path d="M2 8h12" stroke="currentColor" strokeWidth="1.3"/>
     </svg>
   ),
+  "cover-letter": (
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M3 2.5h10l2 2v9.5H3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+      <path d="M10 2.5v2.5h2" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+      <path d="M5 8h6M5 10.5h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  ),
 };
 
 const BADGES: Partial<Record<AppView, string>> = {
   jobs: "Soon",
+  "cover-letter": "Soon",
 };
 
 const SIDEBAR_COLLAPSED_KEY = "rn-app-sidebar-collapsed";
@@ -138,7 +147,7 @@ function readBuilderLayoutOnlyFlag(): boolean {
 export function useAppView(): AppView {
   const params = useSearchParams();
   const raw = (params?.get("view") || "analyze").toLowerCase();
-  const valid: AppView[] = ["builder", "library", "analyze", "profile", "jobs"];
+  const valid: AppView[] = ["builder", "library", "analyze", "profile", "jobs", "cover-letter"];
   return valid.includes(raw as AppView) ? (raw as AppView) : "analyze";
 }
 
@@ -388,6 +397,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <NavRow view="library" />
+          <NavRow view="cover-letter" />
           <NavRow view="jobs" />
           <NavRow view="profile" />
         </nav>
