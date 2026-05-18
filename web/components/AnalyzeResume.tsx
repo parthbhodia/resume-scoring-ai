@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FocusEvent } from "react";
-import { useRouter } from "next/navigation";
 import ScoreRing from "./ScoreRing";
 import BulletImprovedEditor from "./BulletImprovedEditor";
 import {
@@ -17,7 +16,6 @@ import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import type { StructuredResume, BulletMapEntry } from "@/store/resumeAnalyzeStore";
 import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
 import type { AnalyzeRecord } from "@/lib/supabase";
-import { TAILOR_PREFILL_JD } from "@/lib/tailorPrefill";
 import AnalyzePreviewPane from "@/components/AnalyzePreviewPane";
 import { useAppShellSidebar } from "@/contexts/AppShellSidebarContext";
 import {
@@ -218,7 +216,6 @@ function lsPush(uid: string, rec: AnalyzeRecord) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function AnalyzeResume() {
-  const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const lastPdfRef = useRef<File | null>(null);
   const sourcePdfBlobUrlRef = useRef<string | null>(null);
@@ -240,16 +237,11 @@ export default function AnalyzeResume() {
   const [improvementPlanVisible, setImprovementPlanVisible] = useState(false);
   const appShellSidebar = useAppShellSidebar();
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
-  /** Library folder when last run used analyze-folder; PDF file via lastPdfRef otherwise */
-  const [linkedFolder, setLinkedFolder]               = useState<string | null>(null);
-  /** True when Builder / export can use the current run (upload PDF, library folder, or restored text). */
-  const [builderLinkReady, setBuilderLinkReady]       = useState(false);
   /** User picked a row from Recent Analyses — original PDF blob is not available until they upload again. */
   const [historyRestoreActive, setHistoryRestoreActive] = useState(false);
   /** Keys local preview-edit drafts (`rn_az_edit_v1_*` in localStorage); set to history row id or optimistic `local_*` id. */
   const [activeEditDraftId, setActiveEditDraftId] = useState<string | null>(null);
   const [editDraftStatus, setEditDraftStatus] = useState<string | null>(null);
-  const [builderOpening, setBuilderOpening]           = useState(false);
   const [azHistory, setAzHistory]           = useState<AnalyzeRecord[]>([]);
   const [userId, setUserId]                 = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -399,9 +391,7 @@ export default function AnalyzeResume() {
     setActiveCategory(null);
     setImprovementPlanVisible(false);
     setSelectedBulletIndex(null);
-    setBuilderLinkReady(false);
     setHistoryRestoreActive(false);
-    setLinkedFolder(null);
     lastPdfRef.current = file;
     bindSourcePdf(null);
     const fd = new FormData();
@@ -416,7 +406,6 @@ export default function AnalyzeResume() {
       const draftId = `local_${Date.now()}`;
       setActiveEditDraftId(draftId);
       setResult(resWithMeta);
-      setBuilderLinkReady(true);
       bindSourcePdf(file);
       persistResult(file.name.replace(/\.(pdf|docx)$/i, ""), resWithMeta, draftId);
     } catch (e: unknown) {
@@ -437,9 +426,7 @@ export default function AnalyzeResume() {
     setActiveCategory(null);
     setSelectedBulletIndex(null);
     setImprovementPlanVisible(false);
-    setBuilderLinkReady(false);
     setHistoryRestoreActive(false);
-    setLinkedFolder(null);
     lastPdfRef.current = null;
     bindSourcePdf(null);
     try {
@@ -457,8 +444,6 @@ export default function AnalyzeResume() {
       const draftId = `local_${Date.now()}`;
       setActiveEditDraftId(draftId);
       setResult(resWithMeta);
-      setLinkedFolder(folder);
-      setBuilderLinkReady(true);
       persistResult(folder, resWithMeta, draftId);
     } catch (e: unknown) {
       setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Unknown error"));
@@ -479,11 +464,6 @@ export default function AnalyzeResume() {
     setSelectedBulletIndex(null);
     lastPdfRef.current = null;
     bindSourcePdf(null);
-    const folder = typeof merged.libraryFolder === "string" && merged.libraryFolder.trim() !== ""
-      ? merged.libraryFolder.trim()
-      : null;
-    setLinkedFolder(folder);
-    setBuilderLinkReady(Boolean(folder));
     setHistoryRestoreActive(true);
   }, [bindSourcePdf]);
 
@@ -611,57 +591,6 @@ export default function AnalyzeResume() {
     [azHistory, restoreRecord, deleteRecord],
   );
 
-  const continueInBuilder = useCallback(async (opts?: { referenceFolder?: string }) => {
-    if (!builderLinkReady) return;
-    setBuilderOpening(true);
-    setError(null);
-    try {
-      try {
-        if (opts?.referenceFolder) {
-          sessionStorage.setItem("rn_builder_style_ref", opts.referenceFolder);
-        } else {
-          sessionStorage.removeItem("rn_builder_style_ref");
-        }
-      } catch { /* quota */ }
-
-      const styleQ = opts?.referenceFolder
-        ? `&styleRef=${encodeURIComponent(opts.referenceFolder)}`
-        : "";
-
-      if (linkedFolder) {
-        try {
-          if (jd.trim()) sessionStorage.setItem(TAILOR_PREFILL_JD, jd.trim());
-          else sessionStorage.removeItem(TAILOR_PREFILL_JD);
-        } catch { /* quota */ }
-        router.push(`/?view=builder&flow=template&base=${encodeURIComponent(linkedFolder)}${styleQ}`);
-        return;
-      }
-      const file = lastPdfRef.current;
-      if (!file) {
-        setError(
-          "Résumé Builder is for tailoring a live PDF or library project to a job. Re-upload your PDF here to open that flow, or keep editing in this Analyze view (Quick export).",
-        );
-        return;
-      }
-      const fd = new FormData();
-      fd.append("file", file);
-      const resp = await fetch(apiUrl("/api/upload-resume"), { method: "POST", body: fd });
-      const json = (await resp.json()) as { error?: string; text?: string };
-      if (!resp.ok) throw new Error(json.error ?? "Could not extract text from your PDF.");
-      try {
-        sessionStorage.setItem("rn_builder_profile_prefill", json.text ?? "");
-        if (jd.trim()) sessionStorage.setItem(TAILOR_PREFILL_JD, jd.trim());
-        else sessionStorage.removeItem(TAILOR_PREFILL_JD);
-        sessionStorage.setItem("rn_builder_from_analyze", "1");
-      } catch { /* quota */ }
-      router.push(`/?view=builder&flow=template&fromAnalyze=1${styleQ}`);
-    } catch (e: unknown) {
-      setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Could not open Résumé Builder."));
-    } finally {
-      setBuilderOpening(false);
-    }
-  }, [builderLinkReady, linkedFolder, jd, router]);
-
   const handleBulletLinkedSelect = useCallback(
     (index: number) => {
       useResumeAnalyzeStore.getState().pulseBullet(index);
@@ -726,7 +655,7 @@ export default function AnalyzeResume() {
   }, [activeCategory]);
 
   const onFile = (f: File | null | undefined) => {
-    if (!f || !/\.(pdf|docx)$/i.test(f.name)) { setError("Please upload a PDF or DOCX file."); return; }
+    if (!f || !/\.(pdf|docx?)$/i.test(f.name)) { setError("Please upload a PDF or Word (.doc / .docx) file."); return; }
     run(f);
   };
 
@@ -800,8 +729,6 @@ export default function AnalyzeResume() {
     setHistoryOpen(false);
     setActiveCategory(null);
     setSelectedBulletIndex(null);
-    setBuilderLinkReady(false);
-    setLinkedFolder(null);
     lastPdfRef.current = null;
     bindSourcePdf(null);
     
@@ -1603,7 +1530,6 @@ export default function AnalyzeResume() {
                   onClick={() => {
                     setResult(null); setError(null); setExpandedBullets({});
                     setActiveCategory(null); setSelectedBulletIndex(null);
-                    setBuilderLinkReady(false); setLinkedFolder(null);
                     lastPdfRef.current = null;
                     bindSourcePdf(null);
                     
@@ -1739,9 +1665,6 @@ export default function AnalyzeResume() {
               selectedBulletIndex={selectedBulletIndex}
               onBulletLinkedSelect={handleBulletLinkedSelect}
               presentationOnly
-              onOpenBuilder={continueInBuilder}
-              builderReady={builderLinkReady}
-              builderOpening={builderOpening}
               sourcePdfUrl={sourcePdfUrl}
               sourcePdfFileName={sourcePdfFileName}
               restoredResumeNoPdfHint={historyRestoreActive && !sourcePdfUrl}
@@ -1769,73 +1692,6 @@ export default function AnalyzeResume() {
                 : undefined
             }
           >
-        {/* ── Builder handoff (optional) — hidden in split results + preview to avoid duplicate “generate” affordances ── */}
-          {!(result && workspaceSplit) ? (
-          <div style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 12,
-            flexWrap: "wrap",
-            marginBottom: 20,
-          }}>
-            <div style={{ flex: "1 1 280px", minWidth: 0 }}>
-              {builderLinkReady && (
-                <button
-                  type="button"
-                  disabled={builderOpening || loading}
-                  onClick={() => continueInBuilder()}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "8px 16px",
-                    borderRadius: 10,
-                    border: "1px solid var(--border)",
-                    background: "var(--surface2)",
-                    color: "var(--text)",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: builderOpening || loading ? "wait" : "pointer",
-                    fontFamily: "inherit",
-                    opacity: builderOpening ? 0.85 : 1,
-                  }}
-                  title={
-                    linkedFolder
-                      ? "Open this résumé in Résumé Builder (library draft)."
-                      : "Send extracted text to Résumé Builder for full editing, ATS checks, and PDF export."
-                  }
-                >
-                  {builderOpening ? (
-                    <>
-                      <Spinner size={14} /> Opening…
-                    </>
-                  ) : (
-                    <>
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-                        <path d="M3 3h10v10H3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-                        <path d="M6 6h4M6 8.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                      </svg>
-                      Open in Résumé Builder
-                    </>
-                  )}
-                </button>
-              )}
-              {builderLinkReady && (
-                <div style={{
-                  marginTop: 6,
-                  fontSize: 11,
-                  color: "var(--dim)",
-                  maxWidth: 520,
-                  lineHeight: 1.45,
-                }}>
-                  {linkedFolder
-                    ? "Use the full LaTeX workspace for this library draft — bullets, ATS, tailoring, and export."
-                    : "Analyze stays read-only here. Builder is where you edit structure, run ATS, attach a JD, and generate a tailored PDF."}
-                </div>
-              )}
-            </div>
-          </div>
-          ) : null}
 
         {/* ── Issue Detail View (shown when a category is selected) ── */}
         {activeCategory && (
@@ -2741,7 +2597,7 @@ export default function AnalyzeResume() {
       <input
         ref={fileRef}
         type="file"
-        accept=".pdf,.docx"
+        accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         style={{ display: "none" }}
         onChange={e => onFile(e.target.files?.[0])}
       />

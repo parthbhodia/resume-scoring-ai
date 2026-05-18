@@ -41,6 +41,9 @@ interface Props {
   restoredResumeNoPdfHint?: boolean;
   /** Optional JD text — enables JD-tailored PDF export. */
   jd?: string;
+  /** Passed through to preview panel; defaults to export readiness from structured resume. */
+  exportPdfEnabled?: boolean;
+  exportDocxEnabled?: boolean;
 }
 
 /**
@@ -64,6 +67,8 @@ export default function AnalyzePreviewPane({
   sourcePdfFileName = null,
   restoredResumeNoPdfHint = false,
   jd = "",
+  exportPdfEnabled,
+  exportDocxEnabled,
 }: Props) {
   const { exportPdf, exportDocx, exporting, canExport, error: exportError } = useAnalyzeExport({ jd });
   const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
@@ -112,8 +117,10 @@ export default function AnalyzePreviewPane({
       sourcePdfUrl={sourcePdfUrl}
       sourcePdfFileName={sourcePdfFileName}
       restoredResumeNoPdfHint={restoredResumeNoPdfHint}
-      onExportPdf={canExport ? exportPdf : undefined}
-      onExportDocx={canExport ? exportDocx : undefined}
+      onExportPdf={exportPdf}
+      exportPdfEnabled={exportPdfEnabled !== false && canExport}
+      onExportDocx={exportDocx}
+      exportDocxEnabled={exportDocxEnabled !== false && canExport}
       exportingResume={exporting}
       exportError={exportError}
     />

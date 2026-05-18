@@ -48,7 +48,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, FileResponse
+from starlette.responses import HTMLResponse, JSONResponse, FileResponse, Response
 from starlette.routing import Route
 from sse_starlette.sse import EventSourceResponse
 
@@ -756,7 +756,7 @@ def _resolve_structured_source_folder(base_folder: Optional[str], reference_fold
         candidates.append(ref_name)
     if base_name and "_structured_" not in base_name and base_name not in candidates:
         candidates.append(base_name)
-    for fallback in ("Adobe_FullStack", "Harshibar_Template1", "MaltaCV_Modern"):
+    for fallback in ("Harshibar_Template1", "Adobe_FullStack", "MaltaCV_Modern"):
         if fallback not in candidates:
             candidates.append(fallback)
 
@@ -3551,10 +3551,10 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
 
 
 async def api_analyze_upload(request: Request):
-    """POST /api/analyze-upload — upload a PDF or DOCX and run comprehensive AI analysis.
+    """POST /api/analyze-upload — upload a PDF or Word (.doc / .docx) and run comprehensive AI analysis.
 
     Form fields:
-      file  — PDF or DOCX binary
+      file  — PDF or Word binary
       jd    — optional job description text
     """
     try:
@@ -3564,32 +3564,50 @@ async def api_analyze_upload(request: Request):
         if not upload:
             return JSONResponse({"error": "No file provided"}, status_code=400)
         data     = await upload.read()
+        if not data:
+            return JSONResponse({"error": "Empty file"}, status_code=400)
         filename = getattr(upload, "filename", None) or "resume.pdf"
+        content_type = getattr(upload, "content_type", None)
+
+        from resume_upload_parse import (  # type: ignore
+            extract_upload_markdown,
+            message_for_empty_resume_extract,
+            validate_resume_upload_file,
+        )
+
+        try:
+            validate_resume_upload_file(content_type, filename)
+        except ValueError as ve:
+            return JSONResponse({"error": str(ve)}, status_code=400)
 
         loop = asyncio.get_event_loop()
 
         def _extract_text() -> str:
-            # Try MarkItDown (handles PDF + DOCX) first; fall back to pdfplumber for PDFs.
-            try:
-                from resume_upload_parse import extract_upload_markdown  # type: ignore
-                outcome = extract_upload_markdown(data, filename, pdf_plain_fallback=None)
-                text = (outcome.markdown or "").strip()
-                if text:
-                    return text
-            except Exception as exc:
-                logger.warning("MarkItDown extract failed for analyze_upload: %s", exc)
-            # pdfplumber fallback (PDF only)
-            if filename.lower().endswith(".pdf") or not filename.lower().endswith(".docx"):
+            outcome = extract_upload_markdown(data, filename, pdf_plain_fallback=None)
+            text = (outcome.markdown or "").strip()
+            if text:
+                return text
+            # pdfplumber fallback — PDF only (never treat Word as PDF)
+            if filename.lower().endswith(".pdf"):
                 try:
                     with pdfplumber.open(io.BytesIO(data)) as pdf:
                         return _extract_pdf_text(pdf)
                 except Exception as exc:
                     logger.warning("pdfplumber fallback failed: %s", exc)
+            if outcome.empty_reason:
+                raise ValueError(message_for_empty_resume_extract(outcome.empty_reason))
             return ""
 
-        text = await loop.run_in_executor(None, _extract_text)
+        try:
+            text = await loop.run_in_executor(None, _extract_text)
+        except ValueError as ve:
+            return JSONResponse({"error": str(ve)}, status_code=422)
+
         if not text.strip():
-            return JSONResponse({"error": "Could not extract text from the uploaded file"}, status_code=400)
+            return JSONResponse(
+                {"error": "Could not extract text from the uploaded file"},
+                status_code=422,
+            )
 
         # Run comprehensive analysis and structured extraction concurrently
         analysis_future = loop.run_in_executor(None, _analyze_resume_comprehensive, text, jd)
@@ -4348,7 +4366,7 @@ async def api_analyze_export_pdf(request: Request):
     Body (JSON):
       structuredResume  — dict from /api/analyze-upload (required)
       acceptedEdits     — { "<ei>": { "<bi>": "new text" } } (optional)
-      referenceFolder   — LaTeX template key, e.g. "Adobe_FullStack" (optional)
+      referenceFolder   — LaTeX template key, e.g. "Harshibar_Template1" (optional)
       jd                — job description text; if present, runs _llm_tailor_to_jd first (optional)
       role              — job title (optional, used for tailoring + folder naming)
       company           — company name (optional, used for tailoring + folder naming)
@@ -4363,7 +4381,7 @@ async def api_analyze_export_pdf(request: Request):
         return JSONResponse({"error": "structuredResume required"}, status_code=400)
 
     accepted_edits: dict  = body.get("acceptedEdits") or {}
-    reference_folder: str = (body.get("referenceFolder") or "Adobe_FullStack").strip()
+    reference_folder: str = (body.get("referenceFolder") or "Harshibar_Template1").strip()
     jd: str               = (body.get("jd") or "").strip()
     role: str             = (body.get("role") or structured.get("headline") or "Candidate").strip()
     company: str          = (body.get("company") or "").strip()

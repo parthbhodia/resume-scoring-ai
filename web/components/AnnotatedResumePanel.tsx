@@ -11,7 +11,6 @@ import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
   bulletMatchesAnalysisCategory,
 } from "@/lib/analysisCategoryMatch";
-import { exportResumeAsPdf } from "@/lib/exportResumeAsPdf";
 import { DEFAULT_REFERENCE_FOLDER, distinctStyleTemplates, hasMultipleStyleTemplates } from "@/lib/resumeTemplates";
 
 const PdfViewerWithHighlights = dynamic(
@@ -74,10 +73,14 @@ interface Props {
   sourcePdfFileName?: string | null;
   /** Explain why PDF / Original download toggles are missing after opening a saved analysis. */
   restoredResumeNoPdfHint?: boolean;
-  /** Export accepted edits to PDF via unified pipeline. Receives selected template folder. */
-  onExportPdf?: (opts: { referenceFolder: string }) => void;
+  /** Export accepted edits to PDF via LaTeX (Harshibar) + pdflatex. */
+  onExportPdf?: (opts?: { referenceFolder?: string }) => void;
+  /** When false, PDF download stays visible but disabled (no structured resume yet). */
+  exportPdfEnabled?: boolean;
   /** Export accepted edits to DOCX. */
   onExportDocx?: () => void;
+  /** When false, DOCX control stays visible but disabled (no structured resume yet). */
+  exportDocxEnabled?: boolean;
   /** True while an export is in progress. */
   exportingResume?: boolean;
   /** Server-side export error (LaTeX / DOCX). */
@@ -222,14 +225,15 @@ export default function AnnotatedResumePanel({
   sourcePdfFileName = null,
   restoredResumeNoPdfHint = false,
   onExportPdf,
+  exportPdfEnabled = true,
   onExportDocx,
+  exportDocxEnabled = true,
   exportingResume = false,
   exportError = null,
 }: Props) {
   const styleTemplates = useMemo(() => distinctStyleTemplates(), []);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-  const [pdfExporting, setPdfExporting] = useState(false);
   const [viewMode, setViewMode] = useState<"pdf" | "live">("live");
   const [selectedReferenceFolder, setSelectedReferenceFolder] = useState<string>(DEFAULT_REFERENCE_FOLDER);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -322,24 +326,6 @@ export default function AnnotatedResumePanel({
     ? bulletAnalysis.filter(b => bulletMatchesAnalysisCategory(b, activeCategory)).length
     : 0;
   const totalCount = bulletAnalysis.length;
-
-  const onSavePreviewPdf = useCallback(async () => {
-    if (!useLiveDoc || pdfExporting) return;
-    setPdfExporting(true);
-    try {
-      await exportResumeAsPdf(
-        effectiveExtracted,
-        bulletAnalysis,
-        previewLineOverrides,
-        resumeHeader ?? [],
-        `resume-${new Date().toISOString().slice(0, 10)}.pdf`,
-      );
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setPdfExporting(false);
-    }
-  }, [pdfExporting, useLiveDoc, effectiveExtracted, bulletAnalysis, previewLineOverrides, resumeHeader]);
 
   /** Maps `data-bullet-idx` on the preview page to a thick, score-colored frame (split / presentation column). */
   const updateMirrorPosition = useCallback(() => {
@@ -706,71 +692,62 @@ export default function AnnotatedResumePanel({
                   Original PDF
                 </a>
               ) : null}
-              <button
-                type="button"
-                onClick={onSavePreviewPdf}
-                disabled={pdfExporting}
-                title="Download a PDF with your line edits from this preview."
-                aria-label="Download edited preview PDF"
-                style={{
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  letterSpacing: 0.12,
-                  padding: "6px 12px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: pdfExporting ? "var(--surface3)" : "var(--accent)",
-                  color: "#fff",
-                  cursor: pdfExporting ? "wait" : "pointer",
-                  fontFamily: "inherit",
-                  flexShrink: 0,
-                  whiteSpace: "nowrap",
-                  boxShadow: pdfExporting ? "none" : "var(--shadow-sm)",
-                }}
-              >
-                {pdfExporting ? "Exporting…" : "Download edited PDF"}
-              </button>
               {onExportPdf ? (
                 <button
                   type="button"
-                  disabled={exportingResume}
+                  disabled={exportingResume || !exportPdfEnabled}
                   onClick={() => onExportPdf({ referenceFolder: selectedReferenceFolder })}
-                  title="Full LaTeX template PDF with your bullet edits."
+                  title={
+                    exportPdfEnabled
+                      ? "Download PDF — Harshibar LaTeX layout with your bullet edits (same engine as Résumé Builder)."
+                      : "PDF export needs a structured résumé from analysis — re-upload your file if this stays disabled."
+                  }
+                  aria-label="Download résumé PDF"
                   style={{
                     fontSize: 10.5,
                     fontWeight: 700,
+                    letterSpacing: 0.12,
                     padding: "6px 12px",
                     borderRadius: 8,
-                    border: "1px solid var(--border-h)",
-                    background: "var(--surface3)",
-                    color: "var(--text)",
-                    cursor: exportingResume ? "wait" : "pointer",
+                    border: "none",
+                    background: exportPdfEnabled
+                      ? exportingResume ? "var(--surface3)" : "var(--accent)"
+                      : "var(--surface2)",
+                    color: exportPdfEnabled ? "#fff" : "var(--dim)",
+                    cursor: exportingResume ? "wait" : exportPdfEnabled ? "pointer" : "not-allowed",
                     fontFamily: "inherit",
                     flexShrink: 0,
                     whiteSpace: "nowrap",
+                    boxShadow: exportPdfEnabled && !exportingResume ? "var(--shadow-sm)" : "none",
+                    opacity: exportPdfEnabled ? 1 : 0.72,
                   }}
                 >
-                  {exportingResume ? "Exporting…" : "Export template PDF"}
+                  {exportingResume ? "Generating PDF…" : "Download PDF"}
                 </button>
               ) : null}
               {onExportDocx ? (
                 <button
                   type="button"
-                  disabled={exportingResume}
+                  disabled={exportingResume || !exportDocxEnabled}
                   onClick={onExportDocx}
-                  title="Download as Word (.docx) with your edits."
+                  title={
+                    exportDocxEnabled
+                      ? "Download as Word (.docx) with your edits."
+                      : "DOCX export needs a structured résumé from analysis — re-upload your PDF or Word file if this stays disabled."
+                  }
                   style={{
                     fontSize: 10.5,
                     fontWeight: 700,
                     padding: "6px 12px",
                     borderRadius: 8,
                     border: "1px solid var(--border-h)",
-                    background: "var(--surface3)",
-                    color: "var(--text)",
-                    cursor: exportingResume ? "wait" : "pointer",
+                    background: exportDocxEnabled ? "var(--surface3)" : "var(--surface2)",
+                    color: exportDocxEnabled ? "var(--text)" : "var(--dim)",
+                    cursor: exportingResume ? "wait" : exportDocxEnabled ? "pointer" : "not-allowed",
                     fontFamily: "inherit",
                     flexShrink: 0,
                     whiteSpace: "nowrap",
+                    opacity: exportDocxEnabled ? 1 : 0.72,
                   }}
                 >
                   {exportingResume ? "Exporting…" : "Export DOCX"}
@@ -807,8 +784,8 @@ export default function AnnotatedResumePanel({
               background: "var(--surface2)",
             }}
           >
-            Opened from saved analysis — the original PDF is not stored. Edit the text below and use Download edited PDF;
-            re-upload your PDF to enable the PDF tab and original download.
+            Opened from saved analysis — the original PDF is not stored. Use <strong style={{ color: "var(--text)" }}>Download PDF</strong> on the Edit tab for a compiled export;
+            re-upload your file to enable the PDF tab and original download.
           </div>
         ) : null}
         {presentationOnly && useLiveDoc && sourcePdfUrl && viewMode === "pdf" ? (
@@ -823,86 +800,8 @@ export default function AnnotatedResumePanel({
               background: "var(--surface2)",
             }}
           >
-            Switch to the <strong style={{ color: "var(--text)" }}>Edit</strong> tab to download a PDF with your bullet edits.
+            Switch to the <strong style={{ color: "var(--text)" }}>Edit</strong> tab and use <strong style={{ color: "var(--text)" }}>Download PDF</strong> for a Harshibar LaTeX export with your edits.
             The PDF tab shows your original upload only.
-          </div>
-        ) : null}
-        {presentationOnly && useLiveDoc && (!sourcePdfUrl || viewMode === "live") && builderReady && onOpenBuilder ? (
-          <div
-            style={{
-              padding: "8px 16px 10px",
-              borderTop: "1px solid var(--border)",
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              gap: 8,
-              background: "var(--surface2)",
-            }}
-          >
-            {hasMultipleStyleTemplates() ? (
-              <>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 800,
-                    color: "var(--muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: 0.06,
-                    flexShrink: 0,
-                  }}
-                >
-                  Template
-                </span>
-                {styleTemplates.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    disabled={builderOpening}
-                    title={t.description}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setSelectedReferenceFolder(t.referenceFolder);
-                      onOpenBuilder({ referenceFolder: t.referenceFolder });
-                    }}
-                    style={{
-                      fontSize: 10.5,
-                      fontWeight: 600,
-                      padding: "5px 11px",
-                      borderRadius: 999,
-                      border: "1px solid var(--border-h)",
-                      background: "var(--surface)",
-                      color: "var(--text)",
-                      cursor: builderOpening ? "wait" : "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </>
-            ) : null}
-            <button
-              type="button"
-              disabled={builderOpening}
-              onClick={(e) => {
-                e.preventDefault();
-                onOpenBuilder();
-              }}
-              style={{
-                marginLeft: "auto",
-                fontSize: 10.5,
-                fontWeight: 700,
-                padding: "5px 12px",
-                borderRadius: 8,
-                border: "1px solid var(--border-h)",
-                background: "var(--surface)",
-                color: "var(--text)",
-                cursor: builderOpening ? "wait" : "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {builderOpening ? "Opening…" : "Open in Résumé Builder"}
-            </button>
           </div>
         ) : null}
         {extractKind === "synthetic" && !presentationOnly ? (

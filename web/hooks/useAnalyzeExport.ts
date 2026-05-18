@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { apiUrl } from "@/lib/utils";
+import { DEFAULT_REFERENCE_FOLDER } from "@/lib/resumeTemplates";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 
 export interface UseAnalyzeExportOptions {
@@ -10,7 +11,7 @@ export interface UseAnalyzeExportOptions {
 }
 
 export interface UseAnalyzeExportReturn {
-  exportPdf: (opts: { referenceFolder: string }) => Promise<void>;
+  exportPdf: (opts?: { referenceFolder?: string }) => Promise<void>;
   exportDocx: () => Promise<void>;
   exporting: boolean;
   error: string | null;
@@ -32,8 +33,8 @@ function buildAcceptedEdits(): Record<string, Record<string, string>> {
     const entry = bulletMap[flatIdx];
     if (!entry) continue;
     const text = (
-      rewriteEdits[flatIdx] ??
       lineOverrides[flatIdx] ??
+      rewriteEdits[flatIdx] ??
       (acceptedBullets[flatIdx] ? analysisBullets[flatIdx]?.improvedBullet : "") ??
       ""
     ).trim();
@@ -67,9 +68,10 @@ export function useAnalyzeExport({ jd = "" }: UseAnalyzeExportOptions = {}): Use
   const structuredResume = useResumeAnalyzeStore((s) => s.structuredResume);
   const canExport = structuredResume !== null;
 
-  const exportPdf = useCallback(async ({ referenceFolder }: { referenceFolder: string }) => {
+  const exportPdf = useCallback(async (opts?: { referenceFolder?: string }) => {
     const sr = useResumeAnalyzeStore.getState().structuredResume;
     if (!sr) { setError("No structured resume available — re-upload your file to enable PDF export."); return; }
+    const referenceFolder = (opts?.referenceFolder || DEFAULT_REFERENCE_FOLDER).trim() || DEFAULT_REFERENCE_FOLDER;
     setExporting(true);
     setError(null);
     try {

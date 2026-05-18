@@ -13,5 +13,11 @@ export function mergeAnalyzeApiJson(json: Record<string, unknown>): Record<strin
   const lf = json.libraryFolder ?? json.library_folder;
   if (typeof lf === "string" && lf.trim() !== "") out.libraryFolder = lf.trim();
 
+  const sr = json.structuredResume ?? json.structured_resume;
+  if (sr && typeof sr === "object" && !Array.isArray(sr)) out.structuredResume = sr;
+
+  const bm = json.bulletMap ?? json.bullet_map;
+  if (Array.isArray(bm)) out.bulletMap = bm;
+
   return out;
 }
