@@ -12,12 +12,6 @@ import {
 import { apiUrl } from "@/lib/utils";
 import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
-import {
-  loadAnalyzeEditDraft,
-  saveAnalyzeEditDraft,
-  clearAnalyzeEditDraft,
-  migrateAnalyzeEditDraft,
-} from "@/lib/analyzeEditDraft";
 import { stripResumeBulletPrefix } from "@/lib/stripResumeBulletPrefix";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
@@ -252,9 +246,13 @@ export default function AnalyzeResume() {
   const [azHistory, setAzHistory]           = useState<AnalyzeRecord[]>([]);
   const [userId, setUserId]                 = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  /** Draft text for AI improved bullets keyed by bulletAnalysis index */
-  const [rewriteEdits, setRewriteEdits] = useState<Record<number, string>>({});
+  const rewriteEdits = useResumeAnalyzeStore((s) => s.rewriteEdits);
+  const patchRewrite = useResumeAnalyzeStore((s) => s.patchRewrite);
   const previewLineOverrides = useResumeAnalyzeStore((s) => s.lineOverrides);
+  const persistEdits = useResumeAnalyzeStore((s) => s.persistEdits);
+  const restoreEdits = useResumeAnalyzeStore((s) => s.restoreEdits);
+  const clearEditsStore = useResumeAnalyzeStore((s) => s.clearEdits);
+  const migrateEdits = useResumeAnalyzeStore((s) => s.migrateEdits);
 
   const analyzePreviewSnapshot = useMemo(
     () =>
@@ -329,31 +327,12 @@ export default function AnalyzeResume() {
     });
   }, [result]);
 
-  /** Re-apply browser-stored preview edits after hydrate (layout effect clears overrides first). */
+  /** Re-apply browser-stored preview edits after hydrate. */
   useEffect(() => {
     if (!result || !activeEditDraftId) return;
-    const draft = loadAnalyzeEditDraft(activeEditDraftId);
-    if (!draft) return;
-    const lo: Record<number, string> = {};
-    for (const [k, v] of Object.entries(draft.lineOverrides)) {
-      const i = Number(k);
-      if (Number.isFinite(i) && typeof v === "string" && v.trim()) lo[i] = v;
-    }
-    const rw: Record<number, string> = {};
-    for (const [k, v] of Object.entries(draft.rewriteEdits)) {
-      const i = Number(k);
-      if (Number.isFinite(i) && typeof v === "string" && v.trim()) rw[i] = v;
-    }
-    if (Object.keys(lo).length > 0) {
-      useResumeAnalyzeStore.getState().replaceLineOverrides(lo);
-    }
-    if (Object.keys(rw).length > 0) {
-      setRewriteEdits(rw);
-    }
-    if (Object.keys(lo).length > 0 || Object.keys(rw).length > 0) {
-      setEditDraftStatus("Loaded saved preview edits from this browser.");
-    }
-  }, [result, activeEditDraftId]);
+    const restored = restoreEdits(activeEditDraftId);
+    if (restored) setEditDraftStatus("Loaded saved preview edits from this browser.");
+  }, [result, activeEditDraftId, restoreEdits]);
 
   useEffect(() => {
     if (!editDraftStatus) return;
@@ -377,7 +356,7 @@ export default function AnalyzeResume() {
     try {
       const newId = await insertAnalysis(label, res);
       if (newId) {
-        migrateAnalyzeEditDraft(optimistic.id, newId);
+        migrateEdits(optimistic.id, newId);
         setActiveEditDraftId((cur) => (cur === optimistic.id ? newId : cur));
         // Replace optimistic row with real DB id
         setAzHistory(prev => prev.map(r => r.id === optimistic.id ? { ...r, id: newId } : r));
@@ -390,7 +369,7 @@ export default function AnalyzeResume() {
     setLoading(true);
     setError(null);
     setResult(null);
-    setRewriteEdits({});
+    
     setExpandedBullets({});
     setActiveCategory(null);
     setImprovementPlanVisible(true);
@@ -428,7 +407,7 @@ export default function AnalyzeResume() {
     setLoading(true);
     setError(null);
     setResult(null);
-    setRewriteEdits({});
+    
     setExpandedBullets({});
     setActiveCategory(null);
     setSelectedBulletIndex(null);
@@ -468,7 +447,7 @@ export default function AnalyzeResume() {
     setActiveEditDraftId(rec.id);
     const merged = mergeAnalyzeApiJson(rec.result as Record<string, unknown>) as unknown as AnalysisResult;
     setResult(merged);
-    setRewriteEdits({});
+    
     setExpandedBullets({});
     setHistoryOpen(false);
     setActiveCategory(null);
@@ -770,13 +749,8 @@ export default function AnalyzeResume() {
   const [copiedBullet, setCopiedBullet] = useState<number | null>(null);
 
   const patchBulletRewrite = useCallback((index: number, value: string | null) => {
-    setRewriteEdits(prev => {
-      const next = { ...prev };
-      if (value === null) delete next[index];
-      else next[index] = value;
-      return next;
-    });
-  }, []);
+    patchRewrite(index, value);
+  }, [patchRewrite]);
 
   const patchPreviewLine = useCallback((index: number, value: string | null) => {
     if (value === null || value === "") {
@@ -805,7 +779,7 @@ export default function AnalyzeResume() {
     setLinkedFolder(null);
     lastPdfRef.current = null;
     bindSourcePdf(null);
-    setRewriteEdits({});
+    
     setHistoryRestoreActive(false);
     setActiveEditDraftId(null);
     setEditDraftStatus(null);
@@ -818,19 +792,19 @@ export default function AnalyzeResume() {
       return;
     }
     const lineOverrides = useResumeAnalyzeStore.getState().lineOverrides;
-    saveAnalyzeEditDraft(activeEditDraftId, lineOverrides, rewriteEdits);
+    persistEdits(activeEditDraftId);
     setEditDraftStatus("Saved preview edits in this browser only.");
   }, [activeEditDraftId, rewriteEdits]);
 
   const clearLocalPreviewDraft = useCallback(() => {
     if (!activeEditDraftId || !result) return;
-    clearAnalyzeEditDraft(activeEditDraftId);
+    clearEditsStore(activeEditDraftId);
     useResumeAnalyzeStore.getState().hydrateFromAnalysis({
       extractedText: result.extractedText,
       bulletAnalysis: result.bulletAnalysis,
       resumeHeader: result.resumeHeader,
     });
-    setRewriteEdits({});
+    
     setEditDraftStatus("Cleared saved draft; preview reset to analysis text.");
   }, [activeEditDraftId, result]);
 
@@ -1605,7 +1579,7 @@ export default function AnalyzeResume() {
                     setBuilderLinkReady(false); setLinkedFolder(null);
                     lastPdfRef.current = null;
                     bindSourcePdf(null);
-                    setRewriteEdits({});
+                    
                     setHistoryRestoreActive(false);
                   }}
                   style={{

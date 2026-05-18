@@ -956,28 +956,7 @@ Instructions:
 {_EXTRACT_SCHEMA}"""
 
     try:
-        # Use Grok exclusively for throughput — fall back to _llm_json_call only if XAI key missing.
-        raw: Optional[dict] = None
-        xai_key = os.environ.get("XAI_API_KEY")
-        if xai_key:
-            try:
-                from openai import OpenAI as _OAI  # type: ignore
-                grok_model = os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning")
-                _xai = _OAI(api_key=xai_key, base_url="https://api.x.ai/v1")
-                _r = _xai.chat.completions.create(
-                    model=grok_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.2,
-                    response_format={"type": "json_object"},
-                )
-                _text = (_r.choices[0].message.content or "").strip()
-                _text = re.sub(r"^```[a-z]*\n?", "", _text)
-                _text = re.sub(r"\n?```$", "", _text)
-                raw = json.loads(_text)
-            except Exception as exc:
-                logger.warning(f"Grok extract+tailor failed: {exc}")
-        if raw is None:
-            raw = _llm_json_call(prompt)
+        raw = _llm_json_call(prompt)
         if not raw or not isinstance(raw, dict):
             return None
 
