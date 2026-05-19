@@ -1503,7 +1503,8 @@ export default function ResumeBuilder({
         suggestions.length > 0 &&
         (!result || (generating && !result.pdfUrl)),
     );
-  const showBuilderInputs = !result && !generating && !suggestionsReviewMode;
+  const showBuilderInputs =
+    !result && !generating && !suggestionsReviewMode && !suggestLoading;
   /** Research while loading suggestions on the form — not duplicated on the review step. */
   const showSuggestResearchPanel =
     !studioHandoff &&
@@ -1632,13 +1633,26 @@ export default function ResumeBuilder({
             }
           `}</style>
 
-          {/* ── Busy loaders (top of page so scroll-to-top keeps them visible) ── */}
+          {/* ── Busy loaders (sticky top — form scroll hid these when CTAs lived at bottom) ── */}
           {showSuggestLoaderAtTop && (
-            <BuilderSuggestAnalysisLoader
-              stepsDone={suggestLoaderStepsDone}
-              tipIdx={suggestLoaderTipIdx}
-              coachStreamText={suggestCoachStreamText}
-            />
+            <div
+              className="fade-in"
+              style={{
+                position: "sticky",
+                top: 0,
+                zIndex: 30,
+                marginBottom: 20,
+                paddingBottom: 8,
+                background: "var(--bg)",
+                boxShadow: "0 8px 24px -12px rgba(15,23,42,0.12)",
+              }}
+            >
+              <BuilderSuggestAnalysisLoader
+                stepsDone={suggestLoaderStepsDone}
+                tipIdx={suggestLoaderTipIdx}
+                coachStreamText={suggestCoachStreamText}
+              />
+            </div>
           )}
           {showGenerateLoaderAtTop && (
             <BuilderGeneratePdfLoader
@@ -2184,7 +2198,7 @@ export default function ResumeBuilder({
           </>)} {/* end !result && !generating inputs block */}
 
           {/* ── Web research for suggestions (streams in during Get suggestions) ── */}
-          {showSuggestResearchPanel && !result && (
+          {showSuggestResearchPanel && (
             <BuilderWebResearchPanel
               queries={suggestResearchQueries}
               sources={suggestResearchSources}
@@ -4547,7 +4561,8 @@ function SuggestionsGenerateBar({
     <div
       className="rb-suggestions-generate-bar"
       style={{
-        marginBottom: 18,
+        marginTop: 20,
+        marginBottom: 8,
         padding: "14px 16px",
         borderRadius: 12,
         border: "1px solid var(--border)",
@@ -4821,17 +4836,6 @@ function SuggestionsPanel({
         </div>
       )}
 
-      <SuggestionsGenerateBar
-        suggestions={suggestions}
-        acceptedIds={acceptedIds}
-        generating={generating}
-        generateStatusMsg={generateStatusMsg}
-        error={error}
-        onAcceptAll={onAcceptAll}
-        onClearAccepts={onClearAccepts}
-        onGenerate={onGenerate}
-      />
-
       {/* Two-panel layout: suggestions left, résumé preview right */}
       <div className="rb-suggestions-grid">
 
@@ -5081,6 +5085,17 @@ function SuggestionsPanel({
           )}
         </div>
       </div>
+
+      <SuggestionsGenerateBar
+        suggestions={suggestions}
+        acceptedIds={acceptedIds}
+        generating={generating}
+        generateStatusMsg={generateStatusMsg}
+        error={error}
+        onAcceptAll={onAcceptAll}
+        onClearAccepts={onClearAccepts}
+        onGenerate={onGenerate}
+      />
 
       {hasMultipleStyleTemplates() && (
       <div
