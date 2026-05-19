@@ -25,6 +25,7 @@ import ManualResumeForm from "@/components/ManualResumeForm";
 import ResumeLibrary from "@/components/ResumeLibrary";
 import AnalyzeResume from "@/components/AnalyzeResume";
 import ProfilePage from "@/components/ProfilePage";
+import AdvisorDashboard from "@/components/AdvisorDashboard";
 
 export default function HomePageClient() {
   return (
@@ -140,6 +141,15 @@ function RouterView() {
     return (
       <ViewFill>
         <ManualResumeForm />
+      </ViewFill>
+    );
+  }
+  if (view === "advisor") {
+    return (
+      <ViewFill>
+        <ScrollPane>
+          <AdvisorDashboard />
+        </ScrollPane>
       </ViewFill>
     );
   }
