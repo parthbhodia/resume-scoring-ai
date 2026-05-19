@@ -3912,14 +3912,14 @@ async def api_my_analyses(request: Request):
 async def api_cohort_stats(request: Request):
     """GET /api/cohort-stats — aggregate analysis stats across all students.
 
-    Requires X-Advisor-Key header matching ADVISOR_SECRET env var.
+    Checks X-User-Email header against the ADVISOR_EMAILS env var (comma-separated list).
     Returns cohort-level score distributions, weakest dimensions, and
     most common issue types — suitable for career center dashboards.
     """
     import os as _os
-    advisor_secret = _os.environ.get("ADVISOR_SECRET", "").strip()
-    provided_key   = (request.headers.get("x-advisor-key") or "").strip()
-    if not advisor_secret or provided_key != advisor_secret:
+    advisor_emails = {e.strip().lower() for e in _os.environ.get("ADVISOR_EMAILS", "").split(",") if e.strip()}
+    user_email     = (request.headers.get("x-user-email") or "").strip().lower()
+    if not advisor_emails or user_email not in advisor_emails:
         return JSONResponse({"error": "unauthorized"}, status_code=403)
 
     table = _supabase_table("resume_analyses")
