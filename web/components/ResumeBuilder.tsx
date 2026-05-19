@@ -1096,6 +1096,10 @@ export default function ResumeBuilder({
     setError(null);
     setStatusMsg("Connecting…");
     scrollBuilderToTop("smooth");
+    // Tailor flow: jump to results layout immediately (no full-page generate loader).
+    if (!studioHandoff) {
+      setResult({ ...EMPTY_RESULT, baseFolder, baseLoaded: baseFolder ? null : false });
+    }
 
     let effCompany = company.trim();
     let effRole    = role.trim();
@@ -1151,18 +1155,13 @@ export default function ResumeBuilder({
           ? `We couldn't pull the ${label} from that link — please fill it in manually.`
           : `Please fill in the ${label}.`
       );
+      if (!studioHandoff) setResult(null);
       setGenerating(false);
       setStatusMsg("");
       return null;
     }
 
     setStatusMsg("Connecting…");
-    // Clearing `result` here used to unmount the template customize screen entirely (because the
-    // results branch is `result ? … : inputs`). Keep the last successful payload visible during
-    // studioHandoff recompiles so PDF/controls stay on-screen while SSE runs.
-    if (!studioHandoff) {
-      setResult(null);
-    }
     setPreview("");
     setJdKeywords(extractJdKeywords(effJd));
     const digestTrim = suggestResearchDigest.trim();
@@ -1349,6 +1348,9 @@ export default function ResumeBuilder({
       return null;
     } catch (e: unknown) {
       setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
+      if (!studioHandoff) {
+        setResult((r) => (r && !r.ratings && !r.pdfUrl ? null : r));
+      }
       setGenerating(false);
       setStatusMsg("");
       return null;
@@ -1475,12 +1477,23 @@ export default function ResumeBuilder({
     !studioHandoff &&
     Boolean(suggestions && suggestions.length > 0 && !result);
   const showBuilderInputs = !result && !generating && !suggestionsReviewMode;
+  const showSuggestResearchPanel =
+    !studioHandoff &&
+    (suggestLoading || suggestionsReviewMode) &&
+    (suggestLoading || hasSuggestResearch);
+  const showGenerateWebResearchPanel =
+    !studioHandoff &&
+    !reusingSuggestWebForPdf &&
+    (generating || hasWebResearch);
+  const showReusedSuggestResearchOnResults =
+    !studioHandoff &&
+    result &&
+    reusingSuggestWebForPdf &&
+    hasSuggestResearch;
   /** Pin loaders at top of the page — form CTAs sit at the bottom and scroll-to-top hid them. */
   const showSuggestLoaderAtTop = !studioHandoff && suggestLoading;
-  const showGenerateLoaderAtTop =
-    generating &&
-    !suggestionsReviewMode &&
-    (!studioHandoff || !result);
+  /** Template gallery first compile (no prior result) — tailor uses results page instead. */
+  const showGenerateLoaderAtTop = studioHandoff && generating && !result;
 
   useLayoutEffect(() => {
     if (showSuggestLoaderAtTop) scrollBuilderToTop("auto");
@@ -1491,8 +1504,8 @@ export default function ResumeBuilder({
   }, [suggestionsReviewMode, scrollBuilderToTop]);
 
   useLayoutEffect(() => {
-    if (showGenerateLoaderAtTop) scrollBuilderToTop("smooth");
-  }, [showGenerateLoaderAtTop, scrollBuilderToTop]);
+    if (generating && result && !studioHandoff) scrollBuilderToTop("smooth");
+  }, [generating, result, studioHandoff, scrollBuilderToTop]);
 
   return (
     <div
@@ -1596,9 +1609,9 @@ export default function ResumeBuilder({
               statusMsg={statusMsg}
               tipIdx={generateLoaderTipIdx}
               stepsDone={generateLoaderStepsDone}
-              reusingSuggestResearch={reusingSuggestWebForPdf}
-              studioHandoff={studioHandoff}
-              acceptedCount={acceptedIds.size}
+              reusingSuggestResearch={false}
+              studioHandoff
+              acceptedCount={0}
             />
           )}
 
@@ -1636,17 +1649,16 @@ export default function ResumeBuilder({
                   </div>
                   <p className="fade-in stagger-1" style={{
                     fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
-                    marginBottom: 28, maxWidth: 560, letterSpacing: -0.1,
+                    marginBottom: 28, maxWidth: 520, letterSpacing: -0.1,
                   }}>
-                    Upload your résumé, paste the job description, review suggestions (with an optional web-research pass), then generate an ATS-friendly PDF.
-                    This path <strong style={{ color: "var(--text)" }}>rebuilds</strong> your content using the <strong style={{ color: "var(--text)" }}>template style</strong> you select under Your résumé — it will not look identical to your uploaded PDF.
-                    To start from the <strong style={{ color: "var(--text)" }}>template gallery</strong> instead, open <strong style={{ color: "var(--text)" }}>Résumé Builder → Template gallery</strong> in the sidebar.
+                    Upload, paste the job, review suggestions, download a tailored ATS PDF.
+                    Uses your chosen template — not a copy of your original file.
                   </p>
                   <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {[
                       { n: 1, label: "Upload résumé" },
                       { n: 2, label: "Paste job posting" },
-                      { n: 3, label: "Review JD suggestions" },
+                      { n: 3, label: "Review suggestions" },
                       { n: 4, label: "Generate PDF" },
                     ].map(({ n, label }) => (
                       <div key={n} style={{
@@ -1944,7 +1956,7 @@ export default function ResumeBuilder({
                   Template style
                 </div>
                 <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
-                  LaTeX reference for your tailored PDF — pick before you get suggestions or generate.
+                  Layout for your tailored PDF.
                 </p>
                 <ResumeStyleTemplateGrid
                   styleReferenceFolder={styleReferenceFolder}
@@ -1959,7 +1971,7 @@ export default function ResumeBuilder({
           <StepCard
             step={2}
             title="Target job"
-            subtitle="Tell us what you're applying for"
+            subtitle="Company, role, and job text"
           >
             <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               <Field label="Company">
@@ -2103,8 +2115,7 @@ export default function ResumeBuilder({
               </button>
               {!suggestLoading && !generating && (
                 <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 12, letterSpacing: -0.1 }}>
-                  The first pass runs live web research on the posting, then compares your résumé to the job and lists edits.
-                  When you generate the PDF after that, we <strong style={{ color: "var(--text)" }}>reuse</strong> the same research digest — no second live search.
+                  Researches the posting, then lists edits. Generate reuses that research.
                 </p>
               )}
               {!suggestLoading && !generating && (
@@ -2136,84 +2147,21 @@ export default function ResumeBuilder({
 
           </>)} {/* end !result && !generating inputs block */}
 
-          {/* ── Web research used for suggestions (API runs search before coach JSON) ── */}
-          {!studioHandoff && hasSuggestResearch && suggestions && !result && suggestionsReviewMode && (
-            <div style={{ marginBottom: 16 }} className="fade-in">
-              <div style={{
-                display: "flex", alignItems: "center", gap: 8,
-                fontSize: 11, fontWeight: 600, color: "var(--dim)",
-                letterSpacing: -0.1, marginBottom: 8, textTransform: "uppercase",
-              }}>
-                <span>Live web research</span>
-                <span style={{
-                  fontSize: 9, padding: "2px 7px", borderRadius: 999,
-                  background: "rgba(52,211,153,0.12)", color: "var(--green)",
-                  letterSpacing: 0, textTransform: "none",
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                }}>
-                  <span style={{
-                    width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
-                  }} />
-                  Used before suggestions
-                </span>
-              </div>
-              <p style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, margin: "0 0 10px", letterSpacing: -0.05 }}>
-                Public employer and role wording gathered <strong style={{ color: "var(--text)" }}>before</strong> your suggestion cards were built. The coach still only edits facts that appear in your résumé.
-              </p>
-              <div style={{
-                background: "var(--surface)", border: "1px solid var(--border)",
-                borderRadius: 10, padding: "12px 14px",
-                maxHeight: 220, overflow: "auto",
-                display: "flex", flexDirection: "column", gap: 10,
-              }}>
-                {suggestResearchQueries.map((q, i) => (
-                  <div key={`srq-${i}`} style={{
-                    display: "flex", alignItems: "flex-start", gap: 8,
-                    fontSize: 12, color: "var(--text)", lineHeight: 1.45,
-                  }}>
-                    <span style={{ flexShrink: 0, marginTop: 1 }}>🔍</span>
-                    <span>
-                      <span style={{ color: "var(--dim)" }}>Searching:</span>{" "}
-                      <span style={{ color: "var(--text)", fontWeight: 500 }}>&ldquo;{q}&rdquo;</span>
-                    </span>
-                  </div>
-                ))}
-                {suggestResearchSources.length > 0 && (
-                  <div style={{
-                    borderTop: suggestResearchQueries.length ? "1px solid var(--border)" : "none",
-                    paddingTop: suggestResearchQueries.length ? 10 : 0,
-                    display: "flex", flexDirection: "column", gap: 6,
-                  }}>
-                    <div style={{ fontSize: 10, color: "var(--dim)", letterSpacing: 0.3, textTransform: "uppercase", fontWeight: 600 }}>
-                      Citing
-                    </div>
-                    {suggestResearchSources.map((s, i) => {
-                      let domain = s.url;
-                      try { domain = new URL(s.url).hostname.replace(/^www\./, ""); } catch { /* leave */ }
-                      return (
-                        <a
-                          key={`srs-${i}`}
-                          href={s.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            display: "flex", alignItems: "flex-start", gap: 8,
-                            fontSize: 11, color: "var(--accent)",
-                            textDecoration: "none", lineHeight: 1.45,
-                          }}
-                        >
-                          <span style={{ flexShrink: 0, marginTop: 1, color: "var(--dim)" }}>↳</span>
-                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            <span style={{ color: "var(--text)" }}>{s.title || domain}</span>
-                            <span style={{ color: "var(--dim)" }}> — {domain}</span>
-                          </span>
-                        </a>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
+          {/* ── Web research for suggestions (streams in during Get suggestions) ── */}
+          {showSuggestResearchPanel && !result && (
+            <BuilderWebResearchPanel
+              queries={suggestResearchQueries}
+              sources={suggestResearchSources}
+              live={suggestLoading}
+              badgeLabel={suggestLoading ? "Researching the web" : "Used before suggestions"}
+              intro={
+                suggestLoading ? (
+                  <>Researching the role. Suggestions come next.</>
+                ) : (
+                  <>Used to build your suggestion cards.</>
+                )
+              }
+            />
           )}
 
           {/* ── Suggestions review panel (JD tailor flow only) ── */}
@@ -2248,113 +2196,6 @@ export default function ResumeBuilder({
               onBackToInputs={clearSuggestionsState}
             />
           )}
-
-          {/* Live web search during PDF generation (SSE), or the same queries/sources reused from suggestions */}
-          {hasWebResearch && !result && !studioHandoff && !reusingSuggestWebForPdf && (
-            <div style={{ marginBottom: 16 }} className="fade-in">
-              <div style={{
-                display: "flex", alignItems: "center", gap: 8,
-                fontSize: 11, fontWeight: 600, color: "var(--dim)",
-                letterSpacing: -0.1, marginBottom: 8, textTransform: "uppercase",
-              }}>
-                <span>Live web research</span>
-                <span style={{
-                  fontSize: 9, padding: "2px 7px", borderRadius: 999,
-                  background: "rgba(52,211,153,0.12)", color: "var(--green)",
-                  letterSpacing: 0, textTransform: "none",
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                }}>
-                  {reusingSuggestWebForPdf ? (
-                    <>
-                      <span style={{
-                        width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
-                      }} />
-                      Reused from suggestions
-                    </>
-                  ) : (
-                    <>
-                      <span style={{
-                        width: 6, height: 6, borderRadius: "50%", background: "var(--green)",
-                        animation: generating ? "pulse-bg 1.4s ease-in-out infinite" : undefined,
-                      }} />
-                      {generating ? "Researching the web" : "Research used"}
-                    </>
-                  )}
-                </span>
-              </div>
-              <p style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, margin: "0 0 10px", letterSpacing: -0.05 }}>
-                {reusingSuggestWebForPdf ? (
-                  <>
-                    These queries and sources are the same pass as <strong style={{ color: "var(--text)" }}>Get suggestions</strong>.
-                    PDF generation applies that digest again and does <strong>not</strong> run an extra web search.
-                  </>
-                ) : hasSuggestResearch ? (
-                  <>
-                    These queries and citations are from the <strong style={{ color: "var(--text)" }}>Generate PDF</strong> step — an additional live pass beyond the research shown above your suggestions.
-                  </>
-                ) : (
-                  <>These queries and citations are from the <strong style={{ color: "var(--text)" }}>Generate PDF</strong> step (streaming), not from the earlier &ldquo;Get suggestions&rdquo; call.</>
-                )}
-              </p>
-              <div style={{
-                background: "var(--surface)", border: "1px solid var(--border)",
-                borderRadius: 10, padding: "12px 14px",
-                maxHeight: 220, overflow: "auto",
-                display: "flex", flexDirection: "column", gap: 10,
-              }}>
-                {/* Live search queries from this run */}
-                {searchQueries.map((q, i) => (
-                  <div key={`q-${i}`} style={{
-                    display: "flex", alignItems: "flex-start", gap: 8,
-                    fontSize: 12, color: "var(--text)", lineHeight: 1.45,
-                  }}>
-                    <span style={{ flexShrink: 0, marginTop: 1 }}>🔍</span>
-                    <span>
-                      <span style={{ color: "var(--dim)" }}>Searching:</span>{" "}
-                      <span style={{ color: "var(--text)", fontWeight: 500 }}>&ldquo;{q}&rdquo;</span>
-                    </span>
-                  </div>
-                ))}
-
-                {/* Pages cited from those queries */}
-                {searchSources.length > 0 && (
-                  <div style={{
-                    borderTop: searchQueries.length ? "1px solid var(--border)" : "none",
-                    paddingTop: searchQueries.length ? 10 : 0,
-                    display: "flex", flexDirection: "column", gap: 6,
-                  }}>
-                    <div style={{ fontSize: 10, color: "var(--dim)", letterSpacing: 0.3, textTransform: "uppercase", fontWeight: 600 }}>
-                      Citing
-                    </div>
-                    {searchSources.map((s, i) => {
-                      let domain = s.url;
-                      try { domain = new URL(s.url).hostname.replace(/^www\./, ""); } catch { /* leave as-is */ }
-                      return (
-                        <a
-                          key={`s-${i}`}
-                          href={s.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            display: "flex", alignItems: "flex-start", gap: 8,
-                            fontSize: 11, color: "var(--accent)",
-                            textDecoration: "none", lineHeight: 1.45,
-                          }}
-                        >
-                          <span style={{ flexShrink: 0, marginTop: 1, color: "var(--dim)" }}>↳</span>
-                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            <span style={{ color: "var(--text)" }}>{s.title || domain}</span>
-                            <span style={{ color: "var(--dim)" }}> — {domain}</span>
-                          </span>
-                        </a>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
 
           {/* ── Streaming LaTeX preview (only before results card; avoids concatenated-looking UI above scores) ── */}
           {generating && !result && preview && (
@@ -2415,6 +2256,23 @@ export default function ResumeBuilder({
               />
             ) : (
             <div className="fade-in">
+              {error && (
+                <div
+                  role="alert"
+                  style={{
+                    marginBottom: 16,
+                    padding: "12px 16px",
+                    background: "var(--red-bg)",
+                    border: "1px solid rgba(248,113,113,0.2)",
+                    borderRadius: 10,
+                    color: "var(--red)",
+                    fontSize: 13,
+                    letterSpacing: -0.2,
+                  }}
+                >
+                  {error}
+                </div>
+              )}
 
               <header
                 style={{
@@ -2428,13 +2286,10 @@ export default function ResumeBuilder({
               >
                 <div style={{ minWidth: 0, flex: "1 1 240px" }}>
                   <h2 id="rb-results-heading" style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.75, color: "var(--text)", marginBottom: 6, lineHeight: 1.15 }}>
-                    {generating ? "Almost there — finishing PDF and match score" : "Your tailored résumé is ready"}
+                    {generating ? "Building your PDF…" : "Your tailored résumé is ready"}
                   </h2>
                   <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.5, letterSpacing: -0.15 }}>
-                    {[role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Match results for this run"}
-                  </p>
-                  <p style={{ fontSize: 12, color: "var(--dim)", margin: "8px 0 0", lineHeight: 1.45 }}>
-                    Review match quality and gaps on the left, keep the preview visible while you scroll, then export or share.
+                    {[role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Match results"}
                   </p>
                 </div>
                 <button
@@ -2473,6 +2328,29 @@ export default function ResumeBuilder({
                   Try another job
                 </button>
               </header>
+
+              {showReusedSuggestResearchOnResults && (
+                <BuilderWebResearchPanel
+                  queries={suggestResearchQueries}
+                  sources={suggestResearchSources}
+                  live={generating}
+                  badgeLabel={generating ? "Reused while tailoring" : "Reused from suggestions"}
+                  intro={<>Same research as Get suggestions — no second search.</>}
+                />
+              )}
+              {showGenerateWebResearchPanel && result && (
+                <BuilderWebResearchPanel
+                  queries={searchQueries}
+                  sources={searchSources}
+                  live={generating}
+                  badgeLabel={generating ? "Researching the web" : "Research used"}
+                  intro={
+                    hasSuggestResearch
+                      ? <>Extra web research during PDF generation.</>
+                      : <>Updates as we generate your PDF.</>
+                  }
+                />
+              )}
 
               <style>{`
                 .rb-results-phase3 {
@@ -2570,7 +2448,7 @@ export default function ResumeBuilder({
                             {statusMsg}
                           </div>
                         ) : (
-                          <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>Scoring how your résumé lines up with the role…</div>
+                          <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>Scoring match…</div>
                         )}
                       </div>
                     )}
@@ -2750,7 +2628,7 @@ export default function ResumeBuilder({
                     Match breakdown
                   </div>
                   <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>
-                    Each card is one JD requirement compared to your profile and the latest generated résumé.
+                    One row per job requirement.
                   </p>
                   <MatchBreakdownCards criteria={ratings.criteria} />
                 </div>
@@ -2777,12 +2655,7 @@ export default function ResumeBuilder({
                     <span style={{ color: "var(--red)", fontWeight: 600 }}>−{result.removes}</span>
                   </div>
                   <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--muted)", lineHeight: 1.55 }}>
-                    Your PDF already reflects these line-level edits from the last generate. This list is a{" "}
-                    <strong style={{ color: "var(--text)" }}>read-only summary</strong> — not a second approval step. The small{" "}
-                    <strong style={{ color: "var(--text)" }}>?</strong> on each card opens &quot;why this change&quot; from the model. To control what
-                    goes into the <em>next</em> PDF, use{" "}
-                    <strong style={{ color: "var(--text)" }}>Analyze &amp; get suggestions</strong>, tick the edits you want, then{" "}
-                    <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> again.
+                    Read-only summary of edits in your PDF. Use <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> to change the next version.
                   </p>
                   <DiffView
                     key={result.folder ?? "diff"}
@@ -2904,7 +2777,7 @@ export default function ResumeBuilder({
                 }}
               >
                 <span style={{ fontSize: 13, color: "var(--muted)", letterSpacing: -0.15, lineHeight: 1.45 }}>
-                  Want to tailor another posting? Clear the form and keep your layout template.
+                  Tailor another job?
                 </span>
                 <button
                   type="button"
@@ -2989,7 +2862,7 @@ export default function ResumeBuilder({
                           background: "var(--surface2)",
                         }}
                       >
-                        PDF preview appears when the compile step finishes.
+                        PDF loads when ready.
                       </div>
                     )}
                   </div>
@@ -4635,20 +4508,6 @@ function SuggestionsPanel({
     document.getElementById(`rb-sug-${selectedSuggestionId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selectedSuggestionId, resumePreviewTab]);
 
-  if (generating) {
-    return (
-      <div className="fade-in" style={{ marginBottom: 32 }}>
-        <BuilderGeneratePdfLoader
-          statusMsg={generateStatusMsg ?? ""}
-          tipIdx={generateLoaderTipIdx}
-          stepsDone={generateLoaderStepsDone}
-          reusingSuggestResearch={reusingSuggestResearch}
-          acceptedCount={accepted.length}
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="fade-in" style={{ marginBottom: 32 }}>
       <style>{`
@@ -4664,7 +4523,7 @@ function SuggestionsPanel({
       `}</style>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", letterSpacing: -0.1 }}>
-          Accept the edits you want in your PDF, then generate. Skipped cards are not applied.
+          Accept edits, then generate. Skipped cards are ignored.
         </span>
         <button
           type="button"
@@ -4910,7 +4769,7 @@ function SuggestionsPanel({
                   background: "var(--surface2)",
                 }}
               >
-                This is your <strong style={{ color: "var(--text)" }}>uploaded file</strong> as it was authored (fonts, spacing, duplicate headers). For the same visual language as your selected template and generate step, use{" "}
+                Your <strong style={{ color: "var(--text)" }}>uploaded file</strong> as printed. For template styling, use{" "}
                 <strong style={{ color: "var(--text)" }}>Styled preview</strong>.
               </div>
               <BuilderPdfSuggestionHighlights
@@ -5057,27 +4916,20 @@ function SuggestionsPanel({
           >
             <Spinner size={14} />
             <span>
-              <strong style={{ color: "var(--text)", fontWeight: 600 }}>Building your tailored PDF.</strong>
+              <strong style={{ color: "var(--text)", fontWeight: 600 }}>Building PDF…</strong>
               {generateStatusMsg ? (
                 <> <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 11 }}>{generateStatusMsg}</span></>
-              ) : (
-                <> This usually takes a minute — keep this tab open.</>
-              )}
+              ) : null}
             </span>
           </div>
         )}
       </div>
       <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginTop: 8, lineHeight: 1.5 }}>
         {accepted.length} of {suggestions.length} accepted.
-        {accepted.length === 0 ? (
-          <>
-            {" "}
-            Your résumé is still tailored to this job from your profile and the posting; use <strong style={{ color: "var(--text)" }}>Accept all</strong> to apply these bullet edits too.
-          </>
-        ) : (
-          <> Accepted edits are applied on top of the tailored draft.</>
-        )}{" "}
-        <strong style={{ color: "var(--text)" }}>Empty suggested text</strong> counts as a <strong style={{ color: "var(--text)" }}>delete</strong> (that bullet is omitted from the PDF).
+        {accepted.length === 0
+          ? " Generate still tailors to the job — accept cards to apply bullet edits."
+          : " Accepted edits go into the PDF."}{" "}
+        Empty text = delete that bullet.
       </p>
     </div>
   );
@@ -5194,6 +5046,165 @@ function InfoTip({ children, label }: { children: React.ReactNode; label?: strin
         </span>
       )}
     </span>
+  );
+}
+
+/** Live web research queries + citation sources (suggestions or generate stream). */
+function BuilderWebResearchPanel({
+  queries,
+  sources,
+  live,
+  badgeLabel,
+  intro,
+}: {
+  queries: string[];
+  sources: { title: string | null; url: string }[];
+  live?: boolean;
+  badgeLabel: string;
+  intro: ReactNode;
+}) {
+  const pending = live && queries.length === 0 && sources.length === 0;
+  if (!live && queries.length === 0 && sources.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 16 }} className="fade-in">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--dim)",
+          letterSpacing: -0.1,
+          marginBottom: 8,
+          textTransform: "uppercase",
+        }}
+      >
+        <span>Live web research</span>
+        <span
+          style={{
+            fontSize: 9,
+            padding: "2px 7px",
+            borderRadius: 999,
+            background: "rgba(52,211,153,0.12)",
+            color: "var(--green)",
+            letterSpacing: 0,
+            textTransform: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: "var(--green)",
+              animation: live ? "pulse-bg 1.4s ease-in-out infinite" : undefined,
+            }}
+          />
+          {badgeLabel}
+        </span>
+      </div>
+      <p style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, margin: "0 0 10px", letterSpacing: -0.05 }}>
+        {intro}
+      </p>
+      <div
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: "12px 14px",
+          maxHeight: 220,
+          overflow: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        {pending ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "var(--muted)" }}>
+            <Spinner size={16} />
+            <span>Starting web search…</span>
+          </div>
+        ) : null}
+        {queries.map((q, i) => (
+          <div
+            key={`wrq-${i}`}
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              fontSize: 12,
+              color: "var(--text)",
+              lineHeight: 1.45,
+            }}
+          >
+            <span style={{ flexShrink: 0, marginTop: 1 }}>🔍</span>
+            <span>
+              <span style={{ color: "var(--dim)" }}>Searching:</span>{" "}
+              <span style={{ color: "var(--text)", fontWeight: 500 }}>&ldquo;{q}&rdquo;</span>
+            </span>
+          </div>
+        ))}
+        {sources.length > 0 && (
+          <div
+            style={{
+              borderTop: queries.length ? "1px solid var(--border)" : "none",
+              paddingTop: queries.length ? 10 : 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--dim)",
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+                fontWeight: 600,
+              }}
+            >
+              Citing
+            </div>
+            {sources.map((s, i) => {
+              let domain = s.url;
+              try {
+                domain = new URL(s.url).hostname.replace(/^www\./, "");
+              } catch {
+                /* leave */
+              }
+              return (
+                <a
+                  key={`wrs-${i}`}
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    fontSize: 11,
+                    color: "var(--accent)",
+                    textDecoration: "none",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <span style={{ flexShrink: 0, marginTop: 1, color: "var(--dim)" }}>↳</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ color: "var(--text)" }}>{s.title || domain}</span>
+                    <span style={{ color: "var(--dim)" }}> — {domain}</span>
+                  </span>
+                </a>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -5530,7 +5541,7 @@ function BuilderSuggestAnalysisLoader({
           Comparing your résumé to this role
         </div>
         <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, letterSpacing: -0.1 }}>
-          Hang tight — we&apos;re reading both sides before listing improvements.
+          Reading your résumé and the job posting.
         </p>
         <div style={{ marginBottom: 14 }}>
           {stepRow("Read your résumé text", 0, false)}

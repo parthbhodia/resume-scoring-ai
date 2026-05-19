@@ -72,13 +72,107 @@ const FEATURES = [
 const STEPS = [
   { title: "Upload your résumé",      desc: "Drop any existing PDF. We extract every bullet, section, and keyword — no re-typing required." },
   { title: "Paste the job posting",   desc: "URL or raw text. Our AI reads the role like a recruiter: extracting what they're actually screening for." },
-  { title: "Receive your edge",       desc: "Match score, gap analysis, rewritten bullets, and a tailored PDF. Ready to submit in under 60 seconds." },
+  { title: "Get more callbacks",      desc: "Match score, gap analysis, rewritten bullets, and a tailored PDF — tuned so your application is more likely to earn a recruiter screen, not sit in silence." },
 ];
 
-const REVIEWS = [
-  { quote: "The AI identified exactly what the recruiters were looking for. I went from zero interviews to three in one week.", name: "Sarah M.", role: "Registered Nurse · hospital system offer", avatar: "S", col: "#2563eb" },
-  { quote: "I didn't know my résumé was being rejected by ATS before anyone even read it. Resunova fixed that overnight.",    name: "James K.", role: "Marketing coordinator · agency offer",   avatar: "J", col: "#059669" },
-  { quote: "The bullet rewrites made my experience sound 10× more impactful. Completely changed my results.",                 name: "Aisha P.", role: "Policy analyst · nonprofit offer",       avatar: "A", col: "#7c3aed" },
+const PLATFORM_HIGHLIGHTS = [
+  {
+    title: "Résumé templating",
+    desc: "Open the template gallery, pick a LaTeX layout (e.g. Harshibar ATS), customize accents, and compile a polished PDF — reuse the same structure for every role without rebuilding from scratch.",
+    accent: T.blue,
+  },
+  {
+    title: "Public share link",
+    desc: "Mint a memorable URL like resunova.io/r/?id=your-name. Recruiters open your résumé in the browser; photo-enabled layouts keep your profile picture on the PDF they view.",
+    accent: T.teal,
+  },
+  {
+    title: "ATS scoring",
+    desc: "Run an ATS best-practices checklist: parsing-safe structure, headings, dates, and formatting scored 0–100 with a clear pass/fail list — so you know what to fix before you apply.",
+    accent: T.green,
+  },
+];
+
+const RESEARCH_PILLARS = [
+  {
+    title: "MIT & Harvard-style guidance",
+    desc: "Templates and coaching follow elite campus career-center conventions — including MIT-style ATS layouts (Harshibar) and Harvard-tier structuring: tight section headers, achievement bullets with metrics, and keyword discipline that reads well to humans and parsers.",
+    accent: T.blue,
+  },
+  {
+    title: "Transparent scoring mechanism",
+    desc: "A headline ATS best-practices score (checklist passed ÷ total) plus JD match dimensions — readability, keyword fit, achievement quality, ATS safety — so you see which checks moved the number, not a mystery percentage.",
+    accent: T.teal,
+    href: "/blog/optimizing-resumes-for-ats",
+    linkLabel: "How scoring works",
+  },
+  {
+    title: "Top-company training corpus",
+    desc: "Prompts and rubrics are calibrated on anonymized résumés and job descriptions from Google, Figma, Meta, Amazon, Adobe, and similar tech roles in our library — then refined with product analytics and permitted user content per our Privacy Policy.",
+    accent: T.green,
+    href: "/privacy",
+    linkLabel: "Privacy Policy",
+  },
+];
+
+type Review = {
+  quote: string;
+  name: string;
+  role: string;
+  company?: string;
+  avatar: string;
+  col: string;
+};
+
+const REVIEWS: Review[] = [
+  {
+    quote: "Months of applying to Google with no reply. After tailoring here, I got my first recruiter screen in two weeks — that callback was the win.",
+    name: "Priya S.",
+    role: "SWE applicant",
+    company: "Google",
+    avatar: "P",
+    col: "#4285f4",
+  },
+  {
+    quote: "Amazon’s JD was keyword-heavy. Resunova showed gaps I could honestly fix — I submitted on a Friday and had a phone screen invite the next week.",
+    name: "Rohan K.",
+    role: "SDE applicant",
+    company: "Amazon",
+    avatar: "R",
+    col: "#ff9900",
+  },
+  {
+    quote: "Uber roles were going quiet for me. Cleaner bullets and a stronger ATS score — then two interview requests in the same month.",
+    name: "Vikram M.",
+    role: "Ops applicant",
+    company: "Uber",
+    avatar: "V",
+    col: "#276ef1",
+  },
+  {
+    quote: "Campus hiring — I tailored one base résumé to five JDs in an afternoon. Three companies scheduled interviews; before that it was mostly automated rejections.",
+    name: "Ananya R.",
+    role: "New grad · CS",
+    company: "Hyderabad",
+    avatar: "A",
+    col: "#7c3aed",
+  },
+  {
+    quote: "Weeks of silence on applications. The ATS checklist fixed date formats and section headers — interview requests picked up again within a few applies.",
+    name: "Meera N.",
+    role: "Data analyst",
+    company: "Bengaluru",
+    avatar: "M",
+    col: "#0d9488",
+  },
+  {
+    quote: "Free, no card upfront. Our batch uses it before every apply — we compare notes on who got recruiter screens and phone interviews.",
+    name: "Arjun D.",
+    role: "Backend dev",
+    company: "Pune",
+    avatar: "J",
+    col: "#2563eb",
+  },
 ];
 
 // ── Root ────────────────────────────────────────────────────────────────────
@@ -163,7 +257,7 @@ export default function LandingPage() {
 
         {/* Nav */}
         <nav className="lp-nav" style={{ display: "flex", alignItems: "center", gap: 28 }}>
-          {[["Features","features"],["How it works","how"],["Reviews","reviews"]].map(([lbl,id]) => (
+          {[["Features","features"],["Platform","platform"],["Approach","approach"],["How it works","how"],["Reviews","reviews"]].map(([lbl,id]) => (
             <button
               key={id}
               type="button"
@@ -232,8 +326,11 @@ export default function LandingPage() {
           <p style={{ fontSize: 17, color: C.muted, lineHeight: 1.72, maxWidth: 480, margin: "0 0 44px", letterSpacing: -0.15 }}>
             Paste any job description and get an AI-tailored resume in 60 seconds — with a match score, gap analysis, and ATS-safe PDF.
             {" "}
-            <strong style={{ color: C.ink, fontWeight: 600 }}>Resunova is completely free</strong>
-            {" "}for the greater good of the community and students: everyone deserves a fair shot at the next opportunity, without paywalls or surprise charges.
+            <strong style={{ color: C.ink, fontWeight: 600 }}>Built to get you interview callbacks</strong>
+            {" "}— recruiter screens and phone screens that get you in the door.
+            {" "}
+            <strong style={{ color: C.ink, fontWeight: 600 }}>Completely free</strong>
+            {" "}for students and the community, without paywalls or surprise charges.
           </p>
 
           {/* CTA row */}
@@ -255,7 +352,7 @@ export default function LandingPage() {
           {/* Social proof */}
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <div style={{ display: "flex" }}>
-              {[["S","#2563eb"],["M","#059669"],["J","#d97706"],["A","#7c3aed"],["K","#0d9488"]].map(([l,bg], i) => (
+              {[["P","#4285f4"],["R","#ff9900"],["V","#276ef1"],["A","#7c3aed"],["M","#0d9488"],["N","#2563eb"]].map(([l,bg], i) => (
                 <div key={i} style={{
                   width: 28, height: 28, borderRadius: "50%",
                   background: bg, border: `2px solid ${C.bg}`,
@@ -266,7 +363,7 @@ export default function LandingPage() {
               ))}
             </div>
             <span style={{ fontSize: 13, color: C.muted }}>
-              <b style={{ color: C.ink, fontWeight: 600 }}>4.8/5</b> from 2,400+ job seekers
+              <b style={{ color: C.ink, fontWeight: 600 }}>400+</b> early users · more interview callbacks reported
             </span>
           </div>
         </div>
@@ -279,14 +376,14 @@ export default function LandingPage() {
       <div style={{ borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, background: C.bg2, overflow: "hidden", padding: "18px 0" }}>
         <div style={{ display: "flex", gap: 0, width: "max-content", animation: "ticker 36s linear infinite" }}>
           {[...Array(4)].flatMap(() => [
-            ["$0",       "Completely free — always"],
-            ["∞",        "Students & community first"],
-            ["2,400+",  "Résumés tailored"],
-            ["89%",     "Interview rate lift"],
-            ["60s",     "Average tailoring time"],
-            ["50+",     "ATS systems tested"],
-            ["4.8 ★",   "Average user rating"],
-            ["100%",    "Privacy guaranteed"],
+            ["$0",      "Completely free — always"],
+            ["400+",    "Job seekers so far"],
+            ["60s",     "Typical tailoring time"],
+            ["4.7 ★",   "Early user rating"],
+            ["ATS",     "Best-practices checklist"],
+            ["India",   "Students & early community"],
+            ["Callbacks", "Recruiter & phone screens"],
+            ["Privacy", "We don’t sell your data"],
           ]).map(([stat, lbl], i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 40px", flexShrink: 0 }}>
               <span style={{ fontSize: 20, fontWeight: 700, color: T.blue, letterSpacing: -0.5 }}>{stat}</span>
@@ -314,13 +411,62 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ───────────── Platform highlights ──────────────────── */}
+      <section id="platform" style={{ background: C.bg2, borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, scrollMarginTop: 76 }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "100px 40px" }}>
+          <div style={{ textAlign: "center", marginBottom: 56 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
+              Built into Resunova
+            </p>
+            <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
+              Templating, sharing &amp; ATS scoring.
+            </h2>
+            <p style={{ fontSize: 15, color: C.muted, lineHeight: 1.65, maxWidth: 560, margin: "18px auto 0" }}>
+              Beyond JD tailoring — publish, score, and format your résumé in one place.
+            </p>
+          </div>
+          <div className="lp-platform-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24 }}>
+            {PLATFORM_HIGHLIGHTS.map((h, i) => (
+              <PlatformHighlightCard key={i} h={h} dark={dark} C={C} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ───────────── Research & data approach ─────────────── */}
+      <section id="approach" style={{ padding: "100px 40px", maxWidth: 1200, margin: "0 auto", scrollMarginTop: 76 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 56, alignItems: "start" }} className="lp-approach-grid">
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
+              How we build
+            </p>
+            <h2 className="lp-h2" style={{ fontSize: "clamp(28px, 3.5vw, 44px)", fontWeight: 800, lineHeight: 1.12, letterSpacing: "-0.03em", color: C.ink, margin: "0 0 20px" }}>
+              MIT &amp; Harvard guidance. Top-company training.
+            </h2>
+            <p style={{ fontSize: 15, color: C.muted, lineHeight: 1.72, margin: "0 0 16px" }}>
+              Our scoring mechanism blends campus career-center playbooks (MIT- and Harvard-style structure) with recruiter-informed match dimensions. Models and checklists are trained and calibrated on résumés and job descriptions from Google, Figma, Meta, Amazon, Adobe, and other top tech roles in our library — then improved responsibly with product data.
+            </p>
+            <p style={{ fontSize: 14, color: C.muted, lineHeight: 1.68, margin: 0 }}>
+              We do <strong style={{ color: C.ink, fontWeight: 600 }}>not</strong> sell your personal data. Training and quality work use only what our{" "}
+              <Link href="/privacy" prefetch={false} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>Privacy Policy</Link>
+              {" "}allows — operating the service, analytics, and internal model improvement for the community.
+            </p>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {RESEARCH_PILLARS.map((p, i) => (
+              <PlatformHighlightCard key={i} h={p} dark={dark} C={C} compact />
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ───────────── How it works ─────────────────────────── */}
-      <section id="how" style={{ background: C.bg2, borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, scrollMarginTop: 76 }}>
+      <section id="how" style={{ borderBottom: `1px solid ${C.border}`, scrollMarginTop: 76 }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "100px 40px" }}>
           <div style={{ textAlign: "center", marginBottom: 72 }}>
             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>The process</p>
             <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
-              Three steps to a winning application.
+              Three steps to your next interview callback.
             </h2>
           </div>
           <div className="lp-step-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 48 }}>
@@ -343,8 +489,11 @@ export default function LandingPage() {
         <div style={{ textAlign: "center", marginBottom: 64 }}>
           <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>Testimonials</p>
           <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
-            From the people who got hired.
+            More interview callbacks.
           </h2>
+          <p style={{ fontSize: 15, color: C.muted, lineHeight: 1.65, maxWidth: 560, margin: "20px auto 0" }}>
+            About 400 people have used Resunova so far. What we hear most: recruiter screens and phone interviews. Paraphrased early-user notes, not paid endorsements.
+          </p>
         </div>
         <div className="lp-rev-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24 }}>
           {REVIEWS.map((r, i) => (
@@ -370,7 +519,10 @@ export default function LandingPage() {
                 <div style={{ width: 32, height: 32, borderRadius: "50%", background: r.col, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 12 }}>{r.avatar}</div>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{r.name}</div>
-                  <div style={{ fontSize: 11, color: C.muted }}>{r.role}</div>
+                  <div style={{ fontSize: 11, color: C.muted }}>
+                    {r.role}
+                    {r.company ? ` · ${r.company}` : ""}
+                  </div>
                 </div>
               </div>
             </div>
@@ -385,7 +537,7 @@ export default function LandingPage() {
         </h2>
         <p style={{ fontSize: 18, color: "rgba(255,255,255,0.78)", margin: "0 0 44px", lineHeight: 1.65, maxWidth: 560, marginLeft: "auto", marginRight: "auto" }}>
           <strong style={{ color: "#fff", fontWeight: 600 }}>Completely free</strong>
-          {" "}— for students, lifelong learners, and anyone in the job-seeking community. No credit card, no hidden tiers. We built this for the greater good, not a gate fee. Results in 60 seconds; no templates required.
+          {" "}— for students, lifelong learners, and anyone in the job-seeking community. No credit card, no hidden tiers. Tailor in 60 seconds and apply with a résumé built to earn interview callbacks.
         </p>
         <button onClick={signIn} disabled={loading} style={{
           display: "inline-flex", alignItems: "center", gap: 10,
@@ -471,6 +623,8 @@ export default function LandingPage() {
           .lp-feat-grid { grid-template-columns: 1fr 1fr !important; }
           .lp-step-grid { grid-template-columns: 1fr !important; }
           .lp-rev-grid  { grid-template-columns: 1fr !important; }
+          .lp-platform-grid { grid-template-columns: 1fr !important; }
+          .lp-approach-grid { grid-template-columns: 1fr !important; }
           .lp-hero-h1   { font-size: 48px !important; }
         }
         @media (max-width: 640px) {
@@ -578,6 +732,100 @@ function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
         padding: "4px 10px", borderRadius: 20, textTransform: "uppercase",
         boxShadow: `0 2px 8px ${T.blueGlow}`,
       }}>Live Preview</div>
+    </div>
+  );
+}
+
+type HighlightCardContent = {
+  title: string;
+  desc: string;
+  accent: string;
+  href?: string;
+  linkLabel?: string;
+};
+
+function PlatformHighlightCard({
+  h,
+  dark,
+  C,
+  compact = false,
+}: {
+  h: HighlightCardContent;
+  dark: boolean;
+  C: Record<string, string>;
+  compact?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+  const icon =
+    h.title === "Résumé templating" ? "T"
+    : h.title === "Public share link" ? "↗"
+    : h.title === "ATS scoring" ? "✓"
+    : h.title.startsWith("MIT") ? "M"
+    : h.title.startsWith("Transparent") ? "%"
+    : h.title.startsWith("Top-company") ? "G"
+    : "◎";
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        padding: compact ? "20px 22px" : "32px 28px",
+        background: C.surface,
+        border: `1px solid ${hover ? (dark ? T.dBorder : "#c8d1da") : C.border}`,
+        borderRadius: 16,
+        boxShadow: hover
+          ? (dark ? "0 8px 32px rgba(0,0,0,0.35)" : "0 8px 32px rgba(13,17,23,0.08)")
+          : "none",
+        transition: "box-shadow 0.2s, border-color 0.2s",
+        display: compact ? "flex" : "block",
+        gap: compact ? 14 : undefined,
+        alignItems: compact ? "flex-start" : undefined,
+      }}
+    >
+      <div
+        style={{
+          width: compact ? 36 : 40,
+          height: compact ? 36 : 40,
+          flexShrink: 0,
+          borderRadius: 10,
+          background: `${h.accent}18`,
+          border: `1px solid ${h.accent}40`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          marginBottom: compact ? 0 : 18,
+          fontSize: compact ? 15 : 18,
+          fontWeight: 800,
+          color: h.accent,
+          letterSpacing: -0.5,
+        }}
+        aria-hidden
+      >
+        {icon}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <h3 style={{ fontSize: compact ? 16 : 18, fontWeight: 700, color: C.ink, margin: "0 0 8px", letterSpacing: -0.35 }}>
+          {h.title}
+        </h3>
+        <p style={{ fontSize: compact ? 13.5 : 14, color: C.muted, lineHeight: 1.68, margin: 0 }}>{h.desc}</p>
+        {h.href && h.linkLabel ? (
+          <Link
+            href={h.href}
+            prefetch={false}
+            style={{
+              display: "inline-block",
+              marginTop: 10,
+              fontSize: 13,
+              fontWeight: 600,
+              color: T.blue,
+              textDecoration: "none",
+              letterSpacing: -0.1,
+            }}
+          >
+            {h.linkLabel} →
+          </Link>
+        ) : null}
+      </div>
     </div>
   );
 }

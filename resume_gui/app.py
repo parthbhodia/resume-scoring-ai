@@ -509,7 +509,23 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
                 doc.education.extend(_education_items_from_flat_lines(flat))
             continue
 
-        # Dynamic catch-all sections for anything beyond summary/skills/experience/education.
+        if "project" in sec_name:
+            for ent in entries:
+                hdr = _clean_model_text(str(ent.get("header") or "")).strip()
+                bullets = [
+                    _clean_model_text(str(b.get("text") or ""))
+                    for b in (ent.get("bullets") or [])
+                    if _clean_model_text(str(b.get("text") or ""))
+                ]
+                bullets = [b for b in bullets if not _is_structural_noise_line(b)]
+                name = ""
+                if hdr and not _is_structural_noise_line(hdr):
+                    name = re.split(r"\s*·\s*", hdr)[0].strip()
+                if name or bullets:
+                    doc.projects.append(ProjectItem(name=name, bullets=bullets))
+            continue
+
+        # Dynamic catch-all sections for anything beyond summary/skills/experience/education/projects.
         sec_label = _clean_model_text(str(sec.get("name") or "")).strip()
         if sec_label:
             extra_lines: list[str] = []
@@ -564,7 +580,37 @@ def _resume_doc_from_parsed(parsed: dict) -> ResumeDocModel:
         )
     doc.experience = cleaned_exp
 
+    if doc.projects or doc.education:
+        filtered_extra: list[tuple[str, list[str]]] = []
+        for title, lines in doc.extra_sections:
+            lname = (title or "").strip().lower()
+            if doc.projects and lname in ("projects", "project"):
+                continue
+            if doc.education and lname == "education":
+                continue
+            filtered_extra.append((title, lines))
+        doc.extra_sections = filtered_extra
+
     return doc
+
+
+def _resume_doc_with_updates(doc: "ResumeDocModel", **overrides: Any) -> "ResumeDocModel":
+    """Rebuild ``ResumeDocModel`` preserving sections not mentioned in ``overrides``."""
+    return ResumeDocModel(
+        full_name=overrides.get("full_name", doc.full_name),
+        headline=overrides.get("headline", doc.headline),
+        location=overrides.get("location", doc.location),
+        email=overrides.get("email", doc.email),
+        phone=overrides.get("phone", doc.phone),
+        linkedin=overrides.get("linkedin", doc.linkedin),
+        github=overrides.get("github", doc.github),
+        summary=overrides.get("summary", doc.summary),
+        skills=overrides.get("skills", doc.skills),
+        experience=overrides.get("experience", doc.experience),
+        education=overrides.get("education", doc.education),
+        projects=overrides.get("projects", doc.projects),
+        extra_sections=overrides.get("extra_sections", doc.extra_sections),
+    )
 
 
 def _accepted_suggestion_section_bucket(section: Optional[str]) -> str:
@@ -1052,26 +1098,14 @@ Instructions:
                 bullets=bullets,
             ))
 
-        extra_sections: list[tuple[str, list[str]]] = []
-        for proj in (raw.get("projects") or []):
-            name = _clean_model_text(str(proj.get("name") or "Project"))
-            bullets = [_clean_model_text(str(b)) for b in (proj.get("bullets") or []) if _clean_model_text(str(b))]
-            if bullets:
-                extra_sections.append((name, bullets))
-        if extra_sections:
-            # Wrap all projects under a single "Projects" section header
-            all_project_lines: list[str] = []
-            for pname, pbullets in extra_sections:
-                all_project_lines.append(pname)
-                all_project_lines.extend(pbullets)
-            extra_sections = [("Projects", all_project_lines)]
-
         education: list[EducationItem] = []
         for edu in (raw.get("education") or []):
             if isinstance(edu, dict):
                 row = _education_item_from_dict(edu)
                 if row:
                     education.append(row)
+
+        projects = _project_items_from_llm_projects(raw.get("projects"))
 
         return ResumeDocModel(
             full_name=full_name,
@@ -1085,7 +1119,8 @@ Instructions:
             skills=skills,
             experience=experience,
             education=education,
-            extra_sections=extra_sections,
+            projects=projects,
+            extra_sections=[],
         )
     except Exception as exc:
         logger.warning(f"LLM extract+tailor failed: {exc}")
@@ -1142,19 +1177,6 @@ Output ONLY valid JSON matching this schema (no markdown, no explanation):
                 bullets=bullets,
             ))
 
-        extra_sections: list[tuple[str, list[str]]] = []
-        for proj in (raw.get("projects") or []):
-            name = _clean_model_text(str(proj.get("name") or "Project"))
-            pbullets = [_clean_model_text(str(b)) for b in (proj.get("bullets") or []) if _clean_model_text(str(b))]
-            if pbullets:
-                extra_sections.append((name, pbullets))
-        if extra_sections:
-            all_project_lines: list[str] = []
-            for pname, pbullets in extra_sections:
-                all_project_lines.append(pname)
-                all_project_lines.extend(pbullets)
-            extra_sections = [("Projects", all_project_lines)]
-
         education: list[EducationItem] = []
         for edu in (raw.get("education") or []):
             if isinstance(edu, dict):
@@ -1177,7 +1199,7 @@ Output ONLY valid JSON matching this schema (no markdown, no explanation):
             experience=experience,
             education=education,
             projects=projects,
-            extra_sections=extra_sections,
+            extra_sections=[],
         )
     except Exception as exc:
         logger.warning(f"LLM extract failed: {exc}")
@@ -1404,7 +1426,9 @@ async def api_generate_stream(request: Request):
     post_suggestion_coach_run = bool(body.get("post_suggestion_coach_run"))
     _tb = body.get("tailor_body_with_ai")
     tailor_body_with_ai = True if _tb is None else bool(_tb)
-    use_jinja_renderer = True
+    use_jinja_renderer = USE_JINJA_LATEX_RENDERER
+    if body.get("use_jinja_renderer") is not None:
+        use_jinja_renderer = bool(body.get("use_jinja_renderer"))
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
@@ -4543,12 +4567,7 @@ Output ONLY valid JSON (no markdown) with this schema:
 
         new_summary = _clean_model_text(str(raw.get("summary") or ""))
         if new_summary:
-            doc = doc._replace(summary=new_summary) if hasattr(doc, "_replace") else ResumeDocModel(
-                full_name=doc.full_name, headline=doc.headline, location=doc.location,
-                email=doc.email, phone=doc.phone, linkedin=doc.linkedin, github=doc.github,
-                summary=new_summary, skills=doc.skills, experience=doc.experience,
-                extra_sections=doc.extra_sections,
-            )
+            doc = _resume_doc_with_updates(doc, summary=new_summary)
 
         exp_list = raw.get("experience") or []
         new_experience = list(doc.experience or [])
@@ -4563,13 +4582,7 @@ Output ONLY valid JSON (no markdown) with this schema:
                     location=old.location, bullets=raw_bullets,
                 )
 
-        doc = ResumeDocModel(
-            full_name=doc.full_name, headline=doc.headline, location=doc.location,
-            email=doc.email, phone=doc.phone, linkedin=doc.linkedin, github=doc.github,
-            summary=doc.summary, skills=doc.skills, experience=new_experience,
-            extra_sections=doc.extra_sections,
-        )
-        return doc
+        return _resume_doc_with_updates(doc, experience=new_experience)
     except Exception as exc:
         logger.warning(f"_llm_tailor_to_jd failed: {exc}")
         return doc

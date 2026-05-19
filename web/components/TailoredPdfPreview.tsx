@@ -64,7 +64,7 @@ export default function TailoredPdfPreview({
         }}
       >
         <span style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.4 }}>
-          Scroll to see all pages — content is not clipped at page breaks.
+          Scroll for all pages.
         </span>
         <a
           href={pdfUrl}
