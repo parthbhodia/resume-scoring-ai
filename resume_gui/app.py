@@ -3840,10 +3840,175 @@ async def api_analyze_upload(request: Request):
             result["structuredResume"] = _resume_doc_to_dict(structured)
             result["bulletMap"]        = bullet_map
 
+        # Persist analysis result for student history + cohort analytics (best-effort)
+        user_id = (form.get("user_id") or "").strip()
+        user_email = (form.get("user_email") or "").strip()
+        if user_id and isinstance(result, dict):
+            try:
+                await loop.run_in_executor(None, _persist_analysis, result, user_id, user_email, bool(jd))
+            except Exception:
+                pass  # never block the response for analytics writes
+
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("analyze_upload failed")
         return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+def _persist_analysis(result: dict, user_id: str, user_email: str, has_jd: bool) -> None:
+    """Write analysis result to Supabase `analyses` table for history + cohort stats."""
+    table = _supabase_table("analyses")
+    if table is None:
+        return
+    cs = result.get("categoryScores") or {}
+    bullets = result.get("bulletAnalysis") or []
+    bullet_count = len(bullets) if isinstance(bullets, list) else 0
+    weak_bullet_count = sum(
+        1 for b in bullets
+        if isinstance(b, dict) and isinstance(b.get("score"), (int, float)) and b.get("score", 0) < 55
+    )
+    ka = result.get("keywordAnalysis") or {}
+    row = {
+        "user_id":          user_id,
+        "user_email":       user_email or None,
+        "resume_name":      (result.get("resumeHeader") or "")[:120] or None,
+        "overall_score":    result.get("overallScore"),
+        "category_scores":  cs,
+        "top_issues":       result.get("topIssues") or [],
+        "top_strengths":    result.get("topStrengths") or [],
+        "ats_warnings":     result.get("atsWarnings") or [],
+        "missing_keywords": ka.get("missingKeywords") or [],
+        "keyword_score":    ka.get("keywordScore"),
+        "bullet_count":     bullet_count,
+        "weak_bullet_count": weak_bullet_count,
+        "has_jd":           has_jd,
+    }
+    try:
+        table.insert(row).execute()
+    except Exception as exc:
+        logger.warning("analyses insert failed: %s", exc)
+
+
+async def api_my_analyses(request: Request):
+    """GET /api/my-analyses — return current user's analysis history (latest 50)."""
+    user_id = (request.query_params.get("user_id") or "").strip()
+    if not user_id:
+        return JSONResponse({"error": "user_id required"}, status_code=400)
+    table = _supabase_table("analyses")
+    if table is None:
+        return JSONResponse({"analyses": [], "note": "storage unavailable"})
+    try:
+        resp = (
+            table
+            .select("id,overall_score,category_scores,top_issues,top_strengths,keyword_score,has_jd,bullet_count,weak_bullet_count,resume_name,created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        return JSONResponse({"analyses": resp.data or []})
+    except Exception as exc:
+        logger.warning("my_analyses query failed: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+async def api_cohort_stats(request: Request):
+    """GET /api/cohort-stats — aggregate analysis stats across all students.
+
+    Requires X-Advisor-Key header matching ADVISOR_SECRET env var.
+    Returns cohort-level score distributions, weakest dimensions, and
+    most common issue types — suitable for career center dashboards.
+    """
+    import os as _os
+    advisor_secret = _os.environ.get("ADVISOR_SECRET", "").strip()
+    provided_key   = (request.headers.get("x-advisor-key") or "").strip()
+    if not advisor_secret or provided_key != advisor_secret:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+
+    table = _supabase_table("analyses")
+    if table is None:
+        return JSONResponse({"error": "storage unavailable"}, status_code=503)
+
+    try:
+        resp = (
+            table
+            .select("user_id,user_email,overall_score,category_scores,top_issues,keyword_score,has_jd,bullet_count,weak_bullet_count,created_at")
+            .order("created_at", desc=True)
+            .limit(2000)
+            .execute()
+        )
+        rows = resp.data or []
+    except Exception as exc:
+        logger.warning("cohort_stats query failed: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    if not rows:
+        return JSONResponse({"student_count": 0, "analysis_count": 0, "rows": []})
+
+    from collections import Counter as _Counter
+
+    # --- aggregate numeric fields ---
+    def _avg(vals):
+        clean = [v for v in vals if isinstance(v, (int, float))]
+        return round(sum(clean) / len(clean), 1) if clean else None
+
+    dim_keys = ["readability", "atsCompatibility", "jobMatch", "achievementQuality",
+                "quantification", "sectionStructure", "languageQuality", "technicalBranding"]
+
+    overall_scores = [r.get("overall_score") for r in rows if r.get("overall_score") is not None]
+    dim_avgs = {}
+    for dk in dim_keys:
+        vals = [r.get("category_scores", {}).get(dk) for r in rows]
+        dim_avgs[dk] = _avg(vals)
+
+    # --- score tier distribution ---
+    tiers = {"low": 0, "mid": 0, "good": 0, "strong": 0}
+    for s in overall_scores:
+        if s < 50:       tiers["low"]    += 1
+        elif s < 70:     tiers["mid"]    += 1
+        elif s < 85:     tiers["good"]   += 1
+        else:            tiers["strong"] += 1
+
+    # --- most common issues ---
+    issue_counter: _Counter = _Counter()
+    for r in rows:
+        for issue in (r.get("top_issues") or []):
+            title = issue.get("title") or issue.get("issue") if isinstance(issue, dict) else str(issue)
+            if title:
+                issue_counter[title.strip()] += 1
+    top_issues = [{"issue": k, "count": v} for k, v in issue_counter.most_common(10)]
+
+    # --- per-student latest scores (for advisor roster) ---
+    seen: dict = {}
+    for r in rows:
+        uid = r.get("user_id")
+        if uid and uid not in seen:
+            seen[uid] = {
+                "user_id":       uid,
+                "user_email":    r.get("user_email"),
+                "latest_score":  r.get("overall_score"),
+                "latest_at":     r.get("created_at"),
+                "analysis_count": sum(1 for x in rows if x.get("user_id") == uid),
+            }
+    student_roster = sorted(seen.values(), key=lambda x: x.get("latest_score") or 0)
+
+    # --- weakest dimensions (sorted ascending) ---
+    weakest_dims = sorted(
+        [(dk, dim_avgs[dk]) for dk in dim_keys if dim_avgs[dk] is not None],
+        key=lambda x: x[1]
+    )
+
+    return JSONResponse({
+        "student_count":   len(seen),
+        "analysis_count":  len(rows),
+        "avg_overall":     _avg(overall_scores),
+        "score_tiers":     tiers,
+        "dimension_avgs":  dim_avgs,
+        "weakest_dims":    [{"dimension": d, "avg": v} for d, v in weakest_dims[:3]],
+        "top_issues":      top_issues,
+        "student_roster":  student_roster,
+        "generated_at":    __import__("datetime").datetime.utcnow().isoformat() + "Z",
+    })
 
 
 async def api_analyze_folder(request: Request):
@@ -4732,6 +4897,8 @@ routes = [
     Route("/api/storage-status",            api_storage_status,methods=["GET"]),
     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
+    Route("/api/my-analyses",             api_my_analyses,     methods=["GET"]),
+    Route("/api/cohort-stats",            api_cohort_stats,    methods=["GET"]),
     Route("/api/export-docx",             api_export_docx,     methods=["POST"]),
     Route("/api/builder-export-docx",     api_builder_export_docx, methods=["POST"]),
     Route("/api/analyze-export-pdf",      api_analyze_export_pdf, methods=["POST"]),

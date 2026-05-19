@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ResumeAI — Career Center Pitch</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #0a0a0f;
+    --surface: #13131a;
+    --border:  #1e1e2e;
+    --accent:  #6c63ff;
+    --accent2: #a78bfa;
+    --green:   #22c55e;
+    --amber:   #f59e0b;
+    --red:     #ef4444;
+    --text:    #f0f0f8;
+    --dim:     #8888aa;
+    --radius:  14px;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ── SLIDE ENGINE ── */
+  .deck { width: 100%; height: 100vh; position: relative; }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    padding: 60px 80px;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.4s ease, transform 0.4s ease;
+    transform: translateY(20px);
+  }
+  .slide.active {
+    opacity: 1; pointer-events: all; transform: translateY(0);
+  }
+
+  /* ── NAV ── */
+  .nav {
+    position: fixed; bottom: 36px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 16px; z-index: 100;
+    background: rgba(19,19,26,0.9); border: 1px solid var(--border);
+    border-radius: 50px; padding: 10px 20px; backdrop-filter: blur(12px);
+  }
+  .nav button {
+    background: none; border: none; color: var(--dim); cursor: pointer;
+    font-size: 20px; padding: 4px 10px; border-radius: 8px;
+    transition: color 0.2s, background 0.2s;
+  }
+  .nav button:hover { color: var(--text); background: var(--border); }
+  .dots { display: flex; gap: 8px; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--border); cursor: pointer;
+    transition: background 0.2s, transform 0.2s;
+  }
+  .dot.active { background: var(--accent); transform: scale(1.3); }
+  .slide-label {
+    font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums;
+    min-width: 36px; text-align: center;
+  }
+
+  /* ── SHARED LAYOUT HELPERS ── */
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--accent2);
+    background: rgba(108,99,255,0.12); border: 1px solid rgba(108,99,255,0.25);
+    border-radius: 6px; padding: 4px 10px; margin-bottom: 20px;
+  }
+  h1 { font-size: clamp(32px, 5vw, 58px); font-weight: 800; letter-spacing: -1.5px; line-height: 1.08; }
+  h2 { font-size: clamp(22px, 3.5vw, 38px); font-weight: 800; letter-spacing: -1px; line-height: 1.1; }
+  h3 { font-size: 16px; font-weight: 700; }
+  p  { font-size: clamp(14px, 1.8vw, 18px); color: var(--dim); line-height: 1.65; }
+
+  .gradient { background: linear-gradient(135deg, #6c63ff, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .gradient-green { background: linear-gradient(135deg, #22c55e, #86efac); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+  /* ── SLIDE 1 — TITLE ── */
+  #s1 { text-align: center; }
+  #s1 .logo { font-size: 48px; margin-bottom: 24px; }
+  #s1 .sub { max-width: 600px; margin-top: 20px; font-size: clamp(15px, 2vw, 20px); }
+  #s1 .kpi-row { display: flex; gap: 48px; margin-top: 56px; }
+  #s1 .kpi { text-align: center; }
+  #s1 .kpi .num { font-size: 42px; font-weight: 900; letter-spacing: -2px; }
+  #s1 .kpi .lbl { font-size: 13px; color: var(--dim); margin-top: 4px; }
+
+  /* ── SLIDE 2 — PROBLEM ── */
+  #s2 .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 40px; width: 100%; max-width: 880px; }
+  .pain-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 28px 24px;
+  }
+  .pain-card .icon { font-size: 32px; margin-bottom: 14px; }
+  .pain-card h3 { margin-bottom: 8px; }
+  .pain-card p { font-size: 14px; }
+
+  /* ── SLIDE 3 — SOLUTION ── */
+  #s3 .flow { display: flex; align-items: center; gap: 0; margin-top: 40px; width: 100%; max-width: 900px; }
+  .step {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 28px 20px; text-align: center;
+  }
+  .step .num { font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 10px; }
+  .step .icon { font-size: 30px; margin-bottom: 10px; }
+  .step h3 { font-size: 14px; }
+  .step p { font-size: 12px; margin-top: 6px; }
+  .arrow { font-size: 22px; color: var(--dim); padding: 0 6px; flex-shrink: 0; }
+
+  /* ── SLIDE 4 — SCORE DIMENSIONS ── */
+  #s4 .dims { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 36px; width: 100%; max-width: 780px; }
+  .dim-row {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px;
+  }
+  .dim-icon { font-size: 22px; flex-shrink: 0; }
+  .dim-bar-wrap { flex: 1; }
+  .dim-label { font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+  .dim-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .dim-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #6c63ff, #a78bfa); }
+  .dim-score { font-size: 13px; font-weight: 700; color: var(--accent2); flex-shrink: 0; }
+
+  /* ── SLIDE 5 — CAREER CENTER USE CASE ── */
+  #s5 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 36px; width: 100%; max-width: 900px; }
+  .use-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px;
+  }
+  .use-card .badge { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 14px; padding: 4px 10px; border-radius: 6px; display: inline-block; }
+  .use-card .badge.now { background: rgba(34,197,94,0.12); color: #86efac; border: 1px solid rgba(34,197,94,0.25); }
+  .use-card .badge.next { background: rgba(108,99,255,0.12); color: var(--accent2); border: 1px solid rgba(108,99,255,0.25); }
+  .use-card ul { list-style: none; margin-top: 8px; }
+  .use-card ul li { font-size: 14px; color: var(--dim); padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
+  .use-card ul li:last-child { border-bottom: none; }
+  .use-card ul li::before { content: "✓"; color: var(--green); font-weight: 700; flex-shrink: 0; }
+  .use-card ul li.coming::before { content: "→"; color: var(--accent2); }
+
+  /* ── SLIDE 6 — COHORT ANALYTICS (coming) ── */
+  #s6 .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 36px; width: 100%; max-width: 860px; }
+  .metric-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 26px 22px; text-align: center;
+  }
+  .metric-card .m-icon { font-size: 28px; margin-bottom: 12px; }
+  .metric-card .m-val { font-size: 34px; font-weight: 900; letter-spacing: -1.5px; }
+  .metric-card .m-val.green { color: var(--green); }
+  .metric-card .m-val.amber { color: var(--amber); }
+  .metric-card .m-val.purple { color: var(--accent2); }
+  .metric-card .m-lbl { font-size: 12px; color: var(--dim); margin-top: 6px; line-height: 1.4; }
+  .metric-card .m-sub { font-size: 11px; color: var(--dim); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+
+  /* ── SLIDE 7 — CTA ── */
+  #s7 { text-align: center; }
+  #s7 .tiers { display: flex; gap: 24px; margin-top: 44px; }
+  .tier {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 36px 28px; text-align: left; position: relative;
+  }
+  .tier.featured { border-color: var(--accent); box-shadow: 0 0 40px rgba(108,99,255,0.2); }
+  .tier .featured-badge {
+    position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: white; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 14px; border-radius: 20px;
+  }
+  .tier .price { font-size: 38px; font-weight: 900; letter-spacing: -1.5px; margin: 12px 0; }
+  .tier .price span { font-size: 16px; font-weight: 400; color: var(--dim); }
+  .tier ul { list-style: none; margin-top: 16px; }
+  .tier ul li { font-size: 13px; color: var(--dim); padding: 7px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
+  .tier ul li:last-child { border-bottom: none; }
+  .tier ul li::before { content: "✓"; color: var(--green); font-weight: 700; }
+  .tier .cta-btn {
+    margin-top: 24px; width: 100%; padding: 14px; border-radius: 10px;
+    border: none; font-size: 14px; font-weight: 700; cursor: pointer;
+    background: var(--border); color: var(--dim); transition: all 0.2s;
+  }
+  .tier.featured .cta-btn { background: var(--accent); color: white; }
+  .tier .cta-btn:hover { opacity: 0.85; }
+
+  /* ── BACKGROUND DECORATION ── */
+  .glow {
+    position: fixed; border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 0;
+  }
+  .glow-1 { width: 600px; height: 600px; background: rgba(108,99,255,0.06); top: -200px; right: -100px; }
+  .glow-2 { width: 400px; height: 400px; background: rgba(34,197,94,0.04); bottom: -100px; left: -80px; }
+
+  .slide > * { position: relative; z-index: 1; }
+</style>
+</head>
+<body>
+
+<div class="glow glow-1"></div>
+<div class="glow glow-2"></div>
+
+<div class="deck">
+
+  <!-- ── SLIDE 1 — TITLE ── -->
+  <div class="slide active" id="s1">
+    <div class="logo">📄✨</div>
+    <div class="tag">Career Center Edition</div>
+    <h1>Your students deserve<br><span class="gradient">résumés that get read.</span></h1>
+    <p class="sub">AI-powered résumé analysis, scoring, and rewriting — built so career advisors can give every student elite-level feedback, at scale.</p>
+    <div class="kpi-row">
+      <div class="kpi"><div class="num gradient">8</div><div class="lbl">Scoring Dimensions</div></div>
+      <div class="kpi"><div class="num gradient-green">&lt;90s</div><div class="lbl">Full Analysis Per Résumé</div></div>
+      <div class="kpi"><div class="num" style="color:var(--amber)">10×</div><div class="lbl">Students/Hour vs. Manual Review</div></div>
+    </div>
+  </div>
+
+  <!-- ── SLIDE 2 — PROBLEM ── -->
+  <div class="slide" id="s2">
+    <div class="tag">The Problem</div>
+    <h2>Career advisors are <span class="gradient">overwhelmed.</span><br>Students are underprepared.</h2>
+    <div class="grid">
+      <div class="pain-card">
+        <div class="icon">⏳</div>
+        <h3>1 Student / Hour</h3>
+        <p>Manual résumé reviews take 45–60 min each. Most students get one shot before recruiting season.</p>
+      </div>
+      <div class="pain-card">
+        <div class="icon">🤖</div>
+        <h3>75% Filtered by ATS</h3>
+        <p>Applicant Tracking Systems reject most résumés before a human ever reads them — students don't know why.</p>
+      </div>
+      <div class="pain-card">
+        <div class="icon">📊</div>
+        <h3>No Cohort Visibility</h3>
+        <p>Advisors can't see which sections students consistently struggle with — feedback stays anecdotal, not data-driven.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SLIDE 3 — SOLUTION ── -->
+  <div class="slide" id="s3">
+    <div class="tag">The Solution</div>
+    <h2>Upload → Score → Fix → Export.<br><span class="gradient">In under 2 minutes.</span></h2>
+    <div class="flow">
+      <div class="step">
+        <div class="num">Step 1</div>
+        <div class="icon">📤</div>
+        <h3>Upload</h3>
+        <p>PDF or DOCX — any template, any field</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="num">Step 2</div>
+        <div class="icon">🧠</div>
+        <h3>AI Analysis</h3>
+        <p>Score across 8 dimensions + ATS check</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="num">Step 3</div>
+        <div class="icon">✏️</div>
+        <h3>AI Rewrites</h3>
+        <p>Bullet-by-bullet suggestions, accept or edit</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="num">Step 4</div>
+        <div class="icon">📥</div>
+        <h3>Export</h3>
+        <p>ATS-safe PDF or DOCX — ready to submit</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="num">Step 5</div>
+        <div class="icon">📈</div>
+        <h3>Track</h3>
+        <p>Score history, versions, cohort trends</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SLIDE 4 — SCORING ── -->
+  <div class="slide" id="s4">
+    <div class="tag">AI Scoring Engine</div>
+    <h2>8 dimensions. <span class="gradient">Instant rubric.</span><br>Actionable feedback every time.</h2>
+    <div class="dims">
+      <div class="dim-row">
+        <div class="dim-icon">👁️</div>
+        <div class="dim-bar-wrap">
+          <div class="dim-label">Readability</div>
+          <div class="dim-bar"><div class="dim-bar-fill" style="width:82%"></div></div>
+        </div>
+        <div class="dim-score">82</div>
+      </div>
+      <div class="dim-row">
+        <div class="dim-icon">🤖</div>
+        <div class="dim-bar-wrap">
+          <div class="dim-label">ATS Compatibility</div>
+          <div class="dim-bar"><div class="dim-bar-fill" style="width:91%"></div></div>
+        </div>
+        <div class="dim-score">91</div>
+      </div>
+      <div class="dim-row">
+        <div class="dim-icon">🎯</div>
+        <div class="dim-bar-wrap">
+          <div class="dim-label">Job Match</div>
+          <div class="dim-bar"><div class="dim-bar-fill" style="width:67%"></div></div>
+        </div>
+        <div class="dim-score">67</div>
+      </div>
+      <div class="dim-row">
+        <div class="dim-icon">🏆</div>
+        <div class="dim-bar-wrap">
+          <div class="dim-label">Achievement Quality</div>
+          <div class="dim-bar"><div class="dim-bar-fill" style="width:74%"></div></div>
+        </div>
+        <div class="dim-score">74</div>
+      </div>
+      <div class="dim-row">
+        <div class="dim-icon">🔢</div>
+        <div class="dim-bar-wrap">
+          <div class="dim-label">Quantification</div>
+          <div class="dim-bar"><div class="dim-bar-fill" style="width:55%"></div></div>
+        </div>
+        <div class="dim-score">55</div>
+      </div>
+      <div class="dim-row">
+        <div class="dim-icon">🗂️</div>
+        <div class="dim-bar-wrap">
+          <div class="dim-label">Section Structure</div>
+          <div class="dim-bar"><div class="dim-bar-fill" style="width:88%"></div></div>
+        </div>
+        <div class="dim-score">88</div>
+      </div>
+      <div class="dim-row">
+        <div class="dim-icon">💬</div>
+        <div class="dim-bar-wrap">
+          <div class="dim-label">Language Quality</div>
+          <div class="dim-bar"><div class="dim-bar-fill" style="width:79%"></div></div>
+        </div>
+        <div class="dim-score">79</div>
+      </div>
+      <div class="dim-row">
+        <div class="dim-icon">🏷️</div>
+        <div class="dim-bar-wrap">
+          <div class="dim-label">Field Branding</div>
+          <div class="dim-bar"><div class="dim-bar-fill" style="width:61%"></div></div>
+        </div>
+        <div class="dim-score">61</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SLIDE 5 — CAREER CENTER USE CASE ── -->
+  <div class="slide" id="s5">
+    <div class="tag">Built for Career Centers</div>
+    <h2>From one-on-one sessions<br><span class="gradient">to data-driven programs.</span></h2>
+    <div class="two-col">
+      <div class="use-card">
+        <div class="badge now">Available Today</div>
+        <ul>
+          <li>Upload any student résumé (PDF / DOCX)</li>
+          <li>Instant score across 8 rubric dimensions</li>
+          <li>Bullet-level rewrites with one-click accept</li>
+          <li>ATS keyword gap detection vs. job posting</li>
+          <li>Export polished PDF or DOCX in seconds</li>
+          <li>Version history — track student improvement</li>
+          <li>Shareable score report links per student</li>
+        </ul>
+      </div>
+      <div class="use-card">
+        <div class="badge next">Roadmap for Career Centers</div>
+        <ul>
+          <li class="coming">Cohort dashboard — avg. score by major/year</li>
+          <li class="coming">Advisor view — see all student résumés at once</li>
+          <li class="coming">Batch upload — process 50 résumés at once</li>
+          <li class="coming">Common weakness heatmap across cohort</li>
+          <li class="coming">Before/after score tracking per student</li>
+          <li class="coming">Export cohort analytics report (CSV/PDF)</li>
+          <li class="coming">SSO / LMS integration (Canvas, Handshake)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SLIDE 6 — COHORT ANALYTICS ── -->
+  <div class="slide" id="s6">
+    <div class="tag">Cohort Intelligence</div>
+    <h2>Turn individual feedback into<br><span class="gradient">program-level insights.</span></h2>
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="m-icon">📊</div>
+        <div class="m-val green">+22pts</div>
+        <div class="m-lbl">Average score improvement after one revision session</div>
+        <div class="m-sub">vs. ~0pts with manual-only advising</div>
+      </div>
+      <div class="metric-card">
+        <div class="m-icon">🔍</div>
+        <div class="m-val amber">68%</div>
+        <div class="m-lbl">of student résumés lack quantified achievements</div>
+        <div class="m-sub">Now visible across your entire cohort instantly</div>
+      </div>
+      <div class="metric-card">
+        <div class="m-icon">⚡</div>
+        <div class="m-val purple">10×</div>
+        <div class="m-lbl">students reviewed per advisor hour vs. manual sessions</div>
+        <div class="m-sub">AI does the first pass; advisors focus on coaching</div>
+      </div>
+      <div class="metric-card">
+        <div class="m-icon">🎓</div>
+        <div class="m-val green">Field-agnostic</div>
+        <div class="m-lbl">Works for nursing, business, policy, engineering, arts</div>
+        <div class="m-sub">Not just CS/tech résumés</div>
+      </div>
+      <div class="metric-card">
+        <div class="m-icon">🔒</div>
+        <div class="m-val purple">FERPA-ready</div>
+        <div class="m-lbl">Student data stays in your school's Supabase instance</div>
+        <div class="m-sub">No third-party data sharing</div>
+      </div>
+      <div class="metric-card">
+        <div class="m-icon">📅</div>
+        <div class="m-val amber">0 setup</div>
+        <div class="m-lbl">Students sign in with Google — no new accounts</div>
+        <div class="m-sub">Works on any device, no install</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SLIDE 7 — CTA ── -->
+  <div class="slide" id="s7">
+    <div class="tag">Pricing</div>
+    <h2>Start free.<br><span class="gradient">Scale with your program.</span></h2>
+    <div class="tiers">
+      <div class="tier">
+        <h3>Pilot</h3>
+        <div class="price">Free <span>/ semester</span></div>
+        <p style="font-size:13px;color:var(--dim);">For career centers ready to trial with a cohort</p>
+        <ul>
+          <li>Up to 50 student accounts</li>
+          <li>Full AI analysis + scoring</li>
+          <li>PDF &amp; DOCX export</li>
+          <li>Email support</li>
+        </ul>
+        <button class="cta-btn">Start Pilot</button>
+      </div>
+      <div class="tier featured">
+        <div class="featured-badge">Most Popular</div>
+        <h3>Career Center</h3>
+        <div class="price">$2 <span>/ student / month</span></div>
+        <p style="font-size:13px;color:var(--dim);">For programs that want cohort dashboards + advisor tools</p>
+        <ul>
+          <li>Unlimited students</li>
+          <li>Cohort analytics dashboard</li>
+          <li>Advisor multi-student view</li>
+          <li>Batch upload &amp; bulk export</li>
+          <li>Priority support + onboarding</li>
+        </ul>
+        <button class="cta-btn">Get a Demo</button>
+      </div>
+      <div class="tier">
+        <h3>Enterprise</h3>
+        <div class="price">Custom <span>/ year</span></div>
+        <p style="font-size:13px;color:var(--dim);">For multi-college systems or white-label deployments</p>
+        <ul>
+          <li>SSO / LMS integration</li>
+          <li>Custom scoring rubric</li>
+          <li>FERPA compliance review</li>
+          <li>Dedicated SLA + support</li>
+        </ul>
+        <button class="cta-btn">Contact Us</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /deck -->
+
+<!-- ── NAV ── -->
+<nav class="nav">
+  <button id="prev" title="Previous">←</button>
+  <div class="dots" id="dots"></div>
+  <button id="next" title="Next">→</button>
+  <span class="slide-label" id="counter">1 / 7</span>
+</nav>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const dotsEl = document.getElementById('dots');
+  const counter = document.getElementById('counter');
+  let cur = 0;
+
+  // build dots
+  slides.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    d.addEventListener('click', () => go(i));
+    dotsEl.appendChild(d);
+  });
+
+  function go(n) {
+    slides[cur].classList.remove('active');
+    dotsEl.children[cur].classList.remove('active');
+    cur = (n + slides.length) % slides.length;
+    slides[cur].classList.add('active');
+    dotsEl.children[cur].classList.add('active');
+    counter.textContent = `${cur + 1} / ${slides.length}`;
+  }
+
+  document.getElementById('prev').addEventListener('click', () => go(cur - 1));
+  document.getElementById('next').addEventListener('click', () => go(cur + 1));
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') go(cur + 1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')                     go(cur - 1);
+  });
+</script>
+</body>
+</html>
