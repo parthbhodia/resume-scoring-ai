@@ -105,19 +105,31 @@ except ImportError:
     from profile_parser import parse_profile_text  # type: ignore
 try:
     from resume_gui.resume_extraction import (
+        DEFAULT_SECTION_ORDER,
+        ExtractionManifest,
         faithful_extract_prompt,
+        infer_section_order_from_profile,
         inject_section_line_breaks,
+        pop_manifest_from_llm_raw,
         profile_section_inventory,
-        tailor_extract_prompt,
+        ProfileSectionInventory,
+        tailor_doc_prompt,
         validate_extraction_against_inventory,
+        validate_manifest_against_doc,
     )
 except ImportError:
     from resume_extraction import (  # type: ignore
+        DEFAULT_SECTION_ORDER,
+        ExtractionManifest,
         faithful_extract_prompt,
+        infer_section_order_from_profile,
         inject_section_line_breaks,
+        pop_manifest_from_llm_raw,
         profile_section_inventory,
-        tailor_extract_prompt,
+        ProfileSectionInventory,
+        tailor_doc_prompt,
         validate_extraction_against_inventory,
+        validate_manifest_against_doc,
     )
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
@@ -1186,34 +1198,121 @@ def _structured_tailor_diff_and_rationales(
     return diff_lines, adds, removes, rationales
 
 
-def _llm_extract_and_tailor(
-    candidate_profile: str,
+def _llm_tailor_doc_for_jd(
+    doc: ResumeDocModel,
     jd: str,
     role: str,
     company: str,
-) -> Optional[ResumeDocModel]:
-    """Use an LLM to extract structured data from raw resume text AND tailor it to the JD.
+) -> ResumeDocModel:
+    """Second pass: JD-tailor summary and experience bullets only (structure unchanged)."""
+    jd_snippet = (jd or "")[:3000].strip()
+    if not jd_snippet or not doc.experience:
+        return doc
+    prompt = tailor_doc_prompt(doc, jd_snippet, role, company)
+    try:
+        raw = _llm_json_call(prompt)
+        if not raw or not isinstance(raw, dict):
+            return doc
+        summary = _clean_model_text(str(raw.get("summary") or ""))
+        if summary:
+            doc.summary = summary
+        exp_in = raw.get("experience")
+        if isinstance(exp_in, list) and len(exp_in) == len(doc.experience):
+            for i, patch in enumerate(exp_in):
+                if not isinstance(patch, dict):
+                    continue
+                bullets = [
+                    _clean_model_text(str(b))
+                    for b in (patch.get("bullets") or [])
+                    if _clean_model_text(str(b))
+                ]
+                if bullets:
+                    doc.experience[i].bullets = bullets
+        return doc
+    except Exception as exc:
+        logger.warning("LLM tailor-doc second pass failed: %s", exc)
+        return doc
 
-    Returns None on failure so the caller can fall back to the regex parser.
-    """
+
+def _structured_doc_for_generate(
+    candidate_profile: Optional[str],
+    jd: str,
+    role: str,
+    company: str,
+    *,
+    use_conservative_tailor: bool,
+    base_tex: Optional[str] = None,
+) -> ResumeDocModel:
+    """Faithful extract first, optional JD tailor second, then profile backfill + section order."""
     profile_norm = inject_section_line_breaks((candidate_profile or "")[:8000])
     inv = profile_section_inventory(profile_norm)
-    jd_snippet = (jd or "")[:3000].strip()
-    profile_snippet = profile_norm[:6000].strip()
+    section_order = infer_section_order_from_profile(profile_norm)
 
-    prompt = tailor_extract_prompt(profile_snippet, jd_snippet, role, company, inv)
+    doc: Optional[ResumeDocModel] = None
+    manifest: Optional[ExtractionManifest] = None
+
+    if use_conservative_tailor and base_tex:
+        parsed = parse_resume_tex(base_tex)
+        doc = _resume_doc_from_parsed(parsed)
+    elif use_conservative_tailor and profile_norm:
+        doc = _resume_doc_from_profile_text(profile_norm, role, company)
+    elif profile_norm:
+        doc, manifest = _llm_extract_with_manifest(profile_norm)
+        if doc is None:
+            logger.warning("Faithful LLM extract failed — falling back to regex profile parse")
+            doc = _resume_doc_from_profile_text(profile_norm, role, company)
+        elif jd.strip() and not use_conservative_tailor:
+            doc = _llm_tailor_doc_for_jd(doc, jd, role, company)
+
+    if doc is None and profile_norm:
+        doc = _resume_doc_from_profile_text(profile_norm, role, company)
+    if doc is None and base_tex:
+        parsed = parse_resume_tex(base_tex)
+        doc = _resume_doc_from_parsed(parsed)
+    if doc is None:
+        doc = _resume_doc_from_profile_text(profile_norm or "", role, company)
+
+    _finalize_structured_doc(doc, profile_norm, inv, manifest, role, company)
+    doc.section_order = section_order or list(DEFAULT_SECTION_ORDER)
+    return doc
+
+
+def _llm_extract_with_manifest(text: str) -> tuple[Optional[ResumeDocModel], Optional[ExtractionManifest]]:
+    """Faithful structured extract; returns (doc, manifest) for validation/backfill."""
+    profile_norm = inject_section_line_breaks((text or "")[:8000])
+    profile_snippet = profile_norm[:6000].strip()
+    if not profile_snippet:
+        return None, None
+
+    inv = profile_section_inventory(profile_norm)
+    prompt = faithful_extract_prompt(profile_snippet, inv)
 
     try:
         raw = _llm_json_call(prompt)
         if not raw or not isinstance(raw, dict):
-            return None
-        doc = _build_resume_doc_from_llm_raw(raw, role=role, company=company)
-        for w in validate_extraction_against_inventory(doc, inv):
-            logger.warning("LLM extract+tailor completeness: %s", w)
-        return doc
+            return None, None
+        body, manifest = pop_manifest_from_llm_raw(raw)
+        doc = _build_resume_doc_from_llm_raw(body)
+        return doc, manifest
     except Exception as exc:
-        logger.warning(f"LLM extract+tailor failed: {exc}")
-        return None
+        logger.warning("LLM faithful extract failed: %s", exc)
+        return None, None
+
+
+def _finalize_structured_doc(
+    doc: ResumeDocModel,
+    profile_norm: str,
+    inv: ProfileSectionInventory,
+    manifest: Optional[ExtractionManifest],
+    role: str,
+    company: str,
+) -> None:
+    """Manifest + inventory checks, then regex profile backfill for any dropped sections."""
+    for w in validate_extraction_against_inventory(doc, inv):
+        logger.warning("Structured extract completeness: %s", w)
+    for w in validate_manifest_against_doc(doc, manifest):
+        logger.warning("Structured extract manifest mismatch: %s", w)
+    _preserve_structured_sections_from_profile(doc, profile_norm, role, company)
 
 
 def _llm_extract(text: str) -> "Optional[ResumeDocModel]":
@@ -1227,20 +1326,13 @@ def _llm_extract(text: str) -> "Optional[ResumeDocModel]":
     if not profile_snippet:
         return None
 
-    inv = profile_section_inventory(profile_norm)
-    prompt = faithful_extract_prompt(profile_snippet, inv)
-
-    try:
-        raw = _llm_json_call(prompt)
-        if not raw or not isinstance(raw, dict):
-            return None
-        doc = _build_resume_doc_from_llm_raw(raw)
-        for w in validate_extraction_against_inventory(doc, inv):
-            logger.warning("LLM faithful extract completeness: %s", w)
-        return doc
-    except Exception as exc:
-        logger.warning(f"LLM extract failed: {exc}")
+    doc, manifest = _llm_extract_with_manifest(text)
+    if doc is None:
         return None
+    inv = profile_section_inventory(profile_norm)
+    _finalize_structured_doc(doc, profile_norm, inv, manifest, "", "")
+    doc.section_order = infer_section_order_from_profile(profile_norm)
+    return doc
 
 
 def _resume_doc_to_dict(doc: "ResumeDocModel") -> dict:
@@ -1604,28 +1696,24 @@ async def api_generate_stream(request: Request):
                         "(post_suggestion_coach_run, no approved edits)"
                     )
 
-                doc = None
-                if use_conservative_tailor and base_tex:
-                    parsed = parse_resume_tex(base_tex)
-                    doc = _resume_doc_from_parsed(parsed)
-                elif use_conservative_tailor and candidate_profile:
-                    doc = _resume_doc_from_profile_text(candidate_profile, role, company)
-                elif candidate_profile and jd:
+                if candidate_profile and jd and not use_conservative_tailor:
                     asyncio.run_coroutine_threadsafe(queue.put({
                         "event": "status",
-                        "msg": "Tailoring resume content to job description…",
+                        "msg": "Extracting résumé sections faithfully…",
                     }), loop).result()
-                    doc = _llm_extract_and_tailor(candidate_profile, jd, role, company)
-                    if doc is None:
-                        logger.warning("LLM extraction failed — falling back to regex parser")
-                if doc is None and candidate_profile:
-                    doc = _resume_doc_from_profile_text(candidate_profile, role, company)
-                if doc is None and base_tex:
-                    parsed = parse_resume_tex(base_tex)
-                    doc = _resume_doc_from_parsed(parsed)
-                if doc is None:
-                    doc = _resume_doc_from_profile_text(candidate_profile, role, company)
-                _preserve_structured_sections_from_profile(doc, candidate_profile, role, company)
+                doc = _structured_doc_for_generate(
+                    candidate_profile,
+                    jd,
+                    role,
+                    company,
+                    use_conservative_tailor=use_conservative_tailor,
+                    base_tex=base_tex,
+                )
+                if candidate_profile and jd and not use_conservative_tailor:
+                    asyncio.run_coroutine_threadsafe(queue.put({
+                        "event": "status",
+                        "msg": "Tailoring summary and bullets to the job…",
+                    }), loop).result()
                 _apply_accepted_edits_to_doc(doc, accepted_suggestions if isinstance(accepted_suggestions, list) else None)
 
                 asyncio.run_coroutine_threadsafe(queue.put({
@@ -1922,7 +2010,7 @@ async def api_upload_resume(request: Request):
                 status_code=422,
             )
 
-        markdown_content = outcome.markdown
+        markdown_content = inject_section_line_breaks(outcome.markdown)
 
         def _pipeline_sync():
             return parse_upload_resume_full_pipeline(markdown_content)

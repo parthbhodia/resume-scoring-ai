@@ -86,7 +86,6 @@
 \color{text-grey}
 
 \begin{document}
-% Reduce widows/orphans in bullets (especially long items near page breaks).
 \widowpenalty=5000
 \clubpenalty=5000
 
@@ -96,13 +95,27 @@
     \\ \vspace{-3pt}
 \end{center}
 
-{% if doc.summary %}
+{% set section_order = doc.section_order if doc.section_order else ['summary', 'experience', 'education', 'skills', 'projects'] %}
+{% set projects_extra = [] %}
+{% set education_extra = [] %}
+{% set other = [] %}
+{% for sec in doc.extra_sections %}
+  {% set lname = sec[0]|lower %}
+  {% if lname in ['projects', 'project'] %}
+    {% set _ = projects_extra.append(sec) %}
+  {% elif lname == 'education' %}
+    {% set _ = education_extra.append(sec) %}
+  {% else %}
+    {% set _ = other.append(sec) %}
+  {% endif %}
+{% endfor %}
+
+{% for sec in section_order %}
+{% if sec == 'summary' and doc.summary %}
 \needspace{4\baselineskip}
 \section{SUMMARY}
 \small {{ doc.summary|latex }}
-{% endif %}
-
-{% if doc.experience|length %}
+{% elif sec == 'experience' and doc.experience|length %}
 \needspace{6\baselineskip}
 \section{EXPERIENCE}
 \resumeSubHeadingListStart
@@ -119,54 +132,7 @@
   \resumeItemListEnd
 {% endfor %}
 \resumeSubHeadingListEnd
-{% endif %}
-
-{% set projects_extra = [] %}
-{% set education_extra = [] %}
-{% set other = [] %}
-{% for sec in doc.extra_sections %}
-  {% set lname = sec[0]|lower %}
-  {% if lname in ['projects', 'project'] %}
-    {% set _ = projects_extra.append(sec) %}
-  {% elif lname == 'education' %}
-    {% set _ = education_extra.append(sec) %}
-  {% else %}
-    {% set _ = other.append(sec) %}
-  {% endif %}
-{% endfor %}
-
-{% if doc.projects|length %}
-\needspace{7\baselineskip}
-\section{PROJECTS}
-\resumeSubHeadingListStart
-{% for proj in doc.projects %}
-  {% if proj.name %}
-  \resumeProjectHeading{\textbf{ {{ proj.name|latex }} }}{}
-  {% endif %}
-  {% if proj.bullets|length %}
-  \resumeItemListStart
-  {% for b in proj.bullets %}
-    \resumeItem{ {{ b|latex }} }
-  {% endfor %}
-  \resumeItemListEnd
-  {% endif %}
-{% endfor %}
-\resumeSubHeadingListEnd
-{% elif projects_extra|length %}
-\needspace{7\baselineskip}
-\section{PROJECTS}
-\resumeSubHeadingListStart
-{% for sec in projects_extra %}
-  \resumeItemListStart
-  {% for b in sec[1] %}
-    \resumeItem{ {{ b|latex }} }
-  {% endfor %}
-  \resumeItemListEnd
-{% endfor %}
-\resumeSubHeadingListEnd
-{% endif %}
-
-{% if doc.education|length %}
+{% elif sec == 'education' and doc.education|length %}
 \needspace{6\baselineskip}
 \section{EDUCATION}
 \resumeSubHeadingListStart
@@ -187,7 +153,7 @@
 {% endif %}
 {% endfor %}
 \resumeSubHeadingListEnd
-{% elif education_extra|length %}
+{% elif sec == 'education' and education_extra|length %}
 \needspace{6\baselineskip}
 \section{EDUCATION}
 \resumeSubHeadingListStart
@@ -199,9 +165,36 @@
   \resumeItemListEnd
 {% endfor %}
 \resumeSubHeadingListEnd
-{% endif %}
-
-{% if doc.skills|length %}
+{% elif sec == 'projects' and doc.projects|length %}
+\needspace{7\baselineskip}
+\section{PROJECTS}
+\resumeSubHeadingListStart
+{% for proj in doc.projects %}
+  {% if proj.name %}
+  \resumeProjectHeading{\textbf{ {{ proj.name|latex }} }}{}
+  {% endif %}
+  {% if proj.bullets|length %}
+  \resumeItemListStart
+  {% for b in proj.bullets %}
+    \resumeItem{ {{ b|latex }} }
+  {% endfor %}
+  \resumeItemListEnd
+  {% endif %}
+{% endfor %}
+\resumeSubHeadingListEnd
+{% elif sec == 'projects' and projects_extra|length %}
+\needspace{7\baselineskip}
+\section{PROJECTS}
+\resumeSubHeadingListStart
+{% for sec in projects_extra %}
+  \resumeItemListStart
+  {% for b in sec[1] %}
+    \resumeItem{ {{ b|latex }} }
+  {% endfor %}
+  \resumeItemListEnd
+{% endfor %}
+\resumeSubHeadingListEnd
+{% elif sec == 'skills' and doc.skills|length %}
 \needspace{8\baselineskip}
 \section{SKILLS}
 \begin{itemize}[leftmargin=0in, label={}]
@@ -213,6 +206,7 @@
 }}
 \end{itemize}
 {% endif %}
+{% endfor %}
 
 {% if other|length %}
 {% for sec in other %}

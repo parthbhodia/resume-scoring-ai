@@ -11,9 +11,24 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from renderers.latex_renderer import EducationItem, ExperienceItem, ProjectItem, ResumeDocModel
+    from renderers.latex_renderer import ResumeDocModel
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SECTION_ORDER = ["summary", "experience", "education", "skills", "projects"]
+
+_CANONICAL_SECTION_HEADERS: dict[str, tuple[str, ...]] = {
+    "summary": ("summary", "profile", "objective"),
+    "education": ("education", "academic background"),
+    "skills": ("skills", "technical skills", "core competencies"),
+    "experience": (
+        "experience",
+        "work experience",
+        "professional experience",
+        "employment",
+    ),
+    "projects": ("projects", "project"),
+}
 
 # All-caps headers glued to prior lowercase text (e.g. "analystSUMMARY") — case-sensitive to avoid
 # matching "experience" inside bullets.
@@ -40,6 +55,23 @@ _EXPERIENCE_SIGNAL_RE = re.compile(
     r"\s*[–—\-]\s*(?:present|now|current|\w+\s+\d{4}|\d{4})",
     re.IGNORECASE,
 )
+
+
+@dataclass
+class ExtractionManifest:
+    """LLM self-report of what it saw in the source — used to catch dropped sections."""
+
+    sections_seen: list[str] = field(default_factory=list)
+    education_count: int = 0
+    experience_job_count: int = 0
+    skills_present: bool = False
+    projects_present: bool = False
+
+    def expects_education(self) -> bool:
+        return "education" in self.sections_seen or self.education_count > 0
+
+    def expects_experience(self) -> bool:
+        return "experience" in self.sections_seen or self.experience_job_count > 0
 
 
 @dataclass
@@ -73,6 +105,30 @@ def inject_section_line_breaks(text: str) -> str:
     t = _GLUED_EXPERIENCE_HEADER_RE.sub(r"\n\1", t)
     t = re.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
+
+
+def infer_section_order_from_profile(profile_text: str) -> list[str]:
+    """Preserve source PDF section order (e.g. education before experience when present)."""
+    text = inject_section_line_breaks(profile_text or "")
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    found: list[tuple[int, str]] = []
+    for idx, ln in enumerate(lines):
+        low = re.sub(r"[^a-z ]", "", ln.lower()).strip()
+        for key, aliases in _CANONICAL_SECTION_HEADERS.items():
+            if low in aliases:
+                found.append((idx, key))
+                break
+    found.sort(key=lambda x: x[0])
+    order: list[str] = []
+    seen: set[str] = set()
+    for _, key in found:
+        if key not in seen:
+            order.append(key)
+            seen.add(key)
+    for key in DEFAULT_SECTION_ORDER:
+        if key not in seen:
+            order.append(key)
+    return order
 
 
 def profile_section_inventory(profile_text: str) -> ProfileSectionInventory:
@@ -139,6 +195,7 @@ def extraction_guard_prompt_block(inv: ProfileSectionInventory) -> str:
             "- Never return empty \"education\" if the source mentions a school, degree, or university.\n"
             "- Never return empty \"experience\" if the source lists employers or date ranges.\n"
             "- Map each degree to education[] with institution, degree, dates, and details[] for GPA/coursework lines.\n"
+            "- Fill extraction_manifest honestly (sections you saw vs counts you emitted).\n"
         )
 
     lines = [
@@ -169,10 +226,20 @@ def extraction_guard_prompt_block(inv: ProfileSectionInventory) -> str:
         "- Contact: copy email, phone, LinkedIn, GitHub verbatim when present.",
         "- If one education line mixes degree + dates + school (e.g. \"MS Data Science 2022-2024 | City | University\"), "
         "split into institution, degree, dates, location fields — do not drop the entry.",
-        "- Self-check before output: every section visible in the source must appear in the JSON.",
+        "- extraction_manifest: report sections_seen and counts BEFORE finalizing JSON; counts must match arrays.",
+        "- Self-check: every section visible in the source must appear in the JSON.",
     ])
     return "\n".join(lines) + "\n"
 
+
+_MANIFEST_SCHEMA = """
+  "extraction_manifest": {
+    "sections_seen": ["summary", "education", "skills", "experience", "projects"],
+    "education_count": 0,
+    "experience_job_count": 0,
+    "skills_present": true,
+    "projects_present": false
+  }"""
 
 _EXTRACT_SCHEMA = """{
   "full_name": "string (required)",
@@ -198,30 +265,14 @@ _EXTRACT_SCHEMA = """{
     "dates": "string",
     "location": "string",
     "details": ["string — GPA, coursework, honors"]
-  }]
-}"""
+  }],
+""" + _MANIFEST_SCHEMA + "\n}"
 
-_EXTRACT_SCHEMA_FAITHFUL = _EXTRACT_SCHEMA.replace(
-    "string (required)",
-    "string",
-).replace(
-    '"bullets": ["string"]',
-    '"bullets": ["string — copy EXACTLY from source, no rewriting"]',
-).replace(
-    '"summary": "string"',
-    '"summary": "string — copy EXACTLY from source"',
+_EXTRACT_SCHEMA_FAITHFUL = (
+    _EXTRACT_SCHEMA.replace("string (required)", "string")
+    .replace('"bullets": ["string"]', '"bullets": ["string — copy EXACTLY from source, no rewriting"]')
+    .replace('"summary": "string"', '"summary": "string — copy EXACTLY from source"')
 )
-
-_TAILOR_INSTRUCTIONS = """Instructions:
-- FIRST pass: list mentally every section in the source (contact, summary, skills, experience, education, projects, certifications).
-- Extract ALL of them into JSON — empty arrays only when that section is truly absent from the source text.
-- Rewrite the professional summary (2-3 sentences) tailored to this specific JD.
-- For each experience bullet: keep the core fact but strengthen verbs; add metrics only if already in source. Do NOT fabricate employers, degrees, or numbers.
-- Preserve all dates exactly as written (e.g. "July 2020 – Present").
-- education[]: REQUIRED when source mentions any university, college, degree, or "EDUCATION" heading. Split combined lines into institution + degree + dates.
-- skills[]: group by category; include every skill line from the source.
-- projects[]: include every project; use [] only if none exist.
-- Output ONLY valid JSON matching the schema (no markdown fences)."""
 
 _FAITHFUL_INSTRUCTIONS = """Instructions:
 - FIRST pass: identify every section header and block in the source résumé.
@@ -229,25 +280,9 @@ _FAITHFUL_INSTRUCTIONS = """Instructions:
 - Bullets and summary must match source wording exactly (minor whitespace only).
 - education[]: REQUIRED when source has EDUCATION or any school/degree — never return [] if a degree is mentioned.
 - experience[]: one object per job; never merge multiple employers into one entry.
+- extraction_manifest.sections_seen must list every section header found (use keys: summary, education, skills, experience, projects).
+- extraction_manifest.education_count must equal len(education[]); experience_job_count must equal len(experience[]).
 - Output ONLY valid JSON matching the schema (no markdown fences)."""
-
-
-def tailor_extract_prompt(
-    profile_snippet: str,
-    jd_snippet: str,
-    role: str,
-    company: str,
-    inv: ProfileSectionInventory,
-) -> str:
-    return (
-        f"You are an expert resume writer. Extract ALL résumé content into structured JSON and tailor for the role.\n\n"
-        f"TARGET ROLE: {role} at {company}\n\n"
-        f"JOB DESCRIPTION (first 3000 chars):\n{jd_snippet}\n\n"
-        f"CANDIDATE RÉSUMÉ TEXT:\n{profile_snippet}\n"
-        f"{extraction_guard_prompt_block(inv)}\n"
-        f"{_TAILOR_INSTRUCTIONS}\n\n"
-        f"{_EXTRACT_SCHEMA}"
-    )
 
 
 def faithful_extract_prompt(profile_snippet: str, inv: ProfileSectionInventory) -> str:
@@ -259,6 +294,84 @@ def faithful_extract_prompt(profile_snippet: str, inv: ProfileSectionInventory) 
         f"{_FAITHFUL_INSTRUCTIONS}\n\n"
         f"{_EXTRACT_SCHEMA_FAITHFUL}"
     )
+
+
+def tailor_doc_prompt(
+    doc: "ResumeDocModel",
+    jd_snippet: str,
+    role: str,
+    company: str,
+) -> str:
+    """Second-pass prompt: tailor summary + bullets only; structure is fixed."""
+    import json
+
+    n_jobs = len(doc.experience)
+    base = {
+        "summary": doc.summary,
+        "experience": [
+            {
+                "company": e.company,
+                "role": e.role,
+                "dates": e.dates,
+                "location": e.location,
+                "bullets": list(e.bullets),
+            }
+            for e in doc.experience
+        ],
+    }
+    return (
+        "You tailor an ALREADY-STRUCTURED résumé JSON for a specific job.\n\n"
+        f"TARGET ROLE: {role} at {company}\n\n"
+        f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
+        f"CURRENT STRUCTURED CONTENT:\n{json.dumps(base, ensure_ascii=False)[:5500]}\n\n"
+        "RULES (strict):\n"
+        f"- Return JSON with ONLY \"summary\" and \"experience\" keys.\n"
+        f"- experience[] MUST contain exactly {n_jobs} entries in the SAME order.\n"
+        "- Each entry MUST keep the same company, role, dates, and location strings — only rewrite bullets[].\n"
+        "- Do NOT add, remove, or merge jobs. Do NOT fabricate employers, degrees, or metrics.\n"
+        "- summary: 2-3 sentences tailored to the JD using facts already in the résumé.\n"
+        "- Do NOT output education, skills, or projects — those are preserved separately.\n"
+        "- Output ONLY valid JSON (no markdown fences):\n"
+        '{"summary": "...", "experience": [{"company": "...", "role": "...", "dates": "...", '
+        '"location": "...", "bullets": ["..."]}]}'
+    )
+
+
+def sanitize_extraction_manifest(raw: Any) -> Optional[ExtractionManifest]:
+    if not isinstance(raw, dict):
+        return None
+    seen_raw = raw.get("sections_seen")
+    sections_seen: list[str] = []
+    if isinstance(seen_raw, list):
+        allowed = set(_CANONICAL_SECTION_HEADERS.keys())
+        for s in seen_raw:
+            key = str(s or "").strip().lower()
+            if key in allowed and key not in sections_seen:
+                sections_seen.append(key)
+    try:
+        edu_n = int(raw.get("education_count") or 0)
+    except (TypeError, ValueError):
+        edu_n = 0
+    try:
+        exp_n = int(raw.get("experience_job_count") or 0)
+    except (TypeError, ValueError):
+        exp_n = 0
+    return ExtractionManifest(
+        sections_seen=sections_seen,
+        education_count=max(0, edu_n),
+        experience_job_count=max(0, exp_n),
+        skills_present=bool(raw.get("skills_present")),
+        projects_present=bool(raw.get("projects_present")),
+    )
+
+
+def pop_manifest_from_llm_raw(raw: dict) -> tuple[dict, Optional[ExtractionManifest]]:
+    """Remove extraction_manifest from LLM payload before building ResumeDocModel."""
+    if not isinstance(raw, dict):
+        return raw, None
+    copy = dict(raw)
+    manifest = sanitize_extraction_manifest(copy.pop("extraction_manifest", None))
+    return copy, manifest
 
 
 def validate_extraction_against_inventory(
@@ -280,4 +393,31 @@ def validate_extraction_against_inventory(
             warnings.append(
                 f"experience has {len(doc.experience)} job(s) but source suggests ~{inv.estimated_job_blocks}"
             )
+    return warnings
+
+
+def validate_manifest_against_doc(
+    doc: "ResumeDocModel",
+    manifest: Optional[ExtractionManifest],
+) -> list[str]:
+    if not manifest:
+        return []
+    warnings: list[str] = []
+    if manifest.expects_education() and not doc.education:
+        warnings.append("manifest claims education but education[] is empty")
+    if manifest.education_count > 0 and len(doc.education) < manifest.education_count:
+        warnings.append(
+            f"manifest education_count={manifest.education_count} but got {len(doc.education)} row(s)"
+        )
+    if manifest.expects_experience() and not doc.experience:
+        warnings.append("manifest claims experience but experience[] is empty")
+    if manifest.experience_job_count > 0 and len(doc.experience) < manifest.experience_job_count:
+        warnings.append(
+            f"manifest experience_job_count={manifest.experience_job_count} "
+            f"but got {len(doc.experience)} job(s)"
+        )
+    if manifest.skills_present and not doc.skills:
+        warnings.append("manifest claims skills but skills[] is empty")
+    if manifest.projects_present and not doc.projects:
+        warnings.append("manifest claims projects but projects[] is empty")
     return warnings

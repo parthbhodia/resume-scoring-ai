@@ -66,6 +66,10 @@ class ResumeDocModel:
     education: list[EducationItem] = field(default_factory=list)
     projects: list[ProjectItem] = field(default_factory=list)
     extra_sections: list[tuple[str, list[str]]] = field(default_factory=list)
+    # PDF section order (e.g. education before experience) — used by Harshibar template.
+    section_order: list[str] = field(
+        default_factory=lambda: ["summary", "experience", "education", "skills", "projects"]
+    )
 
 
 class JinjaLatexRenderer:

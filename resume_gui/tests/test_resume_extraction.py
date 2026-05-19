@@ -8,9 +8,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from resume_extraction import (  # noqa: E402
     inject_section_line_breaks,
+    infer_section_order_from_profile,
     profile_section_inventory,
     extraction_guard_prompt_block,
+    sanitize_extraction_manifest,
+    validate_manifest_against_doc,
 )
+from dataclasses import dataclass, field  # noqa: E402
+
+
+@dataclass
+class _DocStub:
+    education: list = field(default_factory=list)
+    experience: list = field(default_factory=list)
+    skills: list = field(default_factory=list)
+    projects: list = field(default_factory=list)
 
 
 def test_inject_section_breaks_glued_headers():
@@ -19,6 +31,37 @@ def test_inject_section_breaks_glued_headers():
     assert "\nSUMMARY" in out or "SUMMARY" in out.split("\n")
     assert "\nEDUCATION" in out or out.index("EDUCATION") > 0
     assert "\nSKILLS" in out or "SKILLS" in out
+
+
+def test_infer_section_order_education_before_experience():
+    text = """
+Name
+SUMMARY
+Line one
+EDUCATION
+Master of Science
+SKILLS
+Python
+EXPERIENCE
+Company A
+Jan 2020 - Present
+"""
+    order = infer_section_order_from_profile(text)
+    assert order.index("education") < order.index("experience")
+    assert order.index("summary") < order.index("education")
+
+
+def test_manifest_mismatch_detects_missing_education():
+    manifest = sanitize_extraction_manifest({
+        "sections_seen": ["summary", "education", "experience"],
+        "education_count": 1,
+        "experience_job_count": 1,
+        "skills_present": False,
+        "projects_present": False,
+    })
+    doc = _DocStub()
+    warnings = validate_manifest_against_doc(doc, manifest)
+    assert any("education" in w for w in warnings)
 
 
 def test_inventory_detects_education_before_skills():
