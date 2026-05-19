@@ -4007,6 +4007,107 @@ async def api_cohort_stats(request: Request):
     })
 
 
+
+async def api_student_detail(request: Request):
+    """GET /api/student-detail?student_id=<uuid> — full analysis history + resume list for one student.
+
+    Advisor-only: requires X-User-Email header matching ADVISOR_EMAILS env var.
+    """
+    import os as _os
+    advisor_emails = {e.strip().lower() for e in _os.environ.get("ADVISOR_EMAILS", "").split(",") if e.strip()}
+    user_email     = (request.headers.get("x-user-email") or "").strip().lower()
+    if not advisor_emails or user_email not in advisor_emails:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+
+    student_id = (request.query_params.get("student_id") or "").strip()
+    if not student_id:
+        return JSONResponse({"error": "student_id required"}, status_code=400)
+
+    analyses_table = _supabase_table("resume_analyses")
+    resumes_table  = _supabase_table("resumes")
+    if analyses_table is None:
+        return JSONResponse({"error": "storage unavailable"}, status_code=503)
+
+    try:
+        a_resp = (
+            analyses_table
+            .select("id,user_email,label,score,result,created_at")
+            .eq("user_id", student_id)
+            .order("created_at", desc=False)
+            .limit(100)
+            .execute()
+        )
+        analyses = a_resp.data or []
+    except Exception as exc:
+        logger.warning("student_detail analyses query failed: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    resumes: list[dict] = []
+    if resumes_table is not None:
+        try:
+            r_resp = (
+                resumes_table
+                .select("folder,company,role,score,created_at")
+                .eq("user_id", student_id)
+                .order("created_at", desc=True)
+                .limit(50)
+                .execute()
+            )
+            resumes = r_resp.data or []
+        except Exception as exc:
+            logger.warning("student_detail resumes query failed: %s", exc)
+
+    # Build score history and extract latest analysis details
+    score_history = [
+        {"date": r.get("created_at"), "score": r.get("score"), "label": r.get("label")}
+        for r in analyses
+    ]
+    latest = analyses[-1] if analyses else None
+    latest_result = (latest or {}).get("result") or {}
+
+    # Compute per-student averages across all analyses
+    dim_keys = ["readability", "atsCompatibility", "jobMatch", "achievementQuality",
+                "quantification", "sectionStructure", "languageQuality", "technicalBranding"]
+
+    def _avg(vals):
+        clean = [v for v in vals if isinstance(v, (int, float))]
+        return round(sum(clean) / len(clean), 1) if clean else None
+
+    dim_avgs = {}
+    for dk in dim_keys:
+        vals = [(r.get("result") or {}).get("categoryScores", {}).get(dk) for r in analyses]
+        dim_avgs[dk] = _avg(vals)
+
+    # Issue frequency across all this student's analyses
+    from collections import Counter as _Counter
+    issue_counter: _Counter = _Counter()
+    for r in analyses:
+        for issue in ((r.get("result") or {}).get("topIssues") or []):
+            title = (issue.get("title") or issue.get("issue")) if isinstance(issue, dict) else str(issue)
+            if title:
+                issue_counter[title.strip()] += 1
+    top_issues = [{"issue": k, "count": v} for k, v in issue_counter.most_common(8)]
+
+    first_score  = analyses[0].get("score")  if analyses else None
+    latest_score = analyses[-1].get("score") if analyses else None
+    delta = (latest_score - first_score) if (first_score is not None and latest_score is not None) else None
+
+    return JSONResponse({
+        "student_id":     student_id,
+        "user_email":     (analyses[0].get("user_email") if analyses else None),
+        "analysis_count": len(analyses),
+        "first_score":    first_score,
+        "latest_score":   latest_score,
+        "score_delta":    delta,
+        "score_history":  score_history,
+        "dim_avgs":       dim_avgs,
+        "top_issues":     top_issues,
+        "latest_strengths":     latest_result.get("topStrengths") or [],
+        "latest_category_scores": latest_result.get("categoryScores") or {},
+        "resumes":        resumes,
+    })
+
+
 async def api_analyze_folder(request: Request):
     """POST /api/analyze-folder/{folder} — run comprehensive analysis on a stored resume."""
     folder = request.path_params.get("folder", "").strip()
@@ -4895,6 +4996,7 @@ routes = [
     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
     Route("/api/my-analyses",             api_my_analyses,     methods=["GET"]),
     Route("/api/cohort-stats",            api_cohort_stats,    methods=["GET"]),
+    Route("/api/student-detail",          api_student_detail,  methods=["GET"]),
     Route("/api/export-docx",             api_export_docx,     methods=["POST"]),
     Route("/api/builder-export-docx",     api_builder_export_docx, methods=["POST"]),
     Route("/api/analyze-export-pdf",      api_analyze_export_pdf, methods=["POST"]),
