@@ -2884,6 +2884,24 @@ def _prose_signature(s: str) -> str:
     return re.sub(r"\s+", " ", s.strip())
 
 
+def _looks_like_jd_gap_coaching(text: str) -> bool:
+    """Second-person gap notes belong in ratings.gaps, not the change log."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    markers = (
+        "you lack",
+        "you haven't",
+        "you have not",
+        "your resume lacks",
+        "prepare to discuss",
+        "be ready to discuss",
+        "consider highlighting",
+        "gap:",
+    )
+    return any(m in t for m in markers)
+
+
 def _sanitize_change_rationales(raw: Optional[List[Dict]]) -> List[Dict]:
     """Drop invalid entries and rewrote rows where plain before/after are identical."""
     out: List[Dict] = []
@@ -2896,18 +2914,20 @@ def _sanitize_change_rationales(raw: Optional[List[Dict]]) -> List[Dict]:
         why = (c.get("why") or "").strip()
         if t == "added":
             txt = (c.get("text") or "").strip()
-            if not txt:
+            if not txt or _looks_like_jd_gap_coaching(txt):
                 continue
             out.append({"type": "added", "text": txt, "why": why or "Added for JD alignment."})
         elif t == "removed":
             txt = (c.get("text") or "").strip()
-            if not txt:
+            if not txt or _looks_like_jd_gap_coaching(txt):
                 continue
             out.append({"type": "removed", "text": txt, "why": why or "Trimmed for focus."})
         else:
             prev = (c.get("previous") or "").strip()
             txt = (c.get("text") or "").strip()
             if not prev or not txt:
+                continue
+            if _looks_like_jd_gap_coaching(txt) or _looks_like_jd_gap_coaching(prev):
                 continue
             if _prose_signature(prev) == _prose_signature(txt):
                 continue
@@ -2930,6 +2950,8 @@ def _explain_changes(client, model: str, old_body: str, new_body: str, jd_snippe
         "• Only report MEANINGFUL content changes — ignore whitespace, LaTeX commands, punctuation, and formatting-only edits.\n"
         "• Strip all LaTeX commands from the text you output (no \\resumeItem{}, \\textbf{}, etc). Return clean prose.\n"
         "• Every bullet must trace to actual content in OLD or NEW — do not invent.\n"
+        "• Do NOT output interview coaching, gap analysis, or second-person advice (e.g. 'You lack…', 'prepare to discuss…'). "
+        "Only quote résumé lines/bullets that appear in OLD or NEW.\n"
         "• For type \"rewrote\": NEVER emit an entry if the old and new plain prose are the same — omit it entirely.\n"
         "• Rationale ('why') must be ONE concise sentence (max 20 words) tied to the JOB DESCRIPTION — "
         "e.g. 'JD emphasizes distributed systems, so the bullet now leads with gRPC + Kubernetes experience.'\n"

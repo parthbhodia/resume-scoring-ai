@@ -143,11 +143,12 @@ export default function DiffView({
           previous: r.previous ? latexToText(r.previous) : undefined,
           why: r.why,
         }))
+        .filter(c => c.type === "added" || c.type === "removed" || c.type === "rewrote")
         .filter(c => {
           if (c.type === "rewrote" && c.previous) {
             return proseSig(c.text) !== proseSig(c.previous);
           }
-          return true;
+          return Boolean(c.text?.trim());
         });
       if (fromRat.length > 0) return fromRat;
     }

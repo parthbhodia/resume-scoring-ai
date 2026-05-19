@@ -76,6 +76,15 @@ def normalize_profile_text(raw: Optional[str]) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("`n", "\n")
     text = text.replace("\\n", "\n")
+    try:
+        try:
+            from resume_gui.resume_extraction import inject_section_line_breaks
+        except ImportError:
+            from resume_extraction import inject_section_line_breaks  # type: ignore
+
+        text = inject_section_line_breaks(text)
+    except Exception:
+        pass
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -207,9 +216,12 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
     )
 
     out.education_lines = _collect_between(
-        {"education"},
-        {"projects", "experience", "professional experience", "work experience", "technical skills", "skills"},
-        12,
+        {"education", "academic background"},
+        {
+            "projects", "project", "experience", "professional experience", "work experience",
+            "technical skills", "skills", "certifications", "certification", "awards", "summary",
+        },
+        16,
     )
 
     # Parse multi-role experience entries using paragraph-based splitting.

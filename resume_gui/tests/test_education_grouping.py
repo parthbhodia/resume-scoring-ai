@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app import _education_item_from_combined_line  # noqa: E402
 
 
 def _clean_model_text(value: str) -> str:
@@ -133,6 +138,19 @@ def _education_items_from_flat_lines(lines: list[str]) -> list[EducationItem]:
 
     flush()
     return items
+
+
+def test_combined_degree_dates_pipe_school_line():
+    line = (
+        "Master of professional studies in Data Science Aug 2022 - May 2024 | "
+        "Baltimore, Maryland University of Maryland, Baltimore County"
+    )
+    item = _education_item_from_combined_line(line)
+    assert item is not None
+    assert "Master" in item.degree
+    assert "University of Maryland" in item.institution
+    assert "2022" in item.dates
+    assert "Baltimore" in item.location
 
 
 def test_groups_degree_school_and_bullets():

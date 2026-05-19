@@ -222,6 +222,7 @@ type BuilderSessionV1 = {
   studioHandoff: boolean;
   suggestions: Suggestion[] | null;
   suggestSummary: string;
+  strategicTips: string[];
   acceptedSuggestionIds: string[];
   rejectedSuggestionIds: string[];
   result: GenerationResult | null;
@@ -230,6 +231,14 @@ type BuilderSessionV1 = {
   suggestResearchQueries: string[];
   suggestResearchSources: { title: string | null; url: string }[];
 };
+
+function parseStrategicTips(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((t): t is string => typeof t === "string" && t.trim().length >= 24)
+    .map(t => t.trim())
+    .slice(0, 4);
+}
 
 function isSuggestionRecord(x: unknown): x is Suggestion {
   if (!x || typeof x !== "object") return false;
@@ -300,6 +309,9 @@ function parseBuilderSessionFromDraft(d: Record<string, unknown>): BuilderSessio
     studioHandoff: o.studioHandoff === true,
     suggestions,
     suggestSummary: typeof o.suggestSummary === "string" ? o.suggestSummary : "",
+    strategicTips: Array.isArray(o.strategicTips)
+      ? o.strategicTips.filter((t): t is string => typeof t === "string" && t.trim().length > 0).slice(0, 4)
+      : [],
     acceptedSuggestionIds,
     rejectedSuggestionIds,
     result: parseResultFromDraft(o.result),
@@ -388,6 +400,7 @@ export default function ResumeBuilder({
   // ── Suggestions state (via useSuggestionsStore) ────────────────────────────
   const suggestions        = useSuggestionsStore((s) => s.suggestions);
   const suggestSummary     = useSuggestionsStore((s) => s.summary);
+  const strategicTips      = useSuggestionsStore((s) => s.strategicTips);
   const suggestLoading     = useSuggestionsStore((s) => s.loading);
   const suggestCoachStreamText = useSuggestionsStore((s) => s.streamText);
   const suggestError       = useSuggestionsStore((s) => s.error);
@@ -506,6 +519,7 @@ export default function ResumeBuilder({
       studioHandoff,
       suggestions,
       suggestSummary,
+      strategicTips,
       acceptedSuggestionIds: [...acceptedIds],
       rejectedSuggestionIds: [...rejectedIds],
       result,
@@ -520,6 +534,7 @@ export default function ResumeBuilder({
     studioHandoff,
     suggestions,
     suggestSummary,
+    strategicTips,
     acceptedDepsKey,
     rejectedDepsKey,
     result,
@@ -946,6 +961,7 @@ export default function ResumeBuilder({
             msg?: string;
             text?: string;
             summary?: string;
+            strategic_tips?: unknown;
             suggestions?: unknown;
             research_queries?: string[];
             research_sources?: { title?: string | null; url?: string }[];
@@ -984,7 +1000,11 @@ export default function ResumeBuilder({
               const list = Array.isArray(ev.suggestions)
                 ? ev.suggestions.filter(isSuggestionRecord)
                 : [];
-              hydrateSuggestions(list, typeof ev.summary === "string" ? ev.summary : "");
+              hydrateSuggestions(
+                list,
+                typeof ev.summary === "string" ? ev.summary : "",
+                parseStrategicTips(ev.strategic_tips),
+              );
               const rq = Array.isArray(ev.research_queries)
                 ? ev.research_queries.filter((q): q is string => typeof q === "string")
                 : [];
@@ -1030,8 +1050,8 @@ export default function ResumeBuilder({
 
   const patchSuggestionSuggested = useCallback((id: string, suggested: string) => {
     const updated = suggestions.map((s) => (s.id === id ? { ...s, suggested } : s));
-    hydrateSuggestions(updated, suggestSummary);
-  }, [suggestions, suggestSummary, hydrateSuggestions]);
+    hydrateSuggestions(updated, suggestSummary, strategicTips);
+  }, [suggestions, suggestSummary, strategicTips, hydrateSuggestions]);
 
   const mergeProfileFromLastExtract = useCallback(() => {
     const text = lastResumeExtractRef.current.trim();
@@ -2180,6 +2200,7 @@ export default function ResumeBuilder({
             <SuggestionsPanel
               key={sourcePdfBlobUrl ?? "rb-sug-no-pdf"}
               summary={suggestSummary}
+              strategicTips={strategicTips}
               suggestions={suggestions}
               acceptedIds={acceptedIds}
               rejectedIds={rejectedIds}
@@ -4633,7 +4654,7 @@ function SuggestionsGenerateBar({
 }
 
 function SuggestionsPanel({
-  summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
+  summary, strategicTips, suggestions, acceptedIds, rejectedIds, candidateProfile,
   pdfBlobUrl, pdfFileName, pdfDocumentKey,
   selectedSuggestionId, onSelectSuggestionCard,
   onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, generateStatusMsg,
@@ -4645,6 +4666,7 @@ function SuggestionsPanel({
   previewSectionAccentHex,
 }: {
   summary: string;
+  strategicTips: string[];
   suggestions: Suggestion[];
   acceptedIds: Set<string>;
   rejectedIds: Set<string>;
@@ -4764,6 +4786,33 @@ function SuggestionsPanel({
           boxShadow: "var(--shadow-card)",
         }}>
           <strong style={{ color: "var(--text)" }}>Key gap: </strong>{summary}
+        </div>
+      )}
+
+      {strategicTips.length > 0 && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: "14px 16px",
+            borderRadius: "var(--radius-lg, 12px)",
+            border: "1px solid rgba(251, 191, 36, 0.35)",
+            background: "rgba(251, 191, 36, 0.06)",
+            boxShadow: "var(--shadow-card)",
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--orange)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
+            Strategic tips before you generate
+          </div>
+          <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+            Coaching on how to position your story for this role — not automatic PDF edits. Use bullet suggestions below for résumé changes.
+          </p>
+          <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8 }}>
+            {strategicTips.map((tip, i) => (
+              <li key={i} style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.55 }}>
+                {tip}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

@@ -17,6 +17,8 @@ export interface SuggestionsStore {
   // ── Data ──
   suggestions: Suggestion[];
   summary: string;
+  /** JD gap / interview coaching — shown before generate, not applied to the PDF. */
+  strategicTips: string[];
   /** Accumulated streamed text from /api/suggest-changes-stream. */
   streamText: string;
   acceptedIds: Set<string>;
@@ -30,7 +32,7 @@ export interface SuggestionsStore {
   stepsDone: number;
 
   // ── Actions ──
-  hydrate: (suggestions: Suggestion[], summary: string) => void;
+  hydrate: (suggestions: Suggestion[], summary: string, strategicTips?: string[]) => void;
   appendStream: (chunk: string) => void;
   accept: (id: string) => void;
   reject: (id: string) => void;
@@ -52,6 +54,7 @@ export interface SuggestionsStore {
 const initial = () => ({
   suggestions: [] as Suggestion[],
   summary: "",
+  strategicTips: [] as string[],
   streamText: "",
   acceptedIds: new Set<string>(),
   rejectedIds: new Set<string>(),
@@ -64,8 +67,17 @@ const initial = () => ({
 export const useSuggestionsStore = create<SuggestionsStore>((set, get) => ({
   ...initial(),
 
-  hydrate: (suggestions, summary) =>
-    set({ suggestions, summary, streamText: "", acceptedIds: new Set(), rejectedIds: new Set(), selectedId: null, error: null }),
+  hydrate: (suggestions, summary, strategicTips = []) =>
+    set({
+      suggestions,
+      summary,
+      strategicTips: strategicTips.filter((t) => typeof t === "string" && t.trim().length > 0).slice(0, 4),
+      streamText: "",
+      acceptedIds: new Set(),
+      rejectedIds: new Set(),
+      selectedId: null,
+      error: null,
+    }),
 
   appendStream: (chunk) =>
     set((s) => ({ streamText: s.streamText + chunk })),

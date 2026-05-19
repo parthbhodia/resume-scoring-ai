@@ -76,6 +76,10 @@ from resume_library import (
     _get_resume_tex_for_user,
     _rate_resume,
     _optional_gemini_client,
+    _compute_diff,
+    _explain_changes,
+    _extract_body,
+    _sanitize_change_rationales,
 )
 try:
     from resume_gui.renderers.latex_renderer import (
@@ -99,6 +103,22 @@ try:
     from resume_gui.profile_parser import parse_profile_text
 except ImportError:
     from profile_parser import parse_profile_text  # type: ignore
+try:
+    from resume_gui.resume_extraction import (
+        faithful_extract_prompt,
+        inject_section_line_breaks,
+        profile_section_inventory,
+        tailor_extract_prompt,
+        validate_extraction_against_inventory,
+    )
+except ImportError:
+    from resume_extraction import (  # type: ignore
+        faithful_extract_prompt,
+        inject_section_line_breaks,
+        profile_section_inventory,
+        tailor_extract_prompt,
+        validate_extraction_against_inventory,
+    )
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
 # `python resume_gui/app.py` (local dev).
@@ -161,6 +181,39 @@ def _looks_like_school_date_line(line: str) -> bool:
     return bool(inst and dates)
 
 
+_COMBINED_EDU_DATE_RE = re.compile(
+    r"((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
+    r"Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}"
+    r"\s*[–—\-]\s*(?:Present|Now|Current|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|"
+    r"May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}|\d{4}))",
+    re.I,
+)
+
+
+def _education_item_from_combined_line(line: str) -> Optional[EducationItem]:
+    """One-line education rows: ``Degree … dates | location institution`` (common in PDF extracts)."""
+    raw = _clean_model_text(line)
+    if "|" not in raw:
+        return None
+    left, right = [p.strip() for p in raw.split("|", 1)]
+    if not left or not right:
+        return None
+    if not (_DEGREE_LINE_RE.search(left) or _SCHOOL_HINT_RE.search(right)):
+        return None
+    dm = _COMBINED_EDU_DATE_RE.search(left)
+    dates = dm.group(1).strip() if dm else ""
+    degree = _clean_model_text(left.replace(dm.group(1), "")) if dm else left
+    institution = right
+    location = ""
+    um = _SCHOOL_HINT_RE.search(right)
+    if um and um.start() > 0:
+        location = right[: um.start()].strip().rstrip(",")
+        institution = right[um.start() :].strip()
+    if not (degree or institution):
+        return None
+    return EducationItem(institution=institution, degree=degree, dates=dates, location=location)
+
+
 def _looks_like_degree_line(line: str) -> bool:
     t = _clean_model_text(line)
     if not t or _looks_like_school_date_line(t):
@@ -185,6 +238,16 @@ def _education_item_from_dict(edu: dict) -> Optional[EducationItem]:
         for d in (edu.get("details") or [])
         if _clean_model_text(str(d))
     ]
+    if not inst and deg:
+        combined = _education_item_from_combined_line(deg)
+        if combined:
+            return EducationItem(
+                institution=combined.institution or inst,
+                degree=combined.degree or deg,
+                dates=combined.dates or dat,
+                location=combined.location or loc,
+                bullets=bullets or combined.bullets,
+            )
     if not (inst or deg or dat or loc or bullets):
         return None
     return EducationItem(
@@ -227,6 +290,12 @@ def _education_items_from_flat_lines(lines: list[str]) -> list[EducationItem]:
     for raw in lines:
         line = _clean_model_text(raw)
         if not line or _is_structural_noise_line(line):
+            continue
+
+        combined = _education_item_from_combined_line(line)
+        if combined:
+            flush()
+            items.append(combined)
             continue
 
         if _looks_like_degree_line(line):
@@ -988,47 +1057,133 @@ def _resolve_structured_source_folder(base_folder: Optional[str], reference_fold
     )
 
 
-_EXTRACT_SCHEMA = """{
-  "full_name": "string",
-  "headline": "string — candidate's current title/role",
-  "location": "string",
-  "email": "string",
-  "phone": "string",
-  "linkedin": "string — URL or handle",
-  "github": "string — URL or handle",
-  "summary": "string — 2-3 sentences tailored to the target role and JD keywords",
-  "skills": [{"category": "string e.g. Languages", "items": ["string"]}],
-  "experience": [{
-    "company": "string",
-    "role": "string",
-    "dates": "string e.g. July 2020 – Present",
-    "location": "string",
-    "bullets": ["string — rewritten with strong action verbs, quantified where possible, emphasising JD keywords"]
-  }],
-  "projects": [{"name": "string", "bullets": ["string"]}],
-  "education": [{"institution": "string", "degree": "string", "dates": "string", "details": ["string"]}]
-}"""
+def _build_resume_doc_from_llm_raw(
+    raw: dict,
+    *,
+    role: str = "",
+    company: str = "",
+) -> ResumeDocModel:
+    """Map LLM JSON to ResumeDocModel with consistent field cleaning."""
+    full_name = str(raw.get("full_name") or "Candidate").strip() or "Candidate"
 
-_EXTRACT_SCHEMA_FAITHFUL = """{
-  "full_name": "string",
-  "headline": "string — candidate's current title/role copied exactly",
-  "location": "string",
-  "email": "string",
-  "phone": "string",
-  "linkedin": "string — URL or handle",
-  "github": "string — URL or handle",
-  "summary": "string — professional summary copied exactly from the resume",
-  "skills": [{"category": "string", "items": ["string"]}],
-  "experience": [{
-    "company": "string",
-    "role": "string",
-    "dates": "string",
-    "location": "string",
-    "bullets": ["string — bullet copied EXACTLY as written, no rewriting"]
-  }],
-  "projects": [{"name": "string", "bullets": ["string — copied exactly"]}],
-  "education": [{"institution": "string", "degree": "string", "dates": "string", "details": ["string"]}]
-}"""
+    skills: list[tuple[str, list[str]]] = []
+    for sk in (raw.get("skills") or []):
+        if not isinstance(sk, dict):
+            continue
+        cat = _clean_model_text(str(sk.get("category") or "Skills"))
+        items = normalize_skill_items(str(i) for i in (sk.get("items") or []))
+        if items:
+            skills.append((cat or "Skills", items))
+
+    experience: list[ExperienceItem] = []
+    for exp in (raw.get("experience") or []):
+        if not isinstance(exp, dict):
+            continue
+        bullets = [
+            _clean_model_text(str(b))
+            for b in (exp.get("bullets") or [])
+            if _clean_model_text(str(b))
+        ]
+        company_name = _clean_model_text(str(exp.get("company") or "")) or "Company"
+        experience.append(
+            ExperienceItem(
+                company=company_name,
+                role=_clean_model_text(str(exp.get("role") or "")),
+                dates=_clean_model_text(str(exp.get("dates") or "")),
+                location=_clean_model_text(str(exp.get("location") or "")),
+                bullets=bullets,
+            )
+        )
+
+    education: list[EducationItem] = []
+    for edu in (raw.get("education") or []):
+        if isinstance(edu, dict):
+            row = _education_item_from_dict(edu)
+            if row:
+                education.append(row)
+
+    projects = _project_items_from_llm_projects(raw.get("projects"))
+
+    return ResumeDocModel(
+        full_name=full_name,
+        headline=_clean_model_text(str(raw.get("headline") or role or "")),
+        location=_clean_model_text(str(raw.get("location") or "")),
+        email=_clean_model_text(str(raw.get("email") or "")),
+        phone=_clean_model_text(str(raw.get("phone") or "")),
+        linkedin=_clean_model_text(str(raw.get("linkedin") or "")),
+        github=_clean_model_text(str(raw.get("github") or "")),
+        summary=_clean_model_text(str(raw.get("summary") or "")),
+        skills=skills,
+        experience=experience,
+        education=education,
+        projects=projects,
+        extra_sections=[],
+    )
+
+
+def _count_approved_suggestions(accepted_suggestions: Optional[List]) -> int:
+    if not isinstance(accepted_suggestions, list):
+        return 0
+    n = 0
+    for item in accepted_suggestions:
+        if not isinstance(item, dict):
+            continue
+        orig = str(item.get("original") or "").strip()
+        sugg = str(item.get("suggested") or "").strip()
+        if orig or sugg:
+            n += 1
+    return n
+
+
+def _rationales_from_accepted_suggestions(accepted_suggestions: Optional[List]) -> List[Dict]:
+    """Human-readable change cards from user-approved suggestion rows only."""
+    out: List[Dict] = []
+    if not isinstance(accepted_suggestions, list):
+        return out
+    for item in accepted_suggestions:
+        if not isinstance(item, dict):
+            continue
+        orig = str(item.get("original") or "").strip()
+        sugg = str(item.get("suggested") or "").strip()
+        why = str(item.get("reason") or "").strip() or "Approved from your suggestion cards."
+        if orig and sugg and orig != sugg:
+            out.append({"type": "rewrote", "previous": orig, "text": sugg, "why": why})
+        elif sugg and not orig:
+            out.append({"type": "added", "text": sugg, "why": why})
+        elif orig and not sugg:
+            out.append({"type": "removed", "text": orig, "why": why or "Removed per approved suggestion."})
+    return _sanitize_change_rationales(out)
+
+
+def _structured_tailor_diff_and_rationales(
+    *,
+    baseline_tex: Optional[str],
+    new_tex: str,
+    jd: str,
+    model: str,
+    gemini_client,
+    accepted_suggestions: Optional[List],
+) -> Tuple[List[Dict], int, int, List[Dict]]:
+    """Line diff + change rationales for the Jinja structured PDF path (never JD gap chips)."""
+    diff_lines: List[Dict] = []
+    adds = removes = 0
+    rationales: List[Dict] = []
+
+    old_body = _extract_body(baseline_tex or "") if baseline_tex else ""
+    new_body = _extract_body(new_tex or "") if new_tex else ""
+    if old_body.strip() and new_body.strip() and old_body.strip() != new_body.strip():
+        diff_lines, adds, removes = _compute_diff(old_body, new_body)
+        try:
+            explained = _explain_changes(gemini_client, model, old_body, new_body, (jd or "")[:1500])
+            if explained:
+                rationales = _sanitize_change_rationales(explained)
+        except Exception as exc:
+            logger.warning("structured path: change explanations failed: %s", exc)
+
+    if not rationales:
+        rationales = _rationales_from_accepted_suggestions(accepted_suggestions)
+
+    return diff_lines, adds, removes, rationales
 
 
 def _llm_extract_and_tailor(
@@ -1041,87 +1196,21 @@ def _llm_extract_and_tailor(
 
     Returns None on failure so the caller can fall back to the regex parser.
     """
+    profile_norm = inject_section_line_breaks((candidate_profile or "")[:8000])
+    inv = profile_section_inventory(profile_norm)
     jd_snippet = (jd or "")[:3000].strip()
-    profile_snippet = (candidate_profile or "")[:6000].strip()
+    profile_snippet = profile_norm[:6000].strip()
 
-    prompt = f"""You are an expert resume writer. Given a candidate's raw resume text and a job description,
-extract ALL resume content into structured JSON and tailor it for the target role.
-
-TARGET ROLE: {role} at {company}
-
-JOB DESCRIPTION (first 3000 chars):
-{jd_snippet}
-
-CANDIDATE RESUME TEXT:
-{profile_snippet}
-
-Instructions:
-- Extract every section: contact info, summary, ALL skills, ALL work experience entries (every job),
-  ALL projects, ALL education entries. Do NOT drop any section.
-- Rewrite the professional summary (2-3 sentences) tailored to this specific JD.
-- For each experience bullet: keep the core fact but strengthen verbs, add metrics if present,
-  and naturally incorporate 1-2 relevant JD keywords where they fit. Do NOT fabricate numbers.
-- Preserve all dates exactly as written in the source (e.g. "July 2020 – Present").
-- For skills, group by category (Languages, Frameworks, Tools, Cloud, etc.).
-- Include every project from the resume under "projects".
-- Include every education entry under "education".
-- Output ONLY valid JSON matching this schema (no markdown, no explanation):
-
-{_EXTRACT_SCHEMA}"""
+    prompt = tailor_extract_prompt(profile_snippet, jd_snippet, role, company, inv)
 
     try:
         raw = _llm_json_call(prompt)
         if not raw or not isinstance(raw, dict):
             return None
-
-        full_name = str(raw.get("full_name") or "Candidate").strip() or "Candidate"
-
-        skills: list[tuple[str, list[str]]] = []
-        for sk in (raw.get("skills") or []):
-            cat = _clean_model_text(str(sk.get("category") or "Skills"))
-            items = normalize_skill_items(str(i) for i in (sk.get("items") or []))
-            if items:
-                skills.append((cat or "Skills", items))
-
-        experience: list[ExperienceItem] = []
-        for exp in (raw.get("experience") or []):
-            bullets = [
-                _clean_model_text(str(b))
-                for b in (exp.get("bullets") or [])
-                if _clean_model_text(str(b))
-            ]
-            experience.append(ExperienceItem(
-                company=_clean_model_text(str(exp.get("company") or "")) or "Company",
-                role=_clean_model_text(str(exp.get("role") or "")),
-                dates=_clean_model_text(str(exp.get("dates") or "")),
-                location=_clean_model_text(str(exp.get("location") or "")),
-                bullets=bullets,
-            ))
-
-        education: list[EducationItem] = []
-        for edu in (raw.get("education") or []):
-            if isinstance(edu, dict):
-                row = _education_item_from_dict(edu)
-                if row:
-                    education.append(row)
-
-        projects = _project_items_from_llm_projects(raw.get("projects"))
-
-        return ResumeDocModel(
-            full_name=full_name,
-            headline=_clean_model_text(str(raw.get("headline") or role or "")),
-            location=_clean_model_text(str(raw.get("location") or "")),
-            email=_clean_model_text(str(raw.get("email") or "")),
-            phone=_clean_model_text(str(raw.get("phone") or "")),
-            linkedin=_clean_model_text(str(raw.get("linkedin") or "")),
-            github=_clean_model_text(str(raw.get("github") or "")),
-            summary=_clean_model_text(str(raw.get("summary") or "")),
-            skills=skills,
-            experience=experience,
-            education=education,
-            projects=projects,
-            extra_sections=[],
-        )
+        doc = _build_resume_doc_from_llm_raw(raw, role=role, company=company)
+        for w in validate_extraction_against_inventory(doc, inv):
+            logger.warning("LLM extract+tailor completeness: %s", w)
+        return doc
     except Exception as exc:
         logger.warning(f"LLM extract+tailor failed: {exc}")
         return None
@@ -1133,74 +1222,22 @@ def _llm_extract(text: str) -> "Optional[ResumeDocModel]":
     Used by the Analyze path so the structured model mirrors what the user actually wrote.
     Returns None on failure.
     """
-    profile_snippet = (text or "")[:6000].strip()
+    profile_norm = inject_section_line_breaks((text or "")[:8000])
+    profile_snippet = profile_norm[:6000].strip()
     if not profile_snippet:
         return None
 
-    prompt = f"""You are a precise resume parser. Extract ALL content from this resume into structured JSON.
-IMPORTANT: Copy all bullets EXACTLY as written — do NOT rewrite, improve, or change any text.
-Copy the professional summary exactly as it appears. Preserve original phrasing throughout.
-
-RESUME TEXT:
-{profile_snippet}
-
-Output ONLY valid JSON matching this schema (no markdown, no explanation):
-
-{_EXTRACT_SCHEMA_FAITHFUL}"""
+    inv = profile_section_inventory(profile_norm)
+    prompt = faithful_extract_prompt(profile_snippet, inv)
 
     try:
         raw = _llm_json_call(prompt)
         if not raw or not isinstance(raw, dict):
             return None
-
-        full_name = str(raw.get("full_name") or "Candidate").strip() or "Candidate"
-
-        skills: list[tuple[str, list[str]]] = []
-        for sk in (raw.get("skills") or []):
-            cat = _clean_model_text(str(sk.get("category") or "Skills"))
-            items = normalize_skill_items(str(i) for i in (sk.get("items") or []))
-            if items:
-                skills.append((cat or "Skills", items))
-
-        experience: list[ExperienceItem] = []
-        for exp in (raw.get("experience") or []):
-            bullets = [
-                _clean_model_text(str(b))
-                for b in (exp.get("bullets") or [])
-                if _clean_model_text(str(b))
-            ]
-            experience.append(ExperienceItem(
-                company=_clean_model_text(str(exp.get("company") or "")) or "Company",
-                role=_clean_model_text(str(exp.get("role") or "")),
-                dates=_clean_model_text(str(exp.get("dates") or "")),
-                location=_clean_model_text(str(exp.get("location") or "")),
-                bullets=bullets,
-            ))
-
-        education: list[EducationItem] = []
-        for edu in (raw.get("education") or []):
-            if isinstance(edu, dict):
-                row = _education_item_from_dict(edu)
-                if row:
-                    education.append(row)
-
-        projects = _project_items_from_llm_projects(raw.get("projects"))
-
-        return ResumeDocModel(
-            full_name=full_name,
-            headline=_clean_model_text(str(raw.get("headline") or "")),
-            location=_clean_model_text(str(raw.get("location") or "")),
-            email=_clean_model_text(str(raw.get("email") or "")),
-            phone=_clean_model_text(str(raw.get("phone") or "")),
-            linkedin=_clean_model_text(str(raw.get("linkedin") or "")),
-            github=_clean_model_text(str(raw.get("github") or "")),
-            summary=_clean_model_text(str(raw.get("summary") or "")),
-            skills=skills,
-            experience=experience,
-            education=education,
-            projects=projects,
-            extra_sections=[],
-        )
+        doc = _build_resume_doc_from_llm_raw(raw)
+        for w in validate_extraction_against_inventory(doc, inv):
+            logger.warning("LLM faithful extract completeness: %s", w)
+        return doc
     except Exception as exc:
         logger.warning(f"LLM extract failed: {exc}")
         return None
@@ -1335,6 +1372,82 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         projects=structured_projects,
         extra_sections=extra_sec_filtered,
     )
+
+
+def _preserve_structured_sections_from_profile(
+    doc: ResumeDocModel,
+    candidate_profile: Optional[str],
+    role: str,
+    company: str,
+) -> None:
+    """When LLM tailoring drops sections, backfill from regex profile parse (upload/PDF text)."""
+    profile_norm = inject_section_line_breaks((candidate_profile or "")[:8000])
+    if not profile_norm.strip():
+        return
+    inv = profile_section_inventory(profile_norm)
+    try:
+        source = _resume_doc_from_profile_text(profile_norm, role, company)
+    except Exception as exc:
+        logger.warning("preserve_structured_sections_from_profile failed: %s", exc)
+        return
+
+    if not doc.education and source.education:
+        doc.education = list(source.education)
+        logger.info(
+            "Structured renderer: restored %s education row(s) from profile parse",
+            len(doc.education),
+        )
+    elif inv.expects_education() and doc.education and source.education:
+        # LLM returned partial education — append any profile rows not already present
+        seen = {
+            (e.institution.strip().lower(), e.degree.strip().lower())
+            for e in doc.education
+        }
+        for row in source.education:
+            key = (row.institution.strip().lower(), row.degree.strip().lower())
+            if key not in seen and (row.institution or row.degree):
+                doc.education.append(row)
+                seen.add(key)
+
+    if not doc.projects and source.projects:
+        doc.projects = list(source.projects)
+
+    if not doc.skills and source.skills:
+        doc.skills = list(source.skills)
+    elif inv.has_skills_header and source.skills:
+        src_count = sum(len(items) for _, items in source.skills)
+        doc_count = sum(len(items) for _, items in doc.skills)
+        if doc_count < max(3, src_count // 2):
+            doc.skills = list(source.skills)
+            logger.info("Structured renderer: restored skills from profile parse (LLM under-extracted)")
+
+    if inv.expects_experience() and source.experience:
+        if not doc.experience:
+            doc.experience = list(source.experience)
+            logger.info(
+                "Structured renderer: restored %s experience entries from profile parse",
+                len(doc.experience),
+            )
+        elif len(doc.experience) < max(1, inv.estimated_job_blocks - 1) and len(source.experience) > len(doc.experience):
+            doc.experience = list(source.experience)
+            logger.warning(
+                "Structured renderer: replaced experience with profile parse "
+                "(%s jobs vs LLM %s)",
+                len(source.experience),
+                len(doc.experience),
+            )
+
+    for field_name, src_val, doc_val in (
+        ("email", source.email, doc.email),
+        ("phone", source.phone, doc.phone),
+        ("linkedin", source.linkedin, doc.linkedin),
+        ("github", source.github, doc.github),
+    ):
+        if src_val and not doc_val:
+            setattr(doc, field_name, src_val)
+
+    for w in validate_extraction_against_inventory(doc, inv):
+        logger.warning("After profile backfill still incomplete: %s", w)
 
 # CORS: localhost dev + production site (merge env extras; never drop defaults)
 _CORS_DEFAULT_ORIGINS = [
@@ -1477,8 +1590,27 @@ async def api_generate_stream(request: Request):
 
                 # Content pipeline: LLM extraction+tailoring → regex fallback → base .tex fallback.
                 # The selected template controls layout; the content pipeline controls substance.
+                n_approved = _count_approved_suggestions(
+                    accepted_suggestions if isinstance(accepted_suggestions, list) else None
+                )
+                use_conservative_tailor = (
+                    post_suggestion_coach_run
+                    and not tailor_body_with_ai
+                    and n_approved == 0
+                )
+                if use_conservative_tailor:
+                    logger.info(
+                        "Structured renderer: conservative content — skipping full LLM JD rewrite "
+                        "(post_suggestion_coach_run, no approved edits)"
+                    )
+
                 doc = None
-                if candidate_profile and jd:
+                if use_conservative_tailor and base_tex:
+                    parsed = parse_resume_tex(base_tex)
+                    doc = _resume_doc_from_parsed(parsed)
+                elif use_conservative_tailor and candidate_profile:
+                    doc = _resume_doc_from_profile_text(candidate_profile, role, company)
+                elif candidate_profile and jd:
                     asyncio.run_coroutine_threadsafe(queue.put({
                         "event": "status",
                         "msg": "Tailoring resume content to job description…",
@@ -1493,6 +1625,7 @@ async def api_generate_stream(request: Request):
                     doc = _resume_doc_from_parsed(parsed)
                 if doc is None:
                     doc = _resume_doc_from_profile_text(candidate_profile, role, company)
+                _preserve_structured_sections_from_profile(doc, candidate_profile, role, company)
                 _apply_accepted_edits_to_doc(doc, accepted_suggestions if isinstance(accepted_suggestions, list) else None)
 
                 asyncio.run_coroutine_threadsafe(queue.put({
@@ -1573,8 +1706,8 @@ async def api_generate_stream(request: Request):
                         logger.warning(f"upload_pdf failed: {exc}")
 
                 # Frontend/library contract + LLM-based ratings.
+                gemini_client = _optional_gemini_client()
                 try:
-                    gemini_client = _optional_gemini_client()
                     llm_ratings = _rate_resume(gemini_client, model, new_tex, jd[:1500])
                 except Exception:
                     llm_ratings = None
@@ -1600,25 +1733,25 @@ async def api_generate_stream(request: Request):
                     "loaded": True,
                 }), loop).result()
 
-                diff_data = []
-                if isinstance(accepted_suggestions, list):
-                    for item in accepted_suggestions:
-                        if not isinstance(item, dict):
-                            continue
-                        orig = str(item.get("original") or "").strip()
-                        sugg = str(item.get("suggested") or "").strip()
-                        if orig or sugg:
-                            diff_data.append({"original": orig, "suggested": sugg})
+                diff_data, diff_adds, diff_removes, rationales_data = _structured_tailor_diff_and_rationales(
+                    baseline_tex=base_tex,
+                    new_tex=new_tex,
+                    jd=jd,
+                    model=model,
+                    gemini_client=gemini_client,
+                    accepted_suggestions=accepted_suggestions if isinstance(accepted_suggestions, list) else None,
+                )
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "diff",
                     "data": diff_data,
-                    "adds": len([d for d in diff_data if d.get("suggested")]),
-                    "removes": len([d for d in diff_data if d.get("original") and not d.get("suggested")]),
+                    "adds": diff_adds,
+                    "removes": diff_removes,
                 }), loop).result()
-                asyncio.run_coroutine_threadsafe(queue.put({
-                    "event": "rationales",
-                    "data": [{"type": "gap", "text": g} for g in (ratings_payload.get("gaps", []) if isinstance(ratings_payload.get("gaps"), list) else [])][:4],
-                }), loop).result()
+                if rationales_data:
+                    asyncio.run_coroutine_threadsafe(queue.put({
+                        "event": "rationales",
+                        "data": rationales_data,
+                    }), loop).result()
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "ratings",
                     "data": ratings_payload,
@@ -2899,7 +3032,11 @@ def _post_clean_resume_text(text: str) -> str:
     text = re.sub(r"\(\s*cid\s*:\s*\d+\)", " • ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bUsed\s*:\s*to\b", "Used to", text, flags=re.IGNORECASE)
     lines = [" ".join(ln.split()) for ln in text.splitlines()]
-    return "\n".join(lines).strip()
+    text = "\n".join(lines).strip()
+    try:
+        return inject_section_line_breaks(text)
+    except Exception:
+        return text
 
 
 def _sanitize_bullet_display(s: str) -> str:
@@ -4252,6 +4389,11 @@ def _resume_coach_prompt(candidate_profile: str, job_description: str, digest: s
         "Return a JSON object with this exact structure:\n"
         '{\n'
         '  "summary": "One sentence: the most important gap between this resume and the JD.",\n'
+        '  "strategic_tips": [\n'
+        '    "2-4 actionable coaching tips (1-2 sentences each) on how to strengthen the candidacy for THIS role — '
+        'what to emphasize in interviews, how to reframe experience, or gaps to address in narrative. '
+        'NOT resume bullet rewrites; those belong in suggestions."\n'
+        '  ],\n'
         '  "suggestions": [\n'
         '    {\n'
         '      "id": "s1",\n'
@@ -4268,8 +4410,23 @@ def _resume_coach_prompt(candidate_profile: str, job_description: str, digest: s
         "- Do NOT invent metrics, employers, or facts not in the resume.\n"
         "- When JOB & MARKET CONTEXT is present, use it only to sharpen **wording** and JD-aligned phrasing for facts already in the résumé.\n"
         "- Priority: 'high' = missing critical JD keyword; 'medium' = wording improvement; 'low' = polish.\n"
+        "- strategic_tips: honest, specific, second-person OK; do not repeat the summary sentence; "
+        "do not invent employers or metrics.\n"
         "- Return ONLY the JSON object, no markdown fences."
     )
+
+
+def _sanitize_strategic_tips(raw: object) -> List[str]:
+    """Coaching tips shown before PDF generate (not résumé diff rows)."""
+    if not isinstance(raw, list):
+        return []
+    out: List[str] = []
+    for item in raw[:6]:
+        t = str(item or "").strip()
+        if len(t) < 24 or len(t) > 520:
+            continue
+        out.append(t)
+    return out[:4]
 
 
 def _sanitize_reuse_research_sources(raw: object) -> List[dict]:
@@ -4350,6 +4507,7 @@ async def api_suggest_changes(request: Request):
             text = re.sub(r"\n?```$", "", text)
         data = json.loads(text)
         if isinstance(data, dict):
+            data["strategic_tips"] = _sanitize_strategic_tips(data.get("strategic_tips"))
             data["research_queries"] = research_queries
             data["research_sources"] = research_sources
             if digest.strip():
@@ -4441,6 +4599,8 @@ async def api_suggest_changes_stream(request: Request):
             data = json.loads(text)
             if not isinstance(data, dict):
                 raise RuntimeError("Coach returned non-object JSON")
+            strategic_tips = _sanitize_strategic_tips(data.get("strategic_tips"))
+            data["strategic_tips"] = strategic_tips
             data["research_queries"] = research_queries
             data["research_sources"] = research_sources
             if digest.strip():
@@ -4448,6 +4608,7 @@ async def api_suggest_changes_stream(request: Request):
             qput({
                 "event": "coach_done",
                 "summary": data.get("summary"),
+                "strategic_tips": strategic_tips,
                 "suggestions": data.get("suggestions"),
                 "research_queries": data.get("research_queries"),
                 "research_sources": data.get("research_sources"),
