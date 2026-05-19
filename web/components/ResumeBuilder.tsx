@@ -1523,12 +1523,17 @@ export default function ResumeBuilder({
   const tailorResultsBuilding = !studioHandoff && Boolean(result) && generating;
   /** Pin loaders at top of the page — form CTAs sit at the bottom and scroll-to-top hid them. */
   const showSuggestLoaderAtTop = !studioHandoff && suggestLoading;
-  /** Template gallery first compile (no prior result) — tailor uses results page instead. */
-  const showGenerateLoaderAtTop = studioHandoff && generating && !result;
+  /** Template gallery first compile (no prior result) — tailor uses results page instead.
+   *  Also covers the "Skip suggestions" tailor path where there are no suggestion cards to render. */
+  const showGenerateLoaderAtTop = generating && !result?.pdfUrl && (studioHandoff || !suggestionsReviewMode);
 
   useLayoutEffect(() => {
     if (showSuggestLoaderAtTop) scrollBuilderToTop("auto");
   }, [showSuggestLoaderAtTop, scrollBuilderToTop]);
+
+  useLayoutEffect(() => {
+    if (showGenerateLoaderAtTop) scrollBuilderToTop("auto");
+  }, [showGenerateLoaderAtTop, scrollBuilderToTop]);
 
   useLayoutEffect(() => {
     if (suggestionsReviewMode) scrollBuilderToTop("smooth");
@@ -1640,8 +1645,8 @@ export default function ResumeBuilder({
               statusMsg={statusMsg}
               tipIdx={generateLoaderTipIdx}
               stepsDone={generateLoaderStepsDone}
-              reusingSuggestResearch={false}
-              studioHandoff
+              reusingSuggestResearch={reusingSuggestWebForPdf}
+              studioHandoff={studioHandoff}
               acceptedCount={0}
             />
           )}
