@@ -5,9 +5,11 @@ Used by the Jinja structured PDF path so tailoring does not drop education, proj
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Any, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,7 +17,53 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Set RESUME_EXTRACTION_DEBUG_LOG=0 to silence full JSON dumps (summary lines still log).
+_EXTRACT_DEBUG_JSON = os.environ.get("RESUME_EXTRACTION_DEBUG_LOG", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+_EXTRACT_DEBUG_MAX_JSON_CHARS = int(os.environ.get("RESUME_EXTRACTION_DEBUG_MAX_CHARS", "16000") or "16000")
+
 DEFAULT_SECTION_ORDER = ["summary", "experience", "education", "skills", "projects"]
+
+
+def inventory_to_dict(inv: ProfileSectionInventory) -> dict:
+    return {
+        "headers_found": list(inv.headers_found),
+        "has_education_header": inv.has_education_header,
+        "has_education_signal": inv.has_education_signal,
+        "has_experience_header": inv.has_experience_header,
+        "estimated_education_lines": inv.estimated_education_lines,
+        "estimated_job_blocks": inv.estimated_job_blocks,
+        "has_skills_header": inv.has_skills_header,
+        "has_projects_header": inv.has_projects_header,
+    }
+
+
+def manifest_to_dict(manifest: Optional[ExtractionManifest]) -> dict:
+    if manifest is None:
+        return {}
+    return asdict(manifest)
+
+
+def log_extraction_debug(stage: str, payload: Any, *, force: bool = False) -> None:
+    """Structured extraction trace — grep logs for ``EXTRACT_DEBUG``."""
+    if not _EXTRACT_DEBUG_JSON and not force:
+        logger.info("EXTRACT_DEBUG | %s | (json logging disabled via RESUME_EXTRACTION_DEBUG_LOG=0)", stage)
+        return
+    try:
+        text = json.dumps(payload, ensure_ascii=False, default=str, indent=2)
+    except Exception as exc:
+        text = repr(payload)
+        logger.warning("EXTRACT_DEBUG | %s | json.dumps failed: %s", stage, exc)
+    if len(text) > _EXTRACT_DEBUG_MAX_JSON_CHARS:
+        text = (
+            text[:_EXTRACT_DEBUG_MAX_JSON_CHARS]
+            + f"\n... [truncated — total {len(text)} chars; raise RESUME_EXTRACTION_DEBUG_MAX_CHARS]"
+        )
+    logger.info("EXTRACT_DEBUG | %s\n%s", stage, text)
 
 _CANONICAL_SECTION_HEADERS: dict[str, tuple[str, ...]] = {
     "summary": ("summary", "profile", "objective"),
@@ -278,11 +326,122 @@ _FAITHFUL_INSTRUCTIONS = """Instructions:
 - FIRST pass: identify every section header and block in the source résumé.
 - Copy ALL content faithfully — do NOT rewrite, improve, or omit sections.
 - Bullets and summary must match source wording exactly (minor whitespace only).
-- education[]: REQUIRED when source has EDUCATION or any school/degree — never return [] if a degree is mentioned.
+- education[]: include ONLY schools/degrees that appear in the EDUCATION section of the source — NEVER invent additional universities, degrees, or dates.
+- If the source lists one degree, education[] must have exactly one entry; do not add typical filler schools (e.g. a second bachelor's or unrelated master's).
 - experience[]: one object per job; never merge multiple employers into one entry.
 - extraction_manifest.sections_seen must list every section header found (use keys: summary, education, skills, experience, projects).
 - extraction_manifest.education_count must equal len(education[]); experience_job_count must equal len(experience[]).
 - Output ONLY valid JSON matching the schema (no markdown fences)."""
+
+_EDUCATION_SECTION_STOP_HEADERS = frozenset({
+    "skills",
+    "technical skills",
+    "experience",
+    "work experience",
+    "professional experience",
+    "projects",
+    "project",
+    "certifications",
+    "certification",
+    "awards",
+    "summary",
+})
+
+
+def extract_education_section_text(profile_text: str) -> str:
+    """Plain text between EDUCATION header and the next major section (for grounding checks)."""
+    text = inject_section_line_breaks(profile_text or "")
+    lines = text.splitlines()
+    collecting = False
+    chunk: list[str] = []
+    for ln in lines:
+        low = re.sub(r"[^a-z ]", "", ln.lower()).strip()
+        if low in ("education", "academic background"):
+            collecting = True
+            continue
+        if collecting and low in _EDUCATION_SECTION_STOP_HEADERS:
+            break
+        if collecting and ln.strip():
+            chunk.append(ln.strip())
+    return "\n".join(chunk)
+
+
+def _education_row_grounded_in_text(row: Any, edu_text_lower: str) -> bool:
+    """True when degree wording (preferred) or school name appears in the source EDUCATION block."""
+    if not edu_text_lower.strip():
+        return False
+    inst = str(getattr(row, "institution", "") or "").strip().lower()
+    deg = str(getattr(row, "degree", "") or "").strip().lower()
+
+    def _degree_matches() -> bool:
+        if not deg:
+            return False
+        if len(deg) >= 12 and deg in edu_text_lower:
+            return True
+        if len(deg) >= 8:
+            words = [
+                w
+                for w in re.findall(r"[a-z]{5,}", deg)
+                if w
+                not in ("master", "bachelor", "science", "studies", "degree", "professional", "commerce")
+            ]
+            if words and sum(1 for w in words if w in edu_text_lower) >= max(1, len(words) // 2):
+                return True
+        return False
+
+    # When a degree is present, require degree wording in source (avoids "University of Maryland"
+    # matching UMBC while inventing a different program).
+    if deg:
+        return _degree_matches()
+    if inst and len(inst) >= 6 and inst in edu_text_lower:
+        return True
+    return False
+
+
+def dedupe_education_rows(rows: list) -> list:
+    """Drop near-duplicate schools (e.g. UMBC twice from LLM + profile backfill)."""
+    kept: list = []
+    for row in rows:
+        inst = str(getattr(row, "institution", "") or "").strip().lower()
+        deg = str(getattr(row, "degree", "") or "").strip().lower()
+        duplicate = False
+        for prev in kept:
+            pi = str(getattr(prev, "institution", "") or "").strip().lower()
+            pd = str(getattr(prev, "degree", "") or "").strip().lower()
+            if inst and pi and (inst in pi or pi in inst):
+                duplicate = True
+                break
+            if deg and pd and (deg == pd or (len(deg) > 14 and (deg in pd or pd in deg))):
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(row)
+    return kept
+
+
+def filter_education_grounded_in_source(doc: Any, profile_text: str) -> list[str]:
+    """Remove education rows not supported by the EDUCATION section (LLM hallucination guard)."""
+    edu_text = extract_education_section_text(profile_text)
+    edu_lower = edu_text.lower()
+    warnings: list[str] = []
+    rows = list(getattr(doc, "education", None) or [])
+    if not rows:
+        return warnings
+    if not edu_lower.strip():
+        return warnings
+    kept = []
+    for row in rows:
+        if _education_row_grounded_in_text(row, edu_lower):
+            kept.append(row)
+        else:
+            inst = getattr(row, "institution", "") or ""
+            deg = getattr(row, "degree", "") or ""
+            warnings.append(
+                f"dropped ungrounded education (not in source EDUCATION block): {inst!r} / {deg!r}"
+            )
+    kept = dedupe_education_rows(kept)
+    doc.education = kept
+    return warnings
 
 
 def faithful_extract_prompt(profile_snippet: str, inv: ProfileSectionInventory) -> str:
@@ -302,13 +461,14 @@ def tailor_doc_prompt(
     role: str,
     company: str,
 ) -> str:
-    """Second-pass prompt: tailor summary + bullets only; structure is fixed."""
+    """Second-pass prompt: tailor summary + experience/project bullets only; structure fixed."""
     import json
 
-    n_jobs = len(doc.experience)
-    base = {
-        "summary": doc.summary,
-        "experience": [
+    n_jobs = len(doc.experience or [])
+    n_projects = len(doc.projects or [])
+    base: dict[str, Any] = {"summary": doc.summary}
+    if n_jobs:
+        base["experience"] = [
             {
                 "company": e.company,
                 "role": e.role,
@@ -317,24 +477,64 @@ def tailor_doc_prompt(
                 "bullets": list(e.bullets),
             }
             for e in doc.experience
-        ],
-    }
-    return (
-        "You tailor an ALREADY-STRUCTURED résumé JSON for a specific job.\n\n"
-        f"TARGET ROLE: {role} at {company}\n\n"
-        f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
-        f"CURRENT STRUCTURED CONTENT:\n{json.dumps(base, ensure_ascii=False)[:5500]}\n\n"
-        "RULES (strict):\n"
-        f"- Return JSON with ONLY \"summary\" and \"experience\" keys.\n"
-        f"- experience[] MUST contain exactly {n_jobs} entries in the SAME order.\n"
-        "- Each entry MUST keep the same company, role, dates, and location strings — only rewrite bullets[].\n"
-        "- Do NOT add, remove, or merge jobs. Do NOT fabricate employers, degrees, or metrics.\n"
-        "- summary: 2-3 sentences tailored to the JD using facts already in the résumé.\n"
-        "- Do NOT output education, skills, or projects — those are preserved separately.\n"
-        "- Output ONLY valid JSON (no markdown fences):\n"
-        '{"summary": "...", "experience": [{"company": "...", "role": "...", "dates": "...", '
-        '"location": "...", "bullets": ["..."]}]}'
+        ]
+    if n_projects:
+        base["projects"] = [
+            {"name": p.name, "bullets": list(p.bullets)}
+            for p in doc.projects
+        ]
+
+    allowed_keys = ['"summary"']
+    if n_jobs:
+        allowed_keys.append('"experience"')
+    if n_projects:
+        allowed_keys.append('"projects"')
+
+    rules = [
+        "You tailor an ALREADY-STRUCTURED résumé JSON for a specific job.",
+        "",
+        f"TARGET ROLE: {role} at {company}",
+        "",
+        f"JOB DESCRIPTION:\n{jd_snippet}",
+        "",
+        f"CURRENT STRUCTURED CONTENT:\n{json.dumps(base, ensure_ascii=False)[:5500]}",
+        "",
+        "RULES (strict):",
+        f"- Return JSON with ONLY {', '.join(allowed_keys)} keys.",
+        "- summary: 2-3 sentences tailored to the JD using facts already in the résumé.",
+        "- Do NOT output education or skills — those are preserved separately.",
+    ]
+    if n_jobs:
+        rules.extend(
+            [
+                f"- experience[] MUST contain exactly {n_jobs} entries in the SAME order.",
+                "- Each experience entry MUST keep the same company, role, dates, and location — only rewrite bullets[].",
+                "- Do NOT add, remove, or merge jobs. Do NOT fabricate employers or metrics.",
+            ]
+        )
+    if n_projects:
+        rules.extend(
+            [
+                f"- projects[] MUST contain exactly {n_projects} entries in the SAME order.",
+                "- Each project entry MUST keep the same name string — only rewrite bullets[].",
+                "- Do NOT add, remove, or rename projects. Do NOT fabricate repos, stacks, or outcomes.",
+            ]
+        )
+    example_parts = ['"summary": "..."']
+    if n_jobs:
+        example_parts.append(
+            '"experience": [{"company": "...", "role": "...", "dates": "...", '
+            '"location": "...", "bullets": ["..."]}]'
+        )
+    if n_projects:
+        example_parts.append('"projects": [{"name": "...", "bullets": ["..."]}]')
+    rules.extend(
+        [
+            "- Output ONLY valid JSON (no markdown fences):",
+            "{" + ", ".join(example_parts) + "}",
+        ]
     )
+    return "\n".join(rules)
 
 
 def sanitize_extraction_manifest(raw: Any) -> Optional[ExtractionManifest]:

@@ -13,6 +13,8 @@ from resume_extraction import (  # noqa: E402
     extraction_guard_prompt_block,
     sanitize_extraction_manifest,
     validate_manifest_against_doc,
+    extract_education_section_text,
+    filter_education_grounded_in_source,
 )
 from dataclasses import dataclass, field  # noqa: E402
 
@@ -62,6 +64,62 @@ def test_manifest_mismatch_detects_missing_education():
     doc = _DocStub()
     warnings = validate_manifest_against_doc(doc, manifest)
     assert any("education" in w for w in warnings)
+
+
+def test_filter_drops_hallucinated_education_not_in_source_section():
+    profile = """
+Harini Payala
+SUMMARY
+FP&A analyst
+
+EDUCATION
+Master of professional studies in Data Science Aug 2022 - May 2024 | Baltimore University of Maryland, Baltimore County
+
+SKILLS
+SQL, Python
+"""
+    edu_section = extract_education_section_text(profile)
+    assert "Data Science" in edu_section
+    assert "Osmania" not in edu_section
+
+    @dataclass
+    class _Edu:
+        institution: str = ""
+        degree: str = ""
+        dates: str = ""
+        location: str = ""
+        bullets: list = field(default_factory=list)
+
+    @dataclass
+    class _Doc:
+        education: list = field(default_factory=list)
+
+    doc = _Doc(
+        education=[
+            _Edu(
+                institution="University of Maryland",
+                degree="Master of Science in Finance",
+                dates="2022–2024",
+                location="College Park, MD",
+            ),
+            _Edu(
+                institution="Osmania University",
+                degree="Bachelor of Commerce",
+                dates="2015–2019",
+                location="Hyderabad, India",
+            ),
+            _Edu(
+                institution="University of Maryland, Baltimore County",
+                degree="Master of professional studies in Data Science",
+                dates="Aug 2022 - May 2024",
+                location="Baltimore, Maryland",
+            ),
+        ]
+    )
+    warnings = filter_education_grounded_in_source(doc, profile)
+    assert len(doc.education) == 1
+    assert "Data Science" in doc.education[0].degree
+    assert any("Osmania" in w or "Finance" in w for w in warnings)
 
 
 def test_inventory_detects_education_before_skills():

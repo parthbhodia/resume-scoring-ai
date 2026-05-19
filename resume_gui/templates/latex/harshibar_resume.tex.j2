@@ -120,6 +120,8 @@
 \section{EXPERIENCE}
 \resumeSubHeadingListStart
 {% for exp in doc.experience %}
+  {% set job_lines = 5 + (exp.bullets|length) * 3 %}
+  \needspace{ {{ [job_lines, 32]|min }} \baselineskip}
   \resumeSubheading
     { {{ exp.company|latex }} }
     { {{ exp.dates|latex if exp.dates else '' }} }
@@ -127,7 +129,7 @@
     { {{ exp.location|latex if exp.location else '' }} }
   \resumeItemListStart
   {% for bullet in exp.bullets %}
-    \resumeItem{ {{ bullet|latex }} }
+    \resumeItem{ {{ bullet|bullet_latex }} }
   {% endfor %}
   \resumeItemListEnd
 {% endfor %}
@@ -146,7 +148,7 @@
   {% if edu.bullets|length %}
   \resumeItemListStart
   {% for bullet in edu.bullets %}
-    \resumeItem{ {{ bullet|latex }} }
+    \resumeItem{ {{ bullet|bullet_latex }} }
   {% endfor %}
   \resumeItemListEnd
   {% endif %}
@@ -160,7 +162,7 @@
 {% for sec in education_extra %}
   \resumeItemListStart
   {% for b in sec[1] %}
-    \resumeItem{ {{ b|latex }} }
+    \resumeItem{ {{ b|bullet_latex }} }
   {% endfor %}
   \resumeItemListEnd
 {% endfor %}
@@ -176,7 +178,7 @@
   {% if proj.bullets|length %}
   \resumeItemListStart
   {% for b in proj.bullets %}
-    \resumeItem{ {{ b|latex }} }
+    \resumeItem{ {{ b|bullet_latex }} }
   {% endfor %}
   \resumeItemListEnd
   {% endif %}
@@ -189,7 +191,7 @@
 {% for sec in projects_extra %}
   \resumeItemListStart
   {% for b in sec[1] %}
-    \resumeItem{ {{ b|latex }} }
+    \resumeItem{ {{ b|bullet_latex }} }
   {% endfor %}
   \resumeItemListEnd
 {% endfor %}
@@ -215,7 +217,7 @@
 \begin{itemize}
 {% for b in sec[1] %}
   \needspace{2.8\baselineskip}
-  \item {{ b|latex }}
+  \item {{ b|bullet_latex }}
 {% endfor %}
 \end{itemize}
 {% endfor %}

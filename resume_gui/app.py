@@ -110,12 +110,17 @@ try:
         faithful_extract_prompt,
         infer_section_order_from_profile,
         inject_section_line_breaks,
+        inventory_to_dict,
+        log_extraction_debug,
+        manifest_to_dict,
         pop_manifest_from_llm_raw,
         profile_section_inventory,
         ProfileSectionInventory,
         tailor_doc_prompt,
         validate_extraction_against_inventory,
         validate_manifest_against_doc,
+        filter_education_grounded_in_source,
+        dedupe_education_rows,
     )
 except ImportError:
     from resume_extraction import (  # type: ignore
@@ -124,12 +129,17 @@ except ImportError:
         faithful_extract_prompt,
         infer_section_order_from_profile,
         inject_section_line_breaks,
+        inventory_to_dict,
+        log_extraction_debug,
+        manifest_to_dict,
         pop_manifest_from_llm_raw,
         profile_section_inventory,
         ProfileSectionInventory,
         tailor_doc_prompt,
         validate_extraction_against_inventory,
         validate_manifest_against_doc,
+        filter_education_grounded_in_source,
+        dedupe_education_rows,
     )
 
 # Storage helper — works whether run as `uvicorn resume_gui.app:app` (Railway) or
@@ -1198,21 +1208,60 @@ def _structured_tailor_diff_and_rationales(
     return diff_lines, adds, removes, rationales
 
 
+def _doc_extraction_counts(doc: "ResumeDocModel") -> dict:
+    """Compact section counts for log lines (grep ``EXTRACT_DEBUG``)."""
+    return {
+        "experience_entries": len(doc.experience or []),
+        "experience_bullets": sum(len(e.bullets or []) for e in (doc.experience or [])),
+        "education_entries": len(doc.education or []),
+        "skill_groups": len(doc.skills or []),
+        "skill_items": sum(len(items) for _, items in (doc.skills or [])),
+        "projects": len(doc.projects or []),
+        "extra_sections": len(doc.extra_sections or []),
+        "summary_chars": len((doc.summary or "").strip()),
+        "section_order": list(getattr(doc, "section_order", None) or DEFAULT_SECTION_ORDER),
+    }
+
+
+def _log_structured_doc(stage: str, doc: "ResumeDocModel", **extra: Any) -> None:
+    payload: dict = {"counts": _doc_extraction_counts(doc), "structured_doc": _resume_doc_to_dict(doc)}
+    if extra:
+        payload["meta"] = extra
+    log_extraction_debug(stage, payload)
+
+
 def _llm_tailor_doc_for_jd(
     doc: ResumeDocModel,
     jd: str,
     role: str,
     company: str,
 ) -> ResumeDocModel:
-    """Second pass: JD-tailor summary and experience bullets only (structure unchanged)."""
+    """Second pass: JD-tailor summary, experience bullets, and project bullets (structure unchanged)."""
     jd_snippet = (jd or "")[:3000].strip()
-    if not jd_snippet or not doc.experience:
+    if not jd_snippet:
         return doc
+    if not doc.experience and not doc.projects and not (doc.summary or "").strip():
+        return doc
+    before_counts = _doc_extraction_counts(doc)
     prompt = tailor_doc_prompt(doc, jd_snippet, role, company)
     try:
         raw = _llm_json_call(prompt)
         if not raw or not isinstance(raw, dict):
+            log_extraction_debug(
+                "jd_tailor_skipped",
+                {"reason": "empty_llm_response", "before": before_counts},
+            )
             return doc
+        log_extraction_debug(
+            "jd_tailor_llm_response",
+            {
+                "keys": list(raw.keys()),
+                "summary_preview": (_clean_model_text(str(raw.get("summary") or "")) or "")[:400],
+                "experience_patches": len(raw.get("experience") or [])
+                if isinstance(raw.get("experience"), list)
+                else 0,
+            },
+        )
         summary = _clean_model_text(str(raw.get("summary") or ""))
         if summary:
             doc.summary = summary
@@ -1228,6 +1277,24 @@ def _llm_tailor_doc_for_jd(
                 ]
                 if bullets:
                     doc.experience[i].bullets = bullets
+        proj_in = raw.get("projects")
+        if isinstance(proj_in, list) and doc.projects and len(proj_in) == len(doc.projects):
+            for i, patch in enumerate(proj_in):
+                if not isinstance(patch, dict):
+                    continue
+                bullets = [
+                    _clean_model_text(str(b))
+                    for b in (patch.get("bullets") or [])
+                    if _clean_model_text(str(b))
+                ]
+                if bullets:
+                    doc.projects[i].bullets = bullets
+        _log_structured_doc(
+            "jd_tailor_after",
+            doc,
+            before=before_counts,
+            after=_doc_extraction_counts(doc),
+        )
         return doc
     except Exception as exc:
         logger.warning("LLM tailor-doc second pass failed: %s", exc)
@@ -1248,32 +1315,62 @@ def _structured_doc_for_generate(
     inv = profile_section_inventory(profile_norm)
     section_order = infer_section_order_from_profile(profile_norm)
 
+    log_extraction_debug(
+        "generate_pipeline_start",
+        {
+            "inventory": inventory_to_dict(inv),
+            "section_order_inferred": section_order,
+            "profile_chars": len(profile_norm),
+            "profile_preview": profile_norm[:2000],
+            "use_conservative_tailor": use_conservative_tailor,
+            "has_base_tex": bool(base_tex),
+            "jd_chars": len((jd or "").strip()),
+            "role": role,
+            "company": company,
+        },
+    )
+
     doc: Optional[ResumeDocModel] = None
     manifest: Optional[ExtractionManifest] = None
+    extract_path = "unknown"
 
     if use_conservative_tailor and base_tex:
+        extract_path = "conservative_tex"
         parsed = parse_resume_tex(base_tex)
         doc = _resume_doc_from_parsed(parsed)
     elif use_conservative_tailor and profile_norm:
+        extract_path = "conservative_profile_regex"
         doc = _resume_doc_from_profile_text(profile_norm, role, company)
     elif profile_norm:
+        extract_path = "faithful_llm"
         doc, manifest = _llm_extract_with_manifest(profile_norm)
         if doc is None:
+            extract_path = "faithful_llm_failed_regex_fallback"
             logger.warning("Faithful LLM extract failed — falling back to regex profile parse")
             doc = _resume_doc_from_profile_text(profile_norm, role, company)
         elif jd.strip() and not use_conservative_tailor:
+            extract_path = "faithful_llm_then_jd_tailor"
             doc = _llm_tailor_doc_for_jd(doc, jd, role, company)
 
     if doc is None and profile_norm:
+        extract_path = "regex_fallback"
         doc = _resume_doc_from_profile_text(profile_norm, role, company)
     if doc is None and base_tex:
+        extract_path = "tex_fallback"
         parsed = parse_resume_tex(base_tex)
         doc = _resume_doc_from_parsed(parsed)
     if doc is None:
+        extract_path = "empty_profile_default"
         doc = _resume_doc_from_profile_text(profile_norm or "", role, company)
 
     _finalize_structured_doc(doc, profile_norm, inv, manifest, role, company)
     doc.section_order = section_order or list(DEFAULT_SECTION_ORDER)
+    _log_structured_doc(
+        "generate_pipeline_final_json",
+        doc,
+        extract_path=extract_path,
+        manifest=manifest_to_dict(manifest),
+    )
     return doc
 
 
@@ -1285,17 +1382,37 @@ def _llm_extract_with_manifest(text: str) -> tuple[Optional[ResumeDocModel], Opt
         return None, None
 
     inv = profile_section_inventory(profile_norm)
+    log_extraction_debug(
+        "faithful_extract_input",
+        {
+            "inventory": inventory_to_dict(inv),
+            "profile_snippet_chars": len(profile_snippet),
+            "profile_snippet": profile_snippet,
+        },
+    )
     prompt = faithful_extract_prompt(profile_snippet, inv)
 
     try:
         raw = _llm_json_call(prompt)
         if not raw or not isinstance(raw, dict):
+            log_extraction_debug("faithful_extract_failed", {"reason": "empty_or_non_dict_llm_response"})
             return None, None
         body, manifest = pop_manifest_from_llm_raw(raw)
+        log_extraction_debug(
+            "faithful_extract_llm_raw",
+            {
+                "manifest": manifest_to_dict(manifest),
+                "body_keys": list(body.keys()) if isinstance(body, dict) else [],
+                "llm_top_level_keys": list(raw.keys()),
+            },
+        )
         doc = _build_resume_doc_from_llm_raw(body)
+        if doc is not None:
+            _log_structured_doc("faithful_extract_parsed_doc", doc, manifest=manifest_to_dict(manifest))
         return doc, manifest
     except Exception as exc:
         logger.warning("LLM faithful extract failed: %s", exc)
+        log_extraction_debug("faithful_extract_failed", {"reason": str(exc)})
         return None, None
 
 
@@ -1308,11 +1425,28 @@ def _finalize_structured_doc(
     company: str,
 ) -> None:
     """Manifest + inventory checks, then regex profile backfill for any dropped sections."""
+    before = _doc_extraction_counts(doc)
+    warnings: list[str] = []
     for w in validate_extraction_against_inventory(doc, inv):
         logger.warning("Structured extract completeness: %s", w)
+        warnings.append(w)
     for w in validate_manifest_against_doc(doc, manifest):
         logger.warning("Structured extract manifest mismatch: %s", w)
-    _preserve_structured_sections_from_profile(doc, profile_norm, role, company)
+        warnings.append(w)
+    for w in filter_education_grounded_in_source(doc, profile_norm):
+        logger.warning("Structured extract education grounding: %s", w)
+        warnings.append(w)
+    _preserve_structured_sections_from_profile(doc, profile_norm, inv, role, company)
+    after = _doc_extraction_counts(doc)
+    log_extraction_debug(
+        "finalize_structured_doc",
+        {
+            "before_counts": before,
+            "after_counts": after,
+            "validation_warnings": warnings,
+            "manifest": manifest_to_dict(manifest),
+        },
+    )
 
 
 def _llm_extract(text: str) -> "Optional[ResumeDocModel]":
@@ -1330,8 +1464,13 @@ def _llm_extract(text: str) -> "Optional[ResumeDocModel]":
     if doc is None:
         return None
     inv = profile_section_inventory(profile_norm)
+    log_extraction_debug(
+        "analyze_extract_input",
+        {"inventory": inventory_to_dict(inv), "profile_chars": len(profile_norm)},
+    )
     _finalize_structured_doc(doc, profile_norm, inv, manifest, "", "")
     doc.section_order = infer_section_order_from_profile(profile_norm)
+    _log_structured_doc("analyze_extract_final_json", doc)
     return doc
 
 
@@ -1375,6 +1514,7 @@ def _resume_doc_to_dict(doc: "ResumeDocModel") -> dict:
             {"title": title, "lines": lines}
             for title, lines in (doc.extra_sections or [])
         ],
+        "section_order": list(getattr(doc, "section_order", None) or DEFAULT_SECTION_ORDER),
     }
 
 
@@ -1469,6 +1609,7 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
 def _preserve_structured_sections_from_profile(
     doc: ResumeDocModel,
     candidate_profile: Optional[str],
+    inv: ProfileSectionInventory,
     role: str,
     company: str,
 ) -> None:
@@ -1476,30 +1617,42 @@ def _preserve_structured_sections_from_profile(
     profile_norm = inject_section_line_breaks((candidate_profile or "")[:8000])
     if not profile_norm.strip():
         return
-    inv = profile_section_inventory(profile_norm)
     try:
         source = _resume_doc_from_profile_text(profile_norm, role, company)
     except Exception as exc:
         logger.warning("preserve_structured_sections_from_profile failed: %s", exc)
         return
 
-    if not doc.education and source.education:
-        doc.education = list(source.education)
+    src_edu = list(source.education or [])
+    doc_edu = list(doc.education or [])
+    expected_rows = max(1, inv.estimated_education_lines) if inv.expects_education() else 0
+
+    if not doc_edu and src_edu:
+        doc.education = src_edu
         logger.info(
             "Structured renderer: restored %s education row(s) from profile parse",
             len(doc.education),
         )
-    elif inv.expects_education() and doc.education and source.education:
-        # LLM returned partial education — append any profile rows not already present
-        seen = {
-            (e.institution.strip().lower(), e.degree.strip().lower())
-            for e in doc.education
-        }
-        for row in source.education:
-            key = (row.institution.strip().lower(), row.degree.strip().lower())
-            if key not in seen and (row.institution or row.degree):
-                doc.education.append(row)
-                seen.add(key)
+    elif inv.expects_education() and src_edu:
+        if len(doc_edu) > len(src_edu) and len(src_edu) <= max(2, expected_rows):
+            logger.warning(
+                "Structured renderer: replacing %s LLM education row(s) with %s profile-parsed row(s) "
+                "(LLM over-extracted vs source EDUCATION section)",
+                len(doc_edu),
+                len(src_edu),
+            )
+            doc.education = src_edu
+        elif len(doc_edu) < len(src_edu):
+            seen = {
+                (e.institution.strip().lower(), e.degree.strip().lower())
+                for e in doc_edu
+            }
+            for row in src_edu:
+                key = (row.institution.strip().lower(), row.degree.strip().lower())
+                if key not in seen and (row.institution or row.degree):
+                    doc.education.append(row)
+                    seen.add(key)
+    doc.education = dedupe_education_rows(list(doc.education or []))
 
     if not doc.projects and source.projects:
         doc.projects = list(source.projects)
@@ -1709,10 +1862,14 @@ async def api_generate_stream(request: Request):
                     use_conservative_tailor=use_conservative_tailor,
                     base_tex=base_tex,
                 )
+                logger.info(
+                    "Structured generate | extract_path logged above | counts=%s",
+                    _doc_extraction_counts(doc),
+                )
                 if candidate_profile and jd and not use_conservative_tailor:
                     asyncio.run_coroutine_threadsafe(queue.put({
                         "event": "status",
-                        "msg": "Tailoring summary and bullets to the job…",
+                        "msg": "Tailoring summary, experience, and project bullets to the job…",
                     }), loop).result()
                 _apply_accepted_edits_to_doc(doc, accepted_suggestions if isinstance(accepted_suggestions, list) else None)
 
@@ -2032,6 +2189,14 @@ async def api_upload_resume(request: Request):
         }
         if parse_status == "ready" and structured:
             payload["structured"] = structured
+            log_extraction_debug(
+                "upload_pipeline_final_structured",
+                {
+                    "education_rows": len(structured.get("education") or []),
+                    "experience_rows": len(structured.get("experience") or []),
+                    "structured": structured,
+                },
+            )
         if hints:
             payload["hints"] = hints
 
@@ -4088,6 +4253,7 @@ async def api_analyze_upload(request: Request):
                     bullet_map.append({"experienceIdx": ei, "bulletIdx": bi})
             result["structuredResume"] = _resume_doc_to_dict(structured)
             result["bulletMap"]        = bullet_map
+            _log_structured_doc("analyze_upload_structured_resume", structured)
 
         # Persist analysis result for student history + cohort analytics (best-effort)
         user_id = (form.get("user_id") or "").strip()

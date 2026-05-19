@@ -42,13 +42,14 @@
 \needspace{6\baselineskip}
 \section*{Experience}
 {% for exp in doc.experience %}
-\needspace{5\baselineskip}
+{% set job_lines = 5 + (exp.bullets|length) * 3 %}
+\needspace{ {{ [job_lines, 32]|min }} \baselineskip}
 \textbf{ {{ exp.company|latex }} }{% if exp.location %} --- {{ exp.location|latex }}{% endif %}\\
 \textit{ {{ exp.role|latex }}{% if exp.dates %} | {{ exp.dates|latex }}{% endif %} }\\
 \begin{itemize}
 {% for bullet in exp.bullets %}
 \needspace{2.8\baselineskip}
-\item {{ bullet|latex }}
+\item {{ bullet|bullet_latex }}
 {% endfor %}
 \end{itemize}
 {% endfor %}
@@ -66,7 +67,7 @@
 \begin{itemize}
 {% for bullet in proj.bullets %}
 \needspace{2.8\baselineskip}
-\item {{ bullet|latex }}
+\item {{ bullet|bullet_latex }}
 {% endfor %}
 \end{itemize}
 {% endif %}
@@ -84,7 +85,7 @@
 \begin{itemize}
 {% for bullet in edu.bullets %}
 \needspace{2.8\baselineskip}
-\item {{ bullet|latex }}
+\item {{ bullet|bullet_latex }}
 {% endfor %}
 \end{itemize}
 {% endif %}

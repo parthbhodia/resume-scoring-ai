@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+_BULLET_PREFIX_RE = re.compile(r"^[\s•\-\*·◦▪‣]+\s*")
 
 
 def _latex_escape(value: str) -> str:
@@ -21,6 +24,12 @@ def _latex_escape(value: str) -> str:
     text = text.replace("~", "\\textasciitilde{}")
     text = text.replace("^", "\\textasciicircum{}")
     return text
+
+
+def _latex_escape_bullet(value: str) -> str:
+    """Escape bullet body text and strip leading •/- so LaTeX \\item does not double-mark."""
+    text = _BULLET_PREFIX_RE.sub("", (value or "").strip())
+    return _latex_escape(text)
 
 
 @dataclass
@@ -89,6 +98,7 @@ class JinjaLatexRenderer:
             undefined=StrictUndefined,
         )
         self._env.filters["latex"] = _latex_escape
+        self._env.filters["bullet_latex"] = _latex_escape_bullet
 
     def render(self, doc: ResumeDocModel, template_name: str = "classic_resume.tex.j2") -> str:
         template = self._env.get_template(template_name)
