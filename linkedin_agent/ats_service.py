@@ -1902,18 +1902,21 @@ def ats_check(
 
     bullet_pts = _ATS_SCORE_WEIGHTS["experienceBulletQuality"] * bullet_quality
 
-    raw_total = jd_kw_pts + req_pts + cat_title_pts + bullet_pts + fmt_pts + ct_pts
-    scale = 100.0 / 95.0
-    score = max(0, min(100, int(round(raw_total * scale - red_penalty))))
+    # Primary ATS score = UIC + parsing-research best-practice checklist (passed / total).
+    score = max(0, min(100, int(best_practices.get("score", 0))))
 
     score_breakdown = {
+        "bestPracticesScore": score,
+        "bestPracticesPassed": best_practices.get("passed", 0),
+        "bestPracticesTotal": best_practices.get("total", 0),
+        "redFlagPenalty": red_penalty,
+        # Legacy weighted subscores (informational only — not used for the headline score).
         "jdKeywordMatch": round(jd_kw_pts, 1),
         "requiredSkillMatch": round(req_pts, 1),
         "categoryAndTitleMatch": round(cat_title_pts, 1),
         "experienceBulletQuality": round(bullet_pts, 1),
         "formattingAndParseability": round(fmt_pts, 1),
         "contactAndLinks": round(ct_pts, 1),
-        "redFlagPenalty": red_penalty,
         "keywordTypeWeights": dict(_KEYWORD_TYPE_WEIGHTS),
     }
 
@@ -1928,7 +1931,7 @@ def ats_check(
         {"id": "metrics", "label": "Quantified impact on most bullets", "pass": n_bul == 0 or quant_ratio >= 0.35},
     ]
     disclaimer = (
-        "Resunova scores how well your résumé text aligns with this job description and common ATS parsing patterns. "
+        "Score is the share of ATS best-practice checks passed (UIC formatting guide + parsing research). "
         "It does not guarantee passage of any specific applicant tracking system."
     )
 
@@ -2013,7 +2016,46 @@ def structured_ratings_from_ats(ats: dict) -> dict:
     keywords = ats.get("keywords") if isinstance(ats, dict) else []
     score_breakdown = ats.get("scoreBreakdown") if isinstance(ats, dict) else {}
     jd_signals = ats.get("jdAnalysis") if isinstance(ats, dict) else {}
+    best_practices = ats.get("bestPractices") if isinstance(ats, dict) else {}
     criteria = []
+
+    bp_checks = best_practices.get("checks") if isinstance(best_practices, dict) else []
+    if isinstance(bp_checks, list) and bp_checks:
+        for chk in bp_checks[:23]:
+            if not isinstance(chk, dict):
+                continue
+            name = str(chk.get("name") or "").strip()
+            if not name:
+                continue
+            note = str(chk.get("detail") or "").strip()
+            passed = bool(chk.get("pass"))
+            criteria.append({
+                "name": name,
+                "weight": "Medium",
+                "score": 10 if passed else 4,
+                "notes": note,
+                "text": f"{name} — {note}" if note else name,
+            })
+        try:
+            match_score = int(best_practices.get("score", ats.get("score", 0)))
+        except (TypeError, ValueError):
+            match_score = 0
+        match_score = max(0, min(100, match_score))
+        whats_working = [c["text"] for c in criteria if c.get("score", 0) >= 7][:6]
+        gaps = [c["text"] for c in criteria if c.get("score", 0) < 7][:6]
+        if match_score >= 85:
+            verdict = "Strong ATS formatting and role alignment on the checklist."
+        elif match_score >= 65:
+            verdict = "Solid foundation — address the open checklist items to strengthen ATS parsing."
+        else:
+            verdict = "Several ATS best-practice gaps — fix the failed checks before you apply."
+        return {
+            "match_score": match_score,
+            "criteria": criteria[:15],
+            "whats_working": whats_working,
+            "gaps": gaps,
+            "verdict": verdict,
+        }
 
     req_skills = jd_signals.get("requiredSkills") if isinstance(jd_signals, dict) else []
     pref_skills = jd_signals.get("preferredSkills") if isinstance(jd_signals, dict) else []
