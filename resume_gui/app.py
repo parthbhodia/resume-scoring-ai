@@ -3856,37 +3856,22 @@ async def api_analyze_upload(request: Request):
 
 
 def _persist_analysis(result: dict, user_id: str, user_email: str, has_jd: bool) -> None:
-    """Write analysis result to Supabase `analyses` table for history + cohort stats."""
-    table = _supabase_table("analyses")
+    """Write analysis result to Supabase `resume_analyses` table for history + cohort stats."""
+    table = _supabase_table("resume_analyses")
     if table is None:
         return
-    cs = result.get("categoryScores") or {}
-    bullets = result.get("bulletAnalysis") or []
-    bullet_count = len(bullets) if isinstance(bullets, list) else 0
-    weak_bullet_count = sum(
-        1 for b in bullets
-        if isinstance(b, dict) and isinstance(b.get("score"), (int, float)) and b.get("score", 0) < 55
-    )
-    ka = result.get("keywordAnalysis") or {}
+    header = (result.get("resumeHeader") or "").strip()
+    label  = header[:80] if header else ("With JD" if has_jd else "General")
     row = {
-        "user_id":          user_id,
-        "user_email":       user_email or None,
-        "resume_name":      (result.get("resumeHeader") or "")[:120] or None,
-        "overall_score":    result.get("overallScore"),
-        "category_scores":  cs,
-        "top_issues":       result.get("topIssues") or [],
-        "top_strengths":    result.get("topStrengths") or [],
-        "ats_warnings":     result.get("atsWarnings") or [],
-        "missing_keywords": ka.get("missingKeywords") or [],
-        "keyword_score":    ka.get("keywordScore"),
-        "bullet_count":     bullet_count,
-        "weak_bullet_count": weak_bullet_count,
-        "has_jd":           has_jd,
+        "user_id": user_id,
+        "label":   label,
+        "score":   result.get("overallScore"),
+        "result":  result,
     }
     try:
         table.insert(row).execute()
     except Exception as exc:
-        logger.warning("analyses insert failed: %s", exc)
+        logger.warning("resume_analyses insert failed: %s", exc)
 
 
 async def api_my_analyses(request: Request):
@@ -3894,19 +3879,31 @@ async def api_my_analyses(request: Request):
     user_id = (request.query_params.get("user_id") or "").strip()
     if not user_id:
         return JSONResponse({"error": "user_id required"}, status_code=400)
-    table = _supabase_table("analyses")
+    table = _supabase_table("resume_analyses")
     if table is None:
         return JSONResponse({"analyses": [], "note": "storage unavailable"})
     try:
         resp = (
             table
-            .select("id,overall_score,category_scores,top_issues,top_strengths,keyword_score,has_jd,bullet_count,weak_bullet_count,resume_name,created_at")
+            .select("id,label,score,created_at,result->overallScore,result->categoryScores,result->topIssues,result->topStrengths,result->keywordAnalysis")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .limit(50)
             .execute()
         )
-        return JSONResponse({"analyses": resp.data or []})
+        rows = []
+        for r in (resp.data or []):
+            rows.append({
+                "id":             r.get("id"),
+                "label":          r.get("label"),
+                "score":          r.get("score"),
+                "created_at":     r.get("created_at"),
+                "categoryScores": (r.get("result") or {}).get("categoryScores"),
+                "topIssues":      (r.get("result") or {}).get("topIssues"),
+                "topStrengths":   (r.get("result") or {}).get("topStrengths"),
+                "keywordScore":   ((r.get("result") or {}).get("keywordAnalysis") or {}).get("keywordScore"),
+            })
+        return JSONResponse({"analyses": rows})
     except Exception as exc:
         logger.warning("my_analyses query failed: %s", exc)
         return JSONResponse({"error": str(exc)}, status_code=500)
@@ -3925,14 +3922,14 @@ async def api_cohort_stats(request: Request):
     if not advisor_secret or provided_key != advisor_secret:
         return JSONResponse({"error": "unauthorized"}, status_code=403)
 
-    table = _supabase_table("analyses")
+    table = _supabase_table("resume_analyses")
     if table is None:
         return JSONResponse({"error": "storage unavailable"}, status_code=503)
 
     try:
         resp = (
             table
-            .select("user_id,user_email,overall_score,category_scores,top_issues,keyword_score,has_jd,bullet_count,weak_bullet_count,created_at")
+            .select("user_id,score,result,created_at")
             .order("created_at", desc=True)
             .limit(2000)
             .execute()
@@ -3943,11 +3940,10 @@ async def api_cohort_stats(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
     if not rows:
-        return JSONResponse({"student_count": 0, "analysis_count": 0, "rows": []})
+        return JSONResponse({"student_count": 0, "analysis_count": 0})
 
     from collections import Counter as _Counter
 
-    # --- aggregate numeric fields ---
     def _avg(vals):
         clean = [v for v in vals if isinstance(v, (int, float))]
         return round(sum(clean) / len(clean), 1) if clean else None
@@ -3955,10 +3951,10 @@ async def api_cohort_stats(request: Request):
     dim_keys = ["readability", "atsCompatibility", "jobMatch", "achievementQuality",
                 "quantification", "sectionStructure", "languageQuality", "technicalBranding"]
 
-    overall_scores = [r.get("overall_score") for r in rows if r.get("overall_score") is not None]
+    overall_scores = [r.get("score") for r in rows if r.get("score") is not None]
     dim_avgs = {}
     for dk in dim_keys:
-        vals = [r.get("category_scores", {}).get(dk) for r in rows]
+        vals = [(r.get("result") or {}).get("categoryScores", {}).get(dk) for r in rows]
         dim_avgs[dk] = _avg(vals)
 
     # --- score tier distribution ---
@@ -3972,27 +3968,25 @@ async def api_cohort_stats(request: Request):
     # --- most common issues ---
     issue_counter: _Counter = _Counter()
     for r in rows:
-        for issue in (r.get("top_issues") or []):
-            title = issue.get("title") or issue.get("issue") if isinstance(issue, dict) else str(issue)
+        for issue in ((r.get("result") or {}).get("topIssues") or []):
+            title = (issue.get("title") or issue.get("issue")) if isinstance(issue, dict) else str(issue)
             if title:
                 issue_counter[title.strip()] += 1
     top_issues = [{"issue": k, "count": v} for k, v in issue_counter.most_common(10)]
 
-    # --- per-student latest scores (for advisor roster) ---
+    # --- per-student latest scores (advisor roster) ---
     seen: dict = {}
     for r in rows:
         uid = r.get("user_id")
         if uid and uid not in seen:
             seen[uid] = {
-                "user_id":       uid,
-                "user_email":    r.get("user_email"),
-                "latest_score":  r.get("overall_score"),
-                "latest_at":     r.get("created_at"),
+                "user_id":        uid,
+                "latest_score":   r.get("score"),
+                "latest_at":      r.get("created_at"),
                 "analysis_count": sum(1 for x in rows if x.get("user_id") == uid),
             }
     student_roster = sorted(seen.values(), key=lambda x: x.get("latest_score") or 0)
 
-    # --- weakest dimensions (sorted ascending) ---
     weakest_dims = sorted(
         [(dk, dim_avgs[dk]) for dk in dim_keys if dim_avgs[dk] is not None],
         key=lambda x: x[1]
