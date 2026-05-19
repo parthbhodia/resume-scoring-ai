@@ -2170,7 +2170,11 @@ async def api_upload_resume(request: Request):
         markdown_content = inject_section_line_breaks(outcome.markdown)
 
         def _pipeline_sync():
-            return parse_upload_resume_full_pipeline(markdown_content)
+            return parse_upload_resume_full_pipeline(
+                markdown_content,
+                file_content=content,
+                filename=filename,
+            )
 
         structured, plain_text, parse_status, hints = await loop.run_in_executor(None, _pipeline_sync)
 
@@ -2187,7 +2191,7 @@ async def api_upload_resume(request: Request):
             "markdown": markdown_content,
             "parse_status": parse_status,
         }
-        if parse_status == "ready" and structured:
+        if parse_status in ("ready", "ready_deterministic") and structured:
             payload["structured"] = structured
             log_extraction_debug(
                 "upload_pipeline_final_structured",
