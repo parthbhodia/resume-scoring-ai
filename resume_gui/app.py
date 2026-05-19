@@ -4296,7 +4296,7 @@ async def api_student_detail(request: Request):
         try:
             r_resp = (
                 resumes_table
-                .select("folder,company,role,score,created_at")
+                .select("folder,company,role,score,pdf_url,created_at")
                 .eq("user_id", student_id)
                 .order("created_at", desc=True)
                 .limit(50)
