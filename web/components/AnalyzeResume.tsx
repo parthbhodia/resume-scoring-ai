@@ -252,6 +252,7 @@ export default function AnalyzeResume() {
   const [editDraftStatus, setEditDraftStatus] = useState<string | null>(null);
   const [azHistory, setAzHistory]           = useState<AnalyzeRecord[]>([]);
   const [userId, setUserId]                 = useState<string | null>(null);
+  const [userEmail, setUserEmail]           = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const rewriteEdits = useResumeAnalyzeStore((s) => s.rewriteEdits);
   const patchRewrite = useResumeAnalyzeStore((s) => s.patchRewrite);
@@ -279,6 +280,7 @@ export default function AnalyzeResume() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user?.id) { setLoadingHistory(false); return; }
       setUserId(user.id);
+      setUserEmail(user.email ?? null);
       // Seed from localStorage immediately so UI isn't empty while fetching
       setAzHistory(lsLoad(user.id));
       try {
@@ -373,6 +375,8 @@ export default function AnalyzeResume() {
     const fd = new FormData();
     fd.append("file", file);
     if (jd.trim()) fd.append("jd", jd);
+    if (userId)    fd.append("user_id", userId);
+    if (userEmail) fd.append("user_email", userEmail);
     try {
       const resp = await fetch(apiUrl("/api/analyze-upload"), { method: "POST", body: fd });
       const json = await resp.json();
