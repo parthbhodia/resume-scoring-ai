@@ -693,13 +693,11 @@ def _det_extract_contact(lines: List[str]) -> Dict[str, str]:
 
 def _det_quality_ok(result: "UploadedResumeStructured") -> bool:
     """Return True if deterministic extraction found enough to be useful."""
-    section_count = sum([
-        bool(result.work_experience),
-        bool(result.education),
-        bool(result.skills),
-        bool(result.summary),
-    ])
-    return section_count >= 2 or bool(result.email) or bool(result.full_name)
+    has_identity = bool(result.email) or bool(result.full_name) or bool(result.phone)
+    has_content = bool(
+        result.work_experience or result.education or result.skills or result.summary
+    )
+    return has_identity or has_content
 
 
 # ── PyMuPDF PDF extractor ───────────────────────────────────────────────────
@@ -782,9 +780,16 @@ def _extract_pdf_structured(content: bytes) -> Optional["UploadedResumeStructure
 # ── python-docx DOCX extractor ──────────────────────────────────────────────
 
 def _extract_docx_structured(content: bytes) -> Optional["UploadedResumeStructured"]:
-    """Deterministic DOCX → UploadedResumeStructured via python-docx paragraph styles."""
+    """Deterministic DOCX → UploadedResumeStructured via python-docx paragraph styles.
+
+    Uses full element.body traversal so table-only resumes (where doc.paragraphs
+    returns nothing) are handled correctly.
+    """
     try:
         from docx import Document  # type: ignore[import-untyped]
+        from docx.oxml.ns import qn  # type: ignore[import-untyped]
+        from docx.text.paragraph import Paragraph as DocxParagraph  # type: ignore[import-untyped]
+        from docx.table import Table as DocxTable  # type: ignore[import-untyped]
     except ImportError:
         logger.warning("_extract_docx_structured: python-docx not installed")
         return None
@@ -795,33 +800,47 @@ def _extract_docx_structured(content: bytes) -> Optional["UploadedResumeStructur
         logger.warning("_extract_docx_structured: Document() failed: %s", exc)
         return None
 
-    para_data: List[Dict[str, Any]] = []
-    for para in doc.paragraphs:
+    def _para_meta(para: Any) -> Dict[str, Any]:
         text = para.text.strip()
-        if not text:
-            continue
         style = para.style.name if para.style else ""
         runs = [r for r in para.runs if r.text.strip()]
         all_bold = bool(runs and all(r.bold for r in runs))
         all_caps = text == text.upper() and any(c.isalpha() for c in text)
         is_list = any(s in style for s in ("List", "Bullet", "Item")) or \
-                  (text and text[0] in ("•", "●", "▪", "◦", "○"))
-        para_data.append({
-            "text": text,
-            "style": style,
-            "all_bold": all_bold,
-            "all_caps": all_caps,
-            "is_list": is_list,
-        })
+                  bool(text and text[0] in ("•", "●", "▪", "◦", "○"))
+        return {"text": text, "style": style, "all_bold": all_bold,
+                "all_caps": all_caps, "is_list": is_list}
 
-    # Extract skills from tables
-    table_skills: List[str] = []
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                ct = cell.text.strip()
-                if ct and len(ct) < 60 and ct not in table_skills:
-                    table_skills.append(ct)
+    # Traverse document body in reading order, including table cells
+    para_data: List[Dict[str, Any]] = []
+    seen_cell_texts: set = set()
+
+    for child in doc.element.body:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag == "p":
+            para = DocxParagraph(child, doc)
+            meta = _para_meta(para)
+            if meta["text"]:
+                para_data.append(meta)
+        elif tag == "tbl":
+            table = DocxTable(child, doc)
+            for row in table.rows:
+                for cell in row.cells:
+                    cell_text = cell.text.strip()
+                    if not cell_text or cell_text in seen_cell_texts:
+                        continue
+                    seen_cell_texts.add(cell_text)
+                    for para in cell.paragraphs:
+                        meta = _para_meta(para)
+                        if meta["text"]:
+                            para_data.append(meta)
+
+    if not para_data:
+        return None
+
+    # Detect uniform-bold (like flat PDFs): disable bold-as-heading when >50% lines are bold
+    bold_ratio = sum(1 for p in para_data if p["all_bold"]) / len(para_data)
+    uniform_bold = bold_ratio > 0.5
 
     def is_heading(i: int) -> bool:
         p = para_data[i]
@@ -829,21 +848,19 @@ def _extract_docx_structured(content: bytes) -> Optional["UploadedResumeStructur
         if not text or len(text) > 70:
             return False
         style = p["style"]
-        if any(style.startswith(s) for s in ("Heading", "Title")):
+        if any(style.startswith(s) for s in ("Heading 1", "Heading 2", "Title")):
             return True
         if p["all_caps"] and len(text) <= 60:
             return True
+        if uniform_bold:
+            # Fall back to keyword-only when bold is uniform across the document
+            return len(text.split()) <= 5 and _det_canonical_section(text) is not None
         if p["all_bold"] and len(text) <= 50 and not p["is_list"]:
             return True
         return False
 
     plain_lines = [p["text"] for p in para_data]
-    result = _build_structured_from_lines(plain_lines, is_heading_fn=lambda i: is_heading(i))
-
-    if result and table_skills and not result.skills:
-        result.skills = table_skills
-
-    return result
+    return _build_structured_from_lines(plain_lines, is_heading_fn=lambda i: is_heading(i))
 
 
 # ── Shared line-based structured builder ────────────────────────────────────
