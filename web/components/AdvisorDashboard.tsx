@@ -43,7 +43,7 @@ interface CohortStats {
 
 interface ScorePoint { date: string | null; score: number | null; label: string | null; }
 
-interface ResumeEntry { folder: string; company: string; role: string; score: number | null; created_at: string | null; }
+interface ResumeEntry { folder: string; company: string; role: string; score: number | null; pdf_url: string | null; created_at: string | null; }
 
 interface StudentDetail {
   student_id: string;
@@ -313,7 +313,7 @@ function StudentDetailPanel({
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr>
-                      {["Role", "Company", "Job-fit Score", "Date"].map(h => (
+                      {["Role", "Company", "Job-fit Score", "Date", ""].map(h => (
                         <th key={h} style={{ padding: "6px 12px", textAlign: "left", fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--dim)", borderBottom: "1px solid var(--border)" }}>{h}</th>
                       ))}
                     </tr>
@@ -330,6 +330,25 @@ function StudentDetailPanel({
                           }
                         </td>
                         <td style={{ padding: "11px 12px", fontSize: 12, color: "var(--dim)" }}>{fmt(r.created_at)}</td>
+                        <td style={{ padding: "11px 12px", textAlign: "right" }}>
+                          {r.pdf_url
+                            ? <a
+                                href={r.pdf_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                download
+                                style={{
+                                  fontSize: 11, fontWeight: 600, color: "var(--text)",
+                                  textDecoration: "none", padding: "4px 10px",
+                                  border: "1px solid var(--border)", borderRadius: 6,
+                                  background: "var(--surface2)",
+                                  letterSpacing: "0.02em",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >Download PDF</a>
+                            : <span style={{ fontSize: 11, color: "var(--dim)" }}>No PDF</span>
+                          }
+                        </td>
                       </tr>
                     ))}
                   </tbody>
