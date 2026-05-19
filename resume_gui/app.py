@@ -183,6 +183,145 @@ _EDU_DATE_HINT_RE = re.compile(
     r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
     re.I,
 )
+_EXPERIENCE_SECTION_LABELS = frozenset({
+    "experience",
+    "work experience",
+    "professional experience",
+    "employment",
+    "work history",
+})
+_SKILL_SECTION_LABELS = frozenset({"skills", "technical skills", "core competencies"})
+_LOCATION_BULLET_RE = re.compile(
+    r"^[A-Za-z .'-]+,\s*[A-Za-z .'-]+$",
+)
+_EDU_SECTION_NOISE = frozenset({"projects", "project", "education", "coursework", "relevant coursework"})
+_ACCOMPLISHMENT_STARTERS = frozenset({
+    "developed", "supported", "led", "built", "implemented", "automated", "collaborated",
+    "assisted", "performed", "ensured", "redesigned", "constructed", "consolidated",
+    "managed", "conducted", "applied", "designed", "streamlined", "owned", "contributed",
+    "created", "analyzed", "analysed", "optimized", "optimised", "reduced", "increased",
+})
+
+
+def _is_experience_section_label(text: str) -> bool:
+    low = re.sub(r"[^a-z ]", "", (text or "").lower()).strip()
+    return low in _EXPERIENCE_SECTION_LABELS
+
+
+def _looks_like_accomplishment_bullet(text: str) -> bool:
+    t = _clean_model_text(text)
+    if len(t.split()) < 8:
+        return False
+    first = t.split()[0].lower().rstrip(",")
+    return first in _ACCOMPLISHMENT_STARTERS
+
+
+def _normalize_phone_value(phone: str) -> str:
+    p = _clean_model_text(phone)
+    if p and p[0].isdigit() and ")" in p and "(" not in p:
+        p = "(" + p
+    return p
+
+
+def _normalize_structured_experience(doc: ResumeDocModel) -> None:
+    """Fix table-style extracts that put the word 'Experience' in the company slot."""
+    for exp in doc.experience or []:
+        company = _clean_model_text(exp.company or "")
+        role = _clean_model_text(exp.role or "")
+        loc = _clean_model_text(exp.location or "")
+        if _is_experience_section_label(company):
+            if "|" in role:
+                parts = [p.strip() for p in role.split("|") if p.strip()]
+                if len(parts) >= 2:
+                    exp.role = _clean_model_text(parts[0])
+                    exp.company = _clean_model_text(parts[1])
+                    if len(parts) >= 3:
+                        exp.location = _clean_model_text(parts[2].strip(" |"))
+                else:
+                    exp.company = ""
+            else:
+                exp.company = ""
+        if _is_experience_section_label(exp.role):
+            exp.role = ""
+        if role and not exp.role and not _is_experience_section_label(company):
+            if "|" in role:
+                parts = [p.strip() for p in role.split("|") if p.strip()]
+                if len(parts) >= 2 and not _is_experience_section_label(parts[0]):
+                    exp.role = _clean_model_text(parts[0])
+                    exp.company = _clean_model_text(parts[1]) or exp.company
+                    if len(parts) >= 3:
+                        exp.location = _clean_model_text(parts[2].strip(" |")) or loc
+            elif not exp.role:
+                exp.role = role
+        exp.role = _clean_model_text(exp.role or "").strip(" |")
+        exp.company = _clean_model_text(exp.company or "")
+        if _is_experience_section_label(exp.company):
+            exp.company = ""
+
+
+def _normalize_structured_education(doc: ResumeDocModel) -> None:
+    """Fix degree/dates/location swapped when PDF tables split one school across lines."""
+    for edu in doc.education or []:
+        dates = _clean_model_text(edu.dates or "")
+        degree = _clean_model_text(edu.degree or "")
+        if dates and _DEGREE_LINE_RE.search(dates) and not _EDU_DATE_HINT_RE.search(dates):
+            if not degree:
+                edu.degree = dates
+                edu.dates = ""
+            elif _EDU_DATE_HINT_RE.search(degree) and not _EDU_DATE_HINT_RE.search(dates):
+                edu.dates, edu.degree = degree, dates
+        loc_field = _clean_model_text(edu.location or "")
+        if loc_field and _EDU_DATE_HINT_RE.search(loc_field) and not _EDU_DATE_HINT_RE.search(edu.dates or ""):
+            edu.dates = loc_field
+            edu.location = ""
+        bullets = list(edu.bullets or [])
+        if bullets and not (edu.location or "").strip():
+            kept: list[str] = []
+            for b in bullets:
+                bt = _clean_model_text(b)
+                low_b = re.sub(r"[^a-z ]", "", bt.lower()).strip()
+                if low_b in _EDU_SECTION_NOISE:
+                    continue
+                if (
+                    _EDU_DATE_HINT_RE.search(bt)
+                    and not _DEGREE_LINE_RE.search(bt)
+                    and not edu.dates
+                ):
+                    edu.dates = bt
+                    continue
+                if (
+                    not edu.location
+                    and _LOCATION_BULLET_RE.match(bt)
+                    and not _DEGREE_LINE_RE.search(bt)
+                    and not _SCHOOL_HINT_RE.search(bt)
+                ):
+                    edu.location = bt
+                else:
+                    kept.append(bt)
+            edu.bullets = kept
+
+
+def _normalize_structured_skills(doc: ResumeDocModel) -> None:
+    cleaned: list[tuple[str, list[str]]] = []
+    for cat, items in doc.skills or []:
+        label = _clean_model_text(cat or "")
+        low = re.sub(r"[^a-z ]", "", label.lower()).strip()
+        if low in _SKILL_SECTION_LABELS:
+            label = "Skills"
+        clean_items = [
+            _clean_model_text(it)
+            for it in (items or [])
+            if _clean_model_text(it)
+            and re.sub(r"[^a-z ]", "", _clean_model_text(it).lower()).strip() not in _SKILL_SECTION_LABELS
+            and not _looks_like_accomplishment_bullet(it)
+        ]
+        if label or clean_items:
+            cleaned.append((label or "Skills", clean_items))
+    doc.skills = cleaned
+
+
+def _normalize_structured_contact(doc: ResumeDocModel) -> None:
+    doc.phone = _normalize_phone_value(doc.phone or "")
 
 
 def _parse_school_date_line(line: str) -> Tuple[str, str, str]:
@@ -294,6 +433,8 @@ def _education_items_from_flat_lines(lines: list[str]) -> list[EducationItem]:
         nonlocal degree, institution, dates, location, bullets
         if not (degree or institution or bullets):
             return
+        if institution and not (degree or dates or location or bullets):
+            return
         items.append(
             EducationItem(
                 institution=institution,
@@ -325,6 +466,16 @@ def _education_items_from_flat_lines(lines: list[str]) -> list[EducationItem]:
             degree = line
             continue
 
+        if (
+            _EDU_DATE_HINT_RE.search(line)
+            and not _DEGREE_LINE_RE.search(line)
+            and not _SCHOOL_HINT_RE.search(line)
+            and (degree or institution)
+            and not dates
+        ):
+            dates = line
+            continue
+
         inst, dat, loc = _parse_school_date_line(line)
         if inst:
             if degree or not items:
@@ -342,6 +493,9 @@ def _education_items_from_flat_lines(lines: list[str]) -> list[EducationItem]:
 
         if not degree and not institution:
             row = _education_item_from_csv_line(line)
+            if row.institution and not row.degree and not row.dates:
+                institution = row.institution
+                continue
             if row.institution or row.degree:
                 flush()
                 items.append(row)
@@ -392,6 +546,8 @@ def _education_item_from_csv_line(line: str) -> EducationItem:
     if len(parts) == 3:
         return EducationItem(institution=parts[0], degree=parts[1], dates=parts[2])
     if len(parts) == 2:
+        if _SCHOOL_HINT_RE.search(parts[0]) and not _DEGREE_LINE_RE.search(parts[1]):
+            return EducationItem(institution=raw)
         return EducationItem(institution=parts[0], degree=parts[1])
     return EducationItem(institution=raw)
 
@@ -1437,6 +1593,10 @@ def _finalize_structured_doc(
         logger.warning("Structured extract education grounding: %s", w)
         warnings.append(w)
     _preserve_structured_sections_from_profile(doc, profile_norm, inv, role, company)
+    _normalize_structured_experience(doc)
+    _normalize_structured_education(doc)
+    _normalize_structured_skills(doc)
+    _normalize_structured_contact(doc)
     after = _doc_extraction_counts(doc)
     log_extraction_debug(
         "finalize_structured_doc",
@@ -1527,7 +1687,7 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
     skills: list[tuple[str, list[str]]] = []
     for ln in parsed.skills_lines or []:
         clean = _clean_model_text(ln)
-        if not clean or _is_structural_noise_line(clean):
+        if not clean or _is_structural_noise_line(clean) or _looks_like_accomplishment_bullet(clean):
             continue
         if ":" in clean:
             label, rest = clean.split(":", 1)
@@ -1540,7 +1700,7 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
     if parsed.experience_entries:
         experience_list = [
             ExperienceItem(
-                company=_clean_model_text(ec) or "Experience",
+                company=_clean_model_text(ec),
                 role=_clean_model_text(er or ""),
                 dates=_clean_model_text(ed or ""),
                 location=_clean_model_text(el or ""),
@@ -1552,8 +1712,8 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         reg_bullets = [_clean_model_text(b) for b in (parsed.experience_bullets or []) if _clean_model_text(b)]
         experience_list = [
             ExperienceItem(
-                company=company or "Experience",
-                role=role or "Role",
+                company=company or "",
+                role=role or "",
                 dates="",
                 location="",
                 bullets=reg_bullets,
@@ -1594,7 +1754,7 @@ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, c
         headline=_clean_model_text(parsed.headline or role or ""),
         location=_clean_model_text(parsed.location or ""),
         email=_clean_model_text(parsed.email or ""),
-        phone=_clean_model_text(parsed.phone or ""),
+        phone=_normalize_phone_value(_clean_model_text(parsed.phone or "")),
         linkedin=_clean_model_text(parsed.linkedin or ""),
         github=_clean_model_text(parsed.github or ""),
         summary=summary,

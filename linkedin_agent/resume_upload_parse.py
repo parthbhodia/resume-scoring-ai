@@ -626,6 +626,10 @@ def _det_parse_contact(lines: List[str]) -> Dict[str, str]:
     }
 
 
+def _det_line_is_section_label(line: str) -> bool:
+    return _det_canonical_section(line) is not None and len((line or "").split()) <= 4
+
+
 def _det_parse_work_experience(lines: List[str]) -> List[WorkExperienceItem]:
     jobs: List[WorkExperienceItem] = []
     current: Optional[WorkExperienceItem] = None
@@ -640,6 +644,8 @@ def _det_parse_work_experience(lines: List[str]) -> List[WorkExperienceItem]:
         line = (raw or "").strip()
         if not line:
             continue
+        if _det_line_is_section_label(line):
+            continue
         if _det_is_bullet_line(line):
             bullet = _det_strip_bullet(line)
             if bullet:
@@ -653,7 +659,9 @@ def _det_parse_work_experience(lines: List[str]) -> List[WorkExperienceItem]:
             flush()
             dates = dm.group(0).strip()
             rest = line.replace(dates, "").strip(" ,|")
-            parts = _det_split_pipe(rest) if "|" in rest else [rest]
+            if _det_line_is_section_label(rest):
+                rest = ""
+            parts = _det_split_pipe(rest) if "|" in rest else ([rest] if rest else [])
             title = parts[0] if parts else ""
             org = parts[1] if len(parts) > 1 else ""
             loc = parts[2] if len(parts) > 2 else ""
@@ -662,7 +670,7 @@ def _det_parse_work_experience(lines: List[str]) -> List[WorkExperienceItem]:
 
         if current is None:
             current = WorkExperienceItem()
-        if not current.organization:
+        if not current.organization and not _det_line_is_section_label(line):
             current.organization = line
         elif not current.title:
             current.title = line
@@ -673,33 +681,75 @@ def _det_parse_work_experience(lines: List[str]) -> List[WorkExperienceItem]:
     return jobs
 
 
+def _det_degree_like(line: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:Bachelor|Master|MBA|Ph\.?\s*D|M\.?\s*S\.?|B\.?\s*S\.?|studies|Science|Commerce)\b",
+            line or "",
+            re.I,
+        )
+    )
+
+
 def _det_parse_education(lines: List[str]) -> List[EducationItem]:
     rows: List[EducationItem] = []
     for raw in lines:
         line = (raw or "").strip()
-        if not line or _det_is_bullet_line(line):
-            det = _det_strip_bullet(line) if _det_is_bullet_line(line) else ""
-            if rows and det:
+        if not line:
+            continue
+        if _det_is_bullet_line(line):
+            det = _det_strip_bullet(line)
+            if rows and det and "," in det and len(det) < 80 and not _det_degree_like(det):
+                prev = rows[-1]
+                if not (prev.details or "").strip():
+                    prev.details = det
+                else:
+                    prev.details = f"{prev.details} {det}".strip()
+            elif rows and det:
                 prev = rows[-1]
                 prev.details = (prev.details + " " + det).strip() if prev.details else det
             continue
+        dm = _DET_DATE_RANGE_RE.search(line)
+        if dm and _det_degree_like(line):
+            years = dm.group(0).strip()
+            degree = line.replace(years, "").strip(" |")
+            school = ""
+            if "|" in degree:
+                left, right = [p.strip() for p in degree.split("|", 1)]
+                if _det_degree_like(left):
+                    degree, school = left, right
+                else:
+                    school, degree = left, right
+            rows.append(EducationItem(school=school, degree=degree, years=years, details=""))
+            continue
         parts = _det_split_pipe(line)
         if len(parts) >= 2:
-            dm = _DET_DATE_RANGE_RE.search(line)
-            years = dm.group(0).strip() if dm else (parts[-1] if _DET_DATE_RANGE_RE.search(parts[-1]) else "")
+            years = ""
             if dm:
+                years = dm.group(0).strip()
                 body = line.replace(years, "").strip(" |")
                 parts = _det_split_pipe(body) if "|" in body else [body]
+            elif _DET_DATE_RANGE_RE.search(parts[-1]):
+                years = parts[-1]
+                parts = parts[:-1]
+            school = parts[-1] if parts and not _det_degree_like(parts[-1]) else ""
+            degree = next((p for p in parts if _det_degree_like(p)), parts[0] if parts else "")
+            if not school and len(parts) >= 2:
+                school = parts[-1]
             rows.append(
                 EducationItem(
-                    school=parts[0] if len(parts) > 1 else parts[-1],
-                    degree=parts[1] if len(parts) > 1 else parts[0],
-                    years=years or (parts[-1] if parts else ""),
+                    school=school,
+                    degree=degree,
+                    years=years,
                     details="",
                 )
             )
-        else:
+        elif _det_degree_like(line):
             rows.append(EducationItem(degree=line, school="", years="", details=""))
+        elif _DET_DATE_RANGE_RE.search(line):
+            rows.append(EducationItem(school="", degree="", years=_DET_DATE_RANGE_RE.search(line).group(0).strip(), details=""))
+        else:
+            rows.append(EducationItem(school=line, degree="", years="", details=""))
     return rows
 
 
@@ -710,8 +760,9 @@ def _det_parse_skills(lines: List[str]) -> List[str]:
         if not line:
             continue
         if ":" in line:
-            _, rest = line.split(":", 1)
-            line = rest
+            label, rest = line.split(":", 1)
+            if re.sub(r"[^a-z ]", "", label.lower()).strip() in ("skills", "technical skills"):
+                line = rest
         for part in re.split(r"[,;|]\s*|\n+", line):
             s = part.strip()
             if s and len(s) > 1:
