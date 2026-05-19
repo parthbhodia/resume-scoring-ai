@@ -2132,7 +2132,7 @@ async def api_upload_resume(request: Request):
             RESUME_UPLOAD_MAX_BYTES,
             extract_upload_markdown,
             message_for_empty_resume_extract,
-            parse_upload_resume_full_pipeline,
+            parse_upload_bytes,
             validate_resume_upload_file,
         )
 
@@ -2170,7 +2170,7 @@ async def api_upload_resume(request: Request):
         markdown_content = inject_section_line_breaks(outcome.markdown)
 
         def _pipeline_sync():
-            return parse_upload_resume_full_pipeline(markdown_content)
+            return parse_upload_bytes(content, filename, markdown_content)
 
         structured, plain_text, parse_status, hints = await loop.run_in_executor(None, _pipeline_sync)
 

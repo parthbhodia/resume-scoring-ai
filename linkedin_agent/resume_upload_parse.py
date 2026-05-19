@@ -610,6 +610,426 @@ def llm_resume_markdown_to_structured(markdown: str) -> Dict[str, Any]:
     )
 
 
+# ── Deterministic section / date helpers ────────────────────────────────────
+
+_SECTION_MAP: Dict[str, tuple[str, ...]] = {
+    "experience": (
+        "experience", "work history", "employment", "professional background",
+        "career history", "work experience", "professional experience",
+        "relevant experience", "employment history",
+    ),
+    "education": (
+        "education", "academic", "qualification", "academics", "schooling",
+        "educational background", "academic background",
+    ),
+    "skills": (
+        "skills", "technical skills", "core competencies", "competencies",
+        "technologies", "expertise", "proficiencies", "highlights",
+        "qualifications", "technical qualifications", "core skills",
+        "key skills", "areas of expertise",
+    ),
+    "summary": (
+        "summary", "profile", "objective", "about", "professional summary",
+        "career objective", "overview", "career overview", "career focus",
+        "career summary", "professional profile", "executive summary",
+        "personal statement", "personal profile",
+    ),
+    "projects": ("project", "portfolio", "key projects"),
+    "certifications": (
+        "certification", "certificate", "license", "credential",
+        "training", "courses", "professional development",
+    ),
+}
+
+_EXTRACT_DATE_RE = re.compile(
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?"
+    r"|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    r"\.?\s+\d{4}"
+    r"(?:\s*[-–—]\s*"
+    r"(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?"
+    r"|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    r"\.?\s+\d{4}|Present|Current|Now|Ongoing))?",
+    re.IGNORECASE,
+)
+_YEAR_RANGE_RE = re.compile(
+    r"\b((?:19|20)\d{2})\s*[-–—]\s*((?:19|20)\d{2}|Present|Current|Now)\b",
+    re.IGNORECASE,
+)
+
+
+def _det_canonical_section(text: str) -> Optional[str]:
+    low = text.lower().strip()
+    for sec, kws in _SECTION_MAP.items():
+        if any(k in low for k in kws):
+            return sec
+    return None
+
+
+def _det_extract_date(text: str) -> str:
+    m = _EXTRACT_DATE_RE.search(text)
+    if m:
+        return re.sub(r"\s*[-–—]\s*", " - ", m.group()).strip()
+    m = _YEAR_RANGE_RE.search(text)
+    if m:
+        return f"{m.group(1)} - {m.group(2)}"
+    return ""
+
+
+def _det_extract_contact(lines: List[str]) -> Dict[str, str]:
+    block = "\n".join(lines[:15])
+    contact: Dict[str, str] = {}
+    em = re.search(r"[\w.+%-]+@[\w.-]+\.\w{2,}", block)
+    ph = re.search(r"\+?1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}", block)
+    li = re.search(r"(?:linkedin\.com/in/|linkedin\.com/)[\w%-]+(?:/[\w%-]+)*", block, re.I)
+    gh = re.search(r"github\.com/[\w-]+", block, re.I)
+    url = re.search(r"https?://(?!(?:www\.)?(?:linkedin|github)\.com)\S+", block, re.I)
+    if em:  contact["email"]    = em.group().lower()
+    if ph:  contact["phone"]    = re.sub(r"\s+", " ", ph.group()).strip()
+    if li:  contact["linkedin"] = li.group().rstrip(".,)")
+    if gh:  contact["github"]   = gh.group().rstrip(".,)")
+    if url: contact["website"]  = url.group().rstrip(".,)")
+    return contact
+
+
+def _det_quality_ok(result: "UploadedResumeStructured") -> bool:
+    """Return True if deterministic extraction found enough to be useful."""
+    section_count = sum([
+        bool(result.work_experience),
+        bool(result.education),
+        bool(result.skills),
+        bool(result.summary),
+    ])
+    return section_count >= 2 or bool(result.email) or bool(result.full_name)
+
+
+# ── PyMuPDF PDF extractor ───────────────────────────────────────────────────
+
+def _extract_pdf_structured(content: bytes) -> Optional["UploadedResumeStructured"]:
+    """Deterministic PDF → UploadedResumeStructured via PyMuPDF span metadata."""
+    try:
+        import fitz  # type: ignore[import-untyped]
+    except ImportError:
+        logger.warning("_extract_pdf_structured: PyMuPDF not installed")
+        return None
+
+    try:
+        doc = fitz.open(stream=content, filetype="pdf")
+    except Exception as exc:
+        logger.warning("_extract_pdf_structured: fitz.open failed: %s", exc)
+        return None
+
+    # ── Reconstruct lines from span data ────────────────────────────────────
+    raw_lines: List[Dict[str, Any]] = []
+    for page in doc:
+        spans: List[Dict[str, Any]] = []
+        for block in page.get_text("dict")["blocks"]:
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    t = span["text"].strip()
+                    if t:
+                        spans.append({
+                            "text": t,
+                            "y": round(span["origin"][1] / 4) * 4,
+                            "x": span["origin"][0],
+                            "size": span["size"],
+                            "bold": bool(span["flags"] & 16),
+                        })
+        line_map: Dict[int, List[Dict]] = {}
+        for s in spans:
+            line_map.setdefault(s["y"], []).append(s)
+        for y in sorted(line_map):
+            row = sorted(line_map[y], key=lambda s: s["x"])
+            text = " ".join(s["text"] for s in row).strip()
+            sizes = [s["size"] for s in row]
+            raw_lines.append({
+                "text": text,
+                "size": sum(sizes) / len(sizes),
+                "bold": all(s["bold"] for s in row),
+                "all_caps": text == text.upper() and any(c.isalpha() for c in text),
+            })
+    doc.close()
+
+    if not raw_lines:
+        return None
+
+    # Detect flat-format PDF (no typography variation)
+    from collections import Counter
+    size_counts = Counter(round(ln["size"]) for ln in raw_lines)
+    body_size = size_counts.most_common(1)[0][0]
+    bold_ratio = sum(1 for ln in raw_lines if ln["bold"]) / len(raw_lines)
+    is_flat = len(size_counts) <= 2 and bold_ratio < 0.05
+
+    def is_heading(ln: Dict[str, Any]) -> bool:
+        text = ln["text"]
+        if not text or len(text) > 70:
+            return False
+        if is_flat:
+            return len(text.split()) <= 5 and _det_canonical_section(text) is not None
+        if ln["all_caps"] and len(text) <= 60 and any(c.isalpha() for c in text):
+            return True
+        if ln["bold"] and len(text) <= 50:
+            return True
+        if ln["size"] > body_size + 1 and len(text) <= 60:
+            return True
+        return False
+
+    plain_lines = [ln["text"] for ln in raw_lines]
+    return _build_structured_from_lines(plain_lines, is_heading_fn=lambda i: is_heading(raw_lines[i]))
+
+
+# ── python-docx DOCX extractor ──────────────────────────────────────────────
+
+def _extract_docx_structured(content: bytes) -> Optional["UploadedResumeStructured"]:
+    """Deterministic DOCX → UploadedResumeStructured via python-docx paragraph styles."""
+    try:
+        from docx import Document  # type: ignore[import-untyped]
+    except ImportError:
+        logger.warning("_extract_docx_structured: python-docx not installed")
+        return None
+
+    try:
+        doc = Document(io.BytesIO(content))
+    except Exception as exc:
+        logger.warning("_extract_docx_structured: Document() failed: %s", exc)
+        return None
+
+    para_data: List[Dict[str, Any]] = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
+        style = para.style.name if para.style else ""
+        runs = [r for r in para.runs if r.text.strip()]
+        all_bold = bool(runs and all(r.bold for r in runs))
+        all_caps = text == text.upper() and any(c.isalpha() for c in text)
+        is_list = any(s in style for s in ("List", "Bullet", "Item")) or \
+                  (text and text[0] in ("•", "●", "▪", "◦", "○"))
+        para_data.append({
+            "text": text,
+            "style": style,
+            "all_bold": all_bold,
+            "all_caps": all_caps,
+            "is_list": is_list,
+        })
+
+    # Extract skills from tables
+    table_skills: List[str] = []
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                ct = cell.text.strip()
+                if ct and len(ct) < 60 and ct not in table_skills:
+                    table_skills.append(ct)
+
+    def is_heading(i: int) -> bool:
+        p = para_data[i]
+        text = p["text"]
+        if not text or len(text) > 70:
+            return False
+        style = p["style"]
+        if any(style.startswith(s) for s in ("Heading", "Title")):
+            return True
+        if p["all_caps"] and len(text) <= 60:
+            return True
+        if p["all_bold"] and len(text) <= 50 and not p["is_list"]:
+            return True
+        return False
+
+    plain_lines = [p["text"] for p in para_data]
+    result = _build_structured_from_lines(plain_lines, is_heading_fn=lambda i: is_heading(i))
+
+    if result and table_skills and not result.skills:
+        result.skills = table_skills
+
+    return result
+
+
+# ── Shared line-based structured builder ────────────────────────────────────
+
+def _build_structured_from_lines(
+    lines: List[str],
+    is_heading_fn: Any,
+) -> Optional["UploadedResumeStructured"]:
+    """
+    Convert a flat list of text lines into UploadedResumeStructured.
+    ``is_heading_fn(i)`` returns True when line i is a section heading.
+    """
+    if not lines:
+        return None
+
+    result = UploadedResumeStructured()
+
+    # Contact from header block
+    contact = _det_extract_contact(lines)
+    result.email    = contact.get("email", "")
+    result.phone    = contact.get("phone", "")
+    result.linkedin = contact.get("linkedin", "")
+    result.github   = contact.get("github", "")
+    result.website  = contact.get("website", "")
+
+    # Name: first short line with no special chars
+    for text in lines[:5]:
+        words = text.split()
+        if (
+            1 <= len(words) <= 5
+            and not re.search(r"[@|/\\]", text)
+            and not re.search(r"\d{4}", text)
+            and not any(kw in text.lower() for kw in ("resume", "curriculum", "vitae", "cv"))
+        ):
+            result.full_name = text
+            break
+
+    current_section: Optional[str] = None
+    current_job: Optional[WorkExperienceItem] = None
+    current_edu: Optional[EducationItem] = None
+    current_proj: Optional[ProjectItem] = None
+    skills_raw: List[str] = []
+    summary_lines: List[str] = []
+
+    for i, text in enumerate(lines):
+        if is_heading_fn(i):
+            sec = _det_canonical_section(text)
+            if sec:
+                current_section = sec
+                current_job = None
+                current_edu = None
+                current_proj = None
+                continue
+
+        date_str = _det_extract_date(text)
+        is_bullet = text and text[0] in ("•", "●", "▪", "◦", "○", "–", "—") or \
+                    (len(text) > 1 and text[:2] == "- ")
+        bullet_text = re.sub(r"^[•●▪◦○–—\-]\s*", "", text).strip() if is_bullet else ""
+
+        if current_section == "summary":
+            if not is_heading_fn(i):
+                summary_lines.append(text)
+
+        elif current_section == "skills":
+            if not is_heading_fn(i):
+                skills_raw.append(text)
+
+        elif current_section == "experience":
+            if is_bullet and current_job:
+                current_job.bullets.append(bullet_text or text)
+            elif not is_bullet:
+                text_no_date = _EXTRACT_DATE_RE.sub("", text).strip(" |–—-").strip()
+                parts = [p.strip() for p in re.split(r"\s*[|,]\s*", text_no_date) if p.strip()]
+                if date_str and (not current_job or current_job.title):
+                    current_job = WorkExperienceItem(years=date_str)
+                    result.work_experience.append(current_job)
+                    if len(parts) >= 2:
+                        current_job.title = parts[0]
+                        current_job.organization = parts[1]
+                    elif parts:
+                        current_job.title = parts[0]
+                elif not current_job or (current_job.title and current_job.organization):
+                    current_job = WorkExperienceItem(title=text_no_date or text)
+                    result.work_experience.append(current_job)
+                elif current_job and not current_job.organization:
+                    current_job.organization = text_no_date or text
+                elif current_job and date_str and not current_job.years:
+                    current_job.years = date_str
+
+        elif current_section == "education":
+            if not is_bullet:
+                text_no_date = _EXTRACT_DATE_RE.sub("", text).strip(" |–—-").strip()
+                parts = [p.strip() for p in re.split(r"\s*[|,]\s*", text_no_date) if p.strip()]
+                if not current_edu or (current_edu.school and current_edu.degree):
+                    current_edu = EducationItem()
+                    result.education.append(current_edu)
+                    if len(parts) >= 2:
+                        current_edu.school = parts[0]
+                        current_edu.degree = parts[1]
+                    elif parts:
+                        current_edu.school = parts[0]
+                    if date_str:
+                        current_edu.years = date_str
+                elif current_edu and not current_edu.degree:
+                    current_edu.degree = text_no_date or text
+                elif current_edu and date_str and not current_edu.years:
+                    current_edu.years = date_str
+                elif current_edu:
+                    current_edu.details = (current_edu.details + " " + text).strip()
+
+        elif current_section == "projects":
+            if is_bullet and current_proj:
+                current_proj.bullets.append(bullet_text or text)
+            elif not is_bullet:
+                if not current_proj or current_proj.name:
+                    current_proj = ProjectItem(name=text, years=date_str)
+                    result.projects.append(current_proj)
+                elif not current_proj.description:
+                    current_proj.description = text
+
+    # Process skills
+    if skills_raw:
+        raw = " | ".join(skills_raw)
+        parts = re.split(r"[,;|\n•●▪]+", raw)
+        result.skills = [p.strip() for p in parts if 1 < len(p.strip()) < 80]
+
+    if summary_lines:
+        result.summary = " ".join(summary_lines)
+
+    if not _det_quality_ok(result):
+        return None
+
+    return result
+
+
+# ── Smart upload router ─────────────────────────────────────────────────────
+
+def parse_upload_bytes(
+    content: bytes,
+    filename: str,
+    markdown: str,
+) -> "tuple[Dict[str, Any], str, str, List[str]]":
+    """
+    Smart router: tries deterministic extraction first (PyMuPDF for PDF,
+    python-docx for DOCX), falls back to LLM only when needed.
+
+    Returns ``(structured_dict, plain_text, status, hints)``.
+    ``status`` is one of: ``ready``, ``ready_deterministic``, ``llm_failed``.
+    """
+    suffix = Path(filename or "resume.pdf").suffix.lower()
+    hints: List[str] = []
+    det_result: Optional[UploadedResumeStructured] = None
+
+    if suffix == ".pdf":
+        try:
+            det_result = _extract_pdf_structured(content)
+        except Exception as exc:
+            logger.warning("parse_upload_bytes: PDF deterministic extract failed: %s", exc)
+
+    elif suffix in (".docx", ".doc"):
+        try:
+            det_result = _extract_docx_structured(content)
+        except Exception as exc:
+            logger.warning("parse_upload_bytes: DOCX deterministic extract failed: %s", exc)
+
+    if det_result is not None:
+        logger.info(
+            "parse_upload_bytes: deterministic extract succeeded for %s "
+            "(jobs=%d edu=%d skills=%d)",
+            filename,
+            len(det_result.work_experience),
+            len(det_result.education),
+            len(det_result.skills),
+        )
+        return (
+            det_result.model_dump(),
+            structured_to_plain_resume_text(det_result),
+            "ready_deterministic",
+            hints,
+        )
+
+    # Fallback: LLM pipeline on markdown text
+    logger.info("parse_upload_bytes: deterministic extract insufficient, falling back to LLM for %s", filename)
+    return parse_upload_resume_full_pipeline(markdown)
+
+
 def parse_upload_resume_full_pipeline(markdown: str) -> tuple[Dict[str, Any], str, str, List[str]]:
     """
     Returns ``(structured_dict, plain_text, status, hints)``.
