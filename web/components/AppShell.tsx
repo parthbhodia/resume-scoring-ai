@@ -23,7 +23,7 @@ import ResumeSidebar from "./ResumeSidebar";
 import { useAppBreakpoints } from "@/hooks/useAppBreakpoints";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 
-export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs" | "cover-letter";
+export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs" | "cover-letter" | "advisor";
 
 type Theme = "dark" | "light";
 
@@ -59,9 +59,17 @@ const VIEW_LABELS: Record<AppView, string> = {
   profile:  "Profile",
   jobs:          "Jobs",
   "cover-letter": "Cover letter",
+  advisor:  "Advisor",
 };
 
 const VIEW_ICONS: Record<AppView, ReactNode> = {
+  advisor: (
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <circle cx="8" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
+      <path d="M3 13c0-2.761 2.239-4 5-4s5 1.239 5 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+      <path d="M11.5 7.5l1 1 2-2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
   builder: (
     <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
       <path d="M3 2h7l3 3v9H3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
@@ -147,7 +155,7 @@ function readBuilderLayoutOnlyFlag(): boolean {
 export function useAppView(): AppView {
   const params = useSearchParams();
   const raw = (params?.get("view") || "analyze").toLowerCase();
-  const valid: AppView[] = ["builder", "library", "analyze", "profile", "jobs", "cover-letter"];
+  const valid: AppView[] = ["builder", "library", "analyze", "profile", "jobs", "cover-letter", "advisor"];
   return valid.includes(raw as AppView) ? (raw as AppView) : "analyze";
 }
 
@@ -405,6 +413,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <NavRow view="cover-letter" />
           <NavRow view="jobs" />
           <NavRow view="profile" />
+          <NavRow view="advisor" />
         </nav>
 
         <div style={{ borderTop: "1px solid var(--border)", padding: "10px 10px 12px", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
