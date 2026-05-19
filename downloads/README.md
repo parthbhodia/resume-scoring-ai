@@ -1,14 +1,26 @@
-# Resume dataset (Kaggle)
+# Resume datasets (Kaggle)
 
-Source: [palaksood97/resume-dataset](https://www.kaggle.com/datasets/palaksood97/resume-dataset)
+Downloaded via `kagglehub` with `KAGGLEHUB_CACHE` set to this folder.
 
-Downloaded via `kagglehub` into `datasets/palaksood97/resume-dataset/versions/1/Resumes/` (228 `.docx` files).
+## palaksood97/resume-dataset
 
-Re-download:
+- Source: https://www.kaggle.com/datasets/palaksood97/resume-dataset
+- Path: `datasets/palaksood97/resume-dataset/versions/1/Resumes/`
+- ~228 `.docx` files (~12 MB)
+
+## snehaanbhawal/resume-dataset
+
+- Source: https://www.kaggle.com/datasets/snehaanbhawal/resume-dataset
+- Path: `datasets/snehaanbhawal/resume-dataset/versions/1/`
+- Category folders under `data/data/` (e.g. `FINANCE`, `INFORMATION-TECHNOLOGY`, `HR`) plus `Resume/`
+- ~2,485 files (~118 MB)
+
+## Re-download
 
 ```bash
-KAGGLEHUB_CACHE="$(pwd)/downloads" python -c "
-import kagglehub
-print(kagglehub.dataset_download('palaksood97/resume-dataset'))
-"
+cd /path/to/resume-scoring-ai
+export KAGGLEHUB_CACHE="$(pwd)/downloads"
+
+python -c "import kagglehub; print(kagglehub.dataset_download('palaksood97/resume-dataset'))"
+python -c "import kagglehub; print(kagglehub.dataset_download('snehaanbhawal/resume-dataset'))"
 ```
