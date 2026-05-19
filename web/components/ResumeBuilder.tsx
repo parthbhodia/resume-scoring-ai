@@ -1095,7 +1095,7 @@ export default function ResumeBuilder({
     setGenerating(true);
     setError(null);
     setStatusMsg("Connecting…");
-    scrollBuilderToTop("smooth");
+    if (!(suggestions?.length)) scrollBuilderToTop("smooth");
 
     let effCompany = company.trim();
     let effRole    = role.trim();
@@ -1478,11 +1478,17 @@ export default function ResumeBuilder({
   /** Full-width suggestions review: hide hero + form so the two-column panel can use the width. */
   const suggestionsReviewMode =
     !studioHandoff &&
-    Boolean(suggestions && suggestions.length > 0 && !result);
+    Boolean(
+      suggestions &&
+        suggestions.length > 0 &&
+        (!result || (generating && !result.pdfUrl)),
+    );
   const showBuilderInputs = !result && !generating && !suggestionsReviewMode;
+  /** Research while loading suggestions on the form — not duplicated on the review step. */
   const showSuggestResearchPanel =
     !studioHandoff &&
-    (suggestLoading || suggestionsReviewMode) &&
+    suggestLoading &&
+    !suggestionsReviewMode &&
     (suggestLoading || hasSuggestResearch);
   const showGenerateWebResearchPanel =
     !studioHandoff &&
@@ -2223,7 +2229,7 @@ export default function ResumeBuilder({
           )}
 
           {/* ── Results: template path = customize preview; tailor = match + export ── */}
-          {result ? (
+          {result && (studioHandoff || !suggestionsReviewMode) ? (
             studioHandoff ? (
               <TemplateCustomizePostResult
                 generating={generating}
@@ -4491,6 +4497,141 @@ function ResumeStyleTemplateGrid({
   );
 }
 
+function SuggestionsGenerateBar({
+  suggestions,
+  acceptedIds,
+  generating,
+  generateStatusMsg,
+  error,
+  onAcceptAll,
+  onClearAccepts,
+  onGenerate,
+}: {
+  suggestions: Suggestion[];
+  acceptedIds: Set<string>;
+  generating: boolean;
+  generateStatusMsg?: string;
+  error: string | null;
+  onAcceptAll: () => void;
+  onClearAccepts: () => void;
+  onGenerate: () => void | Promise<unknown>;
+}) {
+  const accepted = suggestions.filter(s => acceptedIds.has(s.id));
+  return (
+    <div
+      className="rb-suggestions-generate-bar"
+      style={{
+        marginBottom: 18,
+        padding: "14px 16px",
+        borderRadius: 12,
+        border: "1px solid var(--border)",
+        background: "var(--surface)",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      {error && (
+        <div role="alert" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
+        <button
+          type="button"
+          onClick={onAcceptAll}
+          disabled={generating}
+          style={{
+            padding: "8px 14px", minHeight: 40, fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+            borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface2)",
+            color: "var(--text)", cursor: generating ? "not-allowed" : "pointer",
+          }}
+        >
+          Accept all
+        </button>
+        <button
+          type="button"
+          onClick={onClearAccepts}
+          disabled={generating || acceptedIds.size === 0}
+          style={{
+            padding: "8px 14px", minHeight: 40, fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+            borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
+            color: acceptedIds.size === 0 ? "var(--dim)" : "var(--muted)",
+            cursor: generating || acceptedIds.size === 0 ? "not-allowed" : "pointer",
+          }}
+        >
+          Clear accepts
+        </button>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--dim)" }}>
+          {accepted.length} of {suggestions.length} accepted
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={() => { void onGenerate(); }}
+        disabled={generating}
+        aria-busy={generating}
+        style={{
+          width: "100%", padding: "14px 20px", minHeight: 48,
+          background: "var(--accent)",
+          color: "#fff",
+          border: "none", borderRadius: 12,
+          fontSize: 15, fontWeight: 600, fontFamily: "inherit",
+          cursor: generating ? "wait" : "pointer",
+          letterSpacing: -0.3,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          opacity: generating ? 0.92 : 1,
+          boxShadow: generating ? "0 0 0 3px rgba(47,129,247,0.25)" : "none",
+        }}
+        onMouseEnter={e => { if (!generating) e.currentTarget.style.background = "var(--accent-h)"; }}
+        onMouseLeave={e => { if (!generating) e.currentTarget.style.background = "var(--accent)"; }}
+      >
+        {generating ? (
+          <><Spinner size={16} />Generating your résumé PDF…</>
+        ) : (
+          accepted.length > 0
+            ? `Apply ${accepted.length} accepted edit${accepted.length > 1 ? "s" : ""} & generate PDF →`
+            : "Generate tailored PDF →"
+        )}
+      </button>
+      {generating && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fade-in"
+          style={{
+            marginTop: 10,
+            padding: "12px 14px",
+            borderRadius: 10,
+            background: "var(--surface2)",
+            border: "1px solid var(--border)",
+            fontSize: 12,
+            color: "var(--muted)",
+            lineHeight: 1.5,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+          }}
+        >
+          <Spinner size={14} />
+          <span>
+            <strong style={{ color: "var(--text)", fontWeight: 600 }}>Building PDF…</strong>
+            {generateStatusMsg ? (
+              <>{" "}<span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 11 }}>{generateStatusMsg}</span></>
+            ) : null}
+          </span>
+        </div>
+      )}
+      {!generating && (
+        <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", margin: "10px 0 0", lineHeight: 1.5 }}>
+          {accepted.length === 0
+            ? "Generate still tailors to the job — accept cards to apply bullet edits."
+            : "Accepted edits go into the PDF."}{" "}
+          Empty text = delete that bullet.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SuggestionsPanel({
   summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
   pdfBlobUrl, pdfFileName, pdfDocumentKey,
@@ -4576,13 +4717,18 @@ function SuggestionsPanel({
         }
       `}</style>
       {hasSuggestResearch && (
-        <BuilderWebResearchPanel
-          queries={suggestResearchQueries}
-          sources={suggestResearchSources}
-          live={false}
-          badgeLabel="From Get suggestions"
-          intro={<>Research used for these cards.</>}
-        />
+        <details style={{ marginBottom: 14 }} open={generating}>
+          <summary style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", cursor: "pointer", marginBottom: 8, listStylePosition: "outside" }}>
+            Live web research ({suggestResearchQueries.length || suggestResearchSources.length} items)
+          </summary>
+          <BuilderWebResearchPanel
+            queries={suggestResearchQueries}
+            sources={suggestResearchSources}
+            live={generating}
+            badgeLabel={generating ? "Researching the web" : "From Get suggestions"}
+            intro={<>Research used for these cards.</>}
+          />
+        </details>
       )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", letterSpacing: -0.1 }}>
@@ -4620,6 +4766,17 @@ function SuggestionsPanel({
           <strong style={{ color: "var(--text)" }}>Key gap: </strong>{summary}
         </div>
       )}
+
+      <SuggestionsGenerateBar
+        suggestions={suggestions}
+        acceptedIds={acceptedIds}
+        generating={generating}
+        generateStatusMsg={generateStatusMsg}
+        error={error}
+        onAcceptAll={onAcceptAll}
+        onClearAccepts={onClearAccepts}
+        onGenerate={onGenerate}
+      />
 
       {/* Two-panel layout: suggestions left, résumé preview right */}
       <div className="rb-suggestions-grid">
@@ -4897,103 +5054,6 @@ function SuggestionsPanel({
       </div>
       )}
 
-      {/* Generate CTA */}
-      {error && (
-        <div role="alert" style={{ marginTop: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
-          {error}
-        </div>
-      )}
-      <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          <button
-            type="button"
-            onClick={onAcceptAll}
-            disabled={generating}
-            style={{
-              padding: "8px 14px", minHeight: 40, fontSize: 12, fontWeight: 600, fontFamily: "inherit",
-              borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface2)",
-              color: "var(--text)", cursor: generating ? "not-allowed" : "pointer",
-            }}
-          >
-            Accept all
-          </button>
-          <button
-            type="button"
-            onClick={onClearAccepts}
-            disabled={generating || acceptedIds.size === 0}
-            style={{
-              padding: "8px 14px", minHeight: 40, fontSize: 12, fontWeight: 600, fontFamily: "inherit",
-              borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
-              color: acceptedIds.size === 0 ? "var(--dim)" : "var(--muted)",
-              cursor: generating || acceptedIds.size === 0 ? "not-allowed" : "pointer",
-            }}
-          >
-            Clear accepts
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={() => { void onGenerate(); }}
-          disabled={generating}
-          aria-busy={generating}
-          style={{
-            width: "100%", padding: "14px 20px", minHeight: 48,
-            background: generating ? "var(--accent)" : "var(--accent)",
-            color: "#fff",
-            border: "none", borderRadius: 12,
-            fontSize: 15, fontWeight: 600, fontFamily: "inherit",
-            cursor: generating ? "wait" : "pointer",
-            letterSpacing: -0.3, transition: "background 0.2s, opacity 0.2s",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            opacity: generating ? 0.92 : 1,
-            boxShadow: generating ? "0 0 0 3px rgba(47,129,247,0.25)" : "none",
-          }}
-          onMouseEnter={e => { if (!generating) e.currentTarget.style.background = "var(--accent-h)"; }}
-          onMouseLeave={e => { if (!generating) e.currentTarget.style.background = "var(--accent)"; }}
-        >
-          {generating ? (
-            <><Spinner size={16} />Generating your résumé PDF…</>
-          ) : (
-            accepted.length > 0
-              ? `Apply ${accepted.length} accepted edit${accepted.length > 1 ? "s" : ""} & generate PDF →`
-              : "Generate tailored PDF →"
-          )}
-        </button>
-        {generating && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="fade-in"
-            style={{
-              padding: "12px 14px",
-              borderRadius: 10,
-              background: "var(--surface2)",
-              border: "1px solid var(--border)",
-              fontSize: 12,
-              color: "var(--muted)",
-              lineHeight: 1.5,
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 10,
-            }}
-          >
-            <Spinner size={14} />
-            <span>
-              <strong style={{ color: "var(--text)", fontWeight: 600 }}>Building PDF…</strong>
-              {generateStatusMsg ? (
-                <> <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 11 }}>{generateStatusMsg}</span></>
-              ) : null}
-            </span>
-          </div>
-        )}
-      </div>
-      <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginTop: 8, lineHeight: 1.5 }}>
-        {accepted.length} of {suggestions.length} accepted.
-        {accepted.length === 0
-          ? " Generate still tailors to the job — accept cards to apply bullet edits."
-          : " Accepted edits go into the PDF."}{" "}
-        Empty text = delete that bullet.
-      </p>
     </div>
   );
 }
