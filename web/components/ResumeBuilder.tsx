@@ -1096,10 +1096,6 @@ export default function ResumeBuilder({
     setError(null);
     setStatusMsg("Connecting…");
     scrollBuilderToTop("smooth");
-    // Tailor flow: jump to results layout immediately (no full-page generate loader).
-    if (!studioHandoff) {
-      setResult({ ...EMPTY_RESULT, baseFolder, baseLoaded: baseFolder ? null : false });
-    }
 
     let effCompany = company.trim();
     let effRole    = role.trim();
@@ -1168,6 +1164,13 @@ export default function ResumeBuilder({
     setSearchQueries([]);
     setSearchSources([]);
     setStorageFailures([]);
+
+    if (!studioHandoff) {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      setResult({ ...EMPTY_RESULT, baseFolder, baseLoaded: baseFolder ? null : false });
+    }
 
     const acceptedList = (suggestions ?? []).filter(s => acceptedIds.has(s.id)).map(s => ({
       id: s.id,
@@ -1489,7 +1492,9 @@ export default function ResumeBuilder({
     !studioHandoff &&
     result &&
     reusingSuggestWebForPdf &&
-    hasSuggestResearch;
+    hasSuggestResearch &&
+    !generating;
+  const tailorResultsBuilding = !studioHandoff && Boolean(result) && generating;
   /** Pin loaders at top of the page — form CTAs sit at the bottom and scroll-to-top hid them. */
   const showSuggestLoaderAtTop = !studioHandoff && suggestLoading;
   /** Template gallery first compile (no prior result) — tailor uses results page instead. */
@@ -2189,6 +2194,8 @@ export default function ResumeBuilder({
               generateLoaderTipIdx={generateLoaderTipIdx}
               generateLoaderStepsDone={generateLoaderStepsDone}
               reusingSuggestResearch={reusingSuggestWebForPdf}
+              suggestResearchQueries={suggestResearchQueries}
+              suggestResearchSources={suggestResearchSources}
               error={error}
               styleReferenceFolder={styleReferenceFolder}
               setStyleReferenceFolder={setStyleReferenceFolder}
@@ -2329,16 +2336,20 @@ export default function ResumeBuilder({
                 </button>
               </header>
 
+              {tailorResultsBuilding && (
+                <TailorBuildProgressBanner statusMsg={statusMsg} />
+              )}
+
               {showReusedSuggestResearchOnResults && (
                 <BuilderWebResearchPanel
                   queries={suggestResearchQueries}
                   sources={suggestResearchSources}
-                  live={generating}
-                  badgeLabel={generating ? "Reused while tailoring" : "Reused from suggestions"}
-                  intro={<>Same research as Get suggestions — no second search.</>}
+                  live={false}
+                  badgeLabel="From suggestions"
+                  intro={<>Research used for Get suggestions.</>}
                 />
               )}
-              {showGenerateWebResearchPanel && result && (
+              {showGenerateWebResearchPanel && result && !tailorResultsBuilding && (
                 <BuilderWebResearchPanel
                   queries={searchQueries}
                   sources={searchSources}
@@ -2349,6 +2360,15 @@ export default function ResumeBuilder({
                       ? <>Extra web research during PDF generation.</>
                       : <>Updates as we generate your PDF.</>
                   }
+                />
+              )}
+              {tailorResultsBuilding && showGenerateWebResearchPanel && (searchQueries.length > 0 || searchSources.length > 0) && (
+                <BuilderWebResearchPanel
+                  queries={searchQueries}
+                  sources={searchSources}
+                  live
+                  badgeLabel="Researching the web"
+                  intro={<>Live search during this generate step.</>}
                 />
               )}
 
@@ -2433,25 +2453,22 @@ export default function ResumeBuilder({
                           </div>
                         ) : null}
                       </>
+                    ) : tailorResultsBuilding ? (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
+                          Tailoring and compiling…
+                        </div>
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>
+                          Match score and gaps appear when the PDF is ready.
+                        </p>
+                      </div>
                     ) : (
                       <div style={{ marginBottom: 16 }}>
                         <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Analysing match…</div>
-                        {generating && statusMsg ? (
-                          <div style={{
-                            fontSize: 11,
-                            color: "var(--muted)",
-                            lineHeight: 1.5,
-                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                            wordBreak: "break-word",
-                          }}
-                          >
-                            {statusMsg}
-                          </div>
-                        ) : (
-                          <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>Scoring match…</div>
-                        )}
+                        <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>Scoring match…</div>
                       </div>
                     )}
+                    {!(tailorResultsBuilding && !ratings) && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
                       <button
                         type="button"
@@ -2564,6 +2581,7 @@ export default function ResumeBuilder({
                         </button>
                       ) : null}
                     </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2729,6 +2747,10 @@ export default function ResumeBuilder({
                 </div>
                 {!user?.id ? (
                   <ResumeBuilderAtsSignInPrompt oauthBusy={atsOAuthBusy} onSignInWithGoogle={signInForAts} />
+                ) : tailorResultsBuilding && !result.pdfUrl ? (
+                  <div style={{ padding: 16, textAlign: "center", color: "var(--dim)", fontSize: 12 }}>
+                    ATS check runs after your PDF is ready.
+                  </div>
                 ) : (
                   <>
                 {atsLoading && (
@@ -2841,8 +2863,7 @@ export default function ResumeBuilder({
                         letterSpacing: -0.1,
                       }}
                     >
-                      <span style={{ fontWeight: 600, color: "var(--text)" }}>{resumeDownloadStem}.pdf</span>
-                      {" · "}Template:{" "}
+                      Template:{" "}
                       <span style={{ fontWeight: 600, color: "var(--text)" }}>{selectedTemplateLabel}</span>
                     </div>
                     {result.pdfUrl ? (
@@ -2850,6 +2871,33 @@ export default function ResumeBuilder({
                         pdfUrl={result.pdfUrl}
                         filename={`${resumeDownloadStem}.pdf`}
                       />
+                    ) : tailorResultsBuilding ? (
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        aria-busy="true"
+                        style={{
+                          padding: "36px 24px",
+                          textAlign: "center",
+                          borderRadius: 12,
+                          border: "1px dashed var(--border)",
+                          background: "var(--surface2)",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 12,
+                          minHeight: 200,
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Spinner size={32} />
+                        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>Building PDF…</div>
+                        {statusMsg ? (
+                          <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, maxWidth: 280 }}>{statusMsg}</div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: "var(--dim)" }}>Preview appears when compile finishes.</div>
+                        )}
+                      </div>
                     ) : (
                       <div
                         style={{
@@ -4448,7 +4496,9 @@ function SuggestionsPanel({
   pdfBlobUrl, pdfFileName, pdfDocumentKey,
   selectedSuggestionId, onSelectSuggestionCard,
   onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, generateStatusMsg,
-  generateLoaderTipIdx, generateLoaderStepsDone, reusingSuggestResearch,
+  generateLoaderTipIdx,   generateLoaderStepsDone, reusingSuggestResearch,
+  suggestResearchQueries,
+  suggestResearchSources,
   error, onBackToInputs,
   styleReferenceFolder, setStyleReferenceFolder,
   previewSectionAccentHex,
@@ -4476,12 +4526,16 @@ function SuggestionsPanel({
   generateLoaderTipIdx: number;
   generateLoaderStepsDone: number;
   reusingSuggestResearch: boolean;
+  suggestResearchQueries: string[];
+  suggestResearchSources: { title: string | null; url: string }[];
   error: string | null;
   onBackToInputs: () => void;
   styleReferenceFolder: string;
   setStyleReferenceFolder: (folder: string) => void;
   previewSectionAccentHex: string;
 }) {
+  const hasSuggestResearch =
+    suggestResearchQueries.length > 0 || suggestResearchSources.length > 0;
   /** Prefer styled HTML preview: it follows `styleReferenceFolder` and dedupes repeated headers. Raw PDF is the upload as printed (often different fonts / duplicate header blocks). */
   const [resumePreviewTab, setResumePreviewTab] = useState<"pdf" | "text">(() => {
     if (!pdfBlobUrl) return "text";
@@ -4521,6 +4575,15 @@ function SuggestionsPanel({
           .rb-suggestions-grid { grid-template-columns: 1fr; }
         }
       `}</style>
+      {hasSuggestResearch && (
+        <BuilderWebResearchPanel
+          queries={suggestResearchQueries}
+          sources={suggestResearchSources}
+          live={false}
+          badgeLabel="From Get suggestions"
+          intro={<>Research used for these cards.</>}
+        />
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", letterSpacing: -0.1 }}>
           Accept edits, then generate. Skipped cards are ignored.
@@ -5046,6 +5109,39 @@ function InfoTip({ children, label }: { children: React.ReactNode; label?: strin
         </span>
       )}
     </span>
+  );
+}
+
+/** Prominent progress while tailor PDF generate runs on the results page. */
+function TailorBuildProgressBanner({ statusMsg }: { statusMsg: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      className="fade-in"
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 14,
+        marginBottom: 16,
+        padding: "16px 18px",
+        borderRadius: 14,
+        border: "1px solid rgba(47,129,247,0.35)",
+        background: "var(--accent-bg)",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      <Spinner size={24} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", letterSpacing: -0.3, marginBottom: 4 }}>
+          Generating your tailored PDF
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+          {statusMsg.trim() || "Tailoring content, compiling PDF, and scoring match…"}
+        </div>
+      </div>
+    </div>
   );
 }
 

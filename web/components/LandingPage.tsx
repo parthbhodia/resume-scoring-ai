@@ -107,8 +107,8 @@ const RESEARCH_PILLARS = [
     linkLabel: "How scoring works",
   },
   {
-    title: "Top-company training corpus",
-    desc: "Prompts and rubrics are calibrated on anonymized résumés and job descriptions from Google, Figma, Meta, Amazon, Adobe, and similar tech roles in our library — then refined with product analytics and permitted user content per our Privacy Policy.",
+    title: "FERPA-informed data privacy",
+    desc: "Built for students and campus communities: we apply FERPA-informed practices for education-related data — limited use, no sale of personal information, and training calibrated on anonymized top-company résumé corpora (Google, Figma, Meta, Amazon, Adobe). See our Privacy Policy.",
     accent: T.green,
     href: "/privacy",
     linkLabel: "Privacy Policy",
@@ -383,7 +383,7 @@ export default function LandingPage() {
             ["ATS",     "Best-practices checklist"],
             ["India",   "Students & early community"],
             ["Callbacks", "Recruiter & phone screens"],
-            ["Privacy", "We don’t sell your data"],
+            ["FERPA",   "FERPA-informed student privacy"],
           ]).map(([stat, lbl], i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 40px", flexShrink: 0 }}>
               <span style={{ fontSize: 20, fontWeight: 700, color: T.blue, letterSpacing: -0.5 }}>{stat}</span>
@@ -447,9 +447,10 @@ export default function LandingPage() {
               Our scoring mechanism blends campus career-center playbooks (MIT- and Harvard-style structure) with recruiter-informed match dimensions. Models and checklists are trained and calibrated on résumés and job descriptions from Google, Figma, Meta, Amazon, Adobe, and other top tech roles in our library — then improved responsibly with product data.
             </p>
             <p style={{ fontSize: 14, color: C.muted, lineHeight: 1.68, margin: 0 }}>
-              We do <strong style={{ color: C.ink, fontWeight: 600 }}>not</strong> sell your personal data. Training and quality work use only what our{" "}
+              Student data is handled with <strong style={{ color: C.ink, fontWeight: 600 }}>FERPA-informed privacy</strong>
+              {" "}— we do not sell personal data. Training and quality work use only what our{" "}
               <Link href="/privacy" prefetch={false} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>Privacy Policy</Link>
-              {" "}allows — operating the service, analytics, and internal model improvement for the community.
+              {" "}allows: operating the service, analytics, and internal model improvement for the community.
             </p>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -573,7 +574,7 @@ export default function LandingPage() {
             Offered <strong style={{ color: C.ink, fontWeight: 600 }}>completely free</strong> for students and the wider community — because strong tools should help everyone, not only those who can pay.
             {" "}
             We <strong style={{ color: C.ink, fontWeight: 600 }}>never sell your data</strong>
-            {" "}— we keep it only to run the product, understand usage through analytics, and improve quality so we can serve you better (
+            {" "}and apply <strong style={{ color: C.ink, fontWeight: 600 }}>FERPA-informed practices</strong> for student users — we keep information only to run the product, understand usage through analytics, and improve quality (
             <Link href="/privacy" prefetch={false} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>Privacy Policy</Link>
             ).
             {" "}
@@ -762,6 +763,7 @@ function PlatformHighlightCard({
     : h.title === "ATS scoring" ? "✓"
     : h.title.startsWith("MIT") ? "M"
     : h.title.startsWith("Transparent") ? "%"
+    : h.title.startsWith("FERPA") ? "F"
     : h.title.startsWith("Top-company") ? "G"
     : "◎";
   return (
