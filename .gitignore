@@ -12,7 +12,6 @@ __pycache__/
 build/
 develop-eggs/
 dist/
-downloads/
 eggs/
 .eggs/
 lib/
@@ -77,5 +76,5 @@ secrets.json
 
 # Personal profile data — local LinkedIn agent only, never commit
 linkedin_agent/parth_profile.py
-resumes/
+/resumes/
 .gstack/
