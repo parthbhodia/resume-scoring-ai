@@ -3863,10 +3863,11 @@ def _persist_analysis(result: dict, user_id: str, user_email: str, has_jd: bool)
     header = (result.get("resumeHeader") or "").strip()
     label  = header[:80] if header else ("With JD" if has_jd else "General")
     row = {
-        "user_id": user_id,
-        "label":   label,
-        "score":   result.get("overallScore"),
-        "result":  result,
+        "user_id":    user_id,
+        "user_email": user_email or None,
+        "label":      label,
+        "score":      result.get("overallScore"),
+        "result":     result,
     }
     try:
         table.insert(row).execute()
@@ -3929,7 +3930,7 @@ async def api_cohort_stats(request: Request):
     try:
         resp = (
             table
-            .select("user_id,score,result,created_at")
+            .select("user_id,user_email,score,result,created_at")
             .order("created_at", desc=True)
             .limit(2000)
             .execute()
@@ -3981,6 +3982,7 @@ async def api_cohort_stats(request: Request):
         if uid and uid not in seen:
             seen[uid] = {
                 "user_id":        uid,
+                "user_email":     r.get("user_email"),
                 "latest_score":   r.get("score"),
                 "latest_at":      r.get("created_at"),
                 "analysis_count": sum(1 for x in rows if x.get("user_id") == uid),
