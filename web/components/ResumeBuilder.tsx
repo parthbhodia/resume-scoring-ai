@@ -2167,29 +2167,40 @@ export default function ResumeBuilder({
                   Researches the posting, then lists edits. Generate reuses that research.
                 </p>
               )}
-              {!suggestLoading && !generating && (
-                <button
-                  type="button"
-                  onClick={() => { void generate(); }}
-                  disabled={!(candidateProfile ?? "").trim() || !jd.trim()}
-                  style={{
-                    width: "100%",
-                    padding: "12px 16px",
-                    marginBottom: 24,
-                    minHeight: 44,
-                    borderRadius: 12,
-                    border: "1px solid var(--border)",
-                    background: "var(--surface)",
-                    color: !(candidateProfile ?? "").trim() || !jd.trim() ? "var(--dim)" : "var(--text)",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    fontFamily: "inherit",
-                    cursor: !(candidateProfile ?? "").trim() || !jd.trim() ? "not-allowed" : "pointer",
-                    letterSpacing: -0.2,
-                  }}
-                >
-                  Skip suggestions — generate tailored PDF now →
-                </button>
+              {!suggestLoading && (
+                generating ? (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    style={{
+                      width: "100%", padding: "13px 16px", marginBottom: 24, minHeight: 44,
+                      borderRadius: 12, border: "1px solid var(--border)",
+                      background: "var(--surface)", fontSize: 13, fontWeight: 600,
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                      color: "var(--dim)",
+                    }}
+                  >
+                    <Spinner size={14} />
+                    Building your tailored PDF…
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { void generate(); }}
+                    disabled={!(candidateProfile ?? "").trim() || !jd.trim()}
+                    style={{
+                      width: "100%", padding: "12px 16px", marginBottom: 24, minHeight: 44,
+                      borderRadius: 12, border: "1px solid var(--border)",
+                      background: "var(--surface)",
+                      color: !(candidateProfile ?? "").trim() || !jd.trim() ? "var(--dim)" : "var(--text)",
+                      fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                      cursor: !(candidateProfile ?? "").trim() || !jd.trim() ? "not-allowed" : "pointer",
+                      letterSpacing: -0.2,
+                    }}
+                  >
+                    Skip suggestions — generate tailored PDF now →
+                  </button>
+                )
               )}
             </>
           )}
