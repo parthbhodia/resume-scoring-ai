@@ -32,6 +32,7 @@ import {
 } from "@/lib/suggestionResumeMatch";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { useSuggestionsStore } from "@/store/suggestionsStore";
+import type { StructuredResume } from "@/store/resumeAnalyzeStore";
 import {
   PRIORITY_BG,
   PRIORITY_COLOR,
@@ -477,6 +478,8 @@ export default function ResumeBuilder({
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Latest PDF extract text — used to merge into saved Profile */
   const lastResumeExtractRef = useRef<string>("");
+  /** Structured resume from the upload pipeline — paired with the profile text to avoid re-parsing on generate. */
+  const structuredUploadRef = useRef<{ profile: string; structured: StructuredResume } | null>(null);
   /** Object URL for the last uploaded PDF — powers true PDF highlights in suggestions (revoked on replace / unmount). */
   const sourcePdfBlobUrlRef = useRef<string | null>(null);
   const [sourcePdfBlobUrl, setSourcePdfBlobUrl] = useState<string | null>(null);
@@ -1075,10 +1078,11 @@ export default function ResumeBuilder({
     }
     setProfileSyncUpsell(null);
     try {
-      const { text } = await uploadResume(file);
+      const { text, structuredResume } = await uploadResume(file);
       setCandidateProfile(text);
       setUploadedFileName(file.name);
       lastResumeExtractRef.current = text;
+      structuredUploadRef.current = structuredResume ? { profile: text, structured: structuredResume } : null;
 
       if (sourcePdfBlobUrlRef.current) {
         URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
@@ -1234,6 +1238,11 @@ export default function ResumeBuilder({
           tailor_body_with_ai: tailorBodyWithAi,
           use_jinja_renderer: true,
           user_email: user?.email ?? null,
+          // Pass the pre-parsed structured resume from the upload step so the backend
+          // can skip redundant LLM re-extraction when the profile text is the same.
+          ...(structuredUploadRef.current?.profile === (candidateProfile ?? "").trim()
+            ? { structured_resume: structuredUploadRef.current.structured }
+            : {}),
         }),
       });
 

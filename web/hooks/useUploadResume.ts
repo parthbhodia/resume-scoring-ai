@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { apiUrl } from "@/lib/utils";
+import type { StructuredResume } from "@/store/resumeAnalyzeStore";
 
 export interface UploadResumeResult {
   /** Extracted plain text from the PDF. */
@@ -10,6 +11,8 @@ export interface UploadResumeResult {
   resumeHeader?: string[];
   /** Original filename as returned by the backend. */
   filename?: string;
+  /** Structured resume JSON produced by the backend extraction pipeline. */
+  structuredResume?: StructuredResume | null;
 }
 
 export interface UseUploadResumeReturn {
@@ -36,13 +39,14 @@ export function useUploadResume(): UseUploadResumeReturn {
       if (jd.trim()) fd.append("jd", jd.trim());
 
       const resp = await fetch(apiUrl("/api/upload-resume"), { method: "POST", body: fd });
-      const json = await resp.json() as { error?: string; text?: string; resumeHeader?: string[]; filename?: string };
+      const json = await resp.json() as { error?: string; text?: string; resumeHeader?: string[]; filename?: string; structuredResume?: StructuredResume | null };
 
       if (!resp.ok) throw new Error(json.error ?? "Could not extract text from your PDF.");
       return {
         text: json.text ?? "",
         resumeHeader: json.resumeHeader,
         filename: json.filename,
+        structuredResume: json.structuredResume ?? null,
       };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Upload failed.";

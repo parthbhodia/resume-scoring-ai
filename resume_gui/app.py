@@ -1465,6 +1465,7 @@ def _structured_doc_for_generate(
     *,
     use_conservative_tailor: bool,
     base_tex: Optional[str] = None,
+    pre_parsed: Optional[dict] = None,
 ) -> ResumeDocModel:
     """Faithful extract first, optional JD tailor second, then profile backfill + section order."""
     profile_norm = inject_section_line_breaks((candidate_profile or "")[:8000])
@@ -1483,6 +1484,7 @@ def _structured_doc_for_generate(
             "jd_chars": len((jd or "").strip()),
             "role": role,
             "company": company,
+            "has_pre_parsed": bool(pre_parsed),
         },
     )
 
@@ -1490,7 +1492,27 @@ def _structured_doc_for_generate(
     manifest: Optional[ExtractionManifest] = None
     extract_path = "unknown"
 
-    if use_conservative_tailor and base_tex:
+    # Use the structured JSON produced at upload time to skip redundant LLM re-extraction.
+    # Only applies on the non-conservative path (conservative paths rely on base_tex/profile text
+    # for intentional minimal-diff behaviour).
+    if pre_parsed and isinstance(pre_parsed, dict) and not use_conservative_tailor and not base_tex:
+        try:
+            doc = _build_resume_doc_from_llm_raw(pre_parsed)
+            if doc and (doc.experience or doc.education or doc.summary):
+                extract_path = "pre_parsed_upload_json"
+                if jd.strip():
+                    extract_path = "pre_parsed_upload_json_then_jd_tailor"
+                    doc = _llm_tailor_doc_for_jd(doc, jd, role, company)
+            else:
+                logger.warning("pre_parsed upload JSON yielded empty doc — falling through to LLM extract")
+                doc = None
+        except Exception as exc:
+            logger.warning("pre_parsed upload JSON parse failed (%s) — falling through to LLM extract", exc)
+            doc = None
+
+    if doc is not None:
+        pass  # pre_parsed path succeeded — skip remaining extraction branches
+    elif use_conservative_tailor and base_tex:
         extract_path = "conservative_tex"
         parsed = parse_resume_tex(base_tex)
         doc = _resume_doc_from_parsed(parsed)
@@ -1947,6 +1969,8 @@ async def api_generate_stream(request: Request):
     use_jinja_renderer = USE_JINJA_LATEX_RENDERER
     if body.get("use_jinja_renderer") is not None:
         use_jinja_renderer = bool(body.get("use_jinja_renderer"))
+    _sr = body.get("structured_resume")
+    pre_parsed_upload: Optional[dict] = _sr if isinstance(_sr, dict) else None
 
     logger.info(
         f"STREAM  |  {role} @ {company}  |  model={model}  |  base={base_folder}  "
@@ -1957,6 +1981,7 @@ async def api_generate_stream(request: Request):
         f"  |  post_suggestion_coach_run={post_suggestion_coach_run}"
         f"  |  tailor_body_with_ai={tailor_body_with_ai}"
         f"  |  use_jinja_renderer={use_jinja_renderer}"
+        f"  |  has_pre_parsed_upload={bool(pre_parsed_upload)}"
     )
 
     if not company or not role or not jd:
@@ -2021,6 +2046,7 @@ async def api_generate_stream(request: Request):
                     company,
                     use_conservative_tailor=use_conservative_tailor,
                     base_tex=base_tex,
+                    pre_parsed=pre_parsed_upload,
                 )
                 logger.info(
                     "Structured generate | extract_path logged above | counts=%s",
