@@ -1524,7 +1524,14 @@ def ats_check(
     with pdfplumber.open(_io.BytesIO(data)) as pdf:
         page_count = len(pdf.pages)
         for p in pdf.pages:
-            pages_text.append(p.extract_text() or "")
+            # Use layout=True so pdfminer's full layout analysis is applied —
+            # this preserves right-aligned table columns (dates, locations in
+            # tabularx {Xr} tables from the LaTeX template) that plain
+            # character-stream extraction misses.
+            text = p.extract_text(layout=True) or ""
+            if not text.strip():
+                text = p.extract_text() or ""
+            pages_text.append(text)
         layout = _detect_layout_issues(pdf)
 
     full_text = "\n".join(pages_text)
