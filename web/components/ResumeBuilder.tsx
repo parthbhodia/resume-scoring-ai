@@ -2214,7 +2214,7 @@ export default function ResumeBuilder({
           )}
 
           {/* ── Suggestions review panel (JD tailor flow only) ── */}
-          {!studioHandoff && suggestionsReviewMode && (
+          {!studioHandoff && suggestionsReviewMode && !generating && (
             <SuggestionsPanel
               key={sourcePdfBlobUrl ?? "rb-sug-no-pdf"}
               summary={suggestSummary}
@@ -2385,15 +2385,6 @@ export default function ResumeBuilder({
                 <TailorBuildProgressBanner statusMsg={statusMsg} />
               )}
 
-              {showReusedSuggestResearchOnResults && (
-                <BuilderWebResearchPanel
-                  queries={suggestResearchQueries}
-                  sources={suggestResearchSources}
-                  live={false}
-                  badgeLabel="From suggestions"
-                  intro={<>Research used for Get suggestions.</>}
-                />
-              )}
               {showGenerateWebResearchPanel && result && !tailorResultsBuilding && (
                 <BuilderWebResearchPanel
                   queries={searchQueries}
