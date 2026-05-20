@@ -739,7 +739,21 @@ def _extract_pdf_structured(content: bytes) -> Optional["UploadedResumeStructure
             line_map.setdefault(s["y"], []).append(s)
         for y in sorted(line_map):
             row = sorted(line_map[y], key=lambda s: s["x"])
-            text = " ".join(s["text"] for s in row).strip()
+            # Detect column gaps: large x-gap between spans → insert | separator
+            # so "School Name          Degree Title" → "School Name | Degree Title"
+            col_parts: List[str] = []
+            current: List[str] = []
+            for j, span in enumerate(row):
+                if j > 0:
+                    prev = row[j - 1]
+                    prev_end = prev["x"] + len(prev["text"]) * prev["size"] * 0.55
+                    gap = span["x"] - prev_end
+                    if gap > 80:
+                        col_parts.append(" ".join(current))
+                        current = []
+                current.append(span["text"])
+            col_parts.append(" ".join(current))
+            text = " | ".join(p for p in col_parts if p).strip()
             sizes = [s["size"] for s in row]
             raw_lines.append({
                 "text": text,
