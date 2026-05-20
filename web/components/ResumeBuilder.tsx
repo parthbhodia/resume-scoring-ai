@@ -2148,7 +2148,7 @@ export default function ResumeBuilder({
               )}
               <button
                 type="button"
-                onClick={getSuggestions}
+                onClick={() => { void getSuggestions(); }}
                 disabled={suggestLoading || generating}
                 style={{
                   width: "100%", padding: "14px 20px", marginBottom: 8, minHeight: 48,
