@@ -194,11 +194,67 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
                     break
         return collected
 
-    out.skills_lines = _collect_between(
-        {"technical skills", "skills"},
-        {"experience", "professional experience", "work experience", "projects", "education"},
-        20,
+    _MONTHS_SK = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+    _DATE_RANGE_SK = re.compile(
+        f"({_MONTHS_SK}\\s+\\d{{4}})"
+        r"\s*[–—\-–—‒]+\s*"
+        f"(present|now|current|{_MONTHS_SK}\\s+\\d{{4}}|\\d{{4}})",
+        re.I,
     )
+    _EXP_LABELS = frozenset({
+        "experience", "work experience", "professional experience", "employment", "work history",
+    })
+    _ACCOMPLISHMENT_STARTERS = frozenset({
+        "developed", "supported", "led", "built", "implemented", "automated", "collaborated",
+        "assisted", "performed", "ensured", "redesigned", "constructed", "consolidated",
+        "managed", "conducted", "applied", "designed", "streamlined", "owned", "contributed",
+        "created", "analyzed", "analysed", "optimized", "optimised", "reduced", "increased",
+    })
+
+    def _is_exp_section_label(s: str) -> bool:
+        low = re.sub(r"[^a-z ]", "", (s or "").lower()).strip()
+        return low in _EXP_LABELS
+
+    def _looks_like_job_header_line(ln: str) -> bool:
+        clean = ln.lstrip("-•* ").strip()
+        if not _DATE_RANGE_SK.search(clean):
+            return False
+        return "|" in clean or len(clean.split()) <= 14
+
+    def _looks_like_work_accomplishment(ln: str) -> bool:
+        clean = ln.lstrip("-•* ").strip()
+        if len(clean.split()) < 8:
+            return False
+        if _looks_like_job_header_line(clean):
+            return False
+        first = clean.split()[0].lower().rstrip(",")
+        return first in _ACCOMPLISHMENT_STARTERS
+
+    def _collect_skills_lines() -> list[str]:
+        in_section = False
+        collected: list[str] = []
+        skill_stops = {
+            "experience", "professional experience", "work experience", "projects", "education",
+        }
+        for ln in lines:
+            low = ln.lower().strip()
+            if low in {"technical skills", "skills"}:
+                in_section = True
+                continue
+            if not in_section:
+                continue
+            if low in skill_stops:
+                break
+            if _looks_like_job_header_line(ln) or _looks_like_work_accomplishment(ln):
+                break
+            val = ln.lstrip("-•* ").strip()
+            if val:
+                collected.append(val)
+            if len(collected) >= 20:
+                break
+        return collected
+
+    out.skills_lines = _collect_skills_lines()
 
     out.experience_bullets = [
         b for b in _collect_between(
@@ -290,8 +346,23 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
 
                     if has_dates and not is_bullet:
                         dates = dm.group(0).strip()
-                        role = clean.replace(dm.group(0), "").strip().rstrip(",")
-                    elif not is_bullet and role:
+                        remainder = clean.replace(dm.group(0), "").strip().strip("|").strip()
+                        if "|" in clean:
+                            parts = [p.strip() for p in clean.split("|") if p.strip()]
+                            parts = [
+                                p for p in parts
+                                if dm.group(0).lower() not in p.lower()
+                                and not _DATE_RANGE_PAT.search(p)
+                            ]
+                            if len(parts) >= 3:
+                                role, company, location = parts[0], parts[1], parts[2]
+                            elif len(parts) == 2:
+                                role, company = parts[0], parts[1]
+                            elif parts and not _is_exp_section_label(parts[0]):
+                                role = parts[0]
+                        elif remainder and not _is_exp_section_label(remainder):
+                            role = remainder
+                    elif not is_bullet and role and not _is_exp_section_label(clean):
                         if not company:
                             company = clean
                         elif not location:
@@ -299,7 +370,11 @@ def parse_profile_text(raw: Optional[str]) -> ParsedProfile:
                     elif is_bullet:
                         if clean and len(clean.split()) >= 3:
                             bullets.append(clean)
-                if role and bullets:
+                if _is_exp_section_label(role):
+                    role = ""
+                if _is_exp_section_label(company):
+                    company = ""
+                if (role or company) and bullets:
                     entries.append((company, role, dates, location, bullets))
 
         out.experience_entries = entries

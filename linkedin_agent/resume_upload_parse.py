@@ -15,7 +15,7 @@ import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -493,6 +493,438 @@ def _merge_split_word_tokens(tokens: List[str]) -> List[str]:
         out.append(t)
         i += 1
     return out
+
+
+# ── Deterministic DOCX structured extract (python-docx, no LLM) ───────────────
+
+_DET_SECTION_ALIASES: Dict[str, tuple[str, ...]] = {
+    "summary": ("summary", "profile", "objective", "professional summary", "about"),
+    "work_experience": (
+        "experience",
+        "work experience",
+        "professional experience",
+        "employment",
+        "work history",
+        "career history",
+    ),
+    "education": ("education", "academic background", "academics", "qualifications"),
+    "skills": ("skills", "technical skills", "core competencies", "technologies", "expertise"),
+    "projects": ("projects", "project", "personal projects"),
+}
+
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.\w{2,}", re.I)
+_PHONE_RE = re.compile(r"\+?\d[\d\s().-]{8,}\d")
+_LINKEDIN_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?linkedin\.com/\S+|(?<!\w)linkedin\.com/\S+",
+    re.I,
+)
+_GITHUB_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?github\.com/\S+|(?<!\w)github\.com/\S+",
+    re.I,
+)
+_BULLET_PREFIX_RE = re.compile(r"^[\s•●▪◦○\-\*]+\s*")
+_DET_DATE_RANGE_RE = re.compile(
+    r"(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    r"\.?\s+\d{4})"
+    r"\s*[–—\-]\s*"
+    r"(?:Present|Current|Now|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|"
+    r"May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
+    r"Dec(?:ember)?)\.?\s+\d{4}|\d{4})",
+    re.I,
+)
+
+
+def _det_canonical_section(text: str) -> Optional[str]:
+    low = re.sub(r"[^a-z0-9 ]", " ", (text or "").lower()).strip()
+    low = re.sub(r"\s+", " ", low)
+    if not low:
+        return None
+    for key, aliases in _DET_SECTION_ALIASES.items():
+        if low in aliases:
+            return key
+        for alias in aliases:
+            if low == alias or low.startswith(alias + " "):
+                return key
+    return None
+
+
+def _det_is_bullet_line(text: str) -> bool:
+    t = (text or "").strip()
+    return bool(t and t[0] in "•●▪◦○-*" and len(t) > 1)
+
+
+def _det_strip_bullet(text: str) -> str:
+    return _BULLET_PREFIX_RE.sub("", (text or "").strip()).strip()
+
+
+def _det_split_pipe(line: str) -> List[str]:
+    return [p.strip() for p in (line or "").split("|") if p.strip()]
+
+
+def _det_quality_ok(result: UploadedResumeStructured) -> bool:
+    """Return True if deterministic extraction found enough to be useful."""
+    has_identity = bool(result.email) or bool(result.full_name) or bool(result.phone)
+    has_content = bool(
+        result.work_experience or result.education or result.skills or result.summary
+    )
+    return has_identity or has_content
+
+
+def _det_parse_contact(lines: List[str]) -> Dict[str, str]:
+    blob = "\n".join(lines[:12])
+    email = ""
+    phone = ""
+    linkedin = ""
+    github = ""
+    em = _EMAIL_RE.search(blob)
+    if em:
+        email = em.group(0).strip()
+    ph = _PHONE_RE.search(blob)
+    if ph:
+        phone = ph.group(0).strip()
+    li = _LINKEDIN_RE.search(blob)
+    if li:
+        linkedin = li.group(0).strip()
+    gh = _GITHUB_RE.search(blob)
+    if gh:
+        github = gh.group(0).strip()
+
+    full_name = ""
+    headline = ""
+    for ln in lines[:8]:
+        low = ln.lower()
+        if _det_canonical_section(ln):
+            break
+        if email and email in ln:
+            continue
+        if phone and phone in ln:
+            continue
+        if "linkedin" in low or "github" in low or "http" in low:
+            continue
+        if not full_name and 2 <= len(ln.split()) <= 6 and len(ln) < 60:
+            if not _DET_DATE_RANGE_RE.search(ln) and ":" not in ln:
+                full_name = ln
+                continue
+        if full_name and not headline and 2 <= len(ln.split()) <= 12 and len(ln) < 80:
+            if not _det_is_bullet_line(ln) and not _DET_DATE_RANGE_RE.search(ln):
+                headline = ln
+                break
+
+    if not full_name and lines:
+        first = lines[0]
+        if "@" not in first and len(first) < 60:
+            full_name = first
+
+    return {
+        "full_name": full_name,
+        "headline": headline,
+        "email": email,
+        "phone": phone,
+        "linkedin": linkedin,
+        "github": github,
+    }
+
+
+def _det_line_is_section_label(line: str) -> bool:
+    return _det_canonical_section(line) is not None and len((line or "").split()) <= 4
+
+
+def _det_parse_work_experience(lines: List[str]) -> List[WorkExperienceItem]:
+    jobs: List[WorkExperienceItem] = []
+    current: Optional[WorkExperienceItem] = None
+
+    def flush() -> None:
+        nonlocal current
+        if current and (current.title or current.organization or current.bullets):
+            jobs.append(current)
+        current = None
+
+    for raw in lines:
+        line = (raw or "").strip()
+        if not line:
+            continue
+        if _det_line_is_section_label(line):
+            continue
+        if _det_is_bullet_line(line):
+            bullet = _det_strip_bullet(line)
+            if bullet:
+                if current is None:
+                    current = WorkExperienceItem()
+                current.bullets.append(bullet)
+            continue
+
+        dm = _DET_DATE_RANGE_RE.search(line)
+        if dm:
+            flush()
+            dates = dm.group(0).strip()
+            rest = line.replace(dates, "").strip(" ,|")
+            if _det_line_is_section_label(rest):
+                rest = ""
+            parts = _det_split_pipe(rest) if "|" in rest else ([rest] if rest else [])
+            title = parts[0] if parts else ""
+            org = parts[1] if len(parts) > 1 else ""
+            loc = parts[2] if len(parts) > 2 else ""
+            current = WorkExperienceItem(title=title, organization=org, location=loc, years=dates)
+            continue
+
+        if current is None:
+            current = WorkExperienceItem()
+        if not current.organization and not _det_line_is_section_label(line):
+            current.organization = line
+        elif not current.title:
+            current.title = line
+        else:
+            current.bullets.append(line)
+
+    flush()
+    return jobs
+
+
+def _det_degree_like(line: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:Bachelor|Master|MBA|Ph\.?\s*D|M\.?\s*S\.?|B\.?\s*S\.?|studies|Science|Commerce)\b",
+            line or "",
+            re.I,
+        )
+    )
+
+
+def _det_parse_education(lines: List[str]) -> List[EducationItem]:
+    rows: List[EducationItem] = []
+    for raw in lines:
+        line = (raw or "").strip()
+        if not line:
+            continue
+        if _det_is_bullet_line(line):
+            det = _det_strip_bullet(line)
+            if rows and det and "," in det and len(det) < 80 and not _det_degree_like(det):
+                prev = rows[-1]
+                if not (prev.details or "").strip():
+                    prev.details = det
+                else:
+                    prev.details = f"{prev.details} {det}".strip()
+            elif rows and det:
+                prev = rows[-1]
+                prev.details = (prev.details + " " + det).strip() if prev.details else det
+            continue
+        dm = _DET_DATE_RANGE_RE.search(line)
+        if dm and _det_degree_like(line):
+            years = dm.group(0).strip()
+            degree = line.replace(years, "").strip(" |")
+            school = ""
+            if "|" in degree:
+                left, right = [p.strip() for p in degree.split("|", 1)]
+                if _det_degree_like(left):
+                    degree, school = left, right
+                else:
+                    school, degree = left, right
+            rows.append(EducationItem(school=school, degree=degree, years=years, details=""))
+            continue
+        parts = _det_split_pipe(line)
+        if len(parts) >= 2:
+            years = ""
+            if dm:
+                years = dm.group(0).strip()
+                body = line.replace(years, "").strip(" |")
+                parts = _det_split_pipe(body) if "|" in body else [body]
+            elif _DET_DATE_RANGE_RE.search(parts[-1]):
+                years = parts[-1]
+                parts = parts[:-1]
+            school = parts[-1] if parts and not _det_degree_like(parts[-1]) else ""
+            degree = next((p for p in parts if _det_degree_like(p)), parts[0] if parts else "")
+            if not school and len(parts) >= 2:
+                school = parts[-1]
+            rows.append(
+                EducationItem(
+                    school=school,
+                    degree=degree,
+                    years=years,
+                    details="",
+                )
+            )
+        elif _det_degree_like(line):
+            rows.append(EducationItem(degree=line, school="", years="", details=""))
+        elif _DET_DATE_RANGE_RE.search(line):
+            rows.append(EducationItem(school="", degree="", years=_DET_DATE_RANGE_RE.search(line).group(0).strip(), details=""))
+        else:
+            rows.append(EducationItem(school=line, degree="", years="", details=""))
+    return rows
+
+
+def _det_parse_skills(lines: List[str]) -> List[str]:
+    skills: List[str] = []
+    for raw in lines:
+        line = (raw or "").strip()
+        if not line:
+            continue
+        if ":" in line:
+            label, rest = line.split(":", 1)
+            if re.sub(r"[^a-z ]", "", label.lower()).strip() in ("skills", "technical skills"):
+                line = rest
+        for part in re.split(r"[,;|]\s*|\n+", line):
+            s = part.strip()
+            if s and len(s) > 1:
+                skills.append(s)
+    return skills
+
+
+def _det_parse_projects(lines: List[str]) -> List[ProjectItem]:
+    projects: List[ProjectItem] = []
+    current: Optional[ProjectItem] = None
+
+    def flush() -> None:
+        nonlocal current
+        if current and (current.name or current.bullets or current.description):
+            projects.append(current)
+        current = None
+
+    for raw in lines:
+        line = (raw or "").strip()
+        if not line:
+            continue
+        if _det_is_bullet_line(line):
+            bullet = _det_strip_bullet(line)
+            if current is None:
+                current = ProjectItem()
+            current.bullets.append(bullet)
+            continue
+        flush()
+        parts = _det_split_pipe(line)
+        current = ProjectItem(
+            name=parts[0] if parts else line,
+            description=parts[1] if len(parts) > 1 else "",
+            years=parts[2] if len(parts) > 2 else "",
+        )
+    flush()
+    return projects
+
+
+def _build_structured_from_lines(
+    lines: List[str],
+    *,
+    is_heading_fn: Callable[[int], bool],
+) -> UploadedResumeStructured:
+    """Group lines by detected headings, then parse each section."""
+    clean_lines = [(ln or "").strip() for ln in lines if (ln or "").strip()]
+    if not clean_lines:
+        return UploadedResumeStructured()
+
+    buckets: Dict[str, List[str]] = {"_preamble": []}
+    current = "_preamble"
+    for i, line in enumerate(clean_lines):
+        if is_heading_fn(i):
+            canon = _det_canonical_section(line)
+            if canon:
+                current = canon
+                buckets.setdefault(canon, [])
+                continue
+        buckets.setdefault(current, []).append(line)
+
+    contact = _det_parse_contact(buckets.get("_preamble", []))
+    summary_lines = buckets.get("summary", [])
+    summary = " ".join(summary_lines).strip()[:1200]
+
+    return UploadedResumeStructured(
+        full_name=contact["full_name"],
+        headline=contact["headline"],
+        email=contact["email"],
+        phone=contact["phone"],
+        linkedin=contact["linkedin"],
+        github=contact["github"],
+        summary=summary,
+        skills=_det_parse_skills(buckets.get("skills", [])),
+        work_experience=_det_parse_work_experience(buckets.get("work_experience", [])),
+        education=_det_parse_education(buckets.get("education", [])),
+        projects=_det_parse_projects(buckets.get("projects", [])),
+    )
+
+
+def _extract_docx_structured(content: bytes) -> Optional[UploadedResumeStructured]:
+    """Deterministic DOCX → UploadedResumeStructured via python-docx paragraph styles.
+
+    Uses full element.body traversal so table-only resumes (where doc.paragraphs
+    returns nothing) are handled correctly.
+    """
+    try:
+        from docx import Document  # type: ignore[import-untyped]
+        from docx.text.paragraph import Paragraph as DocxParagraph  # type: ignore[import-untyped]
+        from docx.table import Table as DocxTable  # type: ignore[import-untyped]
+    except ImportError:
+        logger.warning("_extract_docx_structured: python-docx not installed")
+        return None
+
+    try:
+        doc = Document(io.BytesIO(content))
+    except Exception as exc:
+        logger.warning("_extract_docx_structured: Document() failed: %s", exc)
+        return None
+
+    def _para_meta(para: Any) -> Dict[str, Any]:
+        text = para.text.strip()
+        style = para.style.name if para.style else ""
+        runs = [r for r in para.runs if r.text.strip()]
+        all_bold = bool(runs and all(r.bold for r in runs))
+        all_caps = text == text.upper() and any(c.isalpha() for c in text)
+        is_list = any(s in style for s in ("List", "Bullet", "Item")) or bool(
+            text and text[0] in ("•", "●", "▪", "◦", "○")
+        )
+        return {
+            "text": text,
+            "style": style,
+            "all_bold": all_bold,
+            "all_caps": all_caps,
+            "is_list": is_list,
+        }
+
+    para_data: List[Dict[str, Any]] = []
+    seen_cell_texts: set[str] = set()
+
+    for child in doc.element.body:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag == "p":
+            para = DocxParagraph(child, doc)
+            meta = _para_meta(para)
+            if meta["text"]:
+                para_data.append(meta)
+        elif tag == "tbl":
+            table = DocxTable(child, doc)
+            for row in table.rows:
+                for cell in row.cells:
+                    cell_text = cell.text.strip()
+                    if not cell_text or cell_text in seen_cell_texts:
+                        continue
+                    seen_cell_texts.add(cell_text)
+                    for para in cell.paragraphs:
+                        meta = _para_meta(para)
+                        if meta["text"]:
+                            para_data.append(meta)
+
+    if not para_data:
+        return None
+
+    bold_ratio = sum(1 for p in para_data if p["all_bold"]) / len(para_data)
+    uniform_bold = bold_ratio > 0.5
+
+    def is_heading(i: int) -> bool:
+        p = para_data[i]
+        text = p["text"]
+        if not text or len(text) > 70:
+            return False
+        style = p["style"]
+        if any(style.startswith(s) for s in ("Heading 1", "Heading 2", "Title")):
+            return True
+        if p["all_caps"] and len(text) <= 60:
+            return True
+        if uniform_bold:
+            return len(text.split()) <= 5 and _det_canonical_section(text) is not None
+        if p["all_bold"] and len(text) <= 50 and not p["is_list"]:
+            return True
+        return False
+
+    plain_lines = [p["text"] for p in para_data]
+    return _build_structured_from_lines(plain_lines, is_heading_fn=lambda i: is_heading(i))
 
 
 def _extract_pdf_text_pdfplumber(content: bytes) -> str:

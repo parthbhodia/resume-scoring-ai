@@ -122,6 +122,68 @@ SQL, Python
     assert any("Osmania" in w or "Finance" in w for w in warnings)
 
 
+HARINI_PROFILE_SNIPPET = """
+Harini Payala
+Financial Analyst
+harini.p@protectmymails.com
+(410)530-9684
+linkedin.com/in/harini-payala-402458346
+
+SUMMARY
+Financial Analyst with 4+ years of experience in FP&A.
+
+SKILLS
+Skills : SQL, Python, R, MySQL, PostgreSQL, Snowflake, Power BI, Tableau
+
+EXPERIENCE
+Sr Financial Analyst | CAPITAL ONE | MC LEAN, VIRGINIA | JAN 2026 - PRESENT
+- Supported capital markets operations by validating liquidity datasets.
+
+Financial Analyst | Morgan Stanley | Baltimore, Maryland | Dec 2023 - JAN 2026
+- Developed and maintained detailed financial models (DCF, NPV, IRR).
+
+Financial Analyst | Accenture | Hyderabad, India | Nov 2019 - Jul 2022
+- Built customized financial forecasting models for global client accounts.
+
+EDUCATION
+University of Maryland, Baltimore County
+Master of professional studies in Data Science
+Aug 2022 - May 2024
+Baltimore, Maryland
+"""
+
+
+def test_harini_conservative_profile_maps_experience_and_education():
+    from app import (  # noqa: WPS433
+        _finalize_structured_doc,
+        _resume_doc_from_profile_text,
+    )
+    from resume_extraction import profile_section_inventory  # noqa: E402
+
+    doc = _resume_doc_from_profile_text(HARINI_PROFILE_SNIPPET, "Financial Analyst", "")
+    inv = profile_section_inventory(HARINI_PROFILE_SNIPPET)
+    _finalize_structured_doc(doc, HARINI_PROFILE_SNIPPET, inv, None, "Financial Analyst", "")
+
+    assert len(doc.experience) == 3
+    assert all(e.company.lower() != "experience" for e in doc.experience)
+    assert "Morgan Stanley" in doc.experience[1].company
+    assert doc.experience[1].role.startswith("Financial Analyst")
+    assert "Baltimore" in (doc.experience[1].location or "")
+
+    assert len(doc.education) == 1
+    edu = doc.education[0]
+    assert "Maryland" in edu.institution
+    assert "Data Science" in edu.degree
+    assert "2022" in edu.dates
+    assert "Baltimore" in (edu.location or "")
+    assert not any(b.lower() == "projects" for b in edu.bullets)
+
+    skill_items = [it for _, items in doc.skills for it in items]
+    assert skill_items
+    assert not any("capital markets" in it.lower() for it in skill_items)
+    assert doc.phone.startswith("(")
+
+
 def test_inventory_detects_education_before_skills():
     text = """
 Harini Payala
