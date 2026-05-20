@@ -2695,7 +2695,7 @@ export default function ResumeBuilder({
                   <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>
                     One row per job requirement.
                   </p>
-                  <MatchBreakdownCards criteria={ratings.criteria} />
+                  <MatchBreakdownCards criteria={ratings.criteria} onImprove={improveResumeAfterResult} />
                 </div>
               )}
 

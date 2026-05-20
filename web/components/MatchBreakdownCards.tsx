@@ -3,21 +3,27 @@
 import type { Criterion } from "@/lib/types";
 import { scoreColor, weightColor } from "@/lib/utils";
 
-export default function MatchBreakdownCards({ criteria }: { criteria: Criterion[] }) {
+export default function MatchBreakdownCards({
+  criteria,
+  onImprove,
+}: {
+  criteria: Criterion[];
+  onImprove?: () => void;
+}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {criteria.map((c, i) => {
         const sc = scoreColor(c.score * 10);
         const wc = weightColor(c.weight);
-        const weak = c.score <= 3;
+        const weak = c.score <= 5;
         const notes = (c.notes ?? "").replace(/^\s+/, "").trimEnd();
         return (
           <div
             key={i}
             style={{
               borderRadius: 12,
-              border: `1px solid ${weak ? "rgba(248,113,113,0.22)" : "var(--border)"}`,
-              background: weak ? "rgba(248,113,113,0.04)" : "var(--surface2)",
+              border: `1px solid ${c.score <= 3 ? "rgba(248,113,113,0.22)" : "var(--border)"}`,
+              background: c.score <= 3 ? "rgba(248,113,113,0.04)" : "var(--surface2)",
               padding: "12px 14px 14px",
             }}
           >
@@ -28,7 +34,7 @@ export default function MatchBreakdownCards({ criteria }: { criteria: Criterion[
                 alignItems: "flex-start",
                 justifyContent: "space-between",
                 gap: 10,
-                marginBottom: 8,
+                marginBottom: notes || (weak && onImprove) ? 8 : 0,
               }}
             >
               <div
@@ -76,6 +82,7 @@ export default function MatchBreakdownCards({ criteria }: { criteria: Criterion[
               <p
                 style={{
                   margin: 0,
+                  marginBottom: weak && onImprove ? 10 : 0,
                   fontSize: 12.5,
                   color: "var(--muted)",
                   lineHeight: 1.45,
@@ -85,6 +92,29 @@ export default function MatchBreakdownCards({ criteria }: { criteria: Criterion[
               >
                 {notes}
               </p>
+            ) : null}
+            {weak && onImprove ? (
+              <button
+                type="button"
+                onClick={onImprove}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "5px 11px",
+                  borderRadius: 7,
+                  border: "1px solid var(--border)",
+                  background: "var(--surface)",
+                  color: "var(--accent)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                  letterSpacing: -0.2,
+                }}
+              >
+                Get suggestions to improve →
+              </button>
             ) : null}
           </div>
         );
