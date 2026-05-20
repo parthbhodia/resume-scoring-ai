@@ -40,11 +40,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // While we haven't yet confirmed session status AND there's no session,
-  // show the landing page — which is also what SSG renders for crawlers.
-  if (!session) return <LandingPage />;
-
-  // Brief loading state only for returning authenticated users
+  // Still checking — show spinner to avoid flashing the landing page for returning users.
   if (!checked) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "var(--bg)" }}>
@@ -52,6 +48,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+
+  // Confirmed no session — show landing page (also the SSG/crawler path).
+  if (!session) return <LandingPage />;
 
   return <>{children}</>;
 }
