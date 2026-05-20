@@ -875,7 +875,9 @@ export default function ResumeBuilder({
     void runAtsCheck(result.folder);
   }, [authReady, user?.id, result?.folder, result?.pdfUrl, atsLoading, studioHandoff, runAtsCheck]);
 
-  const getSuggestions = useCallback(async () => {
+  const getSuggestions = useCallback(async (
+    focusGaps?: Array<{ name: string; score: number }>,
+  ) => {
     let effJd = jd.trim();
     if (!effJd && studioHandoff) {
       effJd = (candidateProfile ?? "").trim()
@@ -920,6 +922,7 @@ export default function ResumeBuilder({
           candidate_profile: candidateProfile,
           job_description: effJd,
           ...reuseResearchBody,
+          ...(focusGaps && focusGaps.length > 0 ? { focus_gaps: focusGaps } : {}),
         }),
         signal: ac.signal,
       });
@@ -1423,12 +1426,16 @@ export default function ResumeBuilder({
 
   /** Clear result and re-run JD suggestions so user can iterate before re-downloading. */
   const improveResumeAfterResult = useCallback(() => {
+    const weakCriteria = (result?.ratings?.criteria ?? [])
+      .filter((c) => typeof c.score === "number" && c.score <= 5)
+      .map((c) => ({ name: c.name, score: c.score }))
+      .slice(0, 8);
     setResult(null);
     setPreview("");
     selectSuggestion(null);
     setSuggestError(null);
-    void getSuggestions();
-  }, [getSuggestions, selectSuggestion, setSuggestError]);
+    void getSuggestions(weakCriteria.length > 0 ? weakCriteria : undefined);
+  }, [getSuggestions, selectSuggestion, setSuggestError, result?.ratings?.criteria]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;

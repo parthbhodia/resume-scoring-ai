@@ -4784,7 +4784,12 @@ async def api_rewrite_role(request: Request):
     return JSONResponse({"bullets": rewritten})
 
 
-def _resume_coach_prompt(candidate_profile: str, job_description: str, digest: str) -> str:
+def _resume_coach_prompt(
+    candidate_profile: str,
+    job_description: str,
+    digest: str,
+    focus_gaps: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     """Shared JD + résumé + optional web-digest prompt for suggest-changes (JSON coach)."""
     digest_block = ""
     ds = (digest or "").strip()
@@ -4795,12 +4800,34 @@ def _resume_coach_prompt(candidate_profile: str, job_description: str, digest: s
             "not already in the résumé or JD):\n"
             f"{ds[:4500]}\n\n"
         )
+
+    gaps_block = ""
+    if focus_gaps:
+        lines = []
+        for g in focus_gaps[:8]:
+            name = str(g.get("name") or "").strip()
+            score = g.get("score")
+            if not name:
+                continue
+            score_str = f" ({score}/10)" if isinstance(score, (int, float)) else ""
+            lines.append(f"  - {name}{score_str}")
+        if lines:
+            gaps_block = (
+                "\n---\nPRIORITY GAPS FROM PREVIOUS SCORING (these criteria scored low — focus your "
+                "suggestions on surfacing any related experience already in the résumé, reframing bullets "
+                "to use the exact keywords, or advising the candidate to add missing context they may have "
+                "omitted. Do NOT fabricate experience):\n"
+                + "\n".join(lines)
+                + "\n\n"
+            )
+
     return (
         "You are an expert resume coach. Analyze this resume against the job description "
         "and return 5-8 specific, actionable improvements for individual bullets or sections.\n\n"
         f"RESUME:\n{candidate_profile[:6000]}\n\n"
         f"JOB DESCRIPTION:\n{job_description[:3000]}\n"
         f"{digest_block}"
+        f"{gaps_block}"
         "Return a JSON object with this exact structure:\n"
         '{\n'
         '  "summary": "One sentence: the most important gap between this resume and the JD.",\n'
@@ -4824,6 +4851,8 @@ def _resume_coach_prompt(candidate_profile: str, job_description: str, digest: s
         "- Only suggest changes to bullets that EXIST in the resume — quote them exactly.\n"
         "- Do NOT invent metrics, employers, or facts not in the resume.\n"
         "- When JOB & MARKET CONTEXT is present, use it only to sharpen **wording** and JD-aligned phrasing for facts already in the résumé.\n"
+        "- When PRIORITY GAPS are listed, bias your suggestions toward addressing them — find the closest "
+        "existing bullets and rewrite them to surface the relevant skill or experience.\n"
         "- Priority: 'high' = missing critical JD keyword; 'medium' = wording improvement; 'low' = polish.\n"
         "- strategic_tips: honest, specific, second-person OK; do not repeat the summary sentence; "
         "do not invent employers or metrics.\n"
@@ -4874,6 +4903,26 @@ def _try_suggest_reuse_research(body: dict) -> Optional[Tuple[str, List[str], Li
     return (d[:5000], rq, rs)
 
 
+def _parse_focus_gaps(raw: object) -> List[Dict[str, Any]]:
+    """Validate and sanitize the focus_gaps list from the request body."""
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in raw[:10]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()[:120]
+        if not name:
+            continue
+        score = item.get("score")
+        try:
+            score = float(score) if score is not None else None
+        except (TypeError, ValueError):
+            score = None
+        out.append({"name": name, "score": score})
+    return out
+
+
 async def api_suggest_changes(request: Request):
     """POST /api/suggest-changes — analyze resume vs JD and return per-bullet suggestions.
 
@@ -4910,7 +4959,8 @@ async def api_suggest_changes(request: Request):
         except Exception as exc:
             logger.warning("pre-suggestion web research failed (suggestions will use resume+JD only): %s", exc)
 
-    prompt = _resume_coach_prompt(candidate_profile, job_description, digest)
+    focus_gaps = _parse_focus_gaps(body.get("focus_gaps"))
+    prompt = _resume_coach_prompt(candidate_profile, job_description, digest, focus_gaps=focus_gaps)
 
     def _call():
         return coach_suggestions_llm(prompt)
@@ -4975,6 +5025,7 @@ async def api_suggest_changes_stream(request: Request):
     loop = asyncio.get_event_loop()
     queue: asyncio.Queue = asyncio.Queue()
     reuse_pack = _try_suggest_reuse_research(body)
+    focus_gaps = _parse_focus_gaps(body.get("focus_gaps"))
 
     def producer():
         try:
@@ -5002,7 +5053,7 @@ async def api_suggest_changes_stream(request: Request):
                 "research_digest": rd,
             })
             qput({"event": "status", "msg": "Drafting tailored suggestions…"})
-            prompt = _resume_coach_prompt(candidate_profile, job_description, digest)
+            prompt = _resume_coach_prompt(candidate_profile, job_description, digest, focus_gaps=focus_gaps)
 
             def on_delta(fragment: str) -> None:
                 qput({"event": "coach_delta", "text": fragment})
