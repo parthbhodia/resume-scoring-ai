@@ -58,6 +58,7 @@ interface StudentDetail {
   latest_strengths: string[];
   latest_category_scores: Record<string, number | null>;
   resumes: ResumeEntry[];
+  latest_resume_text: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -305,6 +306,29 @@ function StudentDetailPanel({
                 }
               </div>
             </div>
+
+            {/* Uploaded resume text */}
+            {d.latest_resume_text && (
+              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, marginBottom: 16 }}>
+                <SectionLabel>Latest uploaded résumé</SectionLabel>
+                <pre style={{
+                  margin: 0,
+                  fontSize: 11.5,
+                  lineHeight: 1.7,
+                  color: "var(--text)",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  maxHeight: 320,
+                  overflowY: "auto",
+                  background: "var(--surface2)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  padding: "12px 14px",
+                }}>
+                  {d.latest_resume_text}
+                </pre>
+              </div>
+            )}
 
             {/* Tailored resumes */}
             {d.resumes.length > 0 && (

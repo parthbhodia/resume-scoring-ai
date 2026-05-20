@@ -1524,9 +1524,8 @@ export default function ResumeBuilder({
   const tailorResultsBuilding = !studioHandoff && Boolean(result) && generating;
   /** Pin loaders at top of the page — form CTAs sit at the bottom and scroll-to-top hid them. */
   const showSuggestLoaderAtTop = !studioHandoff && suggestLoading;
-  /** Template gallery first compile (no prior result) — tailor uses results page instead.
-   *  Also covers the "Skip suggestions" tailor path where there are no suggestion cards to render. */
-  const showGenerateLoaderAtTop = generating && !result?.pdfUrl && (studioHandoff || !suggestionsReviewMode);
+  /** Show full generate loader at top for all generation paths that have no PDF yet. */
+  const showGenerateLoaderAtTop = generating && !result?.pdfUrl;
 
   useLayoutEffect(() => {
     if (showSuggestLoaderAtTop) scrollBuilderToTop("auto");

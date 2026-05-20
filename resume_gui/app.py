@@ -4680,6 +4680,7 @@ async def api_student_detail(request: Request):
         "latest_strengths":     latest_result.get("topStrengths") or [],
         "latest_category_scores": latest_result.get("categoryScores") or {},
         "resumes":        resumes,
+        "latest_resume_text":  (latest_result.get("extractedText") or "")[:4000],
     })
 
 
