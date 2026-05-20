@@ -329,6 +329,8 @@ _FAITHFUL_INSTRUCTIONS = """Instructions:
 - education[]: include ONLY schools/degrees that appear in the EDUCATION section of the source — NEVER invent additional universities, degrees, or dates.
 - If the source lists one degree, education[] must have exactly one entry; do not add typical filler schools (e.g. a second bachelor's or unrelated master's).
 - experience[]: one object per job; never merge multiple employers into one entry.
+- experience[].company MUST be a real employer name. NEVER use section-header words ("Experience", "Work Experience", "Professional Experience", "Employment", "Work History") as the company value — those are section labels, not employers. If a line just says "Experience" with no employer name, skip it and read the next line for the actual company/role.
+- If a single line contains "Role | Company | Location" or "Role | Company | Location | Date" separated by "|", split it: role=first token, company=second token, location=third token.
 - extraction_manifest.sections_seen must list every section header found (use keys: summary, education, skills, experience, projects).
 - extraction_manifest.education_count must equal len(education[]); experience_job_count must equal len(experience[]).
 - Output ONLY valid JSON matching the schema (no markdown fences)."""
