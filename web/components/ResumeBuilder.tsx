@@ -2844,6 +2844,11 @@ export default function ResumeBuilder({
                     onFixGap={(gap) => void handleFixGap({ name: gap.name, notes: gap.notes })}
                     fixingGap={gapFixLoading}
                     addressedGaps={addressedGaps}
+                    gapFixPanel={gapFixPanel}
+                    gapFixError={gapFixError}
+                    onApplyFix={applyGapFix}
+                    onDismissFix={() => setGapFixPanel(null)}
+                    generating={generating}
                   />
                   {/* Phase 3 — Re-score button when gaps have been addressed */}
                   {addressedGaps.size > 0 && result?.folder && (
@@ -2873,81 +2878,6 @@ export default function ResumeBuilder({
                     </div>
                   )}
 
-                  {/* Gap-fix error */}
-                  {gapFixError ? (
-                    <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--error, #ef4444)" }}>{gapFixError}</p>
-                  ) : null}
-                  {/* Gap-fix micro-suggestion panel */}
-                  {gapFixPanel ? (
-                    <div
-                      style={{
-                        marginTop: 14,
-                        borderRadius: 12,
-                        border: "1px solid rgba(59,130,246,0.3)",
-                        background: "rgba(59,130,246,0.04)",
-                        padding: "14px 16px",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", letterSpacing: -0.2 }}>
-                          Fixes for: {gapFixPanel.gapName}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setGapFixPanel(null)}
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 16, lineHeight: 1, padding: 2 }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                      {gapFixPanel.suggestions.length === 0 ? (
-                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
-                          No targeted rewrites found — try "Get full suggestions" for a broader analysis.
-                        </p>
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                          {gapFixPanel.suggestions.map((s, idx) => (
-                            <div
-                              key={idx}
-                              style={{
-                                borderRadius: 9,
-                                border: "1px solid var(--border)",
-                                background: "var(--surface)",
-                                padding: "10px 12px",
-                              }}
-                            >
-                              <div style={{ fontSize: 11, color: "var(--dim)", marginBottom: 4 }}>
-                                <span style={{ fontWeight: 600 }}>Was:</span> {s.original}
-                              </div>
-                              <div style={{ fontSize: 12.5, color: "var(--text)", lineHeight: 1.4, marginBottom: 6 }}>
-                                <span style={{ fontWeight: 600, color: "var(--accent)" }}>→ </span>{s.suggested}
-                              </div>
-                              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>{s.reason}</div>
-                              <button
-                                type="button"
-                                disabled={generating}
-                                onClick={() => applyGapFix(s)}
-                                style={{
-                                  padding: "4px 12px",
-                                  borderRadius: 6,
-                                  border: "none",
-                                  background: "var(--accent)",
-                                  color: "#fff",
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                  fontFamily: "inherit",
-                                  cursor: generating ? "not-allowed" : "pointer",
-                                  opacity: generating ? 0.6 : 1,
-                                }}
-                              >
-                                {generating ? "Applying…" : "Apply & regenerate →"}
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
                 </div>
               )}
 
