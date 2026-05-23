@@ -468,11 +468,18 @@ export default function ResumeBuilder({
   const [previewFontSize, setPreviewFontSize] = useState<"small" | "standard" | "large">("standard");
   const [previewSpacing, setPreviewSpacing] = useState<"compact" | "balanced" | "spacious">("balanced");
 
-  // Gap-fix micro-suggestion panel state
+  // Gap-fix micro-suggestion panel state (Phase 1)
   const [gapFixLoading, setGapFixLoading] = useState<string | null>(null); // gap name being fetched
   type GapFixSuggestion = { id: string; section: string; original: string; suggested: string; reason: string; priority: string };
   const [gapFixPanel, setGapFixPanel] = useState<{ gapName: string; gapNotes: string; suggestions: GapFixSuggestion[] } | null>(null);
   const [gapFixError, setGapFixError] = useState<string | null>(null);
+
+  // Phase 3 — Gap status tracking: which gap names have been addressed
+  const [addressedGaps, setAddressedGaps] = useState<Set<string>>(new Set());
+
+  // Phase 2 — Inline bullet editor state
+  const [bulletEditorOpen, setBulletEditorOpen] = useState(false);
+  const [bulletEdits, setBulletEdits] = useState<Map<number, string>>(new Map());
 
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(
     () => builderSession0?.candidateProfile ?? null,
@@ -1486,17 +1493,44 @@ export default function ResumeBuilder({
   const applyGapFix = useCallback((s: { id: string; section: string; original: string; suggested: string; reason: string; priority: string }) => {
     const fixId = `gf_${Date.now()}_${s.id}`;
     const asSuggestion = { ...s, id: fixId, priority: (s.priority ?? "high") as "high" | "medium" | "low" };
-    // Merge into the existing suggestions list so the accepted list flows into generate
     const existing = suggestions ?? [];
     hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips);
     acceptSuggestion(fixId);
+    // Phase 3 — mark the gap as addressed
+    if (gapFixPanel?.gapName) {
+      setAddressedGaps(prev => new Set([...prev, gapFixPanel.gapName]));
+    }
     setGapFixPanel(null);
-    // Trigger generate to apply the accepted fix
     void generate();
-  }, [suggestions, suggestSummary, strategicTips, hydrateSuggestions, acceptSuggestion, generate]);
+  }, [suggestions, suggestSummary, strategicTips, hydrateSuggestions, acceptSuggestion, gapFixPanel, generate]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
+
+  /** Phase 2 — Parse candidateProfile into typed lines for the bullet editor. */
+  const parsedProfileLines = useMemo(() => {
+    if (!candidateProfile) return [];
+    const SECTION_RE = /^(?:[A-Z][A-Z &/\-]{2,}|(?:experience|education|skills|projects|summary|work|professional|employment|certifications|awards|publications|volunteer|languages|interests)\s*:?\s*)$/i;
+    const BULLET_RE  = /^[-•·*▪▸→>]\s|^\d+\.\s/;
+    return candidateProfile.split("\n").map((text, idx) => {
+      const t = text.trim();
+      const isHeader = t.length > 0 && t.length < 80 && SECTION_RE.test(t);
+      const isBullet = t.length > 0 && BULLET_RE.test(t);
+      return { idx, text, isHeader, isBullet };
+    });
+  }, [candidateProfile]);
+
+  /** Phase 2 — Rebuild profile from original lines + edits, update state, trigger generate. */
+  const saveBulletEdits = useCallback(() => {
+    if (bulletEdits.size === 0) { setBulletEditorOpen(false); return; }
+    const lines = (candidateProfile ?? "").split("\n");
+    bulletEdits.forEach((newText, idx) => { if (idx < lines.length) lines[idx] = newText; });
+    const newProfile = lines.join("\n");
+    setCandidateProfile(newProfile);
+    setBulletEdits(new Map());
+    setBulletEditorOpen(false);
+    void generate();
+  }, [candidateProfile, bulletEdits, generate]);
 
   const resumeDownloadStem = useMemo(
     () => (result?.folder ? result.folder : buildResumeFileStem(company, role, candidateProfile)),
@@ -2765,7 +2799,36 @@ export default function ResumeBuilder({
                     onImprove={improveResumeAfterResult}
                     onFixGap={(gap) => void handleFixGap({ name: gap.name, notes: gap.notes })}
                     fixingGap={gapFixLoading}
+                    addressedGaps={addressedGaps}
                   />
+                  {/* Phase 3 — Re-score button when gaps have been addressed */}
+                  {addressedGaps.size > 0 && result?.folder && (
+                    <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, color: "var(--green, #34d399)", fontWeight: 600 }}>
+                        ✓ {addressedGaps.size} gap{addressedGaps.size > 1 ? "s" : ""} addressed
+                      </span>
+                      <button
+                        type="button"
+                        disabled={atsLoading || generating}
+                        onClick={() => void runAtsCheck(result.folder!)}
+                        style={{
+                          padding: "5px 12px",
+                          borderRadius: 7,
+                          border: "1px solid rgba(52,211,153,0.4)",
+                          background: "rgba(52,211,153,0.08)",
+                          color: "var(--green, #34d399)",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          fontFamily: "inherit",
+                          cursor: atsLoading || generating ? "not-allowed" : "pointer",
+                          opacity: atsLoading || generating ? 0.6 : 1,
+                        }}
+                      >
+                        {atsLoading ? "Scoring…" : "Re-score résumé →"}
+                      </button>
+                    </div>
+                  )}
+
                   {/* Gap-fix error */}
                   {gapFixError ? (
                     <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--error, #ef4444)" }}>{gapFixError}</p>
@@ -2841,6 +2904,151 @@ export default function ResumeBuilder({
                       )}
                     </div>
                   ) : null}
+                </div>
+              )}
+
+              {/* Phase 2 — Inline bullet editor */}
+              {candidateProfile && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    borderRadius: "var(--radius-xl)",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface)",
+                    boxShadow: "var(--shadow-card)",
+                    overflow: "hidden",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => { setBulletEditorOpen(o => !o); setBulletEdits(new Map()); }}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "14px 20px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase" }}>
+                        ✏️ Edit résumé bullets directly
+                      </span>
+                      {bulletEdits.size > 0 && (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, background: "rgba(59,130,246,0.12)", color: "var(--accent)" }}>
+                          {bulletEdits.size} edited
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: 12, color: "var(--muted)", transform: bulletEditorOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▾</span>
+                  </button>
+
+                  {bulletEditorOpen && (
+                    <div style={{ padding: "0 20px 20px", borderTop: "1px solid var(--border)" }}>
+                      <p style={{ margin: "12px 0 14px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+                        Edit any bullet, then click <strong style={{ color: "var(--text)" }}>Save & regenerate</strong> to rebuild your PDF with the changes.
+                      </p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        {parsedProfileLines.map(({ idx, text, isHeader, isBullet }) => {
+                          if (isHeader) {
+                            return (
+                              <div key={idx} style={{ padding: "10px 0 4px", fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.5, textTransform: "uppercase", borderBottom: "1px solid var(--border)", marginBottom: 4 }}>
+                                {text.trim()}
+                              </div>
+                            );
+                          }
+                          if (isBullet) {
+                            const currentValue = bulletEdits.has(idx) ? (bulletEdits.get(idx) ?? text) : text;
+                            const isDirty = bulletEdits.has(idx) && bulletEdits.get(idx) !== text;
+                            return (
+                              <div key={idx} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                                <span style={{ color: "var(--muted)", fontSize: 13, marginTop: 7, flexShrink: 0 }}>•</span>
+                                <textarea
+                                  value={currentValue.replace(/^[-•·*▪▸→>]\s/, "")}
+                                  onChange={e => {
+                                    const prefix = text.match(/^([-•·*▪▸→>])\s/)?.[0] ?? "- ";
+                                    const next = new Map(bulletEdits);
+                                    const newVal = prefix + e.target.value;
+                                    if (newVal === text) next.delete(idx);
+                                    else next.set(idx, newVal);
+                                    setBulletEdits(next);
+                                  }}
+                                  rows={1}
+                                  style={{
+                                    flex: 1,
+                                    fontSize: 12.5,
+                                    lineHeight: 1.5,
+                                    color: isDirty ? "var(--text)" : "var(--muted)",
+                                    background: isDirty ? "rgba(59,130,246,0.04)" : "transparent",
+                                    border: isDirty ? "1px solid rgba(59,130,246,0.3)" : "1px solid transparent",
+                                    borderRadius: 6,
+                                    padding: "5px 8px",
+                                    resize: "vertical",
+                                    fontFamily: "inherit",
+                                    outline: "none",
+                                    transition: "border-color 0.15s, background 0.15s",
+                                  }}
+                                  onFocus={e => { if (!bulletEdits.has(idx)) e.currentTarget.style.borderColor = "rgba(59,130,246,0.3)"; }}
+                                  onBlur={e => { if (!bulletEdits.has(idx)) e.currentTarget.style.borderColor = "transparent"; }}
+                                />
+                              </div>
+                            );
+                          }
+                          // Non-header, non-bullet line (contact info, dates, etc.) — show read-only
+                          const trimmed = text.trim();
+                          if (!trimmed) return <div key={idx} style={{ height: 4 }} />;
+                          return (
+                            <div key={idx} style={{ fontSize: 11.5, color: "var(--dim)", padding: "2px 0 2px 14px", fontStyle: "italic" }}>
+                              {trimmed}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: "flex", gap: 10, marginTop: 16, alignItems: "center" }}>
+                        <button
+                          type="button"
+                          disabled={generating || bulletEdits.size === 0}
+                          onClick={saveBulletEdits}
+                          style={{
+                            padding: "7px 16px",
+                            borderRadius: 8,
+                            border: "none",
+                            background: bulletEdits.size === 0 || generating ? "var(--surface2)" : "var(--accent)",
+                            color: bulletEdits.size === 0 || generating ? "var(--muted)" : "#fff",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            fontFamily: "inherit",
+                            cursor: bulletEdits.size === 0 || generating ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          {generating ? "Regenerating…" : `Save & regenerate${bulletEdits.size > 0 ? ` (${bulletEdits.size} change${bulletEdits.size > 1 ? "s" : ""})` : ""}`}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setBulletEdits(new Map()); }}
+                          disabled={bulletEdits.size === 0}
+                          style={{
+                            padding: "7px 12px",
+                            borderRadius: 8,
+                            border: "1px solid var(--border)",
+                            background: "none",
+                            color: "var(--muted)",
+                            fontSize: 13,
+                            fontWeight: 500,
+                            fontFamily: "inherit",
+                            cursor: bulletEdits.size === 0 ? "not-allowed" : "pointer",
+                            opacity: bulletEdits.size === 0 ? 0.5 : 1,
+                          }}
+                        >
+                          Reset edits
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

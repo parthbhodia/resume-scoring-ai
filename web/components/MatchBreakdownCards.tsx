@@ -8,6 +8,7 @@ export default function MatchBreakdownCards({
   onImprove,
   onFixGap,
   fixingGap,
+  addressedGaps,
 }: {
   criteria: Criterion[];
   onImprove?: () => void;
@@ -15,6 +16,8 @@ export default function MatchBreakdownCards({
   onFixGap?: (gap: Criterion) => void;
   /** Name of the gap currently being fixed (shows loading state on that card). */
   fixingGap?: string | null;
+  /** Set of gap names that have already been addressed (Phase 3 tracking). */
+  addressedGaps?: ReadonlySet<string>;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -24,14 +27,16 @@ export default function MatchBreakdownCards({
         const weak = c.score <= 5;
         const notes = (c.notes ?? "").replace(/^\s+/, "").trimEnd();
         const isFixing = fixingGap === c.name;
+        const isAddressed = addressedGaps?.has(c.name) ?? false;
         return (
           <div
             key={i}
             style={{
               borderRadius: 12,
-              border: `1px solid ${c.score <= 3 ? "rgba(248,113,113,0.22)" : "var(--border)"}`,
-              background: c.score <= 3 ? "rgba(248,113,113,0.04)" : "var(--surface2)",
+              border: `1px solid ${isAddressed ? "rgba(52,211,153,0.35)" : c.score <= 3 ? "rgba(248,113,113,0.22)" : "var(--border)"}`,
+              background: isAddressed ? "rgba(52,211,153,0.04)" : c.score <= 3 ? "rgba(248,113,113,0.04)" : "var(--surface2)",
               padding: "12px 14px 14px",
+              transition: "border-color 0.2s, background 0.2s",
             }}
           >
             <div
@@ -44,18 +49,35 @@ export default function MatchBreakdownCards({
                 marginBottom: notes || (weak && (onImprove || onFixGap)) ? 8 : 0,
               }}
             >
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: "var(--text)",
-                  letterSpacing: -0.35,
-                  flex: "1 1 160px",
-                  minWidth: 0,
-                  lineHeight: 1.25,
-                }}
-              >
-                {c.name}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 160px", minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: "var(--text)",
+                    letterSpacing: -0.35,
+                    lineHeight: 1.25,
+                  }}
+                >
+                  {c.name}
+                </div>
+                {isAddressed && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "2px 7px",
+                      borderRadius: 5,
+                      background: "rgba(52,211,153,0.18)",
+                      color: "var(--green, #34d399)",
+                      letterSpacing: 0.3,
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ✓ Fixed
+                  </span>
+                )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                 <span
@@ -89,7 +111,7 @@ export default function MatchBreakdownCards({
               <p
                 style={{
                   margin: 0,
-                  marginBottom: weak && (onImprove || onFixGap) ? 10 : 0,
+                  marginBottom: weak && !isAddressed && (onImprove || onFixGap) ? 10 : 0,
                   fontSize: 12.5,
                   color: "var(--muted)",
                   lineHeight: 1.45,
@@ -100,7 +122,7 @@ export default function MatchBreakdownCards({
                 {notes}
               </p>
             ) : null}
-            {weak && (onImprove || onFixGap) ? (
+            {weak && !isAddressed && (onImprove || onFixGap) ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {onFixGap ? (
                   <button
