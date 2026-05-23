@@ -2242,21 +2242,24 @@ export default function ResumeBuilder({
                 type="button"
                 onClick={() => { void getSuggestions(); }}
                 disabled={suggestLoading || generating}
+                aria-busy={suggestLoading}
                 style={{
                   width: "100%", padding: "14px 20px", marginBottom: 8, minHeight: 48,
-                  background: suggestLoading ? "var(--surface2)" : "var(--accent)",
-                  color: suggestLoading ? "var(--muted)" : "#fff",
+                  background: "var(--accent)",
+                  color: "#fff",
                   border: "none", borderRadius: 12,
                   fontSize: 16, fontWeight: 500, fontFamily: "inherit",
-                  cursor: suggestLoading || generating ? "not-allowed" : "pointer",
+                  cursor: suggestLoading || generating ? "wait" : "pointer",
                   letterSpacing: -0.4, transition: "background 0.2s",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  opacity: generating && !suggestLoading ? 0.5 : 1,
+                  boxShadow: suggestLoading ? "0 0 0 3px rgba(47,129,247,0.25)" : "none",
                 }}
                 onMouseEnter={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent-h)"; }}
                 onMouseLeave={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent)"; }}
               >
                 {suggestLoading ? (
-                  <><Spinner size={16} />Comparing your résumé to this job…</>
+                  <><SpinnerWhite size={16} />Comparing your résumé to this job…</>
                 ) : (
                   "Get suggestions for this job →"
                 )}
@@ -2773,6 +2776,47 @@ export default function ResumeBuilder({
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Key gap + Strategic tips (persisted from suggestion run) */}
+              {suggestSummary && (
+                <div
+                  style={{
+                    marginBottom: 14,
+                    padding: "12px 16px",
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderLeft: "3px solid var(--accent)",
+                    borderRadius: "var(--radius-xl)",
+                    boxShadow: "var(--shadow-card)",
+                    fontSize: 13,
+                    color: "var(--muted)",
+                    lineHeight: 1.55,
+                  }}
+                >
+                  <strong style={{ color: "var(--text)" }}>Key gap: </strong>{suggestSummary}
+                </div>
+              )}
+              {strategicTips.length > 0 && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: "14px 16px",
+                    borderRadius: "var(--radius-xl)",
+                    border: "1px solid rgba(251,191,36,0.35)",
+                    background: "rgba(251,191,36,0.06)",
+                    boxShadow: "var(--shadow-card)",
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--orange)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
+                    Strategic tips
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8 }}>
+                    {strategicTips.map((tip, i) => (
+                      <li key={i} style={{ fontSize: 12.5, color: "var(--text)", lineHeight: 1.55 }}>{tip}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
@@ -4973,14 +5017,14 @@ function SuggestionsGenerateBar({
           cursor: generating ? "wait" : "pointer",
           letterSpacing: -0.3,
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-          opacity: generating ? 0.92 : 1,
           boxShadow: generating ? "0 0 0 3px rgba(47,129,247,0.25)" : "none",
+          animation: generating ? "pulse-cta 1.8s ease-in-out infinite" : "none",
         }}
         onMouseEnter={e => { if (!generating) e.currentTarget.style.background = "var(--accent-h)"; }}
         onMouseLeave={e => { if (!generating) e.currentTarget.style.background = "var(--accent)"; }}
       >
         {generating ? (
-          <><Spinner size={16} />Generating your résumé PDF…</>
+          <><SpinnerWhite size={16} />Building your tailored PDF…</>
         ) : (
           accepted.length > 0
             ? `Apply ${accepted.length} accepted edit${accepted.length > 1 ? "s" : ""} & generate PDF →`
@@ -6199,6 +6243,23 @@ function Spinner({ size = 18 }: { size?: number }) {
     >
       <circle cx="9" cy="9" r="7" stroke="var(--border)" strokeWidth="2.5" />
       <path d="M9 2a7 7 0 017 7" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** White spinner — for use on blue/accent backgrounds (buttons). */
+function SpinnerWhite({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 18 18"
+      fill="none"
+      style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}
+      aria-hidden
+    >
+      <circle cx="9" cy="9" r="7" stroke="rgba(255,255,255,0.3)" strokeWidth="2.5" />
+      <path d="M9 2a7 7 0 017 7" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
   );
 }
