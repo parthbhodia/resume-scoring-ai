@@ -468,6 +468,12 @@ export default function ResumeBuilder({
   const [previewFontSize, setPreviewFontSize] = useState<"small" | "standard" | "large">("standard");
   const [previewSpacing, setPreviewSpacing] = useState<"compact" | "balanced" | "spacious">("balanced");
 
+  // Gap-fix micro-suggestion panel state
+  const [gapFixLoading, setGapFixLoading] = useState<string | null>(null); // gap name being fetched
+  type GapFixSuggestion = { id: string; section: string; original: string; suggested: string; reason: string; priority: string };
+  const [gapFixPanel, setGapFixPanel] = useState<{ gapName: string; gapNotes: string; suggestions: GapFixSuggestion[] } | null>(null);
+  const [gapFixError, setGapFixError] = useState<string | null>(null);
+
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(
     () => builderSession0?.candidateProfile ?? null,
   );
@@ -1445,6 +1451,49 @@ export default function ResumeBuilder({
     setSuggestError(null);
     void getSuggestions(weakCriteria.length > 0 ? weakCriteria : undefined);
   }, [getSuggestions, selectSuggestion, setSuggestError, result?.ratings?.criteria]);
+
+  /** Call /api/suggest-gap-fix for a single criterion, show micro-panel with targeted bullet rewrites. */
+  const handleFixGap = useCallback(async (gap: { name: string; notes: string }) => {
+    if (!candidateProfile || !jd.trim()) return;
+    setGapFixLoading(gap.name);
+    setGapFixError(null);
+    setGapFixPanel(null);
+    try {
+      const resp = await fetch(apiUrl("/api/suggest-gap-fix"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gap_name: gap.name,
+          gap_notes: gap.notes,
+          candidate_profile: candidateProfile,
+          job_description: jd.trim(),
+        }),
+      });
+      const data = await resp.json() as { suggestions?: unknown[]; error?: string };
+      if (!resp.ok || data.error) throw new Error(data.error ?? "Gap fix failed");
+      const suggs = (Array.isArray(data.suggestions) ? data.suggestions : []) as Array<{
+        id: string; section: string; original: string; suggested: string; reason: string; priority: string;
+      }>;
+      setGapFixPanel({ gapName: gap.name, gapNotes: gap.notes, suggestions: suggs });
+    } catch (e: unknown) {
+      setGapFixError(e instanceof Error ? e.message : "Could not get gap fixes. Please try again.");
+    } finally {
+      setGapFixLoading(null);
+    }
+  }, [candidateProfile, jd]);
+
+  /** Accept a gap-fix suggestion: inject it into the suggestions store, mark accepted, trigger generate. */
+  const applyGapFix = useCallback((s: { id: string; section: string; original: string; suggested: string; reason: string; priority: string }) => {
+    const fixId = `gf_${Date.now()}_${s.id}`;
+    const asSuggestion = { ...s, id: fixId, priority: (s.priority ?? "high") as "high" | "medium" | "low" };
+    // Merge into the existing suggestions list so the accepted list flows into generate
+    const existing = suggestions ?? [];
+    hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips);
+    acceptSuggestion(fixId);
+    setGapFixPanel(null);
+    // Trigger generate to apply the accepted fix
+    void generate();
+  }, [suggestions, suggestSummary, strategicTips, hydrateSuggestions, acceptSuggestion, generate]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -2711,7 +2760,87 @@ export default function ResumeBuilder({
                   <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>
                     One row per job requirement.
                   </p>
-                  <MatchBreakdownCards criteria={ratings.criteria} onImprove={improveResumeAfterResult} />
+                  <MatchBreakdownCards
+                    criteria={ratings.criteria}
+                    onImprove={improveResumeAfterResult}
+                    onFixGap={(gap) => void handleFixGap({ name: gap.name, notes: gap.notes })}
+                    fixingGap={gapFixLoading}
+                  />
+                  {/* Gap-fix error */}
+                  {gapFixError ? (
+                    <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--error, #ef4444)" }}>{gapFixError}</p>
+                  ) : null}
+                  {/* Gap-fix micro-suggestion panel */}
+                  {gapFixPanel ? (
+                    <div
+                      style={{
+                        marginTop: 14,
+                        borderRadius: 12,
+                        border: "1px solid rgba(59,130,246,0.3)",
+                        background: "rgba(59,130,246,0.04)",
+                        padding: "14px 16px",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", letterSpacing: -0.2 }}>
+                          Fixes for: {gapFixPanel.gapName}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setGapFixPanel(null)}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 16, lineHeight: 1, padding: 2 }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {gapFixPanel.suggestions.length === 0 ? (
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
+                          No targeted rewrites found — try "Get full suggestions" for a broader analysis.
+                        </p>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                          {gapFixPanel.suggestions.map((s, idx) => (
+                            <div
+                              key={idx}
+                              style={{
+                                borderRadius: 9,
+                                border: "1px solid var(--border)",
+                                background: "var(--surface)",
+                                padding: "10px 12px",
+                              }}
+                            >
+                              <div style={{ fontSize: 11, color: "var(--dim)", marginBottom: 4 }}>
+                                <span style={{ fontWeight: 600 }}>Was:</span> {s.original}
+                              </div>
+                              <div style={{ fontSize: 12.5, color: "var(--text)", lineHeight: 1.4, marginBottom: 6 }}>
+                                <span style={{ fontWeight: 600, color: "var(--accent)" }}>→ </span>{s.suggested}
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>{s.reason}</div>
+                              <button
+                                type="button"
+                                disabled={generating}
+                                onClick={() => applyGapFix(s)}
+                                style={{
+                                  padding: "4px 12px",
+                                  borderRadius: 6,
+                                  border: "none",
+                                  background: "var(--accent)",
+                                  color: "#fff",
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  fontFamily: "inherit",
+                                  cursor: generating ? "not-allowed" : "pointer",
+                                  opacity: generating ? 0.6 : 1,
+                                }}
+                              >
+                                {generating ? "Applying…" : "Apply & regenerate →"}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               )}
 

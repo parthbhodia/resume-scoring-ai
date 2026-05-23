@@ -6,9 +6,15 @@ import { scoreColor, weightColor } from "@/lib/utils";
 export default function MatchBreakdownCards({
   criteria,
   onImprove,
+  onFixGap,
+  fixingGap,
 }: {
   criteria: Criterion[];
   onImprove?: () => void;
+  /** Called when user clicks "Fix this gap →" on a specific criterion. */
+  onFixGap?: (gap: Criterion) => void;
+  /** Name of the gap currently being fixed (shows loading state on that card). */
+  fixingGap?: string | null;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -17,6 +23,7 @@ export default function MatchBreakdownCards({
         const wc = weightColor(c.weight);
         const weak = c.score <= 5;
         const notes = (c.notes ?? "").replace(/^\s+/, "").trimEnd();
+        const isFixing = fixingGap === c.name;
         return (
           <div
             key={i}
@@ -34,7 +41,7 @@ export default function MatchBreakdownCards({
                 alignItems: "flex-start",
                 justifyContent: "space-between",
                 gap: 10,
-                marginBottom: notes || (weak && onImprove) ? 8 : 0,
+                marginBottom: notes || (weak && (onImprove || onFixGap)) ? 8 : 0,
               }}
             >
               <div
@@ -82,7 +89,7 @@ export default function MatchBreakdownCards({
               <p
                 style={{
                   margin: 0,
-                  marginBottom: weak && onImprove ? 10 : 0,
+                  marginBottom: weak && (onImprove || onFixGap) ? 10 : 0,
                   fontSize: 12.5,
                   color: "var(--muted)",
                   lineHeight: 1.45,
@@ -93,28 +100,57 @@ export default function MatchBreakdownCards({
                 {notes}
               </p>
             ) : null}
-            {weak && onImprove ? (
-              <button
-                type="button"
-                onClick={onImprove}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                  padding: "5px 11px",
-                  borderRadius: 7,
-                  border: "1px solid var(--border)",
-                  background: "var(--surface)",
-                  color: "var(--accent)",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  fontFamily: "inherit",
-                  cursor: "pointer",
-                  letterSpacing: -0.2,
-                }}
-              >
-                Get suggestions to improve →
-              </button>
+            {weak && (onImprove || onFixGap) ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {onFixGap ? (
+                  <button
+                    type="button"
+                    disabled={isFixing}
+                    onClick={() => onFixGap(c)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      padding: "5px 11px",
+                      borderRadius: 7,
+                      border: "1px solid rgba(59,130,246,0.4)",
+                      background: isFixing ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.1)",
+                      color: "var(--accent)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: "inherit",
+                      cursor: isFixing ? "not-allowed" : "pointer",
+                      letterSpacing: -0.2,
+                      opacity: isFixing ? 0.7 : 1,
+                    }}
+                  >
+                    {isFixing ? "Getting fixes…" : "Fix this gap →"}
+                  </button>
+                ) : null}
+                {onImprove ? (
+                  <button
+                    type="button"
+                    onClick={onImprove}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      padding: "5px 11px",
+                      borderRadius: 7,
+                      border: "1px solid var(--border)",
+                      background: "var(--surface)",
+                      color: "var(--muted)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: "inherit",
+                      cursor: "pointer",
+                      letterSpacing: -0.2,
+                    }}
+                  >
+                    Get full suggestions
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </div>
         );

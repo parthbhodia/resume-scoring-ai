@@ -5015,6 +5015,92 @@ async def api_suggest_changes(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+async def api_suggest_gap_fix(request: Request):
+    """POST /api/suggest-gap-fix — return 2-3 targeted bullet rewrites for a single gap criterion.
+
+    Much faster than the full suggest-changes call: only looks at one gap and finds the
+    best matching bullets to rewrite, without web research or strategic tips.
+
+    Body: {
+        "gap_name": str,          # e.g. "Zendesk Administration"
+        "gap_notes": str,         # the gap explanation text shown in the UI
+        "candidate_profile": str, # plain-text resume
+        "job_description": str,
+    }
+    Returns: {
+        "suggestions": [{"id", "original", "suggested", "reason", "section", "priority"}]
+    }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+    gap_name          = (body.get("gap_name") or "").strip()
+    gap_notes         = (body.get("gap_notes") or "").strip()
+    candidate_profile = (body.get("candidate_profile") or "").strip()
+    job_description   = (body.get("job_description") or "").strip()
+
+    if not gap_name:
+        return JSONResponse({"error": "gap_name required"}, status_code=400)
+    if not candidate_profile:
+        return JSONResponse({"error": "candidate_profile required"}, status_code=400)
+    if not job_description:
+        return JSONResponse({"error": "job_description required"}, status_code=400)
+
+    notes_line = f"\nGap detail: {gap_notes}" if gap_notes else ""
+    prompt = (
+        "You are an expert resume coach. A candidate's résumé was scored and one specific criterion scored low.\n\n"
+        f"LOW-SCORING CRITERION: {gap_name}{notes_line}\n\n"
+        f"RÉSUMÉ:\n{candidate_profile[:5000]}\n\n"
+        f"JOB DESCRIPTION:\n{job_description[:2000]}\n\n"
+        "Task: Find the 2-3 bullets in the résumé that are most relevant to this gap and suggest improved "
+        "rewrites that better surface the skill or experience. If no bullet directly addresses the gap, "
+        "find the closest transferable experience and reframe it.\n\n"
+        "Rules:\n"
+        "- Only rewrite bullets that EXIST verbatim in the résumé — quote each original exactly.\n"
+        "- Do NOT invent metrics, employers, dates, or facts not already in the résumé.\n"
+        "- Each rewrite must be a single bullet sentence. Do not split into multiple bullets.\n"
+        "- Focus on vocabulary and framing that matches the job description keywords.\n\n"
+        "Return ONLY a JSON object:\n"
+        '{\n'
+        '  "suggestions": [\n'
+        '    {\n'
+        '      "id": "gf1",\n'
+        '      "section": "Work Experience",\n'
+        '      "original": "The exact bullet text from the résumé (verbatim)",\n'
+        '      "suggested": "The improved bullet text",\n'
+        '      "reason": "One sentence explaining how this rewrite addresses the gap.",\n'
+        '      "priority": "high"\n'
+        '    }\n'
+        '  ]\n'
+        '}\n'
+        "Return 2-3 suggestions maximum. Return ONLY the JSON, no markdown fences."
+    )
+
+    loop = asyncio.get_event_loop()
+
+    def _call():
+        return coach_suggestions_llm(prompt)
+
+    try:
+        logger.info("suggest-gap-fix  |  gap=%s  profile_chars=%s", gap_name, len(candidate_profile))
+        text = await loop.run_in_executor(None, _call)
+        if text.startswith("```"):
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+        data = json.loads(text)
+        suggestions = data.get("suggestions") if isinstance(data, dict) else []
+        if not isinstance(suggestions, list):
+            suggestions = []
+        return JSONResponse({"suggestions": suggestions})
+    except json.JSONDecodeError as exc:
+        logger.error("suggest-gap-fix JSON parse error: %s  raw=%s", exc, text[:200])
+        return JSONResponse({"error": "AI response could not be parsed."}, status_code=500)
+    except Exception as exc:
+        logger.exception("suggest-gap-fix failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
 async def api_suggest_changes_stream(request: Request):
     """POST /api/suggest-changes-stream — same inputs as suggest-changes; SSE with live coach tokens.
 
@@ -5674,6 +5760,7 @@ routes = [
     Route("/api/rewrite-bullet",          api_rewrite_bullet,  methods=["POST"]),
     Route("/api/suggest-changes",         api_suggest_changes, methods=["POST"]),
     Route("/api/suggest-changes-stream",  api_suggest_changes_stream, methods=["POST"]),
+    Route("/api/suggest-gap-fix",         api_suggest_gap_fix, methods=["POST"]),
     Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
 
