@@ -383,36 +383,43 @@ export default function SuggestionsPanel({
             {summary ? ` · ${summary}` : ""}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onApplyAll}
-          disabled={applyBusy || totalAccepted === 0}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "10px 18px",
-            borderRadius: 10,
-            border: "none",
-            background: totalAccepted > 0 && !applyBusy ? "#8b5cf6" : "var(--border)",
-            color: totalAccepted > 0 && !applyBusy ? "#fff" : "var(--dim)",
-            fontSize: 13,
-            fontWeight: 700,
-            fontFamily: "inherit",
-            cursor: totalAccepted > 0 && !applyBusy ? "pointer" : "not-allowed",
-            transition: "all 0.15s",
-            flexShrink: 0,
-          }}
-        >
-          {applyBusy ? (
-            <>
-              <span style={{ width: 14, height: 14, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
-              Applying…
-            </>
-          ) : (
-            <>✓ Apply All ({totalAccepted})</>
-          )}
-        </button>
+        {/* Only show the top-level apply button once all categories are reviewed */}
+        {allCatsDone ? (
+          <button
+            type="button"
+            onClick={onApplyAll}
+            disabled={applyBusy || totalAccepted === 0}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 18px",
+              borderRadius: 10,
+              border: "none",
+              background: totalAccepted > 0 && !applyBusy ? "#8b5cf6" : "var(--border)",
+              color: totalAccepted > 0 && !applyBusy ? "#fff" : "var(--dim)",
+              fontSize: 13,
+              fontWeight: 700,
+              fontFamily: "inherit",
+              cursor: totalAccepted > 0 && !applyBusy ? "pointer" : "not-allowed",
+              transition: "all 0.15s",
+              flexShrink: 0,
+            }}
+          >
+            {applyBusy ? (
+              <>
+                <span style={{ width: 14, height: 14, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+                Applying…
+              </>
+            ) : (
+              <>✓ Apply Selected ({totalAccepted})</>
+            )}
+          </button>
+        ) : (
+          <span style={{ fontSize: 12, color: "var(--dim)", flexShrink: 0 }}>
+            Review each category below ↓
+          </span>
+        )}
       </div>
 
       {/* ── Category nav ───────────────────────────────────── */}
@@ -549,7 +556,7 @@ export default function SuggestionsPanel({
               ✓ All categories reviewed
             </div>
             <div style={{ fontSize: 12, color: "var(--dim)" }}>
-              {totalAccepted} fix{totalAccepted !== 1 ? "es" : ""} selected — ready to apply and rebuild your PDF.
+              {totalAccepted} selected fix{totalAccepted !== 1 ? "es" : ""} will be applied · skipped ones are ignored.
             </div>
           </div>
           <button
@@ -568,7 +575,7 @@ export default function SuggestionsPanel({
               cursor: applyBusy ? "wait" : "pointer",
             }}
           >
-            {applyBusy ? "Applying…" : `Apply ${totalAccepted} fix${totalAccepted !== 1 ? "es" : ""} & Rebuild PDF →`}
+            {applyBusy ? "Applying…" : `Apply Selected (${totalAccepted}) & Rebuild PDF →`}
           </button>
         </div>
       )}
