@@ -98,15 +98,15 @@ export default function TailoredPdfPreview({
     return () => ro.disconnect();
   }, []);
 
-  // Normalised "suggested" text for all accepted suggestions → highlight green in compiled PDF
-  // Normalised "original" text for accepted suggestions → highlight orange-red (was replaced)
+  // We are showing the ORIGINAL uploaded PDF, so highlight the ORIGINAL bullet text
+  // that has an accepted change — showing the user "this bullet will be improved"
   const highlightRows = useMemo(() => {
     if (!suggestions || !acceptedIds || acceptedIds.size === 0) return [];
-    const rows: Array<{ norm: string; isSuggested: boolean }> = [];
+    const rows: Array<{ norm: string }> = [];
     for (const s of suggestions) {
       if (!acceptedIds.has(s.id)) continue;
-      const sugNorm = normalizeForMatch(s.suggested.trim()).toLowerCase();
-      if (sugNorm.length >= 6) rows.push({ norm: sugNorm, isSuggested: true });
+      const origNorm = normalizeForMatch(s.original.trim()).toLowerCase();
+      if (origNorm.length >= 20) rows.push({ norm: origNorm });
     }
     return rows;
   }, [suggestions, acceptedIds]);
@@ -264,7 +264,7 @@ export default function TailoredPdfPreview({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: "rgba(52,211,153,0.35)", border: "1px solid rgba(34,197,94,0.5)", display: "inline-block" }} />
-            <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>Improved bullet (accepted change)</span>
+            <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>Bullet with an accepted improvement</span>
           </div>
           <span style={{ fontSize: 10, color: "var(--dim)" }}>
             {(acceptedIds?.size ?? 0)} change{(acceptedIds?.size ?? 0) !== 1 ? "s" : ""} highlighted

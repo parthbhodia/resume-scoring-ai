@@ -3007,55 +3007,30 @@ export default function ResumeBuilder({
                   className="rb-results-phase3-preview"
                   aria-label="Résumé preview and export"
                 >
-                  {result.pdfUrl ? (
+                  {/* Show original uploaded PDF — preserves formatting, avoids LaTeX layout quirks */}
+                  {sourcePdfBlobUrl ? (
                       <TailoredPdfPreview
-                        pdfUrl={result.pdfUrl}
+                        pdfUrl={sourcePdfBlobUrl}
                         filename={`${resumeDownloadStem}.pdf`}
                         maxHeight="100%"
-                        templateLabel={selectedTemplateLabel}
+                        templateLabel="Your résumé"
                         suggestions={suggestions.map(s => ({ id: s.id, original: s.original, suggested: s.suggested }))}
                         acceptedIds={acceptedIds}
                       />
-                    ) : tailorResultsBuilding ? (
-                      <div
-                        role="status"
-                        aria-live="polite"
-                        aria-busy="true"
-                        style={{
-                          padding: "36px 24px",
-                          textAlign: "center",
-                          borderRadius: 12,
-                          border: "1px dashed var(--border)",
-                          background: "var(--surface2)",
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          gap: 12,
-                          minHeight: 200,
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Spinner size={32} />
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>Building PDF…</div>
-                        {statusMsg ? (
-                          <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, maxWidth: 280 }}>{statusMsg}</div>
-                        ) : (
-                          <div style={{ fontSize: 11, color: "var(--dim)" }}>Preview appears when compile finishes.</div>
-                        )}
-                      </div>
                     ) : (
                       <div
                         style={{
+                          flex: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           padding: 28,
                           textAlign: "center",
                           color: "var(--dim)",
                           fontSize: 13,
-                          borderRadius: 12,
-                          border: "1px dashed var(--border)",
-                          background: "var(--surface2)",
                         }}
                       >
-                        PDF loads when ready.
+                        Upload your résumé to see the preview.
                       </div>
                     )}
 
