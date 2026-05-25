@@ -21,6 +21,8 @@ interface Props {
   pdfUrl: string;
   filename?: string;
   maxHeight?: string;
+  /** Optional label shown in the toolbar e.g. "Template: Harshibar" */
+  templateLabel?: string;
   /** Accepted suggestion IDs — used to decide which suggestions to highlight */
   acceptedIds?: ReadonlySet<string>;
   /** All suggestions (original + suggested text) — used for diff highlight */
@@ -53,6 +55,7 @@ export default function TailoredPdfPreview({
   pdfUrl,
   filename = "resume.pdf",
   maxHeight = "min(78vh, 880px)",
+  templateLabel,
   acceptedIds,
   suggestions,
 }: Props) {
@@ -108,7 +111,8 @@ export default function TailoredPdfPreview({
       style={{
         display: "flex",
         flexDirection: "column",
-        maxHeight,
+        height: maxHeight === "100%" ? "100%" : undefined,
+        maxHeight: maxHeight === "100%" ? undefined : maxHeight,
         minHeight: 280,
         borderRadius: 12,
         border: "1px solid var(--border)",
@@ -132,6 +136,11 @@ export default function TailoredPdfPreview({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {templateLabel && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", letterSpacing: -0.1 }}>
+              {templateLabel}
+            </span>
+          )}
           <span style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.4 }}>
             Scroll for all pages.
           </span>

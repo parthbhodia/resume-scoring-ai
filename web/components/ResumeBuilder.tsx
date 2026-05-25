@@ -2608,36 +2608,62 @@ export default function ResumeBuilder({
                     {[role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Match results"}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={tryAnotherJob}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "9px 16px",
-                    minHeight: 40,
-                    borderRadius: "var(--radius)",
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    color: "var(--muted)",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    letterSpacing: -0.2,
-                    whiteSpace: "nowrap",
-                    boxShadow: "var(--shadow-sm)",
-                    flexShrink: 0,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.color = "var(--muted)"; }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
-                    <path d="M1 6a5 5 0 109.9-1M1 6V2m0 4h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                  Try another job
-                </button>
+                {/* Header action buttons */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+                  {result.pdfUrl && (
+                    <button
+                      type="button"
+                      onClick={() => { void downloadResultPdf(); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        padding: "8px 14px", minHeight: 36, borderRadius: "var(--radius)",
+                        background: "var(--accent)", border: "none",
+                        color: "#fff", fontSize: 12, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden><path d="M6 1v7M2.5 5l3.5 3.5L9.5 5M1 10h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      PDF
+                    </button>
+                  )}
+                  {result.folder && (
+                    <button
+                      type="button"
+                      disabled={docxExportBusy}
+                      onClick={() => { void downloadResultDocx(); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        padding: "8px 14px", minHeight: 36, borderRadius: "var(--radius)",
+                        background: "var(--surface)", border: "1px solid var(--border)",
+                        color: "var(--text)", fontSize: 12, fontWeight: 600,
+                        cursor: docxExportBusy ? "wait" : "pointer", fontFamily: "inherit",
+                        whiteSpace: "nowrap", opacity: docxExportBusy ? 0.7 : 1,
+                        boxShadow: "var(--shadow-sm)",
+                      }}
+                    >
+                      {docxExportBusy ? "…" : "DOCX"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={tryAnotherJob}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "8px 14px", minHeight: 36, borderRadius: "var(--radius)",
+                      background: "var(--surface)", border: "1px solid var(--border)",
+                      color: "var(--muted)", fontSize: 12, fontWeight: 600,
+                      cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                      boxShadow: "var(--shadow-sm)",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.color = "var(--muted)"; }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+                      <path d="M1 6a5 5 0 109.9-1M1 6V2m0 4h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Try another job
+                  </button>
+                </div>
               </header>
 
               {tailorResultsBuilding && (
@@ -2668,26 +2694,45 @@ export default function ResumeBuilder({
               )}
 
               <style>{`
-                .rb-results-body { padding: clamp(16px, 2.5vw, 32px) clamp(16px, 3vw, 36px) max(60px, 10vh) clamp(64px, 6vw, 80px); flex: 1; min-height: 0; }
+                /* Full-bleed 50/50 split — left content scrolls, right PDF is fixed */
+                .rb-results-body {
+                  flex: 1;
+                  min-height: 0;
+                  display: flex;
+                  flex-direction: column;
+                  overflow: hidden;
+                }
                 .rb-results-phase3 {
                   display: grid;
-                  grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
-                  gap: 24px;
-                  align-items: start;
+                  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                  flex: 1;
+                  min-height: 0;
+                  overflow: hidden;
+                }
+                .rb-results-phase3-detail {
+                  overflow-y: auto;
+                  min-height: 0;
+                  padding: clamp(16px, 2vw, 28px) clamp(12px, 2vw, 24px) max(80px, 12vh) clamp(64px, 6vw, 80px);
+                  display: flex;
+                  flex-direction: column;
+                  border-right: 1px solid var(--border);
                 }
                 .rb-results-phase3-preview {
-                  position: sticky;
-                  top: 70px;
-                  align-self: start;
+                  display: flex;
+                  flex-direction: column;
+                  min-height: 0;
+                  overflow: hidden;
+                  padding: 16px 16px 16px 12px;
+                  background: #f1f5f9;
                 }
                 @media (max-width: 960px) {
-                  .rb-results-phase3 { grid-template-columns: 1fr; }
-                  .rb-results-phase3-preview { position: static; }
+                  .rb-results-phase3 { grid-template-columns: 1fr; overflow: visible; }
+                  .rb-results-phase3-detail { overflow-y: visible; height: auto; border-right: none; }
+                  .rb-results-phase3-preview { height: 60vh; min-height: 320px; }
                 }
               `}</style>
               <div className="rb-results-body">
-
-              {/* ── Apply feedback banner ── */}
+              {/* ── Apply feedback banner — shown above phase3 for visibility (only while busy) ── */}
               {(applyBusy || applyFeedback) && (
                 <div
                   style={{
@@ -2749,7 +2794,7 @@ export default function ResumeBuilder({
               )}
 
               <section className="rb-results-phase3" aria-labelledby="rb-results-heading">
-                <div className="rb-results-phase3-detail" style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+                <div className="rb-results-phase3-detail">
 
               {/* Detailed bifurcated ratings (new schema) */}
               {ratings && isDetailedRatings(ratings) && (
@@ -2961,50 +3006,13 @@ export default function ResumeBuilder({
                 <aside
                   className="rb-results-phase3-preview"
                   aria-label="Résumé preview and export"
-                  style={{
-                    minWidth: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 14,
-                  }}
                 >
-                  <div
-                    style={{
-                      background: "var(--surface)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-xl)",
-                      padding: "16px 16px 14px",
-                      boxShadow: "var(--shadow-card)",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: "var(--dim)",
-                        letterSpacing: 0.35,
-                        textTransform: "uppercase",
-                        marginBottom: 6,
-                      }}
-                    >
-                      Résumé preview
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 500,
-                        color: "var(--dim)",
-                        marginBottom: 12,
-                        letterSpacing: -0.1,
-                      }}
-                    >
-                      Template:{" "}
-                      <span style={{ fontWeight: 600, color: "var(--text)" }}>{selectedTemplateLabel}</span>
-                    </div>
-                    {result.pdfUrl ? (
+                  {result.pdfUrl ? (
                       <TailoredPdfPreview
                         pdfUrl={result.pdfUrl}
                         filename={`${resumeDownloadStem}.pdf`}
+                        maxHeight="100%"
+                        templateLabel={selectedTemplateLabel}
                         suggestions={suggestions.map(s => ({ id: s.id, original: s.original, suggested: s.suggested }))}
                         acceptedIds={acceptedIds}
                       />
@@ -3050,178 +3058,7 @@ export default function ResumeBuilder({
                         PDF loads when ready.
                       </div>
                     )}
-                  </div>
 
-                  <div
-                    style={{
-                      background: "var(--surface)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-xl)",
-                      padding: "14px 16px 16px",
-                      boxShadow: "var(--shadow-card)",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        marginBottom: 2,
-                      }}
-                    >
-                      <svg width="15" height="15" viewBox="0 0 13 13" fill="none" aria-hidden style={{ flexShrink: 0, color: "var(--accent)" }}>
-                        <circle cx="3" cy="6.5" r="1.7" stroke="currentColor" strokeWidth="1.4" />
-                        <circle cx="10" cy="3" r="1.7" stroke="currentColor" strokeWidth="1.4" />
-                        <circle cx="10" cy="10" r="1.7" stroke="currentColor" strokeWidth="1.4" />
-                        <path d="M4.5 5.6 L8.5 3.7  M4.5 7.4 L8.5 9.3" stroke="currentColor" strokeWidth="1.4" />
-                      </svg>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "var(--dim)",
-                          letterSpacing: 0.35,
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        Actions
-                      </span>
-                    </div>
-                    <Link
-                      href="/?view=builder&flow=template&fromResume=1"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 8,
-                        padding: "11px 14px",
-                        minHeight: 44,
-                        borderRadius: 10,
-                        border: "1px solid var(--border)",
-                        background: "var(--surface2)",
-                        color: "var(--accent)",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        textDecoration: "none",
-                        fontFamily: "inherit",
-                        textAlign: "center",
-                      }}
-                    >
-                      Customize template
-                    </Link>
-                    {result.pdfUrl ? (
-                      <button
-                        type="button"
-                        onClick={() => { void downloadResultPdf(); }}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 8,
-                          padding: "11px 14px",
-                          minHeight: 44,
-                          borderRadius: 10,
-                          border: "1px solid var(--border)",
-                          background: "var(--surface2)",
-                          color: "var(--text)",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          fontFamily: "inherit",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Download PDF
-                      </button>
-                    ) : null}
-                    {result.folder ? (
-                      <button
-                        type="button"
-                        disabled={docxExportBusy}
-                        onClick={() => { void downloadResultDocx(); }}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 8,
-                          padding: "11px 14px",
-                          minHeight: 44,
-                          borderRadius: 10,
-                          border: "1px solid var(--border)",
-                          background: "var(--surface2)",
-                          color: "var(--text)",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          fontFamily: "inherit",
-                          cursor: docxExportBusy ? "wait" : "pointer",
-                          opacity: docxExportBusy ? 0.7 : 1,
-                        }}
-                      >
-                        {docxExportBusy ? "Preparing DOCX…" : "Download DOCX"}
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      disabled={libraryReSaveBusy || !user?.id || !result.folder}
-                      onClick={async () => {
-                        if (!user?.id) {
-                          setError("Sign in to save this résumé to your library.");
-                          return;
-                        }
-                        setLibraryReSaveBusy(true);
-                        setError(null);
-                        setLibraryToast(null);
-                        try {
-                          await syncLibraryRowForShare();
-                          setLibraryToast("Saved to your account.");
-                          window.setTimeout(() => setLibraryToast(null), 6000);
-                        } catch (e: unknown) {
-                          setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
-                        } finally {
-                          setLibraryReSaveBusy(false);
-                        }
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 8,
-                        padding: "11px 14px",
-                        minHeight: 44,
-                        borderRadius: 10,
-                        border: "1px solid var(--border)",
-                        background: "var(--surface2)",
-                        color: "var(--text)",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        cursor: libraryReSaveBusy || !user?.id || !result.folder ? "not-allowed" : "pointer",
-                        fontFamily: "inherit",
-                        opacity: !user?.id || !result.folder ? 0.55 : 1,
-                      }}
-                    >
-                      {libraryReSaveBusy ? "Saving…" : "Save to library"}
-                    </button>
-                    {libraryToast ? (
-                      <p style={{ margin: 0, fontSize: 12, color: "var(--green)", lineHeight: 1.45 }}>
-                        {libraryToast}{" "}
-                        <Link href="/?view=library" style={{ color: "var(--accent)", fontWeight: 600 }}>
-                          Open Library →
-                        </Link>
-                      </p>
-                    ) : null}
-                  </div>
-
-                  {result.folder && result.pdfUrl && !generating ? (
-                    <ResumePublicLinkSettings
-                      folder={result.folder}
-                      userId={user?.id ?? null}
-                      templateFlow={studioHandoff}
-                      collapseAsDetails
-                      ensureLibraryRow={syncLibraryRowForShare}
-                    />
-                  ) : null}
                 </aside>
               </section>
               </div>{/* rb-results-body */}
