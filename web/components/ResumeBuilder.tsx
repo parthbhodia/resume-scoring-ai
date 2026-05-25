@@ -207,14 +207,29 @@ async function downloadBlobFromApiResponse(resp: Response, fallbackFilename: str
 }
 
 const SS_KEY = "rn_builder_draft";
-function loadDraft() {
-  try { return JSON.parse(sessionStorage.getItem(SS_KEY) ?? "{}"); } catch { return {}; }
+const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function loadDraft(): Record<string, unknown> {
+  try {
+    const raw = localStorage.getItem(SS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Expire drafts older than TTL
+    if (typeof parsed._ts === "number" && Date.now() - parsed._ts > DRAFT_TTL_MS) {
+      localStorage.removeItem(SS_KEY);
+      return {};
+    }
+    return parsed;
+  } catch { return {}; }
 }
 function saveDraft(patch: Record<string, unknown>) {
   try {
     const prev = loadDraft();
-    sessionStorage.setItem(SS_KEY, JSON.stringify({ ...prev, ...patch }));
+    localStorage.setItem(SS_KEY, JSON.stringify({ ...prev, ...patch, _ts: Date.now() }));
   } catch { /* quota / SSR */ }
+}
+function clearDraft() {
+  try { localStorage.removeItem(SS_KEY); } catch { /* SSR */ }
 }
 
 const BUILDER_SESSION_KEY = "builderSession";
@@ -229,6 +244,7 @@ type BuilderSessionV1 = {
   suggestions: Suggestion[] | null;
   suggestSummary: string;
   strategicTips: string[];
+  interviewQuestions: string[];
   acceptedSuggestionIds: string[];
   rejectedSuggestionIds: string[];
   result: GenerationResult | null;
@@ -326,6 +342,9 @@ function parseBuilderSessionFromDraft(d: Record<string, unknown>): BuilderSessio
     strategicTips: Array.isArray(o.strategicTips)
       ? o.strategicTips.filter((t): t is string => typeof t === "string" && t.trim().length > 0).slice(0, 4)
       : [],
+    interviewQuestions: Array.isArray(o.interviewQuestions)
+      ? o.interviewQuestions.filter((q): q is string => typeof q === "string" && q.trim().length > 0).slice(0, 8)
+      : [],
     acceptedSuggestionIds,
     rejectedSuggestionIds,
     result: parseResultFromDraft(o.result),
@@ -340,7 +359,7 @@ function parseBuilderSessionFromDraft(d: Record<string, unknown>): BuilderSessio
 function saveBuilderSessionToDraft(session: BuilderSessionV1) {
   try {
     const prev = loadDraft();
-    sessionStorage.setItem(SS_KEY, JSON.stringify({ ...prev, [BUILDER_SESSION_KEY]: session }));
+    localStorage.setItem(SS_KEY, JSON.stringify({ ...prev, [BUILDER_SESSION_KEY]: session, _ts: Date.now() }));
   } catch {
     try {
       const slim: BuilderSessionV1 = {
@@ -348,7 +367,7 @@ function saveBuilderSessionToDraft(session: BuilderSessionV1) {
         result: session.result ? { ...session.result, latexPreview: "" } : null,
       };
       const prev = loadDraft();
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ ...prev, [BUILDER_SESSION_KEY]: slim }));
+      localStorage.setItem(SS_KEY, JSON.stringify({ ...prev, [BUILDER_SESSION_KEY]: slim, _ts: Date.now() }));
     } catch { /* quota */ }
   }
 }
@@ -452,6 +471,7 @@ export default function ResumeBuilder({
     setRole("");
     setAtsResult(null);
     setAtsError(null);
+    clearDraft();
   }, [clearSuggestionsState]);
   const suggestStreamAbortRef = useRef<AbortController | null>(null);
   const builderMainScrollRef = useRef<HTMLElement | null>(null);
@@ -551,6 +571,7 @@ export default function ResumeBuilder({
       suggestions,
       suggestSummary,
       strategicTips,
+      interviewQuestions,
       acceptedSuggestionIds: [...acceptedIds],
       rejectedSuggestionIds: [...rejectedIds],
       result,
@@ -566,6 +587,7 @@ export default function ResumeBuilder({
     suggestions,
     suggestSummary,
     strategicTips,
+    interviewQuestions,
     acceptedDepsKey,
     rejectedDepsKey,
     result,
@@ -573,6 +595,20 @@ export default function ResumeBuilder({
     suggestResearchQueries,
     suggestResearchSources,
   ]);
+
+  // Restore suggestions store from localStorage on mount (survives page refresh)
+  useEffect(() => {
+    const s0 = builderSession0;
+    if (s0?.suggestions && s0.suggestions.length > 0) {
+      hydrateSuggestions(
+        s0.suggestions,
+        s0.suggestSummary,
+        s0.strategicTips,
+        s0.interviewQuestions,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount only
 
   useEffect(() => {
     setProfileAutofillUpload(getProfileAutofillFromUpload());
@@ -1086,8 +1122,8 @@ export default function ResumeBuilder({
 
   const patchSuggestionSuggested = useCallback((id: string, suggested: string) => {
     const updated = suggestions.map((s) => (s.id === id ? { ...s, suggested } : s));
-    hydrateSuggestions(updated, suggestSummary, strategicTips);
-  }, [suggestions, suggestSummary, strategicTips, hydrateSuggestions]);
+    hydrateSuggestions(updated, suggestSummary, strategicTips, interviewQuestions);
+  }, [suggestions, suggestSummary, strategicTips, interviewQuestions, hydrateSuggestions]);
 
   const mergeProfileFromLastExtract = useCallback(() => {
     const text = lastResumeExtractRef.current.trim();
@@ -1511,7 +1547,7 @@ export default function ResumeBuilder({
     const fixId = `gf_${Date.now()}_${s.id}`;
     const asSuggestion = { ...s, id: fixId, priority: (s.priority ?? "high") as "high" | "medium" | "low", category: "strengthen_impact" as const };
     const existing = suggestions ?? [];
-    hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips);
+    hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips, interviewQuestions);
     acceptSuggestion(fixId);
     // Phase 3 — mark the gap as addressed
     if (gapFixPanel?.gapName) {
@@ -1519,7 +1555,7 @@ export default function ResumeBuilder({
     }
     setGapFixPanel(null);
     void generate();
-  }, [suggestions, suggestSummary, strategicTips, hydrateSuggestions, acceptSuggestion, gapFixPanel, generate]);
+  }, [suggestions, suggestSummary, strategicTips, interviewQuestions, hydrateSuggestions, acceptSuggestion, gapFixPanel, generate]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
