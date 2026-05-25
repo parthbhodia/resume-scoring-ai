@@ -1856,37 +1856,7 @@ export default function ResumeBuilder({
             }
           `}</style>
 
-          {/* ── Busy loaders (sticky top — form scroll hid these when CTAs lived at bottom) ── */}
-          {showSuggestLoaderAtTop && (
-            <div
-              className="fade-in"
-              style={{
-                position: "sticky",
-                top: 0,
-                zIndex: 30,
-                marginBottom: 20,
-                paddingBottom: 8,
-                background: "var(--bg)",
-                boxShadow: "0 8px 24px -12px rgba(15,23,42,0.12)",
-              }}
-            >
-              <BuilderSuggestAnalysisLoader
-                stepsDone={suggestLoaderStepsDone}
-                tipIdx={suggestLoaderTipIdx}
-                coachStreamText={suggestCoachStreamText}
-              />
-            </div>
-          )}
-          {showGenerateLoaderAtTop && (
-            <BuilderGeneratePdfLoader
-              statusMsg={statusMsg}
-              tipIdx={generateLoaderTipIdx}
-              stepsDone={generateLoaderStepsDone}
-              reusingSuggestResearch={reusingSuggestWebForPdf}
-              studioHandoff={studioHandoff}
-              acceptedCount={0}
-            />
-          )}
+          {/* Loaders are shown via GenerateOverlay (fixed full-screen blur card) — no duplicate step lists */}
 
           {/* ── Hero (pre-generation) ── */}
           {showBuilderInputs && !showSuggestLoaderAtTop && (
@@ -2456,7 +2426,6 @@ export default function ResumeBuilder({
             <SuggestionsPanel
               key={sourcePdfBlobUrl ?? "rb-sug-no-pdf"}
               summary={suggestSummary}
-              strategicTips={strategicTips}
               suggestions={suggestions}
               acceptedIds={acceptedIds}
               rejectedIds={rejectedIds}
@@ -4678,7 +4647,7 @@ function SuggestionsGenerateBar({
 }
 
 function SuggestionsPanel({
-  summary, strategicTips, suggestions, acceptedIds, rejectedIds, candidateProfile,
+  summary, suggestions, acceptedIds, rejectedIds, candidateProfile,
   pdfBlobUrl, pdfFileName, pdfDocumentKey,
   selectedSuggestionId, onSelectSuggestionCard,
   onToggleAccept, onToggleReject, onAcceptAll, onClearAccepts, onEditSuggested, onGenerate, generating, generateStatusMsg,
@@ -4690,7 +4659,6 @@ function SuggestionsPanel({
   previewSectionAccentHex,
 }: {
   summary: string;
-  strategicTips: string[];
   suggestions: Suggestion[];
   acceptedIds: Set<string>;
   rejectedIds: Set<string>;
@@ -4813,32 +4781,7 @@ function SuggestionsPanel({
         </div>
       )}
 
-      {strategicTips.length > 0 && (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: "14px 16px",
-            borderRadius: "var(--radius-lg, 12px)",
-            border: "1px solid rgba(251, 191, 36, 0.35)",
-            background: "rgba(251, 191, 36, 0.06)",
-            boxShadow: "var(--shadow-card)",
-          }}
-        >
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--orange)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
-            Strategic tips before you generate
-          </div>
-          <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
-            Coaching on how to position your story for this role — not automatic PDF edits. Use bullet suggestions below for résumé changes.
-          </p>
-          <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8 }}>
-            {strategicTips.map((tip, i) => (
-              <li key={i} style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.55 }}>
-                {tip}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* Strategic tips live in the Interview tab → DetailedRatingsView → InterviewSection */}
 
       {/* Two-panel layout: suggestions left, résumé preview right */}
       <div className="rb-suggestions-grid">
@@ -5899,9 +5842,9 @@ function GenerateOverlay({ mode = "generate" }: { mode?: "generate" | "suggest" 
     <div
       aria-hidden
       style={{
-        position: "absolute",
+        position: "fixed",
         inset: 0,
-        zIndex: 50,
+        zIndex: 9999,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
