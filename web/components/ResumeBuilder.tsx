@@ -2907,6 +2907,8 @@ export default function ResumeBuilder({
                       <TailoredPdfPreview
                         pdfUrl={result.pdfUrl}
                         filename={`${resumeDownloadStem}.pdf`}
+                        suggestions={suggestions.map(s => ({ id: s.id, original: s.original, suggested: s.suggested }))}
+                        acceptedIds={acceptedIds}
                       />
                     ) : tailorResultsBuilding ? (
                       <div
