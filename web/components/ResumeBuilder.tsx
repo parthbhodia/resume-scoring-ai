@@ -239,6 +239,8 @@ type BuilderSessionV1 = {
   v: 1;
   candidateProfile: string | null;
   uploadedFileName: string | null;
+  /** Base64 data URL of the original uploaded PDF — persisted so preview survives page refresh. */
+  uploadedPdfDataUrl?: string | null;
   baseFolder: string | null;
   studioHandoff: boolean;
   suggestions: Suggestion[] | null;
@@ -335,6 +337,7 @@ function parseBuilderSessionFromDraft(d: Record<string, unknown>): BuilderSessio
     v: 1,
     candidateProfile: typeof o.candidateProfile === "string" ? o.candidateProfile : null,
     uploadedFileName: typeof o.uploadedFileName === "string" ? o.uploadedFileName : null,
+    uploadedPdfDataUrl: typeof o.uploadedPdfDataUrl === "string" ? o.uploadedPdfDataUrl : null,
     baseFolder: typeof o.baseFolder === "string" ? o.baseFolder : null,
     studioHandoff: o.studioHandoff === true,
     suggestions,
@@ -537,7 +540,14 @@ export default function ResumeBuilder({
   const structuredUploadRef = useRef<{ profile: string; structured: StructuredResume } | null>(null);
   /** Object URL for the last uploaded PDF — powers true PDF highlights in suggestions (revoked on replace / unmount). */
   const sourcePdfBlobUrlRef = useRef<string | null>(null);
-  const [sourcePdfBlobUrl, setSourcePdfBlobUrl] = useState<string | null>(null);
+  /** Base64 data URL of the uploaded PDF — persisted in localStorage so preview survives page refresh. */
+  const [uploadedPdfDataUrl, setUploadedPdfDataUrl] = useState<string | null>(
+    () => builderSession0?.uploadedPdfDataUrl ?? null,
+  );
+  /** Displayed PDF URL: prefer fresh blob URL from current session, fall back to persisted data URL. */
+  const [sourcePdfBlobUrl, setSourcePdfBlobUrl] = useState<string | null>(
+    () => builderSession0?.uploadedPdfDataUrl ?? null,
+  );
   const [profileSyncUpsell, setProfileSyncUpsell] = useState<{
     autoFilled: boolean;
     filledLabels: string[];
@@ -573,6 +583,7 @@ export default function ResumeBuilder({
       v: 1,
       candidateProfile,
       uploadedFileName,
+      uploadedPdfDataUrl,
       baseFolder,
       studioHandoff,
       suggestions,
@@ -589,6 +600,7 @@ export default function ResumeBuilder({
   }, [
     candidateProfile,
     uploadedFileName,
+    uploadedPdfDataUrl,
     baseFolder,
     studioHandoff,
     suggestions,
@@ -1180,8 +1192,19 @@ export default function ResumeBuilder({
         const blobUrl = URL.createObjectURL(file);
         sourcePdfBlobUrlRef.current = blobUrl;
         setSourcePdfBlobUrl(blobUrl);
+
+        // Persist as base64 data URL so the preview survives page refresh
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const dataUrl = ev.target?.result;
+          if (typeof dataUrl === "string") {
+            setUploadedPdfDataUrl(dataUrl);  // triggers session save via useEffect
+          }
+        };
+        reader.readAsDataURL(file);
       } else {
         setSourcePdfBlobUrl(null);
+        setUploadedPdfDataUrl(null);
       }
 
       const hints = extractProfileHintsFromResumeText(text);
@@ -2033,6 +2056,7 @@ export default function ResumeBuilder({
                         sourcePdfBlobUrlRef.current = null;
                       }
                       setSourcePdfBlobUrl(null);
+                      setUploadedPdfDataUrl(null);
                       setCandidateProfile(null);
                       setUploadedFileName(null);
                       lastResumeExtractRef.current = "";
