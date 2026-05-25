@@ -2831,6 +2831,8 @@ export default function ResumeBuilder({
                     onFixGap={(item: DetailedRatingItem) => {
                       void handleFixGap({ name: item.text, notes: item.analysis ?? "" });
                     }}
+                    keyGap={suggestSummary || undefined}
+                    strategicTips={strategicTips.length > 0 ? strategicTips : undefined}
                   />
                 </div>
               )}

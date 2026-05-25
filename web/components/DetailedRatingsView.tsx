@@ -8,10 +8,11 @@ import { OverallSection } from "./ratings/OverallSection";
 import { JobTitleSection } from "./ratings/JobTitleSection";
 import { CoveredMissingSection } from "./ratings/CoveredMissingSection";
 import { KeywordsSection } from "./ratings/KeywordsSection";
+import { InterviewSection } from "./ratings/InterviewSection";
 
-type Tab = "overall" | "job_title" | "qualifications" | "responsibilities" | "keywords";
+type Tab = "overall" | "job_title" | "qualifications" | "responsibilities" | "keywords" | "interview";
 
-const TAB_ORDER: Tab[] = ["overall", "job_title", "qualifications", "responsibilities", "keywords"];
+const TAB_ORDER: Tab[] = ["overall", "job_title", "qualifications", "responsibilities", "keywords", "interview"];
 
 type Impact = "HIGH" | "MEDIUM" | "LOW";
 
@@ -28,6 +29,7 @@ const SECTION_ICON: Record<Tab, string> = {
   qualifications:   "🎓",
   responsibilities: "📋",
   keywords:         "🔑",
+  interview:        "🎤",
 };
 
 const SECTION_IMPACT: Record<Tab, Impact> = {
@@ -36,6 +38,7 @@ const SECTION_IMPACT: Record<Tab, Impact> = {
   qualifications:   "HIGH",
   responsibilities: "MEDIUM",
   keywords:         "HIGH",
+  interview:        "HIGH",
 };
 
 const SECTION_DESC: Record<Tab, string> = {
@@ -44,14 +47,19 @@ const SECTION_DESC: Record<Tab, string> = {
   qualifications:   "Comparison of your qualifications against required skills and experience.",
   responsibilities: "Review of your role descriptions and impact quantification.",
   keywords:         "ATS keyword optimisation check for skills and technologies.",
+  interview:        "Coaching tips on how to position your story for this role in interviews.",
 };
 
 export default function DetailedRatingsView({
   ratings,
   onFixGap,
+  keyGap,
+  strategicTips,
 }: {
   ratings: RatingsData;
   onFixGap?: (item: DetailedRatingItem) => void;
+  keyGap?: string;
+  strategicTips?: string[];
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("overall");
 
@@ -103,6 +111,12 @@ export default function DetailedRatingsView({
           ? Math.round((keywords.found_count / keywords.total_count) * 100)
           : 0,
       ),
+    },
+    {
+      id: "interview",
+      label: "Interview",
+      score: strategicTips && strategicTips.length > 0 ? `${strategicTips.length} Tips` : "—",
+      color: strategicTips && strategicTips.length > 0 ? "#f59e0b" : "var(--dim)",
     },
   ];
 
@@ -382,6 +396,10 @@ export default function DetailedRatingsView({
           )}
 
           {activeTab === "keywords" && <KeywordsSection keywords={keywords} />}
+
+          {activeTab === "interview" && (
+            <InterviewSection keyGap={keyGap} tips={strategicTips} />
+          )}
         </div>
       </div>
     </div>
