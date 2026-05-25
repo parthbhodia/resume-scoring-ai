@@ -1542,20 +1542,23 @@ export default function ResumeBuilder({
     }
   }, [candidateProfile, jd]);
 
-  /** Accept a gap-fix suggestion: inject it into the suggestions store, mark accepted, trigger generate. */
+  /** Accept a gap-fix suggestion: queue it into the suggestions store (user reviews + applies via CategoryFixPanel). */
   const applyGapFix = useCallback((s: { id: string; section: string; original: string; suggested: string; reason: string; priority: string }) => {
     const fixId = `gf_${Date.now()}_${s.id}`;
     const asSuggestion = { ...s, id: fixId, priority: (s.priority ?? "high") as "high" | "medium" | "low", category: "strengthen_impact" as const };
     const existing = suggestions ?? [];
     hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips, interviewQuestions);
     acceptSuggestion(fixId);
-    // Phase 3 — mark the gap as addressed
+    // Mark the gap as addressed
     if (gapFixPanel?.gapName) {
       setAddressedGaps(prev => new Set([...prev, gapFixPanel.gapName]));
     }
     setGapFixPanel(null);
-    void generate();
-  }, [suggestions, suggestSummary, strategicTips, interviewQuestions, hydrateSuggestions, acceptSuggestion, gapFixPanel, generate]);
+    // ⚠️ Do NOT call generate() here — applying gap fixes via raw string replacement on LaTeX
+    // can corrupt bullets if the original text doesn't match exactly, causing score drops and
+    // missing content. The fix is queued in the suggestions store; user applies via
+    // "Apply Selected" in CategoryFixPanel which uses the safe /api/apply-suggestions endpoint.
+  }, [suggestions, suggestSummary, strategicTips, interviewQuestions, hydrateSuggestions, acceptSuggestion, gapFixPanel]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -1792,20 +1795,26 @@ export default function ResumeBuilder({
         <div
           className="rb-page"
           style={{
-            padding: "clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh)",
+            padding: result
+              ? "0"
+              : "clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh)",
             maxWidth:
               result && studioHandoff
                 ? "min(1440px, 98vw)"
                 : result
-                  ? 1180
+                  ? "100%"
                   : suggestionsReviewMode
                     ? 1180
                     : studioHandoff
                       ? 920
                       : 820,
-            margin: "0 auto",
+            margin: result ? 0 : "0 auto",
             width: "100%",
             boxSizing: "border-box",
+            display: result ? "flex" : undefined,
+            flexDirection: result ? "column" as const : undefined,
+            flex: result ? 1 : undefined,
+            minHeight: result ? 0 : undefined,
           }}
         >
           <style>{`
@@ -2533,21 +2542,28 @@ export default function ResumeBuilder({
                 </div>
               )}
 
+              {/* ── Results top bar — sticky, full width ── */}
               <header
                 style={{
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 20,
                   display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "flex-start",
+                  alignItems: "center",
                   justifyContent: "space-between",
                   gap: 14,
-                  marginBottom: 20,
+                  padding: "14px clamp(16px, 3vw, 36px)",
+                  background: "var(--bg)",
+                  borderBottom: "1px solid var(--border)",
+                  boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
+                  flexWrap: "wrap",
                 }}
               >
-                <div style={{ minWidth: 0, flex: "1 1 240px" }}>
-                  <h2 id="rb-results-heading" style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.75, color: "var(--text)", marginBottom: 6, lineHeight: 1.15 }}>
+                <div style={{ minWidth: 0 }}>
+                  <h2 id="rb-results-heading" style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", margin: 0, lineHeight: 1.2 }}>
                     {generating ? "Building your PDF…" : "Your tailored résumé is ready"}
                   </h2>
-                  <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.5, letterSpacing: -0.15 }}>
+                  <p style={{ fontSize: 12.5, color: "var(--muted)", margin: "2px 0 0", letterSpacing: -0.1 }}>
                     {[role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Match results"}
                   </p>
                 </div>
@@ -2558,8 +2574,8 @@ export default function ResumeBuilder({
                     display: "flex",
                     alignItems: "center",
                     gap: 6,
-                    padding: "10px 16px",
-                    minHeight: 44,
+                    padding: "9px 16px",
+                    minHeight: 40,
                     borderRadius: "var(--radius)",
                     background: "var(--surface)",
                     border: "1px solid var(--border)",
@@ -2571,15 +2587,10 @@ export default function ResumeBuilder({
                     letterSpacing: -0.2,
                     whiteSpace: "nowrap",
                     boxShadow: "var(--shadow-sm)",
+                    flexShrink: 0,
                   }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "var(--surface2)";
-                    e.currentTarget.style.color = "var(--text)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "var(--surface)";
-                    e.currentTarget.style.color = "var(--muted)";
-                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.color = "var(--muted)"; }}
                 >
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
                     <path d="M1 6a5 5 0 109.9-1M1 6V2m0 4h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
@@ -2616,6 +2627,7 @@ export default function ResumeBuilder({
               )}
 
               <style>{`
+                .rb-results-body { padding: clamp(16px, 2.5vw, 32px) clamp(16px, 3vw, 36px) max(60px, 10vh); flex: 1; min-height: 0; }
                 .rb-results-phase3 {
                   display: grid;
                   grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
@@ -2624,7 +2636,7 @@ export default function ResumeBuilder({
                 }
                 .rb-results-phase3-preview {
                   position: sticky;
-                  top: 12px;
+                  top: 70px;
                   align-self: start;
                 }
                 @media (max-width: 960px) {
@@ -2632,6 +2644,7 @@ export default function ResumeBuilder({
                   .rb-results-phase3-preview { position: static; }
                 }
               `}</style>
+              <div className="rb-results-body">
               <section className="rb-results-phase3" aria-labelledby="rb-results-heading">
                 <div className="rb-results-phase3-detail" style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
 
@@ -3111,6 +3124,7 @@ export default function ResumeBuilder({
                   ) : null}
                 </aside>
               </section>
+              </div>{/* rb-results-body */}
             </div>
             )
           ) : null}
