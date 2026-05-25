@@ -3007,13 +3007,14 @@ export default function ResumeBuilder({
                   className="rb-results-phase3-preview"
                   aria-label="Résumé preview and export"
                 >
-                  {/* Show original uploaded PDF — preserves formatting, avoids LaTeX layout quirks */}
-                  {sourcePdfBlobUrl ? (
+                  {/* Prefer original uploaded PDF (blob URL) — preserves formatting.
+                      Fall back to compiled PDF when blob URL is gone (e.g. after page refresh). */}
+                  {(sourcePdfBlobUrl || result.pdfUrl) ? (
                       <TailoredPdfPreview
-                        pdfUrl={sourcePdfBlobUrl}
+                        pdfUrl={sourcePdfBlobUrl ?? result.pdfUrl!}
                         filename={`${resumeDownloadStem}.pdf`}
                         maxHeight="100%"
-                        templateLabel="Your résumé"
+                        templateLabel={sourcePdfBlobUrl ? "Your résumé" : selectedTemplateLabel}
                         suggestions={suggestions.map(s => ({ id: s.id, original: s.original, suggested: s.suggested }))}
                         acceptedIds={acceptedIds}
                       />
@@ -3030,7 +3031,7 @@ export default function ResumeBuilder({
                           fontSize: 13,
                         }}
                       >
-                        Upload your résumé to see the preview.
+                        PDF preview loading…
                       </div>
                     )}
 
@@ -4479,6 +4480,30 @@ function SuggestionsGenerateBar({
           {error}
         </div>
       )}
+
+      {/* Progress bar */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: accepted.length > 0 ? "var(--green,#34d399)" : "var(--dim)", letterSpacing: -0.1 }}>
+            {accepted.length > 0
+              ? `✓ ${accepted.length} of ${suggestions.length} accepted`
+              : `Review each suggestion — accept or skip`}
+          </span>
+          <span style={{ fontSize: 10, color: "var(--dim)" }}>
+            {suggestions.length - accepted.length} pending
+          </span>
+        </div>
+        <div style={{ height: 4, borderRadius: 2, background: "var(--border)", overflow: "hidden" }}>
+          <div style={{
+            height: "100%",
+            width: `${suggestions.length > 0 ? Math.round((accepted.length / suggestions.length) * 100) : 0}%`,
+            background: accepted.length > 0 ? "var(--green,#34d399)" : "var(--accent)",
+            borderRadius: 2,
+            transition: "width 0.3s ease",
+          }} />
+        </div>
+      </div>
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
         <button
           type="button"
@@ -4492,22 +4517,20 @@ function SuggestionsGenerateBar({
         >
           Accept all
         </button>
-        <button
-          type="button"
-          onClick={onClearAccepts}
-          disabled={generating || acceptedIds.size === 0}
-          style={{
-            padding: "8px 14px", minHeight: 40, fontSize: 12, fontWeight: 600, fontFamily: "inherit",
-            borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
-            color: acceptedIds.size === 0 ? "var(--dim)" : "var(--muted)",
-            cursor: generating || acceptedIds.size === 0 ? "not-allowed" : "pointer",
-          }}
-        >
-          Clear accepts
-        </button>
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--dim)" }}>
-          {accepted.length} of {suggestions.length} accepted
-        </span>
+        {accepted.length > 0 && (
+          <button
+            type="button"
+            onClick={onClearAccepts}
+            disabled={generating}
+            style={{
+              padding: "8px 14px", minHeight: 40, fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+              borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
+              color: "var(--muted)", cursor: generating ? "not-allowed" : "pointer",
+            }}
+          >
+            Clear
+          </button>
+        )}
       </div>
       <button
         type="button"
@@ -4816,24 +4839,29 @@ function SuggestionsPanel({
                       type="button"
                       onClick={e => { e.stopPropagation(); onToggleAccept(s.id); }}
                       style={{
-                        flex: 1, padding: "12px 14px", minHeight: 44, fontSize: 12, fontWeight: 600,
-                        borderRadius: "var(--radius, 8px)", border: "none", cursor: "pointer", fontFamily: "inherit",
-                        background: isAccepted ? "var(--green-bg)" : "var(--surface2)",
-                        color: isAccepted ? "var(--green)" : "var(--muted)",
-                        transition: "background 0.12s ease, color 0.12s ease",
+                        flex: 1, padding: "12px 14px", minHeight: 44, fontSize: 12, fontWeight: 700,
+                        borderRadius: "var(--radius, 8px)",
+                        border: isAccepted ? "1.5px solid rgba(52,211,153,0.5)" : "1.5px solid var(--border)",
+                        cursor: "pointer", fontFamily: "inherit",
+                        background: isAccepted ? "rgba(52,211,153,0.12)" : "var(--surface2)",
+                        color: isAccepted ? "var(--green,#34d399)" : "var(--muted)",
+                        transition: "all 0.15s ease",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
                       }}
                     >
-                      {isAccepted ? "Accepted" : "Accept"}
+                      {isAccepted ? <><span style={{ fontSize: 13 }}>✓</span> Accepted</> : "Accept"}
                     </button>
                     <button
                       type="button"
                       onClick={e => { e.stopPropagation(); onToggleReject(s.id); }}
                       style={{
                         flex: 1, padding: "12px 14px", minHeight: 44, fontSize: 12, fontWeight: 600,
-                        borderRadius: "var(--radius, 8px)", border: "none", cursor: "pointer", fontFamily: "inherit",
-                        background: isRejected ? "var(--red-bg)" : "var(--surface2)",
-                        color: isRejected ? "var(--red)" : "var(--muted)",
-                        transition: "background 0.12s ease, color 0.12s ease",
+                        borderRadius: "var(--radius, 8px)",
+                        border: isRejected ? "1.5px solid rgba(248,113,113,0.3)" : "1.5px solid var(--border)",
+                        cursor: "pointer", fontFamily: "inherit",
+                        background: isRejected ? "rgba(248,113,113,0.07)" : "var(--surface2)",
+                        color: isRejected ? "var(--red,#f87171)" : "var(--muted)",
+                        transition: "all 0.15s ease",
                       }}
                     >
                       {isRejected ? "Skipped" : "Skip"}
