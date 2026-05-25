@@ -59,6 +59,7 @@ import SourcesPanel from "./SourcesPanel";
 import AtsPanel, { normalizeAtsResult, type AtsResult } from "./AtsPanel";
 
 import ResumePublicLinkSettings from "./ResumePublicLinkSettings";
+import { useAppShellSidebar } from "@/contexts/AppShellSidebarContext";
 
 const TailoredPdfPreview = dynamic(
   () => import("@/components/TailoredPdfPreview"),
@@ -380,6 +381,7 @@ export default function ResumeBuilder({
   const [generating, setGenerating] = useState(false);
   const [statusMsg,  setStatusMsg]  = useState("");
   const [result,     setResult]     = useState<GenerationResult | null>(() => builderSession0?.result ?? null);
+  const appShellSidebar = useAppShellSidebar();
   const [error,      setError]      = useState<string | null>(null);
   const [preview,    setPreview]    = useState(() => builderSession0?.result?.latexPreview ?? "");
   const [jdKeywords, setJdKeywords] = useState<string[]>([]);
@@ -1648,6 +1650,16 @@ export default function ResumeBuilder({
     if (showGenerateLoaderAtTop) scrollBuilderToTop("auto");
   }, [showGenerateLoaderAtTop, scrollBuilderToTop]);
 
+  // Collapse the outer sidebar when analysis (ratings) first loads so the
+  // DetailedRatingsView gets the full width as the "second navbar".
+  useEffect(() => {
+    const r = result?.ratings;
+    if (r && isDetailedRatings(r)) {
+      appShellSidebar?.collapseSidebar();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!result?.ratings]);
+
   useLayoutEffect(() => {
     if (suggestionsReviewMode) scrollBuilderToTop("smooth");
   }, [suggestionsReviewMode, scrollBuilderToTop]);
@@ -2751,91 +2763,6 @@ export default function ResumeBuilder({
                 </div>
               </div>
 
-              {/* Strengths + Gaps */}
-              {ratings && (ratings.whats_working?.length > 0 || ratings.gaps?.length > 0) && (
-                <div id="rb-results-gaps" className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-                  {ratings.whats_working?.length > 0 && (
-                    <div style={{
-                      background: "var(--surface)", border: "1px solid rgba(52,211,153,0.2)",
-                      borderRadius: "var(--radius-xl)", padding: "18px 20px",
-                      boxShadow: "var(--shadow-card)",
-                    }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
-                        What&apos;s working
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {ratings.whats_working.map((w, i) => (
-                          <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "var(--muted)", lineHeight: 1.5, letterSpacing: -0.2, alignItems: "flex-start" }}>
-                            <span style={{ color: "var(--green)", flexShrink: 0, marginTop: 3 }}>✓</span>
-                            <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{w}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {ratings.gaps?.length > 0 && (
-                    <div style={{
-                      background: "var(--surface)", border: "1px solid rgba(251,191,36,0.22)",
-                      borderRadius: "var(--radius-xl)", padding: "18px 20px",
-                      boxShadow: "var(--shadow-card)",
-                    }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--orange)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
-                        Gaps to address
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {ratings.gaps.map((g, i) => (
-                          <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "var(--muted)", lineHeight: 1.5, letterSpacing: -0.2 }}>
-                            <span style={{ color: "var(--orange)", flexShrink: 0, marginTop: 1 }}>→</span>
-                            <span>{g}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Key gap + Strategic tips (persisted from suggestion run) */}
-              {suggestSummary && (
-                <div
-                  style={{
-                    marginBottom: 14,
-                    padding: "12px 16px",
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderLeft: "3px solid var(--accent)",
-                    borderRadius: "var(--radius-xl)",
-                    boxShadow: "var(--shadow-card)",
-                    fontSize: 13,
-                    color: "var(--muted)",
-                    lineHeight: 1.55,
-                  }}
-                >
-                  <strong style={{ color: "var(--text)" }}>Key gap: </strong>{suggestSummary}
-                </div>
-              )}
-              {strategicTips.length > 0 && (
-                <div
-                  style={{
-                    marginBottom: 16,
-                    padding: "14px 16px",
-                    borderRadius: "var(--radius-xl)",
-                    border: "1px solid rgba(251,191,36,0.35)",
-                    background: "rgba(251,191,36,0.06)",
-                    boxShadow: "var(--shadow-card)",
-                  }}
-                >
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--orange)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
-                    Strategic tips
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8 }}>
-                    {strategicTips.map((tip, i) => (
-                      <li key={i} style={{ fontSize: 12.5, color: "var(--text)", lineHeight: 1.55 }}>{tip}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
               {/* Detailed bifurcated ratings (new schema) */}
               {ratings && isDetailedRatings(ratings) && (
                 <div style={{ marginBottom: 16 }}>
@@ -2909,151 +2836,6 @@ export default function ResumeBuilder({
                     </div>
                   )}
 
-                </div>
-              )}
-
-              {/* Phase 2 — Inline bullet editor */}
-              {candidateProfile && (
-                <div
-                  style={{
-                    marginBottom: 16,
-                    borderRadius: "var(--radius-xl)",
-                    border: "1px solid var(--border)",
-                    background: "var(--surface)",
-                    boxShadow: "var(--shadow-card)",
-                    overflow: "hidden",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => { setBulletEditorOpen(o => !o); setBulletEdits(new Map()); }}
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "14px 20px",
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase" }}>
-                        ✏️ Edit résumé bullets directly
-                      </span>
-                      {bulletEdits.size > 0 && (
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, background: "rgba(59,130,246,0.12)", color: "var(--accent)" }}>
-                          {bulletEdits.size} edited
-                        </span>
-                      )}
-                    </div>
-                    <span style={{ fontSize: 12, color: "var(--muted)", transform: bulletEditorOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▾</span>
-                  </button>
-
-                  {bulletEditorOpen && (
-                    <div style={{ padding: "0 20px 20px", borderTop: "1px solid var(--border)" }}>
-                      <p style={{ margin: "12px 0 14px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
-                        Edit any bullet, then click <strong style={{ color: "var(--text)" }}>Save & regenerate</strong> to rebuild your PDF with the changes.
-                      </p>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        {parsedProfileLines.map(({ idx, text, isHeader, isBullet }) => {
-                          if (isHeader) {
-                            return (
-                              <div key={idx} style={{ padding: "10px 0 4px", fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.5, textTransform: "uppercase", borderBottom: "1px solid var(--border)", marginBottom: 4 }}>
-                                {text.trim()}
-                              </div>
-                            );
-                          }
-                          if (isBullet) {
-                            const currentValue = bulletEdits.has(idx) ? (bulletEdits.get(idx) ?? text) : text;
-                            const isDirty = bulletEdits.has(idx) && bulletEdits.get(idx) !== text;
-                            return (
-                              <div key={idx} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                                <span style={{ color: "var(--muted)", fontSize: 13, marginTop: 7, flexShrink: 0 }}>•</span>
-                                <textarea
-                                  value={currentValue.replace(/^[-•·*▪▸→>]\s/, "")}
-                                  onChange={e => {
-                                    const prefix = text.match(/^([-•·*▪▸→>])\s/)?.[0] ?? "- ";
-                                    const next = new Map(bulletEdits);
-                                    const newVal = prefix + e.target.value;
-                                    if (newVal === text) next.delete(idx);
-                                    else next.set(idx, newVal);
-                                    setBulletEdits(next);
-                                  }}
-                                  rows={1}
-                                  style={{
-                                    flex: 1,
-                                    fontSize: 12.5,
-                                    lineHeight: 1.5,
-                                    color: isDirty ? "var(--text)" : "var(--muted)",
-                                    background: isDirty ? "rgba(59,130,246,0.04)" : "transparent",
-                                    border: isDirty ? "1px solid rgba(59,130,246,0.3)" : "1px solid transparent",
-                                    borderRadius: 6,
-                                    padding: "5px 8px",
-                                    resize: "vertical",
-                                    fontFamily: "inherit",
-                                    outline: "none",
-                                    transition: "border-color 0.15s, background 0.15s",
-                                  }}
-                                  onFocus={e => { if (!bulletEdits.has(idx)) e.currentTarget.style.borderColor = "rgba(59,130,246,0.3)"; }}
-                                  onBlur={e => { if (!bulletEdits.has(idx)) e.currentTarget.style.borderColor = "transparent"; }}
-                                />
-                              </div>
-                            );
-                          }
-                          // Non-header, non-bullet line (contact info, dates, etc.) — show read-only
-                          const trimmed = text.trim();
-                          if (!trimmed) return <div key={idx} style={{ height: 4 }} />;
-                          return (
-                            <div key={idx} style={{ fontSize: 11.5, color: "var(--dim)", padding: "2px 0 2px 14px", fontStyle: "italic" }}>
-                              {trimmed}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div style={{ display: "flex", gap: 10, marginTop: 16, alignItems: "center" }}>
-                        <button
-                          type="button"
-                          disabled={generating || bulletEdits.size === 0}
-                          onClick={saveBulletEdits}
-                          style={{
-                            padding: "7px 16px",
-                            borderRadius: 8,
-                            border: "none",
-                            background: bulletEdits.size === 0 || generating ? "var(--surface2)" : "var(--accent)",
-                            color: bulletEdits.size === 0 || generating ? "var(--muted)" : "#fff",
-                            fontSize: 13,
-                            fontWeight: 600,
-                            fontFamily: "inherit",
-                            cursor: bulletEdits.size === 0 || generating ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          {generating ? "Regenerating…" : `Save & regenerate${bulletEdits.size > 0 ? ` (${bulletEdits.size} change${bulletEdits.size > 1 ? "s" : ""})` : ""}`}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setBulletEdits(new Map()); }}
-                          disabled={bulletEdits.size === 0}
-                          style={{
-                            padding: "7px 12px",
-                            borderRadius: 8,
-                            border: "1px solid var(--border)",
-                            background: "none",
-                            color: "var(--muted)",
-                            fontSize: 13,
-                            fontWeight: 500,
-                            fontFamily: "inherit",
-                            cursor: bulletEdits.size === 0 ? "not-allowed" : "pointer",
-                            opacity: bulletEdits.size === 0 ? 0.5 : 1,
-                          }}
-                        >
-                          Reset edits
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -3135,58 +2917,6 @@ export default function ResumeBuilder({
                   </div>
                 </div>
               )}
-
-              {/* ATS panel — auto-runs after generation */}
-              <div
-                style={{
-                  marginBottom: 16,
-                  borderRadius: "var(--radius-xl)",
-                  border: "1px solid var(--border)",
-                  background: "var(--surface)",
-                  boxShadow: "var(--shadow-card)",
-                  padding: "18px 20px 20px",
-                }}
-              >
-                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 12 }}>
-                  ATS &amp; job match{user?.id && atsResult ? ` — ${atsResult.score}` : ""}
-                </div>
-                {!user?.id ? (
-                  <ResumeBuilderAtsSignInPrompt oauthBusy={atsOAuthBusy} onSignInWithGoogle={signInForAts} />
-                ) : tailorResultsBuilding && !result.pdfUrl ? (
-                  <div style={{ padding: 16, textAlign: "center", color: "var(--dim)", fontSize: 12 }}>
-                    ATS check runs after your PDF is ready.
-                  </div>
-                ) : (
-                  <>
-                {atsLoading && (
-                  <div style={{ padding: 20, textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
-                    Running ATS &amp; job match…
-                  </div>
-                )}
-                {atsError && !atsLoading && (
-                  <div style={{ padding: 12, color: "var(--red)", fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
-                    Couldn&apos;t run ATS analysis: {atsError}
-                    {result.folder && (
-                      <button
-                        type="button"
-                        onClick={() => runAtsCheck(result.folder!)}
-                        style={{
-                          fontSize: 12, fontWeight: 600, padding: "10px 16px", minHeight: 44,
-                          background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8,
-                          color: "var(--text)", cursor: "pointer", fontFamily: "inherit",
-                        }}
-                      >
-                        Retry
-                      </button>
-                    )}
-                  </div>
-                )}
-                {atsResult && !atsLoading && (
-                  <AtsPanel result={atsResult} rechecking={atsLoading} onRecheck={() => result.folder && runAtsCheck(result.folder)} />
-                )}
-                  </>
-                )}
-              </div>
 
               {/* Start over nudge */}
               <div
