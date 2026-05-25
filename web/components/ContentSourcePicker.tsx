@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ApiErrorBanner } from "@/components/ApiErrorBanner";
+import { apiErrorFromUnknown } from "@/lib/userFriendlyError";
 import { apiUrl, isResumeUploadFile, parseJsonOrThrow } from "@/lib/utils";
 import { fetchResumes } from "@/lib/supabase";
 import type { ResumeRecord } from "@/lib/types";
@@ -39,7 +41,7 @@ export function UploadResumePdfPanel({ onDone }: { onDone: (profileText: string)
       if (!resp.ok) throw new Error(json.error ?? "Upload failed");
       onDone(json.text ?? "");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(apiErrorFromUnknown(e));
     } finally {
       setUploading(false);
     }
@@ -86,7 +88,7 @@ export function UploadResumePdfPanel({ onDone }: { onDone: (profileText: string)
           </div>
         )}
       </div>
-      {error && <div style={{ fontSize: 12, color: "var(--red, #ef4444)", textAlign: "center" }}>{error}</div>}
+      <ApiErrorBanner error={error} onDismiss={() => setError(null)} style={{ marginBottom: 0 }} />
       <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display: "none" }}
         onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
     </div>

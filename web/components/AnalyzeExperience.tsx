@@ -1,6 +1,7 @@
 "use client";
 
 import type { DragEvent, ReactNode } from "react";
+import { ApiErrorBanner } from "@/components/ApiErrorBanner";
 
 export const ANALYZE_LOADER_STEPS = [
   "Reading your résumé text",
@@ -162,7 +163,7 @@ export function AnalyzeUploadLanding({
         </span>
       </div>
 
-      {error ? <div role="alert" className="az-analyze-upload-error">{error}</div> : null}
+      <ApiErrorBanner error={error} className="az-analyze-upload-error" style={{ marginTop: 14, marginBottom: 0 }} />
     </div>
   );
 }

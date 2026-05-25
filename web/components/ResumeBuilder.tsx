@@ -7,6 +7,7 @@ import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeR
 import { buildResumeFileStem } from "@/lib/resumeFileName";
 import { getBaseResumeBanner } from "@/lib/libraryFolderLabel";
 import { apiUrl, isResumeUploadFile, parseJsonOrThrow, scoreColor } from "@/lib/utils";
+import { ApiErrorBanner } from "@/components/ApiErrorBanner";
 import { toUserFriendlyErrorMessage, messageForNonJsonApiFailure } from "@/lib/userFriendlyError";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD, TAILOR_PREFILL_COMPANY, TAILOR_PREFILL_ROLE } from "@/lib/tailorPrefill";
@@ -2116,9 +2117,11 @@ export default function ResumeBuilder({
               </div>
             )}
 
-            {uploadError && (
-              <div style={{ marginTop: 8, color: "var(--red)", fontSize: 12 }}>{uploadError}</div>
-            )}
+            <ApiErrorBanner
+              error={uploadError}
+              onDismiss={clearUploadError}
+              style={{ marginTop: 8, marginBottom: 0 }}
+            />
 
             {!candidateProfile && (
               <div style={{ marginTop: 8, fontSize: 11, color: "var(--dim)", letterSpacing: -0.1 }}>
@@ -2207,19 +2210,7 @@ export default function ResumeBuilder({
             );
           })()}
 
-          {/* Error banner */}
-          {error && (
-            <div
-              role="alert"
-              style={{
-                marginBottom: 16, padding: "12px 16px",
-                background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)",
-                borderRadius: 10, color: "var(--red)", fontSize: 13, letterSpacing: -0.2,
-              }}
-            >
-              {error}
-            </div>
-          )}
+          <ApiErrorBanner error={error} onDismiss={() => setError(null)} />
 
           {/* ── Primary CTA: template handoff = compile PDF only; tailor flow = suggestions first ── */}
           {studioHandoff ? (
@@ -2261,11 +2252,11 @@ export default function ResumeBuilder({
             </>
           ) : (
             <>
-              {suggestError && (
-                <div role="alert" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
-                  {suggestError}
-                </div>
-              )}
+              <ApiErrorBanner
+                error={suggestError}
+                onDismiss={() => setSuggestError(null)}
+                style={{ marginBottom: 12 }}
+              />
               <button
                 type="button"
                 onClick={() => { void getSuggestions(); }}
@@ -2449,23 +2440,7 @@ export default function ResumeBuilder({
               />
             ) : (
             <div className="fade-in">
-              {error && (
-                <div
-                  role="alert"
-                  style={{
-                    marginBottom: 16,
-                    padding: "12px 16px",
-                    background: "var(--red-bg)",
-                    border: "1px solid rgba(248,113,113,0.2)",
-                    borderRadius: 10,
-                    color: "var(--red)",
-                    fontSize: 13,
-                    letterSpacing: -0.2,
-                  }}
-                >
-                  {error}
-                </div>
-              )}
+              <ApiErrorBanner error={error} onDismiss={() => setError(null)} />
 
               <header
                 style={{
@@ -4659,11 +4634,7 @@ function SuggestionsGenerateBar({
         boxShadow: "var(--shadow-card)",
       }}
     >
-      {error && (
-        <div role="alert" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
-          {error}
-        </div>
-      )}
+      <ApiErrorBanner error={error} style={{ marginBottom: 12 }} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
         <button
           type="button"

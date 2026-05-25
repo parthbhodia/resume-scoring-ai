@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { apiUrl } from "@/lib/utils";
+import { apiErrorFromUnknown } from "@/lib/userFriendlyError";
+import { apiUrl, parseJsonOrThrow } from "@/lib/utils";
 import type { StructuredResume } from "@/store/resumeAnalyzeStore";
 
 export interface UploadResumeResult {
@@ -39,7 +40,7 @@ export function useUploadResume(): UseUploadResumeReturn {
       if (jd.trim()) fd.append("jd", jd.trim());
 
       const resp = await fetch(apiUrl("/api/upload-resume"), { method: "POST", body: fd });
-      const json = await resp.json() as { error?: string; text?: string; resumeHeader?: string[]; filename?: string; structuredResume?: StructuredResume | null };
+      const json = await parseJsonOrThrow<{ error?: string; text?: string; resumeHeader?: string[]; filename?: string; structuredResume?: StructuredResume | null }>(resp);
 
       if (!resp.ok) throw new Error(json.error ?? "Could not extract text from your PDF.");
       return {
@@ -49,7 +50,7 @@ export function useUploadResume(): UseUploadResumeReturn {
         structuredResume: json.structuredResume ?? null,
       };
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Upload failed.";
+      const msg = apiErrorFromUnknown(e);
       setError(msg);
       throw new Error(msg);
     } finally {
