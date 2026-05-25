@@ -427,6 +427,13 @@ export default function ResumeBuilder({
   const [libraryToast, setLibraryToast] = useState<string | null>(null);
   /** Toast for template customize flow (Save / Download with fresh compile). */
   const [customizeExportToast, setCustomizeExportToast] = useState<string | null>(null);
+  /** Feedback after /api/apply-suggestions completes. */
+  const [applyFeedback, setApplyFeedback] = useState<{
+    patchesApplied: number;
+    patchesFailed: number;
+    rescoring: boolean;
+  } | null>(null);
+  const [applyBusy, setApplyBusy] = useState(false);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
@@ -854,7 +861,7 @@ export default function ResumeBuilder({
     }
   }, []);
 
-  const runAtsCheck = useCallback(async (folder: string) => {
+  const runAtsCheck = useCallback(async (folder: string, updateMatchScore = false) => {
     if (!user?.id) {
       setAtsError("Sign in to run ATS and job match.");
       return;
@@ -894,7 +901,22 @@ export default function ResumeBuilder({
         });
         const json = await parseJsonOrThrow<AtsResult & { error?: string }>(resp);
         if (resp.ok) {
-          setAtsResult(normalizeAtsResult(json));
+          const normalized = normalizeAtsResult(json);
+          setAtsResult(normalized);
+          // When called after applying suggestions, also update the match score in ratings
+          if (updateMatchScore && normalized.score > 0) {
+            setResult((prev) => {
+              if (!prev?.ratings || !("overall_score" in prev.ratings)) return prev;
+              return {
+                ...prev,
+                ratings: {
+                  ...prev.ratings,
+                  overall_score: normalized.score,
+                  match_score: normalized.score,
+                },
+              };
+            });
+          }
           lastErr = null;
           break;
         }
@@ -1642,7 +1664,7 @@ export default function ResumeBuilder({
   /**
    * Apply accepted suggestions via /api/apply-suggestions (no LLM rewrite).
    * Patches resume_doc directly → re-renders Jinja → compiles PDF → updates Supabase.
-   * Falls back to the full generate() flow if the folder is unavailable.
+   * Then auto-rescores with /api/ats-check to refresh the match score.
    */
   const applySelectedSuggestions = useCallback(async () => {
     const folder = result?.folder;
@@ -1662,12 +1684,12 @@ export default function ResumeBuilder({
       return;
     }
     if (!folder) {
-      // No compiled folder yet — run the full generate flow first
       void generate();
       return;
     }
 
-    setGenerating(true);
+    setApplyBusy(true);
+    setApplyFeedback(null);
     setError(null);
     try {
       const resp = await fetch(apiUrl("/api/apply-suggestions"), {
@@ -1677,7 +1699,6 @@ export default function ResumeBuilder({
           folder,
           accepted_suggestions: acceptedList,
           user_id: user?.id ?? null,
-          // resume_doc loaded server-side from Supabase by folder
         }),
       });
       if (!resp.ok) {
@@ -1690,17 +1711,30 @@ export default function ResumeBuilder({
         patches_failed: number;
         folder: string;
       };
-      // Update local result with new PDF URL
+
+      // Update PDF preview with patched version
       if (data.pdf_url) {
         setResult((prev) => prev ? { ...prev, pdfUrl: data.pdf_url! } : prev);
       }
+
+      // Show success feedback + kick off rescore
+      setApplyFeedback({ patchesApplied: data.patches_applied, patchesFailed: data.patches_failed, rescoring: true });
+
+      // Auto-rescore against the JD so match score updates (pass true to also update the big score circle)
+      if (jd.trim() && folder) {
+        try {
+          await runAtsCheck(folder, true);
+        } catch { /* rescore is best-effort */ }
+      }
+      setApplyFeedback((prev) => prev ? { ...prev, rescoring: false } : null);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(toUserFriendlyErrorMessage(msg));
+      setApplyFeedback(null);
     } finally {
-      setGenerating(false);
+      setApplyBusy(false);
     }
-  }, [result, suggestions, acceptedIds, user?.id, generate, setGenerating, setError]);
+  }, [result, suggestions, acceptedIds, user?.id, generate, jd, runAtsCheck]);
 
   const selectedTemplateLabel = useMemo(() => {
     return distinctStyleTemplates().find((t) => t.referenceFolder === styleReferenceFolder)?.label ?? "Template";
@@ -2652,6 +2686,68 @@ export default function ResumeBuilder({
                 }
               `}</style>
               <div className="rb-results-body">
+
+              {/* ── Apply feedback banner ── */}
+              {(applyBusy || applyFeedback) && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: "14px 18px",
+                    borderRadius: 12,
+                    border: applyFeedback && !applyBusy
+                      ? "1px solid rgba(52,211,153,0.4)"
+                      : "1px solid rgba(99,102,241,0.3)",
+                    background: applyFeedback && !applyBusy
+                      ? "rgba(52,211,153,0.06)"
+                      : "rgba(99,102,241,0.06)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {applyBusy ? (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 18 18" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden>
+                        <circle cx="9" cy="9" r="7" stroke="rgba(99,102,241,0.3)" strokeWidth="2.5"/>
+                        <path d="M9 2a7 7 0 017 7" stroke="#818cf8" strokeWidth="2.5" strokeLinecap="round"/>
+                      </svg>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#818cf8" }}>Applying changes to your résumé…</span>
+                    </>
+                  ) : applyFeedback ? (
+                    <>
+                      <span style={{ fontSize: 18 }}>✅</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                          {applyFeedback.patchesApplied} change{applyFeedback.patchesApplied !== 1 ? "s" : ""} applied to your résumé
+                          {applyFeedback.patchesFailed > 0 && (
+                            <span style={{ marginLeft: 8, fontSize: 11, color: "var(--orange)", fontWeight: 600 }}>
+                              ({applyFeedback.patchesFailed} couldn&apos;t be matched — bullets may have varied slightly)
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                          {applyFeedback.rescoring
+                            ? "Updating your match score…"
+                            : "PDF and score updated. Review the preview on the right. →"}
+                        </div>
+                      </div>
+                      {applyFeedback.rescoring && (
+                        <svg width="14" height="14" viewBox="0 0 18 18" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden>
+                          <circle cx="9" cy="9" r="7" stroke="rgba(52,211,153,0.3)" strokeWidth="2.5"/>
+                          <path d="M9 2a7 7 0 017 7" stroke="var(--green,#34d399)" strokeWidth="2.5" strokeLinecap="round"/>
+                        </svg>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setApplyFeedback(null)}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--dim)", fontSize: 16, padding: 4, flexShrink: 0 }}
+                      >✕</button>
+                    </>
+                  ) : null}
+                </div>
+              )}
+
               <section className="rb-results-phase3" aria-labelledby="rb-results-heading">
                 <div className="rb-results-phase3-detail" style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
 
@@ -2675,7 +2771,7 @@ export default function ResumeBuilder({
                     suggestionsLoading={generating}
                     hasSuggestions={suggestions.length > 0 && !generating}
                     onApplyAllSuggestions={() => { void applySelectedSuggestions(); }}
-                    applyBusy={generating}
+                    applyBusy={applyBusy}
                   />
                 </div>
               )}
@@ -3273,7 +3369,7 @@ function TemplateCustomizePostResult({
   atsLoading: boolean;
   atsResult: AtsResult | null;
   atsError: string | null;
-  runAtsCheck: (folder: string) => void;
+  runAtsCheck: (folder: string, updateMatchScore?: boolean) => void;
   acceptedCount: number;
   selectedTemplateLabel: string;
   company: string;
