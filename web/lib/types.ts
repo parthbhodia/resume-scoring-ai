@@ -9,8 +9,15 @@ export interface Criterion {
 
 export interface DetailedRatingItem {
   text: string;
-  context?: string;   // for covered items — evidence from resume
-  analysis?: string;  // for missing items — gap + bridge suggestion
+  context?: string;    // for covered items — evidence from resume
+  analysis?: string;   // for missing items — gap + bridge suggestion
+  locations?: number;  // for covered items — how many places in resume it appears
+}
+
+export interface JobTitleReference {
+  section: string;                       // e.g. "EXPERIENCE"
+  type: "exact" | "partial" | "related"; // match strength
+  text: string;                          // quoted resume text
 }
 
 export interface DetailedCategory {
@@ -25,6 +32,7 @@ export interface JobTitleRating {
   resume_title: string;
   score: number;
   detail: string;
+  references?: JobTitleReference[]; // quotes from resume where title/role appears
 }
 
 export interface ContextualKeyword {

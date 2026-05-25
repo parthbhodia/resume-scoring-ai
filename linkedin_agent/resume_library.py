@@ -2818,12 +2818,15 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         '    "jd_title": "<job title from JD>",\n'
         '    "resume_title": "<closest title or role from resume>",\n'
         '    "score": <0-100>,\n'
-        '    "detail": "<1 sentence honest assessment>"\n'
+        '    "detail": "<1-2 sentence honest assessment in second person>",\n'
+        '    "references": [\n'
+        '      {"section": "<EXPERIENCE|EDUCATION|PROJECTS|SKILLS>", "type": "<exact|partial|related>", "text": "<verbatim title/role text from resume>"}\n'
+        '    ]\n'
         '  },\n'
         '  "qualifications": {\n'
         '    "score": <0-100, percent of qualifications met>,\n'
         '    "covered": [\n'
-        '      {"text": "<qualification from JD>", "context": "<exact evidence from resume, second person, cite employer/project>"}\n'
+        '      {"text": "<qualification from JD>", "context": "<exact evidence from resume, second person, cite employer/project>", "locations": <number of places in resume this is evidenced>}\n'
         '    ],\n'
         '    "missing": [\n'
         '      {"text": "<qualification from JD>", "analysis": "<honest gap explanation + how to bridge using existing experience, second person>"}\n'
@@ -2832,7 +2835,7 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         '  "responsibilities": {\n'
         '    "score": <0-100, percent of responsibilities covered>,\n'
         '    "covered": [\n'
-        '      {"text": "<responsibility from JD>", "context": "<evidence from resume, second person>"}\n'
+        '      {"text": "<responsibility from JD>", "context": "<evidence from resume, second person>", "locations": <number of places in resume this is evidenced>}\n'
         '    ],\n'
         '    "missing": [\n'
         '      {"text": "<responsibility from JD>", "analysis": "<why it\'s missing + bridge suggestion, second person>"}\n'
@@ -2858,8 +2861,9 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         "- keywords.direct_skills.found/missing: specific tools, languages, frameworks, certifications, software names\n"
         "- keywords.contextual.found/missing: domain phrases, soft-skill concepts, business/process terminology\n"
         "- For contextual.found, count = how many times the keyword appears or is strongly implied (minimum 1)\n"
-        "- For covered items: cite the specific employer, project, or metric from the resume verbatim\n"
+        "- For covered items: cite the specific employer, project, or metric from the resume verbatim; locations = count of distinct resume sections/bullets that evidence it\n"
         "- For missing items: be honest but always suggest a concrete bridge using existing resume content\n"
+        "- job_title.references: list every place in the resume where a job title or role appears (at least 1 if matched)\n"
         "- overall_score must be honest — do not inflate\n"
         "- whats_working: 3-5 bullets; gaps: 2-4 bullets\n"
         "- Everything in second person ('you'/'your') — no third person\n\n"

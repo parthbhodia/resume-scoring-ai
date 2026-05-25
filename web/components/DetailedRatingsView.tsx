@@ -4,13 +4,47 @@ import { useState } from "react";
 import type { RatingsData, DetailedRatingItem } from "@/lib/types";
 import { isDetailedRatings } from "@/lib/types";
 import { scoreColor } from "./ratings/scoreColor";
-import { ScorePill } from "./ratings/ScorePill";
 import { OverallSection } from "./ratings/OverallSection";
 import { JobTitleSection } from "./ratings/JobTitleSection";
 import { CoveredMissingSection } from "./ratings/CoveredMissingSection";
 import { KeywordsSection } from "./ratings/KeywordsSection";
 
 type Tab = "overall" | "job_title" | "qualifications" | "responsibilities" | "keywords";
+
+const TAB_ORDER: Tab[] = ["overall", "job_title", "qualifications", "responsibilities", "keywords"];
+
+type Impact = "HIGH" | "MEDIUM" | "LOW";
+
+const IMPACT_COLOR: Record<Impact, { color: string; bg: string }> = {
+  HIGH:   { color: "#ef4444", bg: "rgba(239,68,68,0.1)" },
+  MEDIUM: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)" },
+  LOW:    { color: "#64748b", bg: "rgba(100,116,139,0.1)" },
+};
+
+// Icons per section
+const SECTION_ICON: Record<Tab, string> = {
+  overall:          "📊",
+  job_title:        "💼",
+  qualifications:   "🎓",
+  responsibilities: "📋",
+  keywords:         "🔑",
+};
+
+const SECTION_IMPACT: Record<Tab, Impact> = {
+  overall:          "HIGH",
+  job_title:        "HIGH",
+  qualifications:   "HIGH",
+  responsibilities: "MEDIUM",
+  keywords:         "HIGH",
+};
+
+const SECTION_DESC: Record<Tab, string> = {
+  overall:          "Comprehensive evaluation of your resume against the job description.",
+  job_title:        "Analysis of your job title alignment with the target role.",
+  qualifications:   "Comparison of your qualifications against required skills and experience.",
+  responsibilities: "Review of your role descriptions and impact quantification.",
+  keywords:         "ATS keyword optimisation check for skills and technologies.",
+};
 
 export default function DetailedRatingsView({
   ratings,
@@ -23,9 +57,19 @@ export default function DetailedRatingsView({
 
   if (!isDetailedRatings(ratings)) return null;
 
-  const { overall_score, job_title, qualifications, responsibilities, keywords, whats_working, gaps, verdict } = ratings;
+  const {
+    overall_score,
+    job_title,
+    qualifications,
+    responsibilities,
+    keywords,
+    whats_working,
+    gaps,
+    verdict,
+  } = ratings;
 
-  const tabs: { id: Tab; label: string; score: string; color: string }[] = [
+  type NavTab = { id: Tab; label: string; score: string; color: string };
+  const navTabs: NavTab[] = [
     {
       id: "overall",
       label: "Overall Match",
@@ -62,13 +106,19 @@ export default function DetailedRatingsView({
     },
   ];
 
+  const tabIdx = TAB_ORDER.indexOf(activeTab);
+  const prevTab = tabIdx > 0 ? TAB_ORDER[tabIdx - 1] : null;
+  const nextTab = tabIdx < TAB_ORDER.length - 1 ? TAB_ORDER[tabIdx + 1] : null;
+  const impact = SECTION_IMPACT[activeTab];
+  const { color: impactColor, bg: impactBg } = IMPACT_COLOR[impact];
+
   return (
     <div
       style={{
         display: "grid",
         gridTemplateColumns: "220px 1fr",
         gap: 0,
-        borderRadius: "var(--radius-xl)",
+        borderRadius: "var(--radius-xl, 16px)",
         border: "1px solid var(--border)",
         background: "var(--surface)",
         overflow: "hidden",
@@ -101,22 +151,41 @@ export default function DetailedRatingsView({
               marginBottom: 4,
             }}
           >
-            Job Match Score
+            JOB MATCH SCORE
           </div>
           <div
             style={{
               fontSize: 36,
-              fontWeight: 800,
+              fontWeight: 900,
               color: scoreColor(overall_score),
               letterSpacing: -1.5,
               lineHeight: 1,
+              marginBottom: 8,
             }}
           >
             {overall_score}
           </div>
+          {/* Sidebar progress bar */}
+          <div
+            style={{
+              height: 4,
+              borderRadius: 2,
+              background: "rgba(148,163,184,0.2)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.min(100, overall_score)}%`,
+                height: "100%",
+                borderRadius: 2,
+                background: scoreColor(overall_score),
+              }}
+            />
+          </div>
         </div>
 
-        {tabs.map((tab) => (
+        {navTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -165,87 +234,155 @@ export default function DetailedRatingsView({
       </div>
 
       {/* ── Right detail panel ─────────────────────────────── */}
-      <div
-        style={{
-          padding: "24px 28px",
-          minHeight: 400,
-          overflowY: "auto",
-          maxHeight: 700,
-        }}
-      >
-        {activeTab === "overall" && (
-          <OverallSection verdict={verdict} whats_working={whats_working} gaps={gaps} />
-        )}
+      <div style={{ display: "flex", flexDirection: "column", minHeight: 400 }}>
 
-        {activeTab === "job_title" && <JobTitleSection jobTitle={job_title} />}
-
-        {activeTab === "qualifications" && (
-          <div>
+        {/* Section header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "16px 24px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--surface2)",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "1 1 0", minWidth: 0 }}>
             <div
               style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 16,
-                flexWrap: "wrap",
-                gap: 8,
+                justifyContent: "center",
+                fontSize: 18,
+                flexShrink: 0,
               }}
             >
+              {SECTION_ICON[activeTab]}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+                  {navTabs.find((t) => t.id === activeTab)?.label}
+                </span>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    padding: "2px 8px",
+                    borderRadius: 5,
+                    background: impactBg,
+                    color: impactColor,
+                    letterSpacing: 0.4,
+                    textTransform: "uppercase",
+                    flexShrink: 0,
+                  }}
+                >
+                  {impact} IMPACT
+                </span>
+              </div>
               <div
                 style={{
                   fontSize: 11,
-                  fontWeight: 700,
                   color: "var(--dim)",
-                  letterSpacing: 0.5,
-                  textTransform: "uppercase",
+                  lineHeight: 1.4,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
                 }}
               >
-                Qualifications
+                {SECTION_DESC[activeTab]}
               </div>
-              <ScorePill
-                score={qualifications.covered.length}
-                total={qualifications.covered.length + qualifications.missing.length}
-                label="met"
-              />
             </div>
-            <CoveredMissingSection category={qualifications} onFixGap={onFixGap} />
           </div>
-        )}
 
-        {activeTab === "responsibilities" && (
-          <div>
-            <div
+          {/* Prev / Next nav arrows */}
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            <button
+              type="button"
+              disabled={!prevTab}
+              onClick={() => prevTab && setActiveTab(prevTab)}
               style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
+                cursor: prevTab ? "pointer" : "not-allowed",
+                opacity: prevTab ? 1 : 0.4,
+                fontSize: 14,
+                color: "var(--muted)",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 16,
-                flexWrap: "wrap",
-                gap: 8,
+                justifyContent: "center",
               }}
             >
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: "var(--dim)",
-                  letterSpacing: 0.5,
-                  textTransform: "uppercase",
-                }}
-              >
-                Responsibilities
-              </div>
-              <ScorePill
-                score={responsibilities.covered.length}
-                total={responsibilities.covered.length + responsibilities.missing.length}
-                label="covered"
-              />
-            </div>
-            <CoveredMissingSection category={responsibilities} onFixGap={onFixGap} />
+              ‹
+            </button>
+            <button
+              type="button"
+              disabled={!nextTab}
+              onClick={() => nextTab && setActiveTab(nextTab)}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
+                cursor: nextTab ? "pointer" : "not-allowed",
+                opacity: nextTab ? 1 : 0.4,
+                fontSize: 14,
+                color: "var(--muted)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              ›
+            </button>
           </div>
-        )}
+        </div>
 
-        {activeTab === "keywords" && <KeywordsSection keywords={keywords} />}
+        {/* Tab content */}
+        <div style={{ padding: "24px 28px", overflowY: "auto", maxHeight: 680, flex: 1 }}>
+          {activeTab === "overall" && (
+            <OverallSection
+              overallScore={overall_score}
+              verdict={verdict}
+              whats_working={whats_working}
+              gaps={gaps}
+              keywords={keywords}
+              qualifications={qualifications}
+              responsibilities={responsibilities}
+            />
+          )}
+
+          {activeTab === "job_title" && <JobTitleSection jobTitle={job_title} />}
+
+          {activeTab === "qualifications" && (
+            <CoveredMissingSection
+              category={qualifications}
+              label="Qualifications"
+              onFixGap={onFixGap}
+            />
+          )}
+
+          {activeTab === "responsibilities" && (
+            <CoveredMissingSection
+              category={responsibilities}
+              label="Responsibilities"
+              onFixGap={onFixGap}
+            />
+          )}
+
+          {activeTab === "keywords" && <KeywordsSection keywords={keywords} />}
+        </div>
       </div>
     </div>
   );
