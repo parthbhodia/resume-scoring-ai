@@ -5603,6 +5603,155 @@ async def api_export_docx(request: Request):
     )
 
 
+async def api_apply_suggestions(request: Request):
+    """POST /api/apply-suggestions
+
+    Apply accepted suggestion rewrites to a resume folder WITHOUT an LLM rewrite pass.
+
+    Flow:
+      1. Load ResumeDocModel from Supabase resumes table (by folder).
+      2. Patch each accepted suggestion via _apply_accepted_edits_to_doc (string replacement).
+      3. Re-render via JinjaLatexRenderer → deterministic .tex (no LLM).
+      4. Compile with pdflatex.
+      5. Upload new PDF to storage.
+      6. UPDATE Supabase resumes row: resume_doc + pdf_url + applied_suggestions log.
+      7. Return {pdf_url, patches_applied, patches_failed, folder}.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    folder   = str(body.get("folder") or "").strip()
+    accepted = body.get("accepted_suggestions") or []
+    user_id  = str(body.get("user_id") or "local").strip()
+    # Optional: caller can pass resume_doc directly (avoids a Supabase round-trip)
+    resume_doc_override = body.get("resume_doc")
+
+    if not folder:
+        return JSONResponse({"error": "folder is required"}, status_code=400)
+    if not accepted:
+        return JSONResponse({"error": "accepted_suggestions is required"}, status_code=400)
+
+    # ── 1. Load ResumeDocModel ────────────────────────────────────────────────
+    doc: Optional["ResumeDocModel"] = None
+    raw_doc_dict: Optional[dict] = None
+
+    # Try caller-supplied doc first (fastest, no DB round-trip)
+    if isinstance(resume_doc_override, dict) and resume_doc_override:
+        try:
+            raw_doc_dict = resume_doc_override
+            doc = _resume_doc_from_parsed(raw_doc_dict)
+        except Exception as exc:
+            logger.warning(f"apply-suggestions: could not parse caller resume_doc: {exc}")
+            doc = None
+
+    # Fall back to Supabase
+    if doc is None:
+        try:
+            supabase = _supabase_table("resumes")
+            res = (
+                supabase
+                .select("resume_doc, reference_folder")
+                .eq("folder", folder)
+                .limit(1)
+                .execute()
+            )
+            row = (res.data or [None])[0]
+            if row and row.get("resume_doc"):
+                raw_doc_dict = row["resume_doc"]
+                doc = _resume_doc_from_parsed(raw_doc_dict)
+        except Exception as exc:
+            logger.warning(f"apply-suggestions: Supabase load failed: {exc}")
+
+    if doc is None:
+        return JSONResponse(
+            {"error": "Could not load resume data for this folder. Re-generate the resume first."},
+            status_code=404,
+        )
+
+    # ── 2. Patch the doc (pure string replacement, no LLM) ──────────────────
+    _apply_accepted_edits_to_doc(doc, accepted)
+    raw_doc_dict = _resume_doc_to_dict(doc)
+
+    # Count how many bullets actually matched
+    patches_applied = 0
+    patches_failed  = 0
+    for item in accepted:
+        original  = str(item.get("original") or "").strip()
+        suggested = str(item.get("suggested") or "").strip()
+        if not original or not suggested:
+            continue
+        # Check if the suggested text appears anywhere in the serialised doc
+        doc_text = str(raw_doc_dict)
+        if suggested in doc_text or original not in doc_text:
+            patches_applied += 1
+        else:
+            patches_failed += 1
+
+    # ── 3. Re-render via Jinja (deterministic, no LLM) ───────────────────────
+    try:
+        renderer = JinjaLatexRenderer()
+        ref_folder = (row or {}).get("reference_folder") or ""
+        template_name = _template_name_for_reference(ref_folder)
+        new_tex = renderer.render(doc, template_name=template_name)
+    except Exception as exc:
+        logger.exception("apply-suggestions: Jinja render failed")
+        return JSONResponse({"error": f"LaTeX render failed: {exc}"}, status_code=500)
+
+    # ── 4. Compile ───────────────────────────────────────────────────────────
+    try:
+        compiled = recompile_resume_from_tex(folder, new_tex)
+    except Exception as exc:
+        logger.exception("apply-suggestions: pdflatex failed")
+        return JSONResponse({"error": f"PDF compilation failed: {exc}"}, status_code=500)
+
+    if not compiled.get("compiled"):
+        return JSONResponse(
+            {"error": "PDF compilation failed", "details": compiled.get("compile_error", "")},
+            status_code=500,
+        )
+
+    # ── 5. Upload PDF ────────────────────────────────────────────────────────
+    pdf_url: Optional[str] = None
+    try:
+        pdf_url = upload_pdf(user_id, folder, compiled["pdf_path"])
+    except Exception as exc:
+        logger.warning(f"apply-suggestions: upload_pdf failed: {exc}")
+        # Non-fatal — local PDF still available
+
+    # Upload updated .tex too
+    try:
+        upload_tex(user_id, folder, compiled["tex_path"])
+    except Exception as exc:
+        logger.warning(f"apply-suggestions: upload_tex failed: {exc}")
+
+    # ── 6. Update Supabase ───────────────────────────────────────────────────
+    try:
+        update_payload: dict = {
+            "resume_doc": raw_doc_dict,
+            "applied_patch": {
+                "suggestions": [
+                    {"original": s.get("original"), "suggested": s.get("suggested"), "category": s.get("category")}
+                    for s in accepted if s.get("original")
+                ],
+                "applied_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+            },
+        }
+        if pdf_url:
+            update_payload["pdf_url"] = pdf_url
+        _supabase_table("resumes").update(update_payload).eq("folder", folder).execute()
+    except Exception as exc:
+        logger.warning(f"apply-suggestions: Supabase update failed: {exc}")
+
+    return JSONResponse({
+        "pdf_url":        pdf_url,
+        "patches_applied": patches_applied,
+        "patches_failed":  patches_failed,
+        "folder":         folder,
+    })
+
+
 async def api_builder_export_docx(request: Request):
     """POST /api/builder-export-docx — DOCX for a tailored résumé folder (Builder flow).
 
@@ -5887,6 +6036,7 @@ routes = [
     Route("/api/cohort-stats",            api_cohort_stats,    methods=["GET"]),
     Route("/api/student-detail",          api_student_detail,  methods=["GET"]),
     Route("/api/export-docx",             api_export_docx,     methods=["POST"]),
+    Route("/api/apply-suggestions",        api_apply_suggestions,   methods=["POST"]),
     Route("/api/builder-export-docx",     api_builder_export_docx, methods=["POST"]),
     Route("/api/analyze-export-pdf",      api_analyze_export_pdf, methods=["POST"]),
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),

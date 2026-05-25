@@ -1600,6 +1600,65 @@ export default function ResumeBuilder({
     }
   }, [result?.folder, suggestions, acceptedIds, user?.id, resumeDownloadStem]);
 
+  /**
+   * Apply accepted suggestions via /api/apply-suggestions (no LLM rewrite).
+   * Patches resume_doc directly → re-renders Jinja → compiles PDF → updates Supabase.
+   * Falls back to the full generate() flow if the folder is unavailable.
+   */
+  const applySelectedSuggestions = useCallback(async () => {
+    const folder = result?.folder;
+    const acceptedList = suggestions
+      .filter((s) => acceptedIds.has(s.id))
+      .map((s) => ({
+        id: s.id,
+        section: s.section,
+        original: s.original,
+        suggested: s.suggested,
+        reason: s.reason,
+        category: s.category ?? "strengthen_impact",
+      }));
+
+    if (!folder || acceptedList.length === 0) {
+      // Fallback: no folder yet → use the full generate flow
+      void generate();
+      return;
+    }
+
+    setGenerating(true);
+    setError(null);
+    try {
+      const resp = await fetch(apiUrl("/api/apply-suggestions"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          folder,
+          accepted_suggestions: acceptedList,
+          user_id: user?.id ?? null,
+          // resume_doc loaded server-side from Supabase by folder
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: "Apply failed" }));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json() as {
+        pdf_url: string | null;
+        patches_applied: number;
+        patches_failed: number;
+        folder: string;
+      };
+      // Update local result with new PDF URL
+      if (data.pdf_url) {
+        setResult((prev) => prev ? { ...prev, pdfUrl: data.pdf_url! } : prev);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(toUserFriendlyErrorMessage(msg));
+    } finally {
+      setGenerating(false);
+    }
+  }, [result, suggestions, acceptedIds, user?.id, generate, setGenerating, setError]);
+
   const selectedTemplateLabel = useMemo(() => {
     return distinctStyleTemplates().find((t) => t.referenceFolder === styleReferenceFolder)?.label ?? "Template";
   }, [styleReferenceFolder]);
@@ -2591,7 +2650,7 @@ export default function ResumeBuilder({
               {suggestions.length > 0 && !generating && (
                 <div style={{ marginBottom: 16 }}>
                   <CategoryFixPanel
-                    onApplyAll={() => { void generate(); }}
+                    onApplyAll={() => { void applySelectedSuggestions(); }}
                     applyBusy={generating}
                   />
                 </div>
