@@ -56,12 +56,16 @@ export default function DetailedRatingsView({
   keyGap,
   strategicTips,
   interviewQuestions,
+  onGetSuggestions,
+  suggestionsLoading,
 }: {
   ratings: RatingsData;
   onFixGap?: (item: DetailedRatingItem) => void;
   keyGap?: string;
   strategicTips?: string[];
   interviewQuestions?: string[];
+  onGetSuggestions?: () => void;
+  suggestionsLoading?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("overall");
 
@@ -404,7 +408,13 @@ export default function DetailedRatingsView({
           {activeTab === "keywords" && <KeywordsSection keywords={keywords} />}
 
           {activeTab === "interview" && (
-            <InterviewSection keyGap={keyGap} tips={strategicTips} questions={interviewQuestions} />
+            <InterviewSection
+              keyGap={keyGap}
+              tips={strategicTips}
+              questions={interviewQuestions}
+              onGetSuggestions={onGetSuggestions}
+              suggestionsLoading={suggestionsLoading}
+            />
           )}
         </div>
       </div>

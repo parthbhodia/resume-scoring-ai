@@ -8,6 +8,8 @@ type Props = {
   keyGap?: string;
   tips?: string[];
   questions?: string[];
+  onGetSuggestions?: () => void;
+  suggestionsLoading?: boolean;
 };
 
 const CATEGORY_LABELS: { id: QuestionCategory; label: string; emoji: string }[] = [
@@ -42,7 +44,7 @@ function classify(q: string): QuestionCategory {
   return "technical";
 }
 
-export function InterviewSection({ keyGap, tips = [], questions = [] }: Props) {
+export function InterviewSection({ keyGap, tips = [], questions = [], onGetSuggestions, suggestionsLoading }: Props) {
   const [activeSection, setActiveSection] = useState<"coaching" | "questions">("coaching");
   const [questionFilter, setQuestionFilter] = useState<QuestionCategory>("all");
 
@@ -50,8 +52,48 @@ export function InterviewSection({ keyGap, tips = [], questions = [] }: Props) {
 
   if (!hasSomething) {
     return (
-      <div style={{ padding: "40px 24px", textAlign: "center", color: "var(--dim)", fontSize: 13 }}>
-        Run &ldquo;Get suggestions&rdquo; to generate interview coaching tips and likely questions for this role.
+      <div style={{ padding: "48px 24px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+        <div style={{ fontSize: 36 }}>🎤</div>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>
+            Interview prep not generated yet
+          </div>
+          <p style={{ margin: 0, fontSize: 13, color: "var(--dim)", lineHeight: 1.6, maxWidth: 320 }}>
+            Generate coaching tips and role-specific interview questions tailored to this job.
+          </p>
+        </div>
+        {onGetSuggestions && (
+          <button
+            type="button"
+            onClick={onGetSuggestions}
+            disabled={suggestionsLoading}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "11px 22px",
+              borderRadius: 10,
+              border: "none",
+              background: suggestionsLoading ? "var(--border)" : "var(--accent)",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 700,
+              fontFamily: "inherit",
+              cursor: suggestionsLoading ? "wait" : "pointer",
+              opacity: suggestionsLoading ? 0.7 : 1,
+              transition: "opacity 0.15s",
+            }}
+          >
+            {suggestionsLoading ? (
+              <>
+                <span style={{ width: 14, height: 14, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+                Generating…
+              </>
+            ) : (
+              <>✨ Get suggestions</>
+            )}
+          </button>
+        )}
       </div>
     );
   }
