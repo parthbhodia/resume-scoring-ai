@@ -2552,7 +2552,10 @@ export default function ResumeBuilder({
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 14,
-                  padding: "14px clamp(16px, 3vw, 36px)",
+                  paddingTop: 14,
+                  paddingBottom: 14,
+                  paddingLeft: "clamp(64px, 6vw, 80px)",
+                  paddingRight: "clamp(16px, 3vw, 36px)",
                   background: "var(--bg)",
                   borderBottom: "1px solid var(--border)",
                   boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
@@ -2627,7 +2630,7 @@ export default function ResumeBuilder({
               )}
 
               <style>{`
-                .rb-results-body { padding: clamp(16px, 2.5vw, 32px) clamp(16px, 3vw, 36px) max(60px, 10vh); flex: 1; min-height: 0; }
+                .rb-results-body { padding: clamp(16px, 2.5vw, 32px) clamp(16px, 3vw, 36px) max(60px, 10vh) clamp(64px, 6vw, 80px); flex: 1; min-height: 0; }
                 .rb-results-phase3 {
                   display: grid;
                   grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
