@@ -3031,16 +3031,18 @@ export default function ResumeBuilder({
                   className="rb-results-phase3-preview"
                   aria-label="Résumé preview and export"
                 >
-                  {/* Prefer original uploaded PDF (blob URL) — preserves formatting.
-                      Fall back to compiled PDF when blob URL is gone (e.g. after page refresh). */}
+                  {/* Same component as the suggestions view — highlights matched bullets */}
                   {(sourcePdfBlobUrl || result.pdfUrl) ? (
-                      <TailoredPdfPreview
-                        pdfUrl={sourcePdfBlobUrl ?? result.pdfUrl!}
+                      <BuilderPdfSuggestionHighlights
+                        key={`results-pdf-${sourcePdfBlobUrl ?? result.pdfUrl}`}
+                        pdfBlobUrl={sourcePdfBlobUrl ?? result.pdfUrl!}
                         filename={`${resumeDownloadStem}.pdf`}
                         maxHeight="100%"
-                        templateLabel={sourcePdfBlobUrl ? "Your résumé" : selectedTemplateLabel}
-                        suggestions={suggestions.map(s => ({ id: s.id, original: s.original, suggested: s.suggested }))}
+                        suggestions={suggestions.map(s => ({ id: s.id, original: s.original, priority: s.priority }))}
                         acceptedIds={acceptedIds}
+                        rejectedIds={rejectedIds}
+                        selectedSuggestionId={selectedSuggestionId}
+                        onSelectSuggestion={selectSuggestion}
                       />
                     ) : (
                       <div

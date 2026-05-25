@@ -53,6 +53,8 @@ function spanMatchesSuggestion(spanNorm: string, bulletNorm: string): boolean {
 interface Props {
   pdfBlobUrl: string;
   filename?: string;
+  /** Override the max height of the viewer. Pass "100%" to fill a flex parent. */
+  maxHeight?: number | string;
   suggestions: BuilderPdfSuggestion[];
   acceptedIds: ReadonlySet<string>;
   rejectedIds: ReadonlySet<string>;
@@ -63,6 +65,7 @@ interface Props {
 export default function BuilderPdfSuggestionHighlights({
   pdfBlobUrl,
   filename = "resume.pdf",
+  maxHeight = 560,
   suggestions,
   acceptedIds,
   rejectedIds,
@@ -164,7 +167,7 @@ export default function BuilderPdfSuggestionHighlights({
   }, [selectedSuggestionId, numPages, matchRows]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, maxHeight: 560 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, maxHeight }}>
       <div
         style={{
           display: "flex",
