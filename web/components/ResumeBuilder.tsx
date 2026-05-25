@@ -1746,10 +1746,11 @@ export default function ResumeBuilder({
         ref={builderMainScrollRef}
         id="resume-builder-main"
         aria-busy={generating || suggestLoading}
-        style={{ flex: 1, minHeight: 0, overflowY: generating ? "hidden" : "auto", display: "flex", flexDirection: "column", position: "relative" }}
+        style={{ flex: 1, minHeight: 0, overflowY: generating || suggestLoading ? "hidden" : "auto", display: "flex", flexDirection: "column", position: "relative" }}
       >
-        {/* ── Full-page blur overlay + loading card while generating ── */}
-        {generating && <GenerateOverlay />}
+        {/* ── Full-page blur overlay + loading card while generating / suggesting ── */}
+        {generating && <GenerateOverlay mode="generate" />}
+        {suggestLoading && !generating && <GenerateOverlay mode="suggest" />}
 
         {/* Page content */}
         <div
@@ -5829,7 +5830,20 @@ const GENERATE_TIPS = [
   "Almost done — polishing the output…",
 ];
 
-function GenerateOverlay() {
+const SUGGEST_TIPS = [
+  "Reading the job description carefully…",
+  "Identifying gaps between your resume and the role…",
+  "Generating targeted bullet rewrites…",
+  "Grouping improvements by category…",
+  "Crafting interview coaching tips…",
+  "Predicting likely interview questions for this role…",
+  "Scoring keyword coverage against the JD…",
+  "Finalising your personalised suggestions…",
+];
+
+function GenerateOverlay({ mode = "generate" }: { mode?: "generate" | "suggest" }) {
+  const tips = mode === "suggest" ? SUGGEST_TIPS : GENERATE_TIPS;
+  const title = mode === "suggest" ? "Analysing your résumé…" : "Building your résumé…";
   const [tipIdx, setTipIdx] = useState(0);
   const [visible, setVisible] = useState(false);
 
@@ -5841,9 +5855,9 @@ function GenerateOverlay() {
 
   // Cycle tips every 3 s
   useEffect(() => {
-    const id = setInterval(() => setTipIdx((i) => (i + 1) % GENERATE_TIPS.length), 3000);
+    const id = setInterval(() => setTipIdx((i) => (i + 1) % tips.length), 3000);
     return () => clearInterval(id);
-  }, []);
+  }, [tips.length]);
 
   return (
     <div
@@ -5897,7 +5911,7 @@ function GenerateOverlay() {
         </div>
 
         <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 10, letterSpacing: -0.3 }}>
-          Building your résumé…
+          {title}
         </div>
 
         {/* Cycling tip */}
@@ -5911,12 +5925,12 @@ function GenerateOverlay() {
             animation: "fadeSlideIn 0.35s ease",
           }}
         >
-          {GENERATE_TIPS[tipIdx]}
+          {tips[tipIdx]}
         </div>
 
         {/* Progress dots */}
         <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 20 }}>
-          {GENERATE_TIPS.slice(0, 5).map((_, i) => (
+          {tips.slice(0, 5).map((_, i) => (
             <div
               key={i}
               style={{
