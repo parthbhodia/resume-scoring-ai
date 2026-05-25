@@ -4914,6 +4914,11 @@ def _resume_coach_prompt(
         'what to emphasize in interviews, how to reframe experience, or gaps to address in narrative. '
         'NOT resume bullet rewrites; those belong in suggestions."\n'
         '  ],\n'
+        '  "interview_questions": [\n'
+        '    "5-8 specific questions an interviewer is VERY LIKELY to ask for THIS exact role, based on the JD responsibilities and the candidate\'s gaps. '
+        'Include a mix: technical skill questions, behavioural (STAR) questions, and gap-probe questions. '
+        'Each question is a complete sentence ending in a question mark."\n'
+        '  ],\n'
         '  "suggestions": [\n'
         '    {\n'
         '      "id": "s1",\n'
@@ -4937,6 +4942,8 @@ def _resume_coach_prompt(
         "- Priority: 'high' = missing critical JD keyword; 'medium' = wording improvement; 'low' = polish.\n"
         "- strategic_tips: honest, specific, second-person OK; do not repeat the summary sentence; "
         "do not invent employers or metrics.\n"
+        "- interview_questions: 5-8 questions an interviewer would realistically ask; mix technical, behavioural, "
+        "and gap-probe questions; tailor to THIS specific role and the candidate's gaps; full question sentences.\n"
         "- Return ONLY the JSON object, no markdown fences."
     )
 
@@ -4952,6 +4959,19 @@ def _sanitize_strategic_tips(raw: object) -> List[str]:
             continue
         out.append(t)
     return out[:4]
+
+
+def _sanitize_interview_questions(raw: object) -> List[str]:
+    """Likely interview questions for this specific role."""
+    if not isinstance(raw, list):
+        return []
+    out: List[str] = []
+    for item in raw[:12]:
+        q = str(item or "").strip()
+        if len(q) < 15 or len(q) > 600:
+            continue
+        out.append(q)
+    return out[:8]
 
 
 def _sanitize_reuse_research_sources(raw: object) -> List[dict]:
@@ -5054,6 +5074,7 @@ async def api_suggest_changes(request: Request):
         data = json.loads(text)
         if isinstance(data, dict):
             data["strategic_tips"] = _sanitize_strategic_tips(data.get("strategic_tips"))
+            data["interview_questions"] = _sanitize_interview_questions(data.get("interview_questions"))
             data["research_queries"] = research_queries
             data["research_sources"] = research_sources
             if digest.strip():
@@ -5233,7 +5254,9 @@ async def api_suggest_changes_stream(request: Request):
             if not isinstance(data, dict):
                 raise RuntimeError("Coach returned non-object JSON")
             strategic_tips = _sanitize_strategic_tips(data.get("strategic_tips"))
+            interview_questions = _sanitize_interview_questions(data.get("interview_questions"))
             data["strategic_tips"] = strategic_tips
+            data["interview_questions"] = interview_questions
             data["research_queries"] = research_queries
             data["research_sources"] = research_sources
             if digest.strip():
@@ -5242,6 +5265,7 @@ async def api_suggest_changes_stream(request: Request):
                 "event": "coach_done",
                 "summary": data.get("summary"),
                 "strategic_tips": strategic_tips,
+                "interview_questions": interview_questions,
                 "suggestions": data.get("suggestions"),
                 "research_queries": data.get("research_queries"),
                 "research_sources": data.get("research_sources"),

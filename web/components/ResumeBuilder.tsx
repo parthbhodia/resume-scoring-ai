@@ -244,6 +244,14 @@ function parseStrategicTips(raw: unknown): string[] {
     .slice(0, 4);
 }
 
+function parseInterviewQuestions(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((q): q is string => typeof q === "string" && q.trim().length >= 15)
+    .map(q => q.trim())
+    .slice(0, 8);
+}
+
 function isSuggestionRecord(x: unknown): x is Suggestion {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
@@ -405,6 +413,7 @@ export default function ResumeBuilder({
   const suggestions        = useSuggestionsStore((s) => s.suggestions);
   const suggestSummary     = useSuggestionsStore((s) => s.summary);
   const strategicTips      = useSuggestionsStore((s) => s.strategicTips);
+  const interviewQuestions = useSuggestionsStore((s) => s.interviewQuestions);
   const suggestLoading     = useSuggestionsStore((s) => s.loading);
   const suggestCoachStreamText = useSuggestionsStore((s) => s.streamText);
   const suggestError       = useSuggestionsStore((s) => s.error);
@@ -984,6 +993,7 @@ export default function ResumeBuilder({
             text?: string;
             summary?: string;
             strategic_tips?: unknown;
+            interview_questions?: unknown;
             suggestions?: unknown;
             research_queries?: string[];
             research_sources?: { title?: string | null; url?: string }[];
@@ -1026,6 +1036,7 @@ export default function ResumeBuilder({
                 list,
                 typeof ev.summary === "string" ? ev.summary : "",
                 parseStrategicTips(ev.strategic_tips),
+                parseInterviewQuestions(ev.interview_questions),
               );
               const rq = Array.isArray(ev.research_queries)
                 ? ev.research_queries.filter((q): q is string => typeof q === "string")
@@ -2833,6 +2844,7 @@ export default function ResumeBuilder({
                     }}
                     keyGap={suggestSummary || undefined}
                     strategicTips={strategicTips.length > 0 ? strategicTips : undefined}
+                    interviewQuestions={interviewQuestions.length > 0 ? interviewQuestions : undefined}
                   />
                 </div>
               )}
