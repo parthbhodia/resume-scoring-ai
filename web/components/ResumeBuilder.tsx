@@ -1657,8 +1657,12 @@ export default function ResumeBuilder({
         category: s.category ?? "strengthen_impact",
       }));
 
-    if (!folder || acceptedList.length === 0) {
-      // Fallback: no folder yet → use the full generate flow
+    if (acceptedList.length === 0) {
+      setError("No suggestions selected — tick at least one checkbox in the Fixes tab to apply changes.");
+      return;
+    }
+    if (!folder) {
+      // No compiled folder yet — run the full generate flow first
       void generate();
       return;
     }

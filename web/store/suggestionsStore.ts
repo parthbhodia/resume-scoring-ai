@@ -123,13 +123,16 @@ export const useSuggestionsStore = create<SuggestionsStore>((set, get) => ({
     }));
     // Open the first category automatically
     const cats = CATEGORY_ORDER.filter((c) => normalised.some((s) => s.category === c));
+    // Pre-accept all suggestions so "Apply Selected" works immediately.
+    // User unchecks what they don't want rather than having to check each one.
+    const allIds = new Set(normalised.map((s) => s.id));
     set({
       suggestions: normalised,
       summary,
       strategicTips: strategicTips.filter((t) => typeof t === "string" && t.trim().length > 0).slice(0, 4),
       interviewQuestions: interviewQuestions.filter((q) => typeof q === "string" && q.trim().length > 0).slice(0, 8),
       streamText: "",
-      acceptedIds: new Set(),
+      acceptedIds: allIds,
       rejectedIds: new Set(),
       selectedId: null,
       activeCategory: cats[0] ?? null,
