@@ -68,6 +68,7 @@ export default function DetailedRatingsView({
   suggestionsLoading?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("overall");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   if (!isDetailedRatings(ratings)) return null;
 
@@ -140,13 +141,14 @@ export default function DetailedRatingsView({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "220px 1fr",
+        gridTemplateColumns: sidebarCollapsed ? "44px 1fr" : "220px 1fr",
         gap: 0,
         borderRadius: "var(--radius-xl, 16px)",
         border: "1px solid var(--border)",
         background: "var(--surface)",
         overflow: "hidden",
         boxShadow: "var(--shadow-card)",
+        transition: "grid-template-columns 0.22s ease",
       }}
     >
       {/* ── Left sidebar nav ───────────────────────────────── */}
@@ -155,106 +157,188 @@ export default function DetailedRatingsView({
           borderRight: "1px solid var(--border)",
           background: "var(--surface2)",
           padding: "16px 0",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
-        {/* Score header */}
+        {/* Collapse toggle */}
         <div
           style={{
-            padding: "8px 20px 16px",
-            borderBottom: "1px solid var(--border)",
-            marginBottom: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: sidebarCollapsed ? "center" : "flex-end",
+            padding: sidebarCollapsed ? "0 0 12px" : "0 12px 12px",
           }}
         >
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: "var(--dim)",
-              textTransform: "uppercase",
-              letterSpacing: 0.5,
-              marginBottom: 4,
-            }}
-          >
-            JOB MATCH SCORE
-          </div>
-          <div
-            style={{
-              fontSize: 36,
-              fontWeight: 900,
-              color: scoreColor(overall_score),
-              letterSpacing: -1.5,
-              lineHeight: 1,
-              marginBottom: 8,
-            }}
-          >
-            {overall_score}
-          </div>
-          {/* Sidebar progress bar */}
-          <div
-            style={{
-              height: 4,
-              borderRadius: 2,
-              background: "rgba(148,163,184,0.2)",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                width: `${Math.min(100, overall_score)}%`,
-                height: "100%",
-                borderRadius: 2,
-                background: scoreColor(overall_score),
-              }}
-            />
-          </div>
-        </div>
-
-        {navTabs.map((tab) => (
           <button
-            key={tab.id}
             type="button"
-            onClick={() => setActiveTab(tab.id)}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={() => setSidebarCollapsed((c) => !c)}
             style={{
-              width: "100%",
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              border: "1px solid var(--border)",
+              background: "var(--surface)",
+              cursor: "pointer",
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
-              padding: "10px 20px",
-              border: "none",
-              background: activeTab === tab.id ? "var(--surface)" : "transparent",
-              borderLeft:
-                activeTab === tab.id
-                  ? "3px solid var(--accent)"
-                  : "3px solid transparent",
-              cursor: "pointer",
-              fontFamily: "inherit",
+              justifyContent: "center",
+              fontSize: 13,
+              color: "var(--muted)",
+              flexShrink: 0,
               transition: "background 0.12s",
             }}
           >
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: activeTab === tab.id ? 600 : 500,
-                color: activeTab === tab.id ? "var(--text)" : "var(--muted)",
-                textAlign: "left",
-                lineHeight: 1.3,
-              }}
-            >
-              {tab.label}
-            </span>
-            <span
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: tab.color,
-                flexShrink: 0,
-                marginLeft: 8,
-              }}
-            >
-              {tab.score}
-            </span>
+            {sidebarCollapsed ? "›" : "‹"}
           </button>
-        ))}
+        </div>
+
+        {sidebarCollapsed ? (
+          /* ── Collapsed: icon-only rail ── */
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+            {/* Mini score */}
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 900,
+                color: scoreColor(overall_score),
+                marginBottom: 8,
+                lineHeight: 1,
+              }}
+            >
+              {overall_score}
+            </div>
+            {navTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                title={tab.label}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  border: "none",
+                  background: activeTab === tab.id ? "var(--accent)" : "transparent",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 15,
+                  transition: "background 0.12s",
+                }}
+              >
+                {SECTION_ICON[tab.id]}
+              </button>
+            ))}
+          </div>
+        ) : (
+          /* ── Expanded: full sidebar ── */
+          <>
+            {/* Score header */}
+            <div
+              style={{
+                padding: "0 20px 16px",
+                borderBottom: "1px solid var(--border)",
+                marginBottom: 8,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "var(--dim)",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  marginBottom: 4,
+                }}
+              >
+                JOB MATCH SCORE
+              </div>
+              <div
+                style={{
+                  fontSize: 36,
+                  fontWeight: 900,
+                  color: scoreColor(overall_score),
+                  letterSpacing: -1.5,
+                  lineHeight: 1,
+                  marginBottom: 8,
+                }}
+              >
+                {overall_score}
+              </div>
+              <div
+                style={{
+                  height: 4,
+                  borderRadius: 2,
+                  background: "rgba(148,163,184,0.2)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.min(100, overall_score)}%`,
+                    height: "100%",
+                    borderRadius: 2,
+                    background: scoreColor(overall_score),
+                  }}
+                />
+              </div>
+            </div>
+
+            {navTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 20px",
+                  border: "none",
+                  background: activeTab === tab.id ? "var(--surface)" : "transparent",
+                  borderLeft:
+                    activeTab === tab.id
+                      ? "3px solid var(--accent)"
+                      : "3px solid transparent",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  transition: "background 0.12s",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: activeTab === tab.id ? 600 : 500,
+                    color: activeTab === tab.id ? "var(--text)" : "var(--muted)",
+                    textAlign: "left",
+                    lineHeight: 1.3,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {tab.label}
+                </span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: tab.color,
+                    flexShrink: 0,
+                    marginLeft: 8,
+                  }}
+                >
+                  {tab.score}
+                </span>
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
       {/* ── Right detail panel ─────────────────────────────── */}
@@ -378,6 +462,7 @@ export default function DetailedRatingsView({
           {activeTab === "overall" && (
             <OverallSection
               overallScore={overall_score}
+              jobTitleScore={job_title?.score}
               verdict={verdict}
               whats_working={whats_working}
               gaps={gaps}

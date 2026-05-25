@@ -4,6 +4,7 @@ import { scoreColor } from "./scoreColor";
 
 type Props = {
   overallScore: number;
+  jobTitleScore?: number;
   verdict?: string;
   whats_working?: string[];
   gaps?: string[];
@@ -21,6 +22,7 @@ function qualityLabel(score: number) {
 
 export function OverallSection({
   overallScore,
+  jobTitleScore,
   verdict,
   whats_working = [],
   gaps = [],
@@ -198,10 +200,12 @@ export function OverallSection({
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>Job Title Match</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--green, #34d399)" }}>100%</span>
-            </div>
+            {jobTitleScore !== undefined && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>Job Title Match</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: scoreColor(jobTitleScore) }}>{jobTitleScore}%</span>
+              </div>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 12, color: "var(--muted)" }}>Keywords Found</span>
               <span style={{ fontSize: 12, fontWeight: 700, color: "var(--green, #34d399)" }}>
