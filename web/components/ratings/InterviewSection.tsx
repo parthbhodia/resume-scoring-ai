@@ -22,13 +22,23 @@ const CATEGORY_LABELS: { id: QuestionCategory; label: string; emoji: string }[] 
 /** Heuristic: classify questions without an extra LLM call. */
 function classify(q: string): QuestionCategory {
   const lower = q.toLowerCase();
+
+  // Behavioural: past-tense / STAR-story framing.
+  // Guard: "walk me through how you would ..." is a technical/design question,
+  // not a behavioural one — require situational/past-tense context alongside it.
   if (
     lower.includes("tell me about a time") ||
     lower.includes("describe a situation") ||
     lower.includes("give me an example") ||
     lower.includes("how did you handle") ||
-    lower.includes("walk me through")
+    lower.includes("walk me through a time") ||
+    lower.includes("walk me through a situation") ||
+    lower.includes("walk me through when you") ||
+    lower.includes("walk me through how you handled") ||
+    lower.includes("walk me through how you managed") ||
+    lower.includes("walk me through your experience")
   ) return "behavioural";
+
   if (
     lower.includes("how would you") ||
     lower.includes("have you worked with") ||
@@ -41,6 +51,7 @@ function classify(q: string): QuestionCategory {
     lower.includes("missing") ||
     lower.includes("haven't")
   ) return "gap";
+
   return "technical";
 }
 

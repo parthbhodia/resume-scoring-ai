@@ -50,7 +50,14 @@ export async function parseJsonOrThrow<T = unknown>(resp: Response): Promise<T> 
   }
   // Non-JSON response — likely a 404 "Not Found" or an HTML error page.
   if (!resp.ok) {
-    const snippet = text.trim().slice(0, 120) || resp.statusText || "Request failed";
+    let snippet = text.trim().slice(0, 240) || resp.statusText || "Request failed";
+    try {
+      const j = JSON.parse(text) as { message?: string; error?: string };
+      if (j?.message) snippet = String(j.message);
+      else if (j?.error) snippet = String(j.error);
+    } catch {
+      /* plain text / HTML */
+    }
     throw new Error(messageForNonJsonApiFailure(resp.status, snippet));
   }
   throw new Error("The résumé server returned an unexpected response (not JSON). Please try again.");
