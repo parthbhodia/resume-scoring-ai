@@ -2146,21 +2146,46 @@ async def api_generate_stream(request: Request):
                     if "qualifications" in llm_ratings or "responsibilities" in llm_ratings:
                         # New detailed schema
                         kw = llm_ratings.get("keywords") or {}
-                        found_kw = kw.get("found") or [] if isinstance(kw, dict) else []
-                        missing_kw = kw.get("missing") or [] if isinstance(kw, dict) else []
                         overall = int(llm_ratings.get("overall_score") or llm_ratings.get("match_score") or 0)
+                        # Support both new categorized schema and legacy flat arrays
+                        if isinstance(kw, dict) and ("direct_skills" in kw or "contextual" in kw):
+                            # New categorized keyword schema
+                            ds = kw.get("direct_skills") or {}
+                            ctx = kw.get("contextual") or {}
+                            ds_found = ds.get("found") or [] if isinstance(ds, dict) else []
+                            ds_missing = ds.get("missing") or [] if isinstance(ds, dict) else []
+                            ctx_found = ctx.get("found") or [] if isinstance(ctx, dict) else []
+                            ctx_missing = ctx.get("missing") or [] if isinstance(ctx, dict) else []
+                            # Normalise ctx_found to list of {keyword, count} dicts
+                            ctx_found_norm = []
+                            for item in ctx_found:
+                                if isinstance(item, dict):
+                                    ctx_found_norm.append({"keyword": str(item.get("keyword", "")), "count": int(item.get("count", 1))})
+                                else:
+                                    ctx_found_norm.append({"keyword": str(item), "count": 1})
+                            kw_payload = {
+                                "direct_skills": {"found": ds_found, "missing": ds_missing},
+                                "contextual": {"found": ctx_found_norm, "missing": ctx_missing},
+                                "found_count": len(ds_found) + len(ctx_found_norm),
+                                "total_count": len(ds_found) + len(ds_missing) + len(ctx_found_norm) + len(ctx_missing),
+                            }
+                        else:
+                            # Legacy flat arrays — wrap into new shape
+                            found_kw = kw.get("found") or [] if isinstance(kw, dict) else []
+                            missing_kw = kw.get("missing") or [] if isinstance(kw, dict) else []
+                            kw_payload = {
+                                "direct_skills": {"found": found_kw, "missing": missing_kw},
+                                "contextual": {"found": [], "missing": []},
+                                "found_count": len(found_kw),
+                                "total_count": len(found_kw) + len(missing_kw),
+                            }
                         ratings_payload = {
                             # New schema fields
                             "overall_score": overall,
                             "job_title": llm_ratings.get("job_title") or {},
                             "qualifications": llm_ratings.get("qualifications") or {"score": 0, "covered": [], "missing": []},
                             "responsibilities": llm_ratings.get("responsibilities") or {"score": 0, "covered": [], "missing": []},
-                            "keywords": {
-                                "found": found_kw,
-                                "missing": missing_kw,
-                                "found_count": len(found_kw),
-                                "total_count": len(found_kw) + len(missing_kw),
-                            },
+                            "keywords": kw_payload,
                             "whats_working": llm_ratings.get("whats_working") or [],
                             "gaps": llm_ratings.get("gaps") or [],
                             "verdict": llm_ratings.get("verdict", ""),

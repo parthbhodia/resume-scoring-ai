@@ -27,9 +27,18 @@ export interface JobTitleRating {
   detail: string;
 }
 
+export interface ContextualKeyword {
+  keyword: string;
+  count: number;
+}
+
 export interface KeywordsRating {
-  found: string[];
-  missing: string[];
+  /** Categorised keyword data (new schema) */
+  direct_skills?: { found: string[]; missing: string[] };
+  contextual?: { found: ContextualKeyword[]; missing: string[] };
+  /** Legacy flat arrays — present when backend returns old format */
+  found?: string[];
+  missing?: string[];
   found_count: number;
   total_count: number;
 }

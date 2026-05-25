@@ -2839,8 +2839,14 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         '    ]\n'
         '  },\n'
         '  "keywords": {\n'
-        '    "found": ["<keyword or skill found in resume>"],\n'
-        '    "missing": ["<important keyword from JD not found in resume>"]\n'
+        '    "direct_skills": {\n'
+        '      "found": ["<specific tool/language/framework/cert from JD found in resume>"],\n'
+        '      "missing": ["<specific tool/language/framework/cert from JD NOT in resume>"]\n'
+        '    },\n'
+        '    "contextual": {\n'
+        '      "found": [{"keyword": "<phrase/concept from JD found in resume>", "count": <number of times it appears or is implied>}],\n'
+        '      "missing": ["<important phrase, concept, or domain term from JD not evident in resume>"]\n'
+        '    }\n'
         '  },\n'
         '  "whats_working": ["<second-person strength: You have..., You built..., Your experience with...>"],\n'
         '  "gaps": ["<second-person gap + concrete bridge plan>"],\n'
@@ -2849,8 +2855,9 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         "Rules:\n"
         "- Extract ALL responsibilities from the JD (typically 5-12 items — use the full list, not a sample)\n"
         "- Extract ALL qualifications (required skills, years of experience, education, certifications)\n"
-        "- keywords.found: list every JD skill/tool/framework found in the resume\n"
-        "- keywords.missing: list important JD skills/tools not found in the resume\n"
+        "- keywords.direct_skills.found/missing: specific tools, languages, frameworks, certifications, software names\n"
+        "- keywords.contextual.found/missing: domain phrases, soft-skill concepts, business/process terminology\n"
+        "- For contextual.found, count = how many times the keyword appears or is strongly implied (minimum 1)\n"
         "- For covered items: cite the specific employer, project, or metric from the resume verbatim\n"
         "- For missing items: be honest but always suggest a concrete bridge using existing resume content\n"
         "- overall_score must be honest — do not inflate\n"
