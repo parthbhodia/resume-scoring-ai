@@ -994,9 +994,9 @@ export default function ResumeBuilder({
     const ac = new AbortController();
     suggestStreamAbortRef.current = ac;
 
-    setSuggestLoading(true);
+    resetSuggestions();       // reset first — clears stale data (also resets loading to false)
+    setSuggestLoading(true);  // set loading AFTER reset so it isn't wiped
     setSuggestError(null);
-    resetSuggestions();
     scrollBuilderToTop("auto");
 
     setSuggestResearchQueries([]);
