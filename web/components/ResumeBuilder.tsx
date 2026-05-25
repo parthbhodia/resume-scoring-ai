@@ -1674,8 +1674,10 @@ export default function ResumeBuilder({
         ref={builderMainScrollRef}
         id="resume-builder-main"
         aria-busy={generating || suggestLoading}
-        style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}
+        style={{ flex: 1, minHeight: 0, overflowY: generating ? "hidden" : "auto", display: "flex", flexDirection: "column", position: "relative" }}
       >
+        {/* ── Full-page blur overlay + loading card while generating ── */}
+        {generating && <GenerateOverlay />}
 
         {/* Page content */}
         <div
@@ -6203,6 +6205,124 @@ function Spinner({ size = 18 }: { size?: number }) {
       <circle cx="9" cy="9" r="7" stroke="var(--border)" strokeWidth="2.5" />
       <path d="M9 2a7 7 0 017 7" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
+  );
+}
+
+// ─── Generate overlay — blurs the page + shows a centred loading card ─────────
+
+const GENERATE_TIPS = [
+  "Analysing the job description against your experience…",
+  "Tailoring bullet points to match key requirements…",
+  "Weaving in JD keywords without changing your facts…",
+  "Optimising ATS keyword density…",
+  "Scoring your resume against the role criteria…",
+  "Compiling your tailored PDF via LaTeX…",
+  "Running final quality checks…",
+  "Almost done — polishing the output…",
+];
+
+function GenerateOverlay() {
+  const [tipIdx, setTipIdx] = useState(0);
+  const [visible, setVisible] = useState(false);
+
+  // Fade in after 1 frame so the transition is smooth
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setVisible(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  // Cycle tips every 3 s
+  useEffect(() => {
+    const id = setInterval(() => setTipIdx((i) => (i + 1) % GENERATE_TIPS.length), 3000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        background: "rgba(var(--bg-rgb, 15,15,20), 0.55)",
+        opacity: visible ? 1 : 0,
+        transition: "opacity 0.3s ease",
+        pointerEvents: "all",
+      }}
+    >
+      {/* Loading card */}
+      <div
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 18,
+          padding: "36px 40px",
+          maxWidth: 380,
+          width: "90%",
+          textAlign: "center",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
+        }}
+      >
+        {/* Animated rings */}
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+          <div style={{ position: "relative", width: 56, height: 56 }}>
+            {/* Outer ring */}
+            <svg width="56" height="56" viewBox="0 0 56 56" fill="none" style={{ position: "absolute", inset: 0, animation: "spin 1.4s linear infinite" }} aria-hidden>
+              <circle cx="28" cy="28" r="24" stroke="rgba(59,130,246,0.15)" strokeWidth="3" />
+              <path d="M28 4a24 24 0 0124 24" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+            {/* Inner ring */}
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" style={{ position: "absolute", inset: 10, animation: "spin 0.9s linear infinite reverse" }} aria-hidden>
+              <circle cx="18" cy="18" r="14" stroke="rgba(59,130,246,0.1)" strokeWidth="2.5" />
+              <path d="M18 4a14 14 0 0114 14" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" opacity="0.6" />
+            </svg>
+            {/* Centre dot */}
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--accent)", animation: "pulse-cta 1.4s ease-in-out infinite" }} />
+            </div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 10, letterSpacing: -0.3 }}>
+          Building your résumé…
+        </div>
+
+        {/* Cycling tip */}
+        <div
+          key={tipIdx}
+          style={{
+            fontSize: 12.5,
+            color: "var(--muted)",
+            lineHeight: 1.55,
+            minHeight: 40,
+            animation: "fadeSlideIn 0.35s ease",
+          }}
+        >
+          {GENERATE_TIPS[tipIdx]}
+        </div>
+
+        {/* Progress dots */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 20 }}>
+          {GENERATE_TIPS.slice(0, 5).map((_, i) => (
+            <div
+              key={i}
+              style={{
+                width: i === tipIdx % 5 ? 20 : 6,
+                height: 6,
+                borderRadius: 3,
+                background: i === tipIdx % 5 ? "var(--accent)" : "rgba(148,163,184,0.25)",
+                transition: "width 0.3s ease, background 0.3s ease",
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
