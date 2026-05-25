@@ -1788,7 +1788,7 @@ export default function ResumeBuilder({
               stepsDone={generateLoaderStepsDone}
               reusingSuggestResearch={reusingSuggestWebForPdf}
               studioHandoff={studioHandoff}
-              acceptedCount={0}
+              acceptedCount={acceptedIds.size}
             />
           )}
 
@@ -2543,200 +2543,102 @@ export default function ResumeBuilder({
               `}</style>
               <section className="rb-results-phase3" aria-labelledby="rb-results-heading">
                 <div className="rb-results-phase3-detail" style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
-              {/* Score hero card */}
-              <div className="rb-score-card" style={{
-                background: "var(--surface)", border: "1px solid var(--border)",
-                borderRadius: "var(--radius-xl)", padding: "28px 28px 24px",
-                marginBottom: 16,
-                position: "relative", overflow: "hidden",
-                boxShadow: "var(--shadow-card)",
-              }}>
-                {/* Subtle accent glow behind score */}
+              {/* ── Action bar (replaces the old score hero card) ── */}
+              {!(tailorResultsBuilding && !ratings) && (
                 <div style={{
-                  position: "absolute", top: -40, left: -40, width: 200, height: 200,
-                  background: score >= 75 ? "rgba(52,211,153,0.06)" : score >= 55 ? "rgba(251,191,36,0.06)" : "rgba(248,113,113,0.06)",
-                  borderRadius: "50%", pointerEvents: "none",
-                }} />
-
-                <div className="rb-score-row" style={{ display: "flex", alignItems: "flex-start", gap: 20, position: "relative", flexWrap: "wrap" }}>
-                  {ratings ? (
-                    <ScoreRing score={score} size={120} />
-                  ) : (
-                    <div style={{ width: 120, height: 120, borderRadius: "50%", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <Spinner size={28} />
+                  display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center",
+                  marginBottom: 16,
+                }}>
+                  <button
+                    type="button"
+                    onClick={improveResumeAfterResult}
+                    style={{
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      gap: 8, padding: "12px 20px", minHeight: 46,
+                      borderRadius: 10, border: "none",
+                      background: "var(--accent)", color: "#fff",
+                      fontSize: 14, fontWeight: 700, letterSpacing: -0.35,
+                      cursor: "pointer", fontFamily: "inherit",
+                      boxShadow: "var(--shadow-sm)",
+                    }}
+                  >
+                    Improve this résumé
+                    <span aria-hidden style={{ fontSize: 16 }}>→</span>
+                  </button>
+                  <a
+                    href="#rb-results-gaps"
+                    style={{
+                      display: "inline-flex", alignItems: "center",
+                      padding: "10px 16px", minHeight: 44,
+                      borderRadius: 10, border: "1px solid var(--border)",
+                      background: "var(--surface2)", color: "var(--text)",
+                      fontSize: 13, fontWeight: 600,
+                      textDecoration: "none", fontFamily: "inherit",
+                    }}
+                  >
+                    View gaps
+                  </a>
+                  <Link
+                    href="/?view=builder&flow=template&fromResume=1"
+                    style={{
+                      display: "inline-flex", alignItems: "center",
+                      padding: "10px 16px", minHeight: 44,
+                      borderRadius: 10, border: "1px solid var(--border)",
+                      color: "var(--accent)", fontSize: 13, fontWeight: 600,
+                      textDecoration: "none", fontFamily: "inherit",
+                    }}
+                  >
+                    Customize template
+                  </Link>
+                  {result.pdfUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => { void downloadResultPdf(); }}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 6,
+                        padding: "10px 16px", minHeight: 44,
+                        borderRadius: 10, border: "1px solid var(--border)",
+                        color: "var(--muted)", fontSize: 13, fontWeight: 600,
+                        fontFamily: "inherit", background: "var(--surface2)", cursor: "pointer",
+                      }}
+                    >
+                      Download PDF
+                    </button>
+                  ) : null}
+                  {result.folder ? (
+                    <button
+                      type="button"
+                      disabled={docxExportBusy}
+                      onClick={() => { void downloadResultDocx(); }}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 6,
+                        padding: "10px 16px", minHeight: 44,
+                        borderRadius: 10, border: "1px solid var(--border)",
+                        color: "var(--muted)", fontSize: 13, fontWeight: 600,
+                        fontFamily: "inherit", background: "var(--surface2)",
+                        cursor: docxExportBusy ? "wait" : "pointer",
+                        opacity: docxExportBusy ? 0.7 : 1,
+                      }}
+                    >
+                      {docxExportBusy ? "Preparing DOCX…" : "Download DOCX"}
+                    </button>
+                  ) : null}
+                  {generating && (
+                    <div
+                      role="status" aria-live="polite" aria-busy="true"
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "8px 12px", borderRadius: 8,
+                        background: "var(--accent-bg)", border: "1px solid var(--border)",
+                        fontSize: 12, color: "var(--muted)",
+                      }}
+                    >
+                      <Spinner size={14} />
+                      {statusMsg || "Saving PDF…"}
                     </div>
                   )}
-
-                  <div style={{ flex: 1, minWidth: 200, paddingTop: 2 }}>
-                    {ratings ? (
-                      <>
-                        <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.65, color: scoreColor(score), marginBottom: 4, lineHeight: 1.2 }}>
-                          {score >= 80 ? "Strong match" : score >= 65 ? "Good match" : score >= 50 ? "Moderate match" : "Needs work"}
-                        </div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 10 }}>
-                          Match score · {score}/100
-                        </div>
-                        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, letterSpacing: -0.2, margin: "0 0 16px", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-                          {ratings.verdict}
-                        </p>
-                        {generating ? (
-                          <div
-                            role="status"
-                            aria-live="polite"
-                            aria-busy="true"
-                            style={{
-                              display: "flex",
-                              alignItems: "flex-start",
-                              gap: 10,
-                              marginBottom: 16,
-                              padding: "10px 12px",
-                              borderRadius: 10,
-                              background: "var(--accent-bg)",
-                              border: "1px solid var(--border)",
-                            }}
-                          >
-                            <Spinner size={18} />
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", letterSpacing: -0.05 }}>Finishing up</div>
-                              <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45, marginTop: 2 }}>
-                                {statusMsg || "Saving PDF and uploading…"}
-                              </div>
-                            </div>
-                          </div>
-                        ) : null}
-                      </>
-                    ) : tailorResultsBuilding ? (
-                      <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
-                          Tailoring and compiling…
-                        </div>
-                        <p style={{ margin: 0, fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>
-                          Match score and gaps appear when the PDF is ready.
-                        </p>
-                      </div>
-                    ) : (
-                      <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Analysing match…</div>
-                        <div style={{ fontSize: 12, color: "var(--dim)", lineHeight: 1.45 }}>Scoring match…</div>
-                      </div>
-                    )}
-                    {!(tailorResultsBuilding && !ratings) && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-                      <button
-                        type="button"
-                        onClick={improveResumeAfterResult}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 8,
-                          padding: "12px 20px",
-                          minHeight: 46,
-                          borderRadius: 10,
-                          border: "none",
-                          background: "var(--accent)",
-                          color: "#fff",
-                          fontSize: 14,
-                          fontWeight: 700,
-                          letterSpacing: -0.35,
-                          cursor: "pointer",
-                          fontFamily: "inherit",
-                          boxShadow: "var(--shadow-sm)",
-                        }}
-                      >
-                        Improve this résumé
-                        <span aria-hidden style={{ fontSize: 16 }}>→</span>
-                      </button>
-                      <a
-                        href="#rb-results-gaps"
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          padding: "10px 16px",
-                          minHeight: 44,
-                          borderRadius: 10,
-                          border: "1px solid var(--border)",
-                          background: "var(--surface2)",
-                          color: "var(--text)",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          textDecoration: "none",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        View gaps
-                      </a>
-                      <Link
-                        href="/?view=builder&flow=template&fromResume=1"
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          padding: "10px 16px",
-                          minHeight: 44,
-                          borderRadius: 10,
-                          border: "1px solid var(--border)",
-                          color: "var(--accent)",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          textDecoration: "none",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        Customize template
-                      </Link>
-                      {result.pdfUrl ? (
-                        <button
-                          type="button"
-                          onClick={() => { void downloadResultPdf(); }}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            padding: "10px 16px",
-                            minHeight: 44,
-                            borderRadius: 10,
-                            border: "1px solid var(--border)",
-                            color: "var(--muted)",
-                            fontSize: 13,
-                            fontWeight: 600,
-                            fontFamily: "inherit",
-                            background: "var(--surface2)",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Download PDF
-                        </button>
-                      ) : null}
-                      {result.folder ? (
-                        <button
-                          type="button"
-                          disabled={docxExportBusy}
-                          onClick={() => { void downloadResultDocx(); }}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            padding: "10px 16px",
-                            minHeight: 44,
-                            borderRadius: 10,
-                            border: "1px solid var(--border)",
-                            color: "var(--muted)",
-                            fontSize: 13,
-                            fontWeight: 600,
-                            fontFamily: "inherit",
-                            background: "var(--surface2)",
-                            cursor: docxExportBusy ? "wait" : "pointer",
-                            opacity: docxExportBusy ? 0.7 : 1,
-                          }}
-                        >
-                          {docxExportBusy ? "Preparing DOCX…" : "Download DOCX"}
-                        </button>
-                      ) : null}
-                    </div>
-                    )}
-                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Detailed bifurcated ratings (new schema) */}
               {ratings && isDetailedRatings(ratings) && (

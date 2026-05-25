@@ -373,8 +373,6 @@ export default function DetailedRatingsView({
         <div style={{ padding: "24px 28px", overflowY: "auto", maxHeight: 680, flex: 1 }}>
           {activeTab === "overall" && (
             <OverallSection
-              overallScore={overall_score}
-              verdict={verdict}
               whats_working={whats_working}
               gaps={gaps}
               keywords={keywords}
