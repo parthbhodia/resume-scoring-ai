@@ -4926,7 +4926,8 @@ def _resume_coach_prompt(
         '      "original": "The exact bullet text from the resume (quote it verbatim)",\n'
         '      "suggested": "The improved version, tailored to the JD keywords",\n'
         '      "reason": "Why this change improves the match — 1 concise sentence.",\n'
-        '      "priority": "high"\n'
+        '      "priority": "high",\n'
+        '      "category": "quantify_impact"\n'
         '    }\n'
         '  ]\n'
         '}\n\n'
@@ -4940,12 +4941,67 @@ def _resume_coach_prompt(
         "from the posting (verbatim, not a synonym) — e.g. if the JD title is 'Software Engineer, Full Stack', "
         "the summary should begin 'Software Engineer, Full Stack with…', not 'Full Stack Engineer with…'.\n"
         "- Priority: 'high' = missing critical JD keyword; 'medium' = wording improvement; 'low' = polish.\n"
+        "- category: MUST be exactly one of: 'quantify_impact' (add metrics/numbers/%), "
+        "'action_verbs' (stronger/more specific action verbs), "
+        "'add_keywords' (surface JD-critical keywords missing from the bullet), "
+        "'relevance' (reframe to align with the target role), "
+        "'remove_filler' (cut vague/generic language), "
+        "'strengthen_impact' (make outcomes and scope clearer). "
+        "Pick the SINGLE best-fit category for each suggestion.\n"
         "- strategic_tips: honest, specific, second-person OK; do not repeat the summary sentence; "
         "do not invent employers or metrics.\n"
         "- interview_questions: 5-8 questions an interviewer would realistically ask; mix technical, behavioural, "
         "and gap-probe questions; tailor to THIS specific role and the candidate's gaps; full question sentences.\n"
         "- Return ONLY the JSON object, no markdown fences."
     )
+
+
+SUGGESTION_CATEGORIES = {
+    "quantify_impact", "action_verbs", "add_keywords",
+    "relevance", "remove_filler", "strengthen_impact",
+}
+
+def _sanitize_suggestions(raw: object) -> List[dict]:
+    """Validate and normalise suggestions list — ensures category is always a known value."""
+    if not isinstance(raw, list):
+        return []
+    out: List[dict] = []
+    for item in raw[:12]:
+        if not isinstance(item, dict):
+            continue
+        original = str(item.get("original") or "").strip()
+        suggested = str(item.get("suggested") or "").strip()
+        if not original or not suggested or original == suggested:
+            continue
+        cat = str(item.get("category") or "").strip().lower()
+        if cat not in SUGGESTION_CATEGORIES:
+            # fall back: infer from reason text
+            reason_lower = str(item.get("reason") or "").lower()
+            if any(w in reason_lower for w in ["metric", "number", "quantif", "%", "percent"]):
+                cat = "quantify_impact"
+            elif any(w in reason_lower for w in ["verb", "action", "strong"]):
+                cat = "action_verbs"
+            elif any(w in reason_lower for w in ["keyword", "missing", "jd", "ats"]):
+                cat = "add_keywords"
+            elif any(w in reason_lower for w in ["filler", "vague", "generic", "weak"]):
+                cat = "remove_filler"
+            elif any(w in reason_lower for w in ["relevance", "align", "reframe", "target"]):
+                cat = "relevance"
+            else:
+                cat = "strengthen_impact"
+        priority = str(item.get("priority") or "medium").lower()
+        if priority not in ("high", "medium", "low"):
+            priority = "medium"
+        out.append({
+            "id": str(item.get("id") or f"s{len(out)+1}"),
+            "section": str(item.get("section") or "Resume").strip(),
+            "original": original,
+            "suggested": suggested,
+            "reason": str(item.get("reason") or "").strip(),
+            "priority": priority,
+            "category": cat,
+        })
+    return out
 
 
 def _sanitize_strategic_tips(raw: object) -> List[str]:
@@ -5255,8 +5311,10 @@ async def api_suggest_changes_stream(request: Request):
                 raise RuntimeError("Coach returned non-object JSON")
             strategic_tips = _sanitize_strategic_tips(data.get("strategic_tips"))
             interview_questions = _sanitize_interview_questions(data.get("interview_questions"))
+            suggestions = _sanitize_suggestions(data.get("suggestions"))
             data["strategic_tips"] = strategic_tips
             data["interview_questions"] = interview_questions
+            data["suggestions"] = suggestions
             data["research_queries"] = research_queries
             data["research_sources"] = research_sources
             if digest.strip():
@@ -5266,7 +5324,7 @@ async def api_suggest_changes_stream(request: Request):
                 "summary": data.get("summary"),
                 "strategic_tips": strategic_tips,
                 "interview_questions": interview_questions,
-                "suggestions": data.get("suggestions"),
+                "suggestions": suggestions,
                 "research_queries": data.get("research_queries"),
                 "research_sources": data.get("research_sources"),
                 "research_digest": data.get("research_digest"),

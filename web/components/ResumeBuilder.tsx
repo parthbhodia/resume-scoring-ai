@@ -52,6 +52,7 @@ import {
 import ScoreRing    from "./ScoreRing";
 import MatchBreakdownCards from "./MatchBreakdownCards";
 import DetailedRatingsView from "./DetailedRatingsView";
+import CategoryFixPanel from "./CategoryFixPanel";
 import { isDetailedRatings } from "@/lib/types";
 import type { DetailedRatingItem } from "@/lib/types";
 import DiffView     from "./DiffView";
@@ -1508,7 +1509,7 @@ export default function ResumeBuilder({
   /** Accept a gap-fix suggestion: inject it into the suggestions store, mark accepted, trigger generate. */
   const applyGapFix = useCallback((s: { id: string; section: string; original: string; suggested: string; reason: string; priority: string }) => {
     const fixId = `gf_${Date.now()}_${s.id}`;
-    const asSuggestion = { ...s, id: fixId, priority: (s.priority ?? "high") as "high" | "medium" | "low" };
+    const asSuggestion = { ...s, id: fixId, priority: (s.priority ?? "high") as "high" | "medium" | "low", category: "strengthen_impact" as const };
     const existing = suggestions ?? [];
     hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips);
     acceptSuggestion(fixId);
@@ -2582,6 +2583,16 @@ export default function ResumeBuilder({
                     interviewQuestions={interviewQuestions.length > 0 ? interviewQuestions : undefined}
                     onGetSuggestions={() => { void getSuggestions(); }}
                     suggestionsLoading={generating}
+                  />
+                </div>
+              )}
+
+              {/* AI Suggestions Panel — category-by-category fix flow */}
+              {suggestions.length > 0 && !generating && (
+                <div style={{ marginBottom: 16 }}>
+                  <CategoryFixPanel
+                    onApplyAll={() => { void generate(); }}
+                    applyBusy={generating}
                   />
                 </div>
               )}
