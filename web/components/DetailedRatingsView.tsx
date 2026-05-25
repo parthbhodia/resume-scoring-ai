@@ -9,10 +9,11 @@ import { JobTitleSection } from "./ratings/JobTitleSection";
 import { CoveredMissingSection } from "./ratings/CoveredMissingSection";
 import { KeywordsSection } from "./ratings/KeywordsSection";
 import { InterviewSection } from "./ratings/InterviewSection";
+import CategoryFixPanel from "./CategoryFixPanel";
 
-type Tab = "overall" | "job_title" | "qualifications" | "responsibilities" | "keywords" | "interview";
+type Tab = "overall" | "job_title" | "qualifications" | "responsibilities" | "keywords" | "interview" | "fixes";
 
-const TAB_ORDER: Tab[] = ["overall", "job_title", "qualifications", "responsibilities", "keywords", "interview"];
+const ALWAYS_TABS: Tab[] = ["overall", "job_title", "qualifications", "responsibilities", "keywords", "interview"];
 
 type Impact = "HIGH" | "MEDIUM" | "LOW";
 
@@ -22,7 +23,6 @@ const IMPACT_COLOR: Record<Impact, { color: string; bg: string }> = {
   LOW:    { color: "#64748b", bg: "rgba(100,116,139,0.1)" },
 };
 
-// Icons per section
 const SECTION_ICON: Record<Tab, string> = {
   overall:          "📊",
   job_title:        "💼",
@@ -30,6 +30,7 @@ const SECTION_ICON: Record<Tab, string> = {
   responsibilities: "📋",
   keywords:         "🔑",
   interview:        "🎤",
+  fixes:            "✨",
 };
 
 const SECTION_IMPACT: Record<Tab, Impact> = {
@@ -39,6 +40,7 @@ const SECTION_IMPACT: Record<Tab, Impact> = {
   responsibilities: "MEDIUM",
   keywords:         "HIGH",
   interview:        "HIGH",
+  fixes:            "HIGH",
 };
 
 const SECTION_DESC: Record<Tab, string> = {
@@ -48,6 +50,7 @@ const SECTION_DESC: Record<Tab, string> = {
   responsibilities: "Review of your role descriptions and impact quantification.",
   keywords:         "ATS keyword optimisation check for skills and technologies.",
   interview:        "Coaching tips on how to position your story for this role in interviews.",
+  fixes:            "Review and apply AI-suggested bullet improvements category by category.",
 };
 
 type GapFixSuggestion = {
@@ -68,6 +71,9 @@ export default function DetailedRatingsView({
   interviewQuestions,
   onGetSuggestions,
   suggestionsLoading,
+  hasSuggestions,
+  onApplyAllSuggestions,
+  applyBusy,
 }: {
   ratings: RatingsData;
   onFixGap?: (item: DetailedRatingItem) => void;
@@ -81,6 +87,10 @@ export default function DetailedRatingsView({
   interviewQuestions?: string[];
   onGetSuggestions?: () => void;
   suggestionsLoading?: boolean;
+  /** When true, the ✨ Fixes tab is shown */
+  hasSuggestions?: boolean;
+  onApplyAllSuggestions?: () => void;
+  applyBusy?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("overall");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -97,6 +107,10 @@ export default function DetailedRatingsView({
     gaps,
     verdict,
   } = ratings;
+
+  const tabOrder: Tab[] = hasSuggestions
+    ? [...ALWAYS_TABS, "fixes"]
+    : ALWAYS_TABS;
 
   type NavTab = { id: Tab; label: string; score: string; color: string };
   const navTabs: NavTab[] = [
@@ -144,11 +158,17 @@ export default function DetailedRatingsView({
         : "—",
       color: (interviewQuestions?.length ?? 0) > 0 || (strategicTips?.length ?? 0) > 0 ? "#f59e0b" : "var(--dim)",
     },
+    ...(hasSuggestions ? [{
+      id: "fixes" as Tab,
+      label: "✨ Fixes",
+      score: "Review",
+      color: "#818cf8",
+    }] : []),
   ];
 
-  const tabIdx = TAB_ORDER.indexOf(activeTab);
-  const prevTab = tabIdx > 0 ? TAB_ORDER[tabIdx - 1] : null;
-  const nextTab = tabIdx < TAB_ORDER.length - 1 ? TAB_ORDER[tabIdx + 1] : null;
+  const tabIdx = tabOrder.indexOf(activeTab);
+  const prevTab = tabIdx > 0 ? tabOrder[tabIdx - 1] : null;
+  const nextTab = tabIdx < tabOrder.length - 1 ? tabOrder[tabIdx + 1] : null;
   const impact = SECTION_IMPACT[activeTab];
   const { color: impactColor, bg: impactBg } = IMPACT_COLOR[impact];
 
@@ -191,19 +211,11 @@ export default function DetailedRatingsView({
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             onClick={() => setSidebarCollapsed((c) => !c)}
             style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              border: "1px solid var(--border)",
-              background: "var(--surface)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 13,
-              color: "var(--muted)",
-              flexShrink: 0,
-              transition: "background 0.12s",
+              width: 28, height: 28, borderRadius: 8,
+              border: "1px solid var(--border)", background: "var(--surface)",
+              cursor: "pointer", display: "flex", alignItems: "center",
+              justifyContent: "center", fontSize: 13, color: "var(--muted)",
+              flexShrink: 0, transition: "background 0.12s",
             }}
           >
             {sidebarCollapsed ? "›" : "‹"}
@@ -213,16 +225,7 @@ export default function DetailedRatingsView({
         {sidebarCollapsed ? (
           /* ── Collapsed: icon-only rail ── */
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-            {/* Mini score */}
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 900,
-                color: scoreColor(overall_score),
-                marginBottom: 8,
-                lineHeight: 1,
-              }}
-            >
+            <div style={{ fontSize: 14, fontWeight: 900, color: scoreColor(overall_score), marginBottom: 8, lineHeight: 1 }}>
               {overall_score}
             </div>
             {navTabs.map((tab) => (
@@ -232,17 +235,10 @@ export default function DetailedRatingsView({
                 title={tab.label}
                 onClick={() => setActiveTab(tab.id)}
                 style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  border: "none",
+                  width: 32, height: 32, borderRadius: 8, border: "none",
                   background: activeTab === tab.id ? "var(--accent)" : "transparent",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 15,
-                  transition: "background 0.12s",
+                  cursor: "pointer", display: "flex", alignItems: "center",
+                  justifyContent: "center", fontSize: 15, transition: "background 0.12s",
                 }}
               >
                 {SECTION_ICON[tab.id]}
@@ -253,53 +249,15 @@ export default function DetailedRatingsView({
           /* ── Expanded: full sidebar ── */
           <>
             {/* Score header */}
-            <div
-              style={{
-                padding: "0 20px 16px",
-                borderBottom: "1px solid var(--border)",
-                marginBottom: 8,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "var(--dim)",
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  marginBottom: 4,
-                }}
-              >
+            <div style={{ padding: "0 20px 16px", borderBottom: "1px solid var(--border)", marginBottom: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
                 JOB MATCH SCORE
               </div>
-              <div
-                style={{
-                  fontSize: 36,
-                  fontWeight: 900,
-                  color: scoreColor(overall_score),
-                  letterSpacing: -1.5,
-                  lineHeight: 1,
-                  marginBottom: 8,
-                }}
-              >
+              <div style={{ fontSize: 36, fontWeight: 900, color: scoreColor(overall_score), letterSpacing: -1.5, lineHeight: 1, marginBottom: 8 }}>
                 {overall_score}
               </div>
-              <div
-                style={{
-                  height: 4,
-                  borderRadius: 2,
-                  background: "rgba(148,163,184,0.2)",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    width: `${Math.min(100, overall_score)}%`,
-                    height: "100%",
-                    borderRadius: 2,
-                    background: scoreColor(overall_score),
-                  }}
-                />
+              <div style={{ height: 4, borderRadius: 2, background: "rgba(148,163,184,0.2)", overflow: "hidden" }}>
+                <div style={{ width: `${Math.min(100, overall_score)}%`, height: "100%", borderRadius: 2, background: scoreColor(overall_score) }} />
               </div>
             </div>
 
@@ -310,44 +268,24 @@ export default function DetailedRatingsView({
                 onClick={() => setActiveTab(tab.id)}
                 style={{
                   width: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "10px 20px",
-                  border: "none",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "10px 20px", border: "none",
                   background: activeTab === tab.id ? "var(--surface)" : "transparent",
-                  borderLeft:
-                    activeTab === tab.id
-                      ? "3px solid var(--accent)"
-                      : "3px solid transparent",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  transition: "background 0.12s",
+                  borderLeft: activeTab === tab.id ? "3px solid var(--accent)" : "3px solid transparent",
+                  cursor: "pointer", fontFamily: "inherit", transition: "background 0.12s",
                 }}
               >
-                <span
-                  style={{
-                    fontSize: 13,
-                    fontWeight: activeTab === tab.id ? 600 : 500,
-                    color: activeTab === tab.id ? "var(--text)" : "var(--muted)",
-                    textAlign: "left",
-                    lineHeight: 1.3,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
+                <span style={{
+                  fontSize: 13, fontWeight: activeTab === tab.id ? 600 : 500,
+                  color: tab.id === "fixes"
+                    ? (activeTab === "fixes" ? "#818cf8" : "#818cf8")
+                    : (activeTab === tab.id ? "var(--text)" : "var(--muted)"),
+                  textAlign: "left", lineHeight: 1.3,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}>
                   {tab.label}
                 </span>
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: tab.color,
-                    flexShrink: 0,
-                    marginLeft: 8,
-                  }}
-                >
+                <span style={{ fontSize: 12, fontWeight: 700, color: tab.color, flexShrink: 0, marginLeft: 8 }}>
                   {tab.score}
                 </span>
               </button>
@@ -359,121 +297,78 @@ export default function DetailedRatingsView({
       {/* ── Right detail panel ─────────────────────────────── */}
       <div style={{ display: "flex", flexDirection: "column", minHeight: 400 }}>
 
-        {/* Section header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "16px 24px",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--surface2)",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "1 1 0", minWidth: 0 }}>
-            <div
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 10,
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 18,
-                flexShrink: 0,
-              }}
-            >
-              {SECTION_ICON[activeTab]}
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
-                <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
-                  {navTabs.find((t) => t.id === activeTab)?.label}
-                </span>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 800,
-                    padding: "2px 8px",
-                    borderRadius: 5,
-                    background: impactBg,
-                    color: impactColor,
-                    letterSpacing: 0.4,
-                    textTransform: "uppercase",
-                    flexShrink: 0,
-                  }}
-                >
-                  {impact} IMPACT
-                </span>
+        {/* Section header — hidden for fixes tab (CategoryFixPanel has its own header) */}
+        {activeTab !== "fixes" && (
+          <div
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "16px 24px", borderBottom: "1px solid var(--border)",
+              background: "var(--surface2)", gap: 12, flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "1 1 0", minWidth: 0 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10, background: "var(--surface)",
+                border: "1px solid var(--border)", display: "flex", alignItems: "center",
+                justifyContent: "center", fontSize: 18, flexShrink: 0,
+              }}>
+                {SECTION_ICON[activeTab]}
               </div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--dim)",
-                  lineHeight: 1.4,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {SECTION_DESC[activeTab]}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+                    {navTabs.find((t) => t.id === activeTab)?.label}
+                  </span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 5,
+                    background: impactBg, color: impactColor, letterSpacing: 0.4,
+                    textTransform: "uppercase", flexShrink: 0,
+                  }}>
+                    {impact} IMPACT
+                  </span>
+                </div>
+                <div style={{
+                  fontSize: 11, color: "var(--dim)", lineHeight: 1.4,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {SECTION_DESC[activeTab]}
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Prev / Next nav arrows */}
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-            <button
-              type="button"
-              disabled={!prevTab}
-              onClick={() => prevTab && setActiveTab(prevTab)}
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-                cursor: prevTab ? "pointer" : "not-allowed",
-                opacity: prevTab ? 1 : 0.4,
-                fontSize: 14,
-                color: "var(--muted)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              disabled={!nextTab}
-              onClick={() => nextTab && setActiveTab(nextTab)}
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-                cursor: nextTab ? "pointer" : "not-allowed",
-                opacity: nextTab ? 1 : 0.4,
-                fontSize: 14,
-                color: "var(--muted)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              ›
-            </button>
+            {/* Prev / Next nav arrows */}
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              <button
+                type="button"
+                disabled={!prevTab}
+                onClick={() => prevTab && setActiveTab(prevTab)}
+                style={{
+                  width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)",
+                  background: "var(--surface)", cursor: prevTab ? "pointer" : "not-allowed",
+                  opacity: prevTab ? 1 : 0.4, fontSize: 14, color: "var(--muted)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >‹</button>
+              <button
+                type="button"
+                disabled={!nextTab}
+                onClick={() => nextTab && setActiveTab(nextTab)}
+                style={{
+                  width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)",
+                  background: "var(--surface)", cursor: nextTab ? "pointer" : "not-allowed",
+                  opacity: nextTab ? 1 : 0.4, fontSize: 14, color: "var(--muted)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >›</button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Tab content */}
-        <div style={{ padding: "24px 28px", overflowY: "auto", maxHeight: 680, flex: 1 }}>
+        <div style={{
+          padding: activeTab === "fixes" ? 0 : "24px 28px",
+          overflowY: "auto", maxHeight: 680, flex: 1,
+        }}>
           {activeTab === "overall" && (
             <OverallSection
               overallScore={overall_score}
@@ -524,6 +419,13 @@ export default function DetailedRatingsView({
               questions={interviewQuestions}
               onGetSuggestions={onGetSuggestions}
               suggestionsLoading={suggestionsLoading}
+            />
+          )}
+
+          {activeTab === "fixes" && (
+            <CategoryFixPanel
+              onApplyAll={onApplyAllSuggestions ?? (() => {})}
+              applyBusy={applyBusy ?? false}
             />
           )}
         </div>

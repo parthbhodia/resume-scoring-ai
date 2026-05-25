@@ -2669,19 +2669,14 @@ export default function ResumeBuilder({
                     interviewQuestions={interviewQuestions.length > 0 ? interviewQuestions : undefined}
                     onGetSuggestions={() => { void getSuggestions(); }}
                     suggestionsLoading={generating}
-                  />
-                </div>
-              )}
-
-              {/* AI Suggestions Panel — category-by-category fix flow */}
-              {suggestions.length > 0 && !generating && (
-                <div style={{ marginBottom: 16 }}>
-                  <CategoryFixPanel
-                    onApplyAll={() => { void applySelectedSuggestions(); }}
+                    hasSuggestions={suggestions.length > 0 && !generating}
+                    onApplyAllSuggestions={() => { void applySelectedSuggestions(); }}
                     applyBusy={generating}
                   />
                 </div>
               )}
+
+              {/* AI Suggestions Panel lives inside DetailedRatingsView → ✨ Fixes tab */}
 
               {/* Legacy flat criteria breakdown (old schema fallback) */}
               {ratings && !isDetailedRatings(ratings) && ratings.criteria.length > 0 && (
