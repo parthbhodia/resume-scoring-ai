@@ -37,17 +37,37 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * Strict match: only highlight a PDF text span if it clearly corresponds to
+ * a full accepted-suggestion bullet. Avoids false positives on common phrases.
+ *
+ * Strategy:
+ *   1. The PDF text layer splits bullets into multiple short spans. We collect
+ *      consecutive spans into a rolling buffer (see customTextRenderer) and
+ *      compare the BUFFER (not each tiny span alone) against the suggestion.
+ *   2. A span only matches if it or the rolling prefix is ≥ 30 chars AND
+ *      is a substantial substring of the suggestion (≥ 60% overlap by length).
+ */
 function spanMatchesSuggestion(spanNorm: string, bulletNorm: string): boolean {
-  if (bulletNorm.length < 6 || spanNorm.length < 4) return false;
+  // Both must be substantial — skip section headers, short labels, dates
+  if (bulletNorm.length < 30 || spanNorm.length < 20) return false;
+
+  // Exact match
   if (spanNorm === bulletNorm) return true;
-  if (bulletNorm.includes(spanNorm) && spanNorm.length >= 8) return true;
-  if (spanNorm.length >= 10 && bulletNorm.startsWith(spanNorm.slice(0, Math.min(30, spanNorm.length)))) return true;
-  if (bulletNorm.length >= 10 && spanNorm.includes(bulletNorm.slice(0, Math.min(45, bulletNorm.length)))) return true;
-  if (spanNorm.length >= 12 && bulletNorm.length >= 12) {
-    const a = spanNorm.slice(0, 40);
-    const b = bulletNorm.slice(0, 40);
-    if (a.startsWith(b.slice(0, 14)) || b.startsWith(a.slice(0, 14))) return true;
+
+  // Span is fully contained in the suggestion (long span ≥ 30 chars)
+  if (spanNorm.length >= 30 && bulletNorm.includes(spanNorm)) return true;
+
+  // Suggestion is fully contained in the span (means span accumulated a full bullet)
+  if (bulletNorm.length >= 30 && spanNorm.includes(bulletNorm)) return true;
+
+  // Both are long: require the first 40 chars to match (same opening phrase)
+  if (spanNorm.length >= 40 && bulletNorm.length >= 40) {
+    const sPfx = spanNorm.slice(0, 40);
+    const bPfx = bulletNorm.slice(0, 40);
+    if (sPfx === bPfx) return true;
   }
+
   return false;
 }
 
@@ -91,22 +111,57 @@ export default function TailoredPdfPreview({
     return rows;
   }, [suggestions, acceptedIds]);
 
+  // Rolling buffer: accumulate spans within the same page to build full bullet text
+  const spanBufferRef = useRef<string>("");
+
   const customTextRenderer = useCallback<CustomTextRenderer>(
     ({ str }) => {
+      if (highlightRows.length === 0) return escapeHtml(str);
       const trimmed = str.trim();
-      if (trimmed.length < 6 || highlightRows.length === 0) return escapeHtml(str);
-      const spanNorm = normalizeForMatch(trimmed).toLowerCase();
-      const match = highlightRows.find((r) => spanMatchesSuggestion(spanNorm, r.norm));
+      if (!trimmed) return escapeHtml(str);
+
+      // Accumulate into rolling buffer (reset on very long runs to avoid cross-bullet pollution)
+      spanBufferRef.current = (spanBufferRef.current + " " + trimmed).trim().slice(-300);
+      const bufNorm = normalizeForMatch(spanBufferRef.current).toLowerCase();
+      const singleNorm = normalizeForMatch(trimmed).toLowerCase();
+
+      const match = highlightRows.find((r) =>
+        spanMatchesSuggestion(singleNorm, r.norm) ||
+        spanMatchesSuggestion(bufNorm, r.norm)
+      );
       if (!match) return escapeHtml(str);
       // Green highlight = new/improved text now in the compiled PDF
-      return `<mark style="background:rgba(52,211,153,0.35);border-radius:3px;padding:1px 0;outline:1.5px solid rgba(34,197,94,0.5);outline-offset:1px;">${escapeHtml(str)}</mark>`;
+      return `<mark style="background:rgba(52,211,153,0.4);border-radius:2px;padding:0 1px;">${escapeHtml(str)}</mark>`;
     },
     [highlightRows],
   );
 
   const pageRenderWidth = pageWidth > 0 ? Math.min(pageWidth - 28, 720) : 600;
 
+  // Reset buffer when diff mode toggles or accepted set changes
+  useEffect(() => { spanBufferRef.current = ""; }, [showDiff, highlightRows]);
+
   return (
+    <>
+    {/* When diff is on: make text-layer spans invisible (transparent text, keep selection)
+        EXCEPT the ones we've wrapped in <mark> — those show the green background only. */}
+    {showDiff && (
+      <style>{`
+        .rb-pdf-preview-scroll .react-pdf__Page__textContent span {
+          color: transparent !important;
+          -webkit-text-fill-color: transparent !important;
+        }
+        .rb-pdf-preview-scroll .react-pdf__Page__textContent mark {
+          color: transparent !important;
+          -webkit-text-fill-color: transparent !important;
+          background: rgba(52,211,153,0.38) !important;
+          border-radius: 2px;
+          padding: 0 1px;
+          outline: 1.5px solid rgba(34,197,94,0.45);
+          outline-offset: 1px;
+        }
+      `}</style>
+    )}
     <div
       style={{
         display: "flex",
@@ -271,5 +326,6 @@ export default function TailoredPdfPreview({
         )}
       </div>
     </div>
+    </>
   );
 }
