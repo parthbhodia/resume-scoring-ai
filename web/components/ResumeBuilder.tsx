@@ -51,6 +51,9 @@ import {
 
 import ScoreRing    from "./ScoreRing";
 import MatchBreakdownCards from "./MatchBreakdownCards";
+import DetailedRatingsView from "./DetailedRatingsView";
+import { isDetailedRatings } from "@/lib/types";
+import type { DetailedRatingItem } from "@/lib/types";
 import DiffView     from "./DiffView";
 import SourcesPanel from "./SourcesPanel";
 import AtsPanel, { normalizeAtsResult, type AtsResult } from "./AtsPanel";
@@ -2820,8 +2823,20 @@ export default function ResumeBuilder({
                 </div>
               )}
 
-              {/* JD requirement breakdown (was under Analysis tab) */}
-              {ratings && ratings.criteria.length > 0 && (
+              {/* Detailed bifurcated ratings (new schema) */}
+              {ratings && isDetailedRatings(ratings) && (
+                <div style={{ marginBottom: 16 }}>
+                  <DetailedRatingsView
+                    ratings={ratings}
+                    onFixGap={(item: DetailedRatingItem) => {
+                      void handleFixGap({ name: item.text, notes: item.analysis ?? "" });
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Legacy flat criteria breakdown (old schema fallback) */}
+              {ratings && !isDetailedRatings(ratings) && ratings.criteria.length > 0 && (
                 <div
                   style={{
                     marginBottom: 16,

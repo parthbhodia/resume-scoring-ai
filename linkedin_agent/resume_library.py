@@ -2804,41 +2804,60 @@ def _rating_explain_model_chain() -> List[str]:
 def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Optional[Dict]:
     # ``client`` may be ``None`` when only xAI is configured — Gemini slots in the chain are skipped.
     prompt = (
-        "You are a coach giving the candidate an honest, direct read on their fit for a job. Write the assessment in "
-        "SECOND-PERSON voice — address the candidate directly with 'you', 'your', 'you have', 'you built'. Never refer to "
-        "'this candidate' or 'the candidate', and never use first-person 'I'/'my'. Speak TO the candidate, not about them. "
-        "Be specific, direct, and reference actual companies, projects, and metrics from the resume.\n\n"
-        "ABSOLUTE NO-HALLUCINATION RULE — violating this makes your output useless:\n"
-        "• You may ONLY cite employers, companies, institutions, metrics, numbers, technologies, and projects that appear VERBATIM in the RESUME BODY below.\n"
-        "• Do NOT invent, infer, or borrow facts from your training data, from the job description, or from typical candidates for this role.\n"
-        "• Before writing each bullet or note: quote the exact phrase from the resume you are relying on (mentally). If you cannot find it verbatim, DO NOT write that bullet.\n"
-        "• Never mention employers like 'Booz Allen', 'Google', 'Meta', etc. unless they appear in the resume. Never invent metrics like '1TB', '100M records', '5-person team' unless present.\n"
-        "• If the resume lacks evidence for a JD requirement, say so honestly — do not fabricate evidence to fill the gap.\n\n"
-        "Return ONLY valid JSON (no markdown, no fences, no explanation):\n"
+        "You are a coach giving the candidate an honest, direct read on their fit for a job. "
+        "Write ALL assessments in SECOND-PERSON voice — address the candidate directly with 'you', 'your', 'you have', 'you built'. "
+        "Never refer to 'this candidate' or 'the candidate'. Be specific and reference actual companies, projects, and metrics from the resume.\n\n"
+        "ABSOLUTE NO-HALLUCINATION RULE:\n"
+        "• Only cite employers, companies, institutions, metrics, numbers, technologies, and projects that appear VERBATIM in the RESUME BODY.\n"
+        "• Do NOT invent or infer facts. If the resume lacks evidence for a JD requirement, say so honestly.\n\n"
+        "Return ONLY valid JSON (no markdown, no fences):\n"
         "{\n"
-        '  "match_score": <overall fit 0-100>,\n'
-        '  "criteria": [\n'
-        '    {\n'
-        '      "name": "<specific skill or requirement from JD>",\n'
-        '      "weight": "<High if the JD lists it as required/core/must-have OR the company primary domain depends on it; Medium if clearly preferred but not blocking; Low only if explicitly optional or nice-to-have>",\n'
-        '      "score": <1-10>,\n'
-        '      "notes": "<honest note in SECOND PERSON, e.g. \'You built X at Y\' — quoting actual experience from the resume>"\n'
-        '    }\n'
-        "  ],\n"
-        '  "whats_working": ["<second-person strength: \'You have...\', \'You built...\', \'Your experience with...\'>"],\n'
-        '  "gaps": ["<second-person gap + how to address it: \'You lack X, but you can discuss Y to bridge this\'>"],\n'
-        '  "verdict": "<2-3 sentence honest bottom line in second person: \'You have a strong foundation in X. While you lack Y, your experience with Z should make this a worthwhile pursuit.\'>"\n'
+        '  "overall_score": <honest overall fit 0-100>,\n'
+        '  "job_title": {\n'
+        '    "matched": <true if resume title/role closely matches JD title>,\n'
+        '    "jd_title": "<job title from JD>",\n'
+        '    "resume_title": "<closest title or role from resume>",\n'
+        '    "score": <0-100>,\n'
+        '    "detail": "<1 sentence honest assessment>"\n'
+        '  },\n'
+        '  "qualifications": {\n'
+        '    "score": <0-100, percent of qualifications met>,\n'
+        '    "covered": [\n'
+        '      {"text": "<qualification from JD>", "context": "<exact evidence from resume, second person, cite employer/project>"}\n'
+        '    ],\n'
+        '    "missing": [\n'
+        '      {"text": "<qualification from JD>", "analysis": "<honest gap explanation + how to bridge using existing experience, second person>"}\n'
+        '    ]\n'
+        '  },\n'
+        '  "responsibilities": {\n'
+        '    "score": <0-100, percent of responsibilities covered>,\n'
+        '    "covered": [\n'
+        '      {"text": "<responsibility from JD>", "context": "<evidence from resume, second person>"}\n'
+        '    ],\n'
+        '    "missing": [\n'
+        '      {"text": "<responsibility from JD>", "analysis": "<why it\'s missing + bridge suggestion, second person>"}\n'
+        '    ]\n'
+        '  },\n'
+        '  "keywords": {\n'
+        '    "found": ["<keyword or skill found in resume>"],\n'
+        '    "missing": ["<important keyword from JD not found in resume>"]\n'
+        '  },\n'
+        '  "whats_working": ["<second-person strength: You have..., You built..., Your experience with...>"],\n'
+        '  "gaps": ["<second-person gap + concrete bridge plan>"],\n'
+        '  "verdict": "<2-3 sentence honest bottom line in second person>"\n'
         "}\n\n"
         "Rules:\n"
-        "- 6-10 criteria covering the most important JD requirements (mix of required and nice-to-have)\n"
-        "- Weight rule: if your notes say 'core', 'primary', 'critical', 'required', or 'must' the weight MUST be High — never Low\n"
-        "- Notes must name actual companies, projects, or metrics from the RESUME BODY — never generic, never invented\n"
-        "- gaps must include a concrete second-person plan (e.g. 'You haven't used LangGraph, but your dual-LLM pipeline at VibeIMG shows you can quickly pick up agentic frameworks')\n"
-        "- match_score must be honest — do not inflate it\n"
-        "- whats_working: 3-5 bullets, gaps: 2-4 bullets\n"
-        "- EVERY string in whats_working, gaps, and verdict must use second-person 'you'/'your' — no first-person 'I'/'my', no third-person 'this candidate' or 'the candidate' anywhere\n\n"
+        "- Extract ALL responsibilities from the JD (typically 5-12 items — use the full list, not a sample)\n"
+        "- Extract ALL qualifications (required skills, years of experience, education, certifications)\n"
+        "- keywords.found: list every JD skill/tool/framework found in the resume\n"
+        "- keywords.missing: list important JD skills/tools not found in the resume\n"
+        "- For covered items: cite the specific employer, project, or metric from the resume verbatim\n"
+        "- For missing items: be honest but always suggest a concrete bridge using existing resume content\n"
+        "- overall_score must be honest — do not inflate\n"
+        "- whats_working: 3-5 bullets; gaps: 2-4 bullets\n"
+        "- Everything in second person ('you'/'your') — no third person\n\n"
         f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
-        f"RESUME BODY (LaTeX — ignore formatting commands, read only the content. This is the ONLY source of truth about the candidate's experience):\n{latex_body[:6000]}"
+        f"RESUME BODY (LaTeX — ignore formatting commands, read only content):\n{latex_body[:6000]}"
     )
     reasoning_chain = _rating_explain_model_chain()
 

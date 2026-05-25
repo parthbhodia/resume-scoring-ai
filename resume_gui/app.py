@@ -2143,13 +2143,40 @@ async def api_generate_stream(request: Request):
                 except Exception:
                     llm_ratings = None
                 if llm_ratings and isinstance(llm_ratings, dict):
-                    ratings_payload = {
-                        "match_score": llm_ratings.get("match_score", 0),
-                        "criteria": (llm_ratings.get("criteria") or [])[:12],
-                        "whats_working": llm_ratings.get("whats_working") or [],
-                        "gaps": llm_ratings.get("gaps") or [],
-                        "verdict": llm_ratings.get("verdict", ""),
-                    }
+                    if "qualifications" in llm_ratings or "responsibilities" in llm_ratings:
+                        # New detailed schema
+                        kw = llm_ratings.get("keywords") or {}
+                        found_kw = kw.get("found") or [] if isinstance(kw, dict) else []
+                        missing_kw = kw.get("missing") or [] if isinstance(kw, dict) else []
+                        overall = int(llm_ratings.get("overall_score") or llm_ratings.get("match_score") or 0)
+                        ratings_payload = {
+                            # New schema fields
+                            "overall_score": overall,
+                            "job_title": llm_ratings.get("job_title") or {},
+                            "qualifications": llm_ratings.get("qualifications") or {"score": 0, "covered": [], "missing": []},
+                            "responsibilities": llm_ratings.get("responsibilities") or {"score": 0, "covered": [], "missing": []},
+                            "keywords": {
+                                "found": found_kw,
+                                "missing": missing_kw,
+                                "found_count": len(found_kw),
+                                "total_count": len(found_kw) + len(missing_kw),
+                            },
+                            "whats_working": llm_ratings.get("whats_working") or [],
+                            "gaps": llm_ratings.get("gaps") or [],
+                            "verdict": llm_ratings.get("verdict", ""),
+                            # Backwards compat: keep match_score and criteria so old consumers don't break
+                            "match_score": overall,
+                            "criteria": [],
+                        }
+                    else:
+                        # Old schema (fallback if model returns old format)
+                        ratings_payload = {
+                            "match_score": llm_ratings.get("match_score", 0),
+                            "criteria": (llm_ratings.get("criteria") or [])[:12],
+                            "whats_working": llm_ratings.get("whats_working") or [],
+                            "gaps": llm_ratings.get("gaps") or [],
+                            "verdict": llm_ratings.get("verdict", ""),
+                        }
                 else:
                     # Fallback to ATS-based scoring.
                     ats = ats_check(

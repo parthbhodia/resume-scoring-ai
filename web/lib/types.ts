@@ -5,12 +5,58 @@ export interface Criterion {
   notes: string;
 }
 
+// ── Detailed ratings (new bifurcated schema) ──────────────────────────────
+
+export interface DetailedRatingItem {
+  text: string;
+  context?: string;   // for covered items — evidence from resume
+  analysis?: string;  // for missing items — gap + bridge suggestion
+}
+
+export interface DetailedCategory {
+  score: number;
+  covered: DetailedRatingItem[];
+  missing: DetailedRatingItem[];
+}
+
+export interface JobTitleRating {
+  matched: boolean;
+  jd_title: string;
+  resume_title: string;
+  score: number;
+  detail: string;
+}
+
+export interface KeywordsRating {
+  found: string[];
+  missing: string[];
+  found_count: number;
+  total_count: number;
+}
+
 export interface RatingsData {
+  // Legacy fields (always present for backwards compat)
   match_score: number;
   criteria: Criterion[];
   whats_working: string[];
   gaps: string[];
   verdict: string;
+  // New detailed fields (present when using new scoring schema)
+  overall_score?: number;
+  job_title?: JobTitleRating;
+  qualifications?: DetailedCategory;
+  responsibilities?: DetailedCategory;
+  keywords?: KeywordsRating;
+}
+
+export function isDetailedRatings(r: RatingsData): r is RatingsData & {
+  overall_score: number;
+  job_title: JobTitleRating;
+  qualifications: DetailedCategory;
+  responsibilities: DetailedCategory;
+  keywords: KeywordsRating;
+} {
+  return !!(r.qualifications && r.responsibilities && r.keywords && r.job_title);
 }
 
 export interface DiffLine {
