@@ -2643,6 +2643,11 @@ export default function ResumeBuilder({
                     onFixGap={(item: DetailedRatingItem) => {
                       void handleFixGap({ name: item.text, notes: item.analysis ?? "" });
                     }}
+                    fixingGapName={gapFixLoading}
+                    gapFixPanel={gapFixPanel}
+                    gapFixError={gapFixError}
+                    onApplyFix={applyGapFix}
+                    onDismissFix={() => setGapFixPanel(null)}
                     keyGap={suggestSummary || undefined}
                     strategicTips={strategicTips.length > 0 ? strategicTips : undefined}
                     interviewQuestions={interviewQuestions.length > 0 ? interviewQuestions : undefined}

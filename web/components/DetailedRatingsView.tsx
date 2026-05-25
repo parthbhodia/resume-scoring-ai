@@ -50,9 +50,19 @@ const SECTION_DESC: Record<Tab, string> = {
   interview:        "Coaching tips on how to position your story for this role in interviews.",
 };
 
+type GapFixSuggestion = {
+  id: string; section: string; original: string; suggested: string; reason: string; priority: string;
+};
+type GapFixPanel = { gapName: string; gapNotes: string; suggestions: GapFixSuggestion[] };
+
 export default function DetailedRatingsView({
   ratings,
   onFixGap,
+  fixingGapName,
+  gapFixPanel,
+  gapFixError,
+  onApplyFix,
+  onDismissFix,
   keyGap,
   strategicTips,
   interviewQuestions,
@@ -61,6 +71,11 @@ export default function DetailedRatingsView({
 }: {
   ratings: RatingsData;
   onFixGap?: (item: DetailedRatingItem) => void;
+  fixingGapName?: string | null;
+  gapFixPanel?: GapFixPanel | null;
+  gapFixError?: string | null;
+  onApplyFix?: (s: GapFixSuggestion) => void;
+  onDismissFix?: () => void;
   keyGap?: string;
   strategicTips?: string[];
   interviewQuestions?: string[];
@@ -479,6 +494,11 @@ export default function DetailedRatingsView({
               category={qualifications}
               label="Qualifications"
               onFixGap={onFixGap}
+              fixingGapName={fixingGapName}
+              gapFixPanel={gapFixPanel}
+              gapFixError={gapFixError}
+              onApplyFix={onApplyFix}
+              onDismissFix={onDismissFix}
             />
           )}
 
@@ -487,6 +507,11 @@ export default function DetailedRatingsView({
               category={responsibilities}
               label="Responsibilities"
               onFixGap={onFixGap}
+              fixingGapName={fixingGapName}
+              gapFixPanel={gapFixPanel}
+              gapFixError={gapFixError}
+              onApplyFix={onApplyFix}
+              onDismissFix={onDismissFix}
             />
           )}
 
