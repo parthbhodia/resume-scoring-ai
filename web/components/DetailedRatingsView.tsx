@@ -83,7 +83,7 @@ export default function DetailedRatingsView({
   fixingGapName?: string | null;
   gapFixPanel?: GapFixPanel | null;
   gapFixError?: string | null;
-  onApplyFix?: (s: GapFixSuggestion) => void;
+  onApplyFix?: (s: GapFixSuggestion) => void | Promise<void>;
   onDismissFix?: () => void;
   keyGap?: string;
   strategicTips?: string[];

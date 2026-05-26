@@ -518,6 +518,8 @@ export default function ResumeBuilder({
   type GapFixSuggestion = { id: string; section: string; original: string; suggested: string; reason: string; priority: string };
   const [gapFixPanel, setGapFixPanel] = useState<{ gapName: string; gapNotes: string; suggestions: GapFixSuggestion[] } | null>(null);
   const [gapFixError, setGapFixError] = useState<string | null>(null);
+  /** True while a gap-fix suggestion is being applied + PDF compiled + rescored. */
+  const [gapApplyBusy, setGapApplyBusy] = useState(false);
 
   // Phase 3 — Gap status tracking: which gap names have been addressed
   const [addressedGaps, setAddressedGaps] = useState<Set<string>>(new Set());
@@ -1587,23 +1589,146 @@ export default function ResumeBuilder({
     }
   }, [candidateProfile, jd]);
 
-  /** Accept a gap-fix suggestion: queue it into the suggestions store (user reviews + applies via CategoryFixPanel). */
-  const applyGapFix = useCallback((s: { id: string; section: string; original: string; suggested: string; reason: string; priority: string }) => {
+  /**
+   * Apply a gap-fix suggestion immediately:
+   *  1. Patch the resume via /api/apply-suggestions (safe fuzzy matching, no raw LaTeX writes)
+   *  2. Update PDF preview URL
+   *  3. Optimistically remove the gap from the ratings missing list
+   *  4. Rescore via /api/ats-check so the match score reflects the change
+   *
+   * Falls back to queuing (no API call) when no folder exists yet.
+   */
+  const applyGapFix = useCallback(async (s: { id: string; section: string; original: string; suggested: string; reason: string; priority: string }) => {
     const fixId = `gf_${Date.now()}_${s.id}`;
     const asSuggestion = { ...s, id: fixId, priority: (s.priority ?? "high") as "high" | "medium" | "low", category: "strengthen_impact" as const };
-    const existing = suggestions ?? [];
-    hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips, interviewQuestions);
-    acceptSuggestion(fixId);
-    // Mark the gap as addressed
-    if (gapFixPanel?.gapName) {
-      setAddressedGaps(prev => new Set([...prev, gapFixPanel.gapName]));
-    }
+    const gapName = gapFixPanel?.gapName ?? "";
+
+    // Mark gap addressed and close panel immediately for responsive feel
+    if (gapName) setAddressedGaps(prev => new Set([...prev, gapName]));
     setGapFixPanel(null);
-    // ⚠️ Do NOT call generate() here — applying gap fixes via raw string replacement on LaTeX
-    // can corrupt bullets if the original text doesn't match exactly, causing score drops and
-    // missing content. The fix is queued in the suggestions store; user applies via
-    // "Apply Selected" in CategoryFixPanel which uses the safe /api/apply-suggestions endpoint.
-  }, [suggestions, suggestSummary, strategicTips, interviewQuestions, hydrateSuggestions, acceptSuggestion, gapFixPanel]);
+
+    const folder = result?.folder;
+    if (!folder) {
+      // No compiled resume yet — just queue for later apply
+      const existing = suggestions ?? [];
+      hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips, interviewQuestions);
+      acceptSuggestion(fixId);
+      return;
+    }
+
+    // Immediately apply + compile + rescore
+    setGapApplyBusy(true);
+    try {
+      const resp = await fetch(apiUrl("/api/apply-suggestions"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          folder,
+          accepted_suggestions: [{
+            id: fixId,
+            section: s.section,
+            original: s.original,
+            suggested: s.suggested,
+            reason: s.reason,
+            category: "strengthen_impact",
+          }],
+          user_id: user?.id ?? null,
+        }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json() as { pdf_url?: string | null };
+        // Update PDF preview with newly compiled file
+        if (data.pdf_url) {
+          setResult(prev => prev ? { ...prev, pdfUrl: data.pdf_url! } : prev);
+        }
+      }
+
+      // Optimistic ratings update — move the gap out of its missing list
+      if (gapName) {
+        setResult(prev => {
+          if (!prev?.ratings || !isDetailedRatings(prev.ratings)) return prev;
+          const r = prev.ratings;
+          // Try qualifications
+          if (r.qualifications.missing.some(i => i.text === gapName)) {
+            const item = r.qualifications.missing.find(i => i.text === gapName)!;
+            return {
+              ...prev,
+              ratings: {
+                ...r,
+                qualifications: {
+                  ...r.qualifications,
+                  missing: r.qualifications.missing.filter(i => i.text !== gapName),
+                  covered: [...r.qualifications.covered, { text: item.text, context: "Applied via AI fix" }],
+                },
+              },
+            };
+          }
+          // Try responsibilities
+          if (r.responsibilities.missing.some(i => i.text === gapName)) {
+            const item = r.responsibilities.missing.find(i => i.text === gapName)!;
+            return {
+              ...prev,
+              ratings: {
+                ...r,
+                responsibilities: {
+                  ...r.responsibilities,
+                  missing: r.responsibilities.missing.filter(i => i.text !== gapName),
+                  covered: [...r.responsibilities.covered, { text: item.text, context: "Applied via AI fix" }],
+                },
+              },
+            };
+          }
+          // Try direct skill keyword
+          const kw = r.keywords;
+          if (kw.direct_skills?.missing?.includes(gapName)) {
+            return {
+              ...prev,
+              ratings: {
+                ...r,
+                keywords: {
+                  ...kw,
+                  direct_skills: {
+                    found: [...(kw.direct_skills?.found ?? []), gapName],
+                    missing: (kw.direct_skills?.missing ?? []).filter(k => k !== gapName),
+                  },
+                  found_count: kw.found_count + 1,
+                },
+              },
+            };
+          }
+          // Try contextual keyword
+          if (kw.contextual?.missing?.includes(gapName)) {
+            return {
+              ...prev,
+              ratings: {
+                ...r,
+                keywords: {
+                  ...kw,
+                  contextual: {
+                    found: [...(kw.contextual?.found ?? []), { keyword: gapName, count: 1 }],
+                    missing: (kw.contextual?.missing ?? []).filter(k => k !== gapName),
+                  },
+                  found_count: kw.found_count + 1,
+                },
+              },
+            };
+          }
+          return prev;
+        });
+      }
+
+      // Rescore to update the match score circle
+      if (jd.trim()) {
+        await runAtsCheck(folder, true);
+      }
+    } catch {
+      // Best effort — don't surface apply errors to avoid interrupting flow
+    } finally {
+      setGapApplyBusy(false);
+    }
+  }, [result, suggestions, suggestSummary, strategicTips, interviewQuestions,
+      hydrateSuggestions, acceptSuggestion, gapFixPanel, user?.id, jd, runAtsCheck]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -2756,6 +2881,17 @@ export default function ResumeBuilder({
                 }
               `}</style>
               <div className="rb-results-body">
+              {/* ── Gap-fix apply spinner — shown while a single fix is being compiled + scored ── */}
+              {gapApplyBusy && (
+                <div style={{ marginBottom: 12, padding: "10px 16px", borderRadius: 10, border: "1px solid rgba(99,102,241,0.3)", background: "rgba(99,102,241,0.06)", display: "flex", alignItems: "center", gap: 10 }}>
+                  <svg width="14" height="14" viewBox="0 0 18 18" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden>
+                    <circle cx="9" cy="9" r="7" stroke="rgba(99,102,241,0.3)" strokeWidth="2.5"/>
+                    <path d="M9 2a7 7 0 017 7" stroke="#818cf8" strokeWidth="2.5" strokeLinecap="round"/>
+                  </svg>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#818cf8" }}>Applying fix — updating PDF and rescoring…</span>
+                </div>
+              )}
+
               {/* ── Apply feedback banner — shown above phase3 for visibility (only while busy) ── */}
               {(applyBusy || applyFeedback) && (
                 <div

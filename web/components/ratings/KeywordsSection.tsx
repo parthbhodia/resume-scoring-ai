@@ -24,7 +24,7 @@ type Props = {
   fixingKeyword?: string | null;
   gapFixPanel?: GapFixPanel | null;
   gapFixError?: string | null;
-  onApplyFix?: (s: GapFixSuggestion) => void;
+  onApplyFix?: (s: GapFixSuggestion) => void | Promise<void>;
   onDismissFix?: () => void;
 };
 
