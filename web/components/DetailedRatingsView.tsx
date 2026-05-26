@@ -61,6 +61,7 @@ type GapFixPanel = { gapName: string; gapNotes: string; suggestions: GapFixSugge
 export default function DetailedRatingsView({
   ratings,
   onFixGap,
+  onFixKeyword,
   fixingGapName,
   gapFixPanel,
   gapFixError,
@@ -77,6 +78,8 @@ export default function DetailedRatingsView({
 }: {
   ratings: RatingsData;
   onFixGap?: (item: DetailedRatingItem) => void;
+  /** Called when user clicks "Fix with AI" on a missing keyword */
+  onFixKeyword?: (keyword: string) => void;
   fixingGapName?: string | null;
   gapFixPanel?: GapFixPanel | null;
   gapFixError?: string | null;
@@ -410,7 +413,17 @@ export default function DetailedRatingsView({
             />
           )}
 
-          {activeTab === "keywords" && <KeywordsSection keywords={keywords} />}
+          {activeTab === "keywords" && (
+            <KeywordsSection
+              keywords={keywords}
+              onFixKeyword={onFixKeyword}
+              fixingKeyword={fixingGapName}
+              gapFixPanel={gapFixPanel}
+              gapFixError={gapFixError}
+              onApplyFix={onApplyFix}
+              onDismissFix={onDismissFix}
+            />
+          )}
 
           {activeTab === "interview" && (
             <InterviewSection

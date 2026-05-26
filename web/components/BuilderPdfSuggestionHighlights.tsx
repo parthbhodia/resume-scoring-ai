@@ -67,6 +67,8 @@ function spanMatchesSuggestion(spanNorm: string, bulletNorm: string): boolean {
 
 interface Props {
   pdfBlobUrl: string;
+  /** Separate URL used for the "Download PDF" link — when omitted falls back to pdfBlobUrl. */
+  downloadUrl?: string;
   filename?: string;
   /** Override the max height of the viewer. Pass "100%" to fill a flex parent. */
   maxHeight?: number | string;
@@ -79,6 +81,7 @@ interface Props {
 
 export default function BuilderPdfSuggestionHighlights({
   pdfBlobUrl,
+  downloadUrl,
   filename = "resume.pdf",
   maxHeight = 560,
   suggestions,
@@ -210,8 +213,10 @@ export default function BuilderPdfSuggestionHighlights({
           Tinted spans match suggestions — click a highlight to focus the card.
         </span>
         <a
-          href={pdfBlobUrl}
+          href={downloadUrl ?? pdfBlobUrl}
           download={filename}
+          target={downloadUrl ? "_blank" : undefined}
+          rel={downloadUrl ? "noopener noreferrer" : undefined}
           style={{
             fontSize: 11,
             fontWeight: 600,
@@ -220,7 +225,7 @@ export default function BuilderPdfSuggestionHighlights({
             whiteSpace: "nowrap",
           }}
         >
-          Download PDF
+          {downloadUrl ? "⬇ Tailored PDF" : "Download PDF"}
         </a>
       </div>
       <div

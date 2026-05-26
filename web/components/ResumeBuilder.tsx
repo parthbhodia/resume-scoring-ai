@@ -2798,14 +2798,33 @@ export default function ResumeBuilder({
                         <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
                           {applyFeedback.rescoring
                             ? "Updating your match score…"
-                            : "PDF and score updated. Review the preview on the right. →"}
+                            : "Score updated. Section counts refresh after re-analysis."}
                         </div>
                       </div>
-                      {applyFeedback.rescoring && (
+                      {applyFeedback.rescoring ? (
                         <svg width="14" height="14" viewBox="0 0 18 18" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden>
                           <circle cx="9" cy="9" r="7" stroke="rgba(52,211,153,0.3)" strokeWidth="2.5"/>
                           <path d="M9 2a7 7 0 017 7" stroke="var(--green,#34d399)" strokeWidth="2.5" strokeLinecap="round"/>
                         </svg>
+                      ) : result?.folder && (
+                        <button
+                          type="button"
+                          disabled={atsLoading || generating}
+                          onClick={() => { setApplyFeedback(null); void runAtsCheck(result.folder!, true); }}
+                          title="Re-run full analysis to refresh Qualifications, Keywords, and Responsibilities counts"
+                          style={{
+                            display: "inline-flex", alignItems: "center", gap: 5,
+                            padding: "5px 12px", borderRadius: 7,
+                            border: "1px solid rgba(52,211,153,0.4)",
+                            background: "rgba(52,211,153,0.08)",
+                            color: "var(--green, #34d399)",
+                            fontSize: 11.5, fontWeight: 600, fontFamily: "inherit",
+                            cursor: atsLoading || generating ? "not-allowed" : "pointer",
+                            whiteSpace: "nowrap", flexShrink: 0,
+                          }}
+                        >
+                          ↺ Re-analyze
+                        </button>
                       )}
                       <button
                         type="button"
@@ -2827,6 +2846,12 @@ export default function ResumeBuilder({
                     ratings={ratings}
                     onFixGap={(item: DetailedRatingItem) => {
                       void handleFixGap({ name: item.text, notes: item.analysis ?? "" });
+                    }}
+                    onFixKeyword={(kw) => {
+                      void handleFixGap({
+                        name: kw,
+                        notes: `This keyword is missing from the resume. Rewrite one of the most relevant existing bullets to naturally incorporate "${kw}" without fabricating experience.`,
+                      });
                     }}
                     fixingGapName={gapFixLoading}
                     gapFixPanel={gapFixPanel}
@@ -3036,6 +3061,7 @@ export default function ResumeBuilder({
                       <BuilderPdfSuggestionHighlights
                         key={`results-pdf-${sourcePdfBlobUrl ?? result.pdfUrl}`}
                         pdfBlobUrl={sourcePdfBlobUrl ?? result.pdfUrl!}
+                        downloadUrl={result.pdfUrl ?? undefined}
                         filename={`${resumeDownloadStem}.pdf`}
                         maxHeight="100%"
                         suggestions={suggestions.map(s => ({ id: s.id, original: s.original, priority: s.priority }))}
