@@ -1651,6 +1651,26 @@ def _audit_pdflatex_log(log_text: str, *, max_hits: int = 10) -> List[str]:
     return [ln.strip() for ln in log_text.splitlines() if _OVERFULL_HBOX_RE.search(ln)][:max_hits]
 
 
+def _extract_pdflatex_error(stdout: str, stderr: str) -> str:
+    """Return the most meaningful error lines from pdflatex output.
+
+    Prefers lines starting with '!' (the actual LaTeX error), plus a
+    couple of context lines, so the UI shows the real problem rather than
+    just the version banner.  Falls back to the last 800 chars when no
+    '!' lines are found.
+    """
+    text = stdout or ""
+    lines = text.splitlines()
+    error_ctx: list[str] = []
+    for i, ln in enumerate(lines):
+        if ln.startswith("!"):
+            error_ctx.extend(lines[i:i + 4])  # '!' line + 3 context lines
+    if error_ctx:
+        return "\n".join(error_ctx[:30])
+    # Fallback: tail
+    return (text[-800:] if text else "") or (stderr[-800:] if stderr else "")
+
+
 def _log_pdflatex_quality(proc_stdout: Optional[str], proc_stderr: Optional[str]) -> None:
     blob = (proc_stdout or "") + "\n" + (proc_stderr or "")
     hits = _audit_pdflatex_log(blob)
@@ -2518,10 +2538,10 @@ def recompile_resume_from_tex(folder: str, full_tex: str, layout: Optional[Dict]
             result["compiled"] = True
             logger.info(f"PDF re-compiled  |  {time.time()-t:.1f}s")
         else:
-            tail = (proc.stdout[-800:] if proc.stdout else "") or (proc.stderr[-800:] if proc.stderr else "")
+            tail = _extract_pdflatex_error(proc.stdout or "", proc.stderr or "")
             result["compiled"]      = False
             result["compile_error"] = tail or f"exit={proc.returncode}"
-            logger.warning(f"Re-compile FAILED  |  exit={proc.returncode}\npdflatex tail:\n{tail}")
+            logger.warning(f"Re-compile FAILED  |  exit={proc.returncode}\npdflatex errors:\n{tail}")
     except Exception as exc:
         result["compiled"]      = False
         result["compile_error"] = str(exc)
@@ -3258,8 +3278,8 @@ def generate_latex_resume(
                 logger.info(f"PDF compiled  |  {time.time() - t3:.1f}s")
             else:
                 result["compiled"] = False
-                result["compile_error"] = proc.stdout[-500:] if proc.stdout else proc.stderr[-500:]
-                logger.warning(f"PDF compile failed  |  {result['compile_error'][:200]}")
+                result["compile_error"] = _extract_pdflatex_error(proc.stdout or "", proc.stderr or "")
+                logger.warning(f"PDF compile failed  |  {result['compile_error'][:400]}")
         except Exception as exc:
             result["compiled"] = False
             result["compile_error"] = str(exc)
@@ -3804,14 +3824,14 @@ def _save_and_compile(
             else:
                 # Surface the failure — previously this was silently swallowed
                 # into result["compile_error"], which broke the Supabase upload
-                # chain because the "pdf" event never fired. Log the tail so
-                # missing LaTeX packages etc. are debuggable from Railway logs.
-                tail = (proc.stdout[-800:] if proc.stdout else "") or (proc.stderr[-800:] if proc.stderr else "")
+                # chain because the "pdf" event never fired. Log the actual
+                # pdflatex error lines so the root cause is visible.
+                tail = _extract_pdflatex_error(proc.stdout or "", proc.stderr or "")
                 result["compiled"]      = False
                 result["compile_error"] = tail or f"exit={proc.returncode}"
                 logger.warning(
                     f"PDF compile FAILED  |  exit={proc.returncode}  |  tex={tex_path}\n"
-                    f"pdflatex tail:\n{tail}"
+                    f"pdflatex errors:\n{tail}"
                 )
         except Exception as exc:
             result["compiled"]      = False
