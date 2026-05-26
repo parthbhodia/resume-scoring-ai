@@ -5720,6 +5720,11 @@ async def api_apply_suggestions(request: Request):
         logger.warning(f"apply-suggestions: upload_pdf failed: {exc}")
         # Non-fatal — local PDF still available
 
+    # Fall back to the locally-served PDF route if Supabase upload failed
+    # so the frontend always gets a usable URL it can reload the viewer with.
+    if not pdf_url and compiled.get("pdf_path") and os.path.isfile(compiled["pdf_path"]):
+        pdf_url = f"/pdf/{folder}/{Path(compiled['pdf_path']).name}"
+
     # Upload updated .tex too
     try:
         upload_tex(user_id, folder, compiled["tex_path"])

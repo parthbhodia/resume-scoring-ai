@@ -443,6 +443,8 @@ export default function ResumeBuilder({
     rescoring: boolean;
   } | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
+  /** Incremented each time apply-suggestions succeeds — forces PDF viewer remount even if URL is unchanged. */
+  const [applySeq, setApplySeq] = useState(0);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
@@ -1647,10 +1649,11 @@ export default function ResumeBuilder({
 
       if (resp.ok) {
         const data = await resp.json() as { pdf_url?: string | null };
-        // Update PDF preview with newly compiled file
+        // Update PDF preview with newly compiled file — always bump applySeq to force viewer remount
         if (data.pdf_url) {
           setResult(prev => prev ? { ...prev, pdfUrl: data.pdf_url! } : prev);
         }
+        setApplySeq((n) => n + 1);
       }
 
       // Optimistic ratings update — move the gap out of its missing list
@@ -1869,10 +1872,11 @@ export default function ResumeBuilder({
         folder: string;
       };
 
-      // Update PDF preview with patched version
+      // Update PDF preview with patched version — always bump applySeq to force viewer remount
       if (data.pdf_url) {
         setResult((prev) => prev ? { ...prev, pdfUrl: data.pdf_url! } : prev);
       }
+      setApplySeq((n) => n + 1);
 
       // Show success feedback + kick off rescore
       setApplyFeedback({ patchesApplied: data.patches_applied, patchesFailed: data.patches_failed, rescoring: true });
@@ -3231,7 +3235,7 @@ export default function ResumeBuilder({
                   {/* After applyGapFix result.pdfUrl is the freshly compiled tailored PDF — prefer it */}
                   {(result.pdfUrl || sourcePdfBlobUrl) ? (
                       <BuilderPdfSuggestionHighlights
-                        key={`results-pdf-${result.pdfUrl ?? sourcePdfBlobUrl}`}
+                        key={`results-pdf-${applySeq}-${result.pdfUrl ?? sourcePdfBlobUrl}`}
                         pdfBlobUrl={result.pdfUrl ?? sourcePdfBlobUrl!}
                         downloadUrl={result.pdfUrl ?? undefined}
                         filename={`${resumeDownloadStem}.pdf`}

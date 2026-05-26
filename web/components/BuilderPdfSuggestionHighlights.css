@@ -1,7 +1,9 @@
-/* Extra emphasis when a PDF span’s suggestion is selected (card on the right). */
+/* Extra emphasis when a PDF span’s suggestion is selected (card clicked on the left panel). */
 .textLayer span.pdfv-hl-builder--selected {
+  background: rgba(139, 92, 246, 0.45) !important;
   box-shadow:
-    inset 0 0 0 1px rgba(37, 99, 235, 0.55),
-    0 0 0 2px rgba(59, 130, 246, 0.45) !important;
+    inset 0 0 0 2px rgba(139, 92, 246, 0.9),
+    0 0 0 3px rgba(139, 92, 246, 0.35) !important;
   border-radius: 2px;
+  outline: none;
 }

@@ -191,9 +191,14 @@ export default function BuilderPdfSuggestionHighlights({
         ? CSS.escape(selectedSuggestionId)
         : selectedSuggestionId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     try {
-      root.querySelectorAll(`[data-rb-sug-id="${esc}"]`).forEach(el => {
+      const matches = Array.from(root.querySelectorAll(`[data-rb-sug-id="${esc}"]`));
+      matches.forEach(el => {
         el.classList.add("pdfv-hl-builder--selected");
       });
+      // Scroll the first matched span into view so the user sees where it is in the PDF
+      if (matches.length > 0) {
+        matches[0].scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     } catch {
       /* ignore */
     }
