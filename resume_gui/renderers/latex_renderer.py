@@ -10,22 +10,94 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 _BULLET_PREFIX_RE = re.compile(r"^[\s•\-\*·◦▪‣]+\s*")
 
 
-def _latex_escape(value: str) -> str:
+def _latex_escape(value: str) -> str:  # noqa: C901
     text = value or ""
-    # Order: replace `\` first, then `%` (which is LaTeX comment char).
+
+    # -----------------------------------------------------------------------
+    # Step 1 -- Unicode -> pure-ASCII substitutions.
+    # Must happen BEFORE the LaTeX-command substitutions (step 3+) so that
+    # we don't accidentally re-escape the backslashes we introduce later.
+    # -----------------------------------------------------------------------
+
+    # Non-breaking space -> regular space
+    text = text.replace(" ", " ")
+
+    # Dashes: en-dash -> --, em-dash -> ---
+    text = text.replace("–", "--")   # en-dash
+    text = text.replace("—", "---")  # em-dash
+    text = text.replace("‒", "--")   # figure dash
+    text = text.replace("―", "---")  # horizontal bar
+
+    # Smart / curly quotes -> straight ASCII
+    text = text.replace("‘", "'")    # left single quote
+    text = text.replace("’", "'")    # right single quote / apostrophe
+    text = text.replace("‚", ",")    # single low-9 quotation mark
+    text = text.replace("‛", "'")    # single high-reversed quotation
+    text = text.replace("“", "``")   # left double quote
+    text = text.replace("”", "''")   # right double quote
+    text = text.replace("„", ",,")   # double low-9 quotation mark
+
+    # Ellipsis -> three dots
+    text = text.replace("…", "...")
+
+    # Bullet / list markers that might appear outside the bullet prefix
+    for ch in "•·▪‣◦⁃∙":
+        text = text.replace(ch, "")
+
+    # -----------------------------------------------------------------------
+    # Step 2 -- Escape the backslash FIRST (standard LaTeX rule).
+    # Any \ remaining at this point came from the original user text; our
+    # own LaTeX-command \ chars are added in steps 3-5 below, so they
+    # won't be double-escaped.
+    # -----------------------------------------------------------------------
     text = text.replace("\\", "\\textbackslash{} ")
+
+    # -----------------------------------------------------------------------
+    # Step 3 -- Standard LaTeX special characters (ASCII, no curly braces yet).
+    # -----------------------------------------------------------------------
     text = text.replace("%", "\\%")
     text = text.replace("&", "\\&")
     text = text.replace("$", "\\$")
     text = text.replace("#", "\\#")
     text = text.replace("_", "\\_")
+
+    # -----------------------------------------------------------------------
+    # Step 4 -- Escape { and } so any literal braces in the original are safe.
+    # The \command{} sequences we add in step 5 are NEW braces; they won't
+    # be affected because we've already processed all original { } here.
+    # -----------------------------------------------------------------------
     text = text.replace("{", "\\{")
     text = text.replace("}", "\\}")
+
+    # -----------------------------------------------------------------------
+    # Step 5 -- Remaining special characters that expand to \command{} form.
+    # Safe to add now because step 4 has already consumed original braces.
+    # -----------------------------------------------------------------------
     text = text.replace("~", "\\textasciitilde{}")
     text = text.replace("^", "\\textasciicircum{}")
+
+    # Angle brackets
+    text = text.replace("<", "\\textless{}")
+    text = text.replace(">", "\\textgreater{}")
+
+    # Misc symbols LLMs sometimes emit
+    text = text.replace("°", "\\textdegree{}")      # degree
+    text = text.replace("®", "\\textregistered{}")  # registered
+    text = text.replace("™", "\\texttrademark{}")   # trademark
+    text = text.replace("©", "\\textcopyright{}")   # copyright
+
+    # -----------------------------------------------------------------------
+    # Step 6 -- Safety net: drop any remaining non-latin-1 chars.
+    # T1 encoding only covers latin-1 (ISO 8859-1); anything outside it
+    # will cause pdflatex to bail. We replace unknowns with '?' rather than
+    # raising so compilation always succeeds.
+    # -----------------------------------------------------------------------
+    try:
+        text = text.encode("latin-1", errors="replace").decode("latin-1")
+    except Exception:
+        pass
+
     return text
-
-
 def _latex_escape_bullet(value: str) -> str:
     """Escape bullet body text and strip leading •/- so LaTeX \\item does not double-mark."""
     text = _BULLET_PREFIX_RE.sub("", (value or "").strip())
