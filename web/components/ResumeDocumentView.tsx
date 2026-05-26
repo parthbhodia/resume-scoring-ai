@@ -44,7 +44,7 @@ export interface ResumeDocData {
 interface Props {
   doc: ResumeDocData;
   /** Ref to the root div for HTML extraction */
-  containerRef?: React.RefObject<HTMLDivElement>;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
   /** Scale factor for preview (default 1). Use <1 to fit in small panels. */
   scale?: number;
 }

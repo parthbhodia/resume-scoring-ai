@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback, useRef, useEffect, useLayoutEffect, useId, useMemo, type CSSProperties, type ReactNode } from "react";
+import React, { useState, useCallback, useRef, useEffect, useLayoutEffect, useId, useMemo, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -61,6 +61,12 @@ import AtsPanel, { normalizeAtsResult, type AtsResult } from "./AtsPanel";
 
 import ResumePublicLinkSettings from "./ResumePublicLinkSettings";
 import { useAppShellSidebar } from "@/contexts/AppShellSidebarContext";
+import { useHtmlPdfExport } from "@/hooks/useHtmlPdfExport";
+
+const ResumeDocumentView = dynamic(
+  () => import("@/components/ResumeDocumentView"),
+  { ssr: false, loading: () => null },
+);
 
 const TailoredPdfPreview = dynamic(
   () => import("@/components/TailoredPdfPreview"),
@@ -542,6 +548,9 @@ export default function ResumeBuilder({
   const structuredUploadRef = useRef<{ profile: string; structured: StructuredResume } | null>(null);
   /** Object URL for the last uploaded PDF — powers true PDF highlights in suggestions (revoked on replace / unmount). */
   const sourcePdfBlobUrlRef = useRef<string | null>(null);
+  /** Ref to the hidden ResumeDocumentView DOM node — used for HTML→PDF export */
+  const htmlResumeRef = useRef<HTMLDivElement>(null);
+  const { exportPdf: exportHtmlPdf, exporting: htmlPdfExporting } = useHtmlPdfExport();
   /** Base64 data URL of the uploaded PDF — persisted in localStorage so preview survives page refresh. */
   const [uploadedPdfDataUrl, setUploadedPdfDataUrl] = useState<string | null>(
     () => builderSession0?.uploadedPdfDataUrl ?? null,
@@ -2759,7 +2768,33 @@ export default function ResumeBuilder({
                 </div>
                 {/* Header action buttons */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
-                  {result.pdfUrl && (
+                  {/* HTML→PDF download (new Playwright pipeline — WYSIWYG) */}
+                  {structuredUploadRef.current && (
+                    <button
+                      type="button"
+                      disabled={htmlPdfExporting}
+                      onClick={() => {
+                        if (htmlResumeRef.current) {
+                          void exportHtmlPdf(htmlResumeRef.current, `${resumeDownloadStem}.pdf`);
+                        }
+                      }}
+                      title="Download PDF rendered from HTML — WYSIWYG, no LaTeX"
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        padding: "8px 14px", minHeight: 36, borderRadius: "var(--radius)",
+                        background: "var(--accent)", border: "none",
+                        color: "#fff", fontSize: 12, fontWeight: 600,
+                        cursor: htmlPdfExporting ? "wait" : "pointer",
+                        fontFamily: "inherit", whiteSpace: "nowrap",
+                        opacity: htmlPdfExporting ? 0.7 : 1,
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden><path d="M6 1v7M2.5 5l3.5 3.5L9.5 5M1 10h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      {htmlPdfExporting ? "Generating…" : "⬇ PDF"}
+                    </button>
+                  )}
+                  {/* Legacy LaTeX PDF — kept as fallback while testing new pipeline */}
+                  {result.pdfUrl && !structuredUploadRef.current && (
                     <button
                       type="button"
                       onClick={() => { void downloadResultPdf(); }}
@@ -3225,6 +3260,17 @@ export default function ResumeBuilder({
 
                 </aside>
               </section>
+
+              {/* Hidden ResumeDocumentView — rendered off-screen so htmlResumeRef is populated for HTML→PDF export */}
+              {structuredUploadRef.current && (
+                <div style={{ position: "absolute", left: -9999, top: -9999, width: 816, pointerEvents: "none", opacity: 0, zIndex: -1 }} aria-hidden>
+                  <ResumeDocumentView
+                    doc={structuredUploadRef.current.structured as unknown as import("@/components/ResumeDocumentView").ResumeDocData}
+                    containerRef={htmlResumeRef as React.RefObject<HTMLDivElement>}
+                  />
+                </div>
+              )}
+
               </div>{/* rb-results-body */}
             </div>
             )
