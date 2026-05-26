@@ -445,6 +445,10 @@ export default function ResumeBuilder({
   const [applyBusy, setApplyBusy] = useState(false);
   /** Incremented each time apply-suggestions succeeds — forces PDF viewer remount even if URL is unchanged. */
   const [applySeq, setApplySeq] = useState(0);
+  /** Active tab in the results-phase DetailedRatingsView — lifted so clicking a resume line can switch tabs. */
+  const [resultsActiveTab, setResultsActiveTab] = useState<import("@/components/DetailedRatingsView").Tab>("overall");
+  /** Texts of bullets that were just applied via gap fix — highlighted green briefly in the paper view. */
+  const [appliedGapTexts, setAppliedGapTexts] = useState<string[]>([]);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
@@ -1657,6 +1661,9 @@ export default function ResumeBuilder({
         // Patch the preview text immediately so ResumePaperView reflects the change
         if (s.original && s.suggested) {
           setCandidateProfile((prev) => (prev ?? "").replace(s.original, s.suggested));
+          // Flash the new suggested text in green for 3 s so the user sees the change
+          setAppliedGapTexts(prev => [...prev, s.suggested]);
+          setTimeout(() => setAppliedGapTexts(prev => prev.filter(t => t !== s.suggested)), 3000);
         }
       }
 
@@ -3056,6 +3063,8 @@ export default function ResumeBuilder({
                     hasSuggestions={suggestions.length > 0 && !generating}
                     onApplyAllSuggestions={() => { void applySelectedSuggestions(); }}
                     applyBusy={applyBusy}
+                    activeTab={resultsActiveTab}
+                    onActiveTabChange={setResultsActiveTab}
                   />
                 </div>
               )}
@@ -3284,12 +3293,18 @@ export default function ResumeBuilder({
                       text={(candidateProfile ?? "").trim() || "—"}
                       highlightOriginals={suggestions.filter(s => !rejectedIds.has(s.id)).map(s => s.original)}
                       templateFolder={styleReferenceFolder}
+                      gapFixHighlights={gapFixPanel?.suggestions.map(s => s.original) ?? []}
+                      appliedHighlights={appliedGapTexts}
                       interactiveSuggestions={{
                         suggestions,
                         acceptedIds,
                         rejectedIds,
                         selectedSuggestionId,
-                        onLineSelectSuggestion: (id) => selectSuggestion(id),
+                        onLineSelectSuggestion: (id) => {
+                          selectSuggestion(id);
+                          // Switch the left panel to the Fixes tab so the card is visible
+                          setResultsActiveTab("fixes");
+                        },
                       }}
                     />
                   </div>
@@ -4238,7 +4253,9 @@ function ResumePaperView({
   lineHeight = 1.55,
   paperPaddingY = 28,
   paperPaddingX = 32,
-  sectionAccentColor = "#0f172a",
+  sectionAccentColor = “#0f172a”,
+  gapFixHighlights = [],
+  appliedHighlights = [],
 }: {
   text: string;
   highlightOriginals: string[];
@@ -4249,6 +4266,10 @@ function ResumePaperView({
   /** Optional typography for template “Customize preview” (does not affect exported PDF). */
   baseFontPx?: number;
   lineHeight?: number;
+  /** Bullets currently being targeted by the open gap-fix panel — shown with purple highlight. */
+  gapFixHighlights?: string[];
+  /** Bullets that were just applied via gap fix — shown with green highlight. */
+  appliedHighlights?: string[];
   paperPaddingY?: number;
   paperPaddingX?: number;
   /** Section titles + rules (accent swatch in customize preview). */
@@ -4276,6 +4297,14 @@ function ResumePaperView({
   const lineMatchesHighlight = useMemo(
     () => buildResumeHighlightMatcher(highlightOriginals, combinedMatchByLine),
     [highlightOriginals, combinedMatchByLine],
+  );
+  const lineMatchesGapFix = useMemo(
+    () => buildResumeHighlightMatcher(gapFixHighlights, combinedMatchByLine),
+    [gapFixHighlights, combinedMatchByLine],
+  );
+  const lineMatchesApplied = useMemo(
+    () => buildResumeHighlightMatcher(appliedHighlights, combinedMatchByLine),
+    [appliedHighlights, combinedMatchByLine],
   );
   const ic = interactiveSuggestions;
 
@@ -4387,8 +4416,24 @@ function ResumePaperView({
             marginLeft: -9,
             borderRadius: "0 3px 3px 0",
           };
+          // Purple: currently targeted by an open gap-fix panel
+          const purple: React.CSSProperties = {
+            background: "rgba(139,92,246,0.12)",
+            borderLeft: "3px solid #8b5cf6",
+            paddingLeft: 6,
+            marginLeft: -9,
+            borderRadius: "0 3px 3px 0",
+            transition: "background 0.3s, border-color 0.3s",
+          };
+
+          const isGapFixTarget = lineMatchesGapFix(i);
+          const isJustApplied  = lineMatchesApplied(i);
+
           let hlStyle: React.CSSProperties = {};
-          if (acceptedSug) hlStyle = green;
+          // Gap-fix targets take highest priority so they're clearly visible
+          if (isGapFixTarget)       hlStyle = purple;
+          else if (isJustApplied)   hlStyle = green;
+          else if (acceptedSug)     hlStyle = green;
           else if (pendingHighlight && linkSug) hlStyle = stripeStyleForPriority(linkSug.priority);
           else if (pendingHighlight || highlightedPlain) hlStyle = amber;
 

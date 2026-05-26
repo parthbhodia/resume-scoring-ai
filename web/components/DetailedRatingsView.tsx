@@ -11,7 +11,7 @@ import { KeywordsSection } from "./ratings/KeywordsSection";
 import { InterviewSection } from "./ratings/InterviewSection";
 import CategoryFixPanel from "./CategoryFixPanel";
 
-type Tab = "overall" | "job_title" | "qualifications" | "responsibilities" | "keywords" | "interview" | "fixes";
+export type Tab = "overall" | "job_title" | "qualifications" | "responsibilities" | "keywords" | "interview" | "fixes";
 
 const ALWAYS_TABS: Tab[] = ["overall", "job_title", "qualifications", "responsibilities", "keywords", "interview"];
 
@@ -75,6 +75,8 @@ export default function DetailedRatingsView({
   hasSuggestions,
   onApplyAllSuggestions,
   applyBusy,
+  activeTab: activeTabProp,
+  onActiveTabChange,
 }: {
   ratings: RatingsData;
   onFixGap?: (item: DetailedRatingItem) => void;
@@ -94,8 +96,16 @@ export default function DetailedRatingsView({
   hasSuggestions?: boolean;
   onApplyAllSuggestions?: () => void;
   applyBusy?: boolean;
+  /** Optional controlled tab — when provided, overrides internal state */
+  activeTab?: Tab;
+  onActiveTabChange?: (tab: Tab) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<Tab>("overall");
+  const [activeTabInternal, setActiveTabInternal] = useState<Tab>("overall");
+  const activeTab = activeTabProp ?? activeTabInternal;
+  const setActiveTab = (t: Tab) => {
+    setActiveTabInternal(t);
+    onActiveTabChange?.(t);
+  };
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   if (!isDetailedRatings(ratings)) return null;

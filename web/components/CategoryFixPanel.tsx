@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   useSuggestionsStore,
   CATEGORY_META,
@@ -335,6 +335,25 @@ export default function SuggestionsPanel({
   } = useSuggestionsStore();
 
   const categories = categoriesPresent();
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // When selectedId changes (e.g. user clicked a line in the paper view):
+  // 1. Switch to the category that contains the selected suggestion
+  // 2. Scroll the matching card into view
+  useEffect(() => {
+    if (!selectedId) return;
+    const sug = suggestions.find(s => s.id === selectedId);
+    if (!sug) return;
+    if (sug.category && sug.category !== activeCategory) {
+      setActiveCategory(sug.category);
+    }
+    // Small delay so the category panel re-renders before we scroll
+    const t = setTimeout(() => {
+      const el = cardRefs.current.get(selectedId);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (suggestions.length === 0) return null;
 
@@ -543,17 +562,18 @@ export default function SuggestionsPanel({
           {/* Bullet cards */}
           <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 12 }}>
             {activeSuggestions.map((s) => (
-              <BulletCard
-                key={s.id}
-                suggestion={s}
-                accepted={acceptedIds.has(s.id)}
-                rejected={rejectedIds.has(s.id)}
-                selected={selectedId === s.id}
-                onAccept={() => accept(s.id)}
-                onReject={() => reject(s.id)}
-                onUndo={() => { undoAccept(s.id); undoReject(s.id); }}
-                onSelect={() => select(s.id)}
-              />
+              <div key={s.id} ref={(el) => { if (el) cardRefs.current.set(s.id, el); else cardRefs.current.delete(s.id); }}>
+                <BulletCard
+                  suggestion={s}
+                  accepted={acceptedIds.has(s.id)}
+                  rejected={rejectedIds.has(s.id)}
+                  selected={selectedId === s.id}
+                  onAccept={() => accept(s.id)}
+                  onReject={() => reject(s.id)}
+                  onUndo={() => { undoAccept(s.id); undoReject(s.id); }}
+                  onSelect={() => select(s.id)}
+                />
+              </div>
             ))}
           </div>
         </div>
