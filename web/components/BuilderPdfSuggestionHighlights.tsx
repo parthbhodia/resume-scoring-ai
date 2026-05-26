@@ -140,6 +140,11 @@ export default function BuilderPdfSuggestionHighlights({
       const trimmed = str.trim();
       if (!trimmed) return str;
 
+      // Skip pure punctuation / bullet characters — PDF text layer emits these as
+      // separate tiny spans and highlighting them produces a stray coloured dot.
+      const alphaCount = (trimmed.match(/[a-zA-Z0-9]/g) ?? []).length;
+      if (alphaCount < 4) return str;
+
       // Accumulate into rolling buffer — reset when it grows too long to avoid cross-bullet pollution
       spanBufferRef.current = (spanBufferRef.current + " " + trimmed).trim().slice(-400);
       const bufNorm = normalizeForMatch(spanBufferRef.current).toLowerCase();

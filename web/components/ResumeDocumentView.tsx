@@ -95,7 +95,7 @@ function getBullets(
   item: { bullets?: string[]; description?: string[] } | undefined
 ): string[] {
   if (!item) return [];
-  return item.bullets ?? item.description ?? [];
+  return (item.bullets ?? item.description ?? []).filter(b => typeof b === "string" && b.trim().length > 0);
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -151,14 +151,11 @@ const boldStyle: React.CSSProperties = { fontWeight: "bold" };
 const italicStyle: React.CSSProperties = { fontStyle: "italic" };
 
 const bulletStyle: React.CSSProperties = {
-  marginLeft: "14px",
   marginBottom: "1px",
   listStyleType: "disc",
   listStylePosition: "outside",
-};
-
-const bulletItemStyle: React.CSSProperties = {
-  marginBottom: "1px",
+  marginLeft: "16px",
+  paddingLeft: "2px",
 };
 
 // ─── Section renderers ────────────────────────────────────────────────────────
@@ -191,7 +188,7 @@ function ExperienceSection({ experience }: { experience: ResumeDocData["experien
             {bullets.length > 0 && (
               <ul style={{ margin: "2px 0 0 0", padding: 0 }}>
                 {bullets.map((b, bi) => (
-                  <li key={bi} style={{ ...bulletStyle, ...bulletItemStyle }}>
+                  <li key={bi} style={{ ...bulletStyle }}>
                     {b}
                   </li>
                 ))}
@@ -228,7 +225,7 @@ function EducationSection({ education }: { education: ResumeDocData["education"]
             {bullets.length > 0 && (
               <ul style={{ margin: "2px 0 0 0", padding: 0 }}>
                 {bullets.map((b, bi) => (
-                  <li key={bi} style={{ ...bulletStyle, ...bulletItemStyle }}>
+                  <li key={bi} style={{ ...bulletStyle }}>
                     {b}
                   </li>
                 ))}
@@ -265,14 +262,14 @@ function ProjectsSection({ projects }: { projects: ResumeDocData["projects"] }) 
     <>
       <SectionHeader title="Projects" />
       {projects.map((proj, i) => {
-        const bullets = getBullets(proj);
+        const bullets = getBullets(proj).filter(b => b.trim());
         return (
-          <div key={i} style={{ marginBottom: "6px" }}>
-            <span style={boldStyle}>{proj.name}</span>
+          <div key={i} style={{ marginBottom: "4px" }}>
+            <div style={boldStyle}>{proj.name}</div>
             {bullets.length > 0 && (
-              <ul style={{ margin: "2px 0 0 0", padding: 0 }}>
+              <ul style={{ margin: "1px 0 0 0", padding: 0 }}>
                 {bullets.map((b, bi) => (
-                  <li key={bi} style={{ ...bulletStyle, ...bulletItemStyle }}>
+                  <li key={bi} style={{ ...bulletStyle, marginBottom: "1px" }}>
                     {b}
                   </li>
                 ))}
@@ -309,7 +306,7 @@ function ExtraSections({
           <SectionHeader title={sec.title} />
           <ul style={{ margin: "2px 0 4px 0", padding: 0 }}>
             {sec.items.map((item, ii) => (
-              <li key={ii} style={{ ...bulletStyle, ...bulletItemStyle }}>
+              <li key={ii} style={{ ...bulletStyle }}>
                 {item}
               </li>
             ))}

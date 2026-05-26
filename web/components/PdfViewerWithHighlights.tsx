@@ -119,6 +119,10 @@ export default function PdfViewerWithHighlights({
       const trimmed = str.trim();
       if (!trimmed) return str;
 
+      // Skip pure punctuation / bullet chars — avoids highlighting just the "•" dot
+      const alphaCount = (trimmed.match(/[a-zA-Z0-9]/g) ?? []).length;
+      if (alphaCount < 4) return str;
+
       // Accumulate into rolling buffer — limit to 400 chars to avoid cross-bullet pollution
       spanBufferRef.current = (spanBufferRef.current + " " + trimmed).trim().slice(-400);
       const bufNorm = normalizeForMatch(spanBufferRef.current).toLowerCase();
