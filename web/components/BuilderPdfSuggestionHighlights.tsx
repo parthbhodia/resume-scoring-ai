@@ -35,18 +35,33 @@ function escapeAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
-/** Heuristic: PDF text layer span vs suggestion original (same family as PdfViewerWithHighlights). */
+/**
+ * Heuristic: PDF text layer span vs suggestion original.
+ * Strict thresholds to avoid false-positive highlights on short/common phrases.
+ *
+ * Strategy: both the span text and the suggestion must be substantial (≥20 chars
+ * for span, ≥30 chars for bullet). The PDF text layer splits bullets into multiple
+ * short spans — the caller should also try matching with a rolling buffer of
+ * accumulated spans when individual spans are too short.
+ */
 function spanMatchesSuggestion(spanNorm: string, bulletNorm: string): boolean {
-  if (bulletNorm.length < 6 || spanNorm.length < 4) return false;
+  // Both must be substantial — skip section headers, short labels, dates
+  if (bulletNorm.length < 30 || spanNorm.length < 20) return false;
+
+  // Exact match
   if (spanNorm === bulletNorm) return true;
-  if (bulletNorm.includes(spanNorm) && spanNorm.length >= 8) return true;
-  if (spanNorm.length >= 10 && bulletNorm.startsWith(spanNorm.slice(0, Math.min(30, spanNorm.length)))) return true;
-  if (bulletNorm.length >= 10 && spanNorm.includes(bulletNorm.slice(0, Math.min(45, bulletNorm.length)))) return true;
-  if (spanNorm.length >= 12 && bulletNorm.length >= 12) {
-    const a = spanNorm.slice(0, 40);
-    const b = bulletNorm.slice(0, 40);
-    if (a.startsWith(b.slice(0, 14)) || b.startsWith(a.slice(0, 14))) return true;
+
+  // Span is fully contained in the suggestion (long span ≥ 30 chars)
+  if (spanNorm.length >= 30 && bulletNorm.includes(spanNorm)) return true;
+
+  // Suggestion is fully contained in the span (span accumulated a full bullet)
+  if (bulletNorm.length >= 30 && spanNorm.includes(bulletNorm)) return true;
+
+  // Both are long: require the first 40 chars to match (same opening phrase)
+  if (spanNorm.length >= 40 && bulletNorm.length >= 40) {
+    if (spanNorm.slice(0, 40) === bulletNorm.slice(0, 40)) return true;
   }
+
   return false;
 }
 
@@ -76,6 +91,8 @@ export default function BuilderPdfSuggestionHighlights({
   const [loadError, setLoadError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [pageWidth, setPageWidth] = useState(640);
+  // Rolling buffer: accumulate adjacent spans within a page to reconstruct full bullet text
+  const spanBufferRef = useRef<string>("");
 
   useEffect(() => {
     const el = containerRef.current;
@@ -101,7 +118,7 @@ export default function BuilderPdfSuggestionHighlights({
       const raw = s.original.trim();
       if (!raw) continue;
       const norm = normalizeForMatch(raw).toLowerCase();
-      if (norm.length < 6) continue;
+      if (norm.length < 20) continue;  // must be substantial to avoid false matches
       const accepted = acceptedIds.has(s.id);
       const pal = PRIORITY_PDF_STRIPE[normalizeSuggestionPriority(s.priority)];
       rows.push({
@@ -118,10 +135,15 @@ export default function BuilderPdfSuggestionHighlights({
   const customTextRenderer = useCallback<CustomTextRenderer>(
     ({ str }) => {
       const trimmed = str.trim();
-      if (trimmed.length < 6) return str;
-      const norm = normalizeForMatch(trimmed).toLowerCase();
+      if (!trimmed) return str;
+
+      // Accumulate into rolling buffer — reset when it grows too long to avoid cross-bullet pollution
+      spanBufferRef.current = (spanBufferRef.current + " " + trimmed).trim().slice(-400);
+      const bufNorm = normalizeForMatch(spanBufferRef.current).toLowerCase();
+      const singleNorm = normalizeForMatch(trimmed).toLowerCase();
+
       for (const row of matchRows) {
-        if (!spanMatchesSuggestion(norm, row.norm)) continue;
+        if (!spanMatchesSuggestion(singleNorm, row.norm) && !spanMatchesSuggestion(bufNorm, row.norm)) continue;
         const safe = escapeHtml(str);
         return (
           `<span class="pdfv-hl pdfv-hl-builder" data-rb-sug-id="${escapeAttr(row.id)}" ` +
@@ -132,6 +154,9 @@ export default function BuilderPdfSuggestionHighlights({
     },
     [matchRows],
   );
+
+  // Reset span buffer when match rows change (new suggestions / new page set)
+  useEffect(() => { spanBufferRef.current = ""; }, [matchRows]);
 
   useEffect(() => {
     const root = containerRef.current;
