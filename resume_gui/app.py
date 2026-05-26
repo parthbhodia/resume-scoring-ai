@@ -6009,6 +6009,54 @@ async def api_analyze_export_pdf(request: Request):
     )
 
 
+async def api_export_pdf_html(request: Request) -> Response:
+    """Render arbitrary HTML to PDF via Playwright/Chromium.
+
+    Body: { html: string, filename?: string }
+    Returns: PDF bytes (application/pdf)
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    html_content = body.get("html", "")
+    filename = body.get("filename", "resume.pdf")
+
+    if not html_content:
+        return JSONResponse({"error": "html field is required"}, status_code=400)
+
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from playwright.sync_api import sync_playwright
+
+    def render_pdf():
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+            )
+            page = browser.new_page()
+            page.set_content(html_content, wait_until="networkidle")
+            pdf_bytes = page.pdf(
+                format="Letter",
+                margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
+                print_background=True,
+            )
+            browser.close()
+            return pdf_bytes
+
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pdf_bytes = await loop.run_in_executor(executor, render_pdf)
+
+    safe_filename = filename.replace('"', '').replace('\\', '') or "resume.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+    )
+
+
 routes = [
     Route("/",                              homepage),
     Route("/api/health",                    api_health,          methods=["GET"]),
@@ -6045,6 +6093,7 @@ routes = [
     Route("/api/suggest-changes",         api_suggest_changes, methods=["POST"]),
     Route("/api/suggest-changes-stream",  api_suggest_changes_stream, methods=["POST"]),
     Route("/api/suggest-gap-fix",         api_suggest_gap_fix, methods=["POST"]),
+    Route("/api/export-pdf-html",         api_export_pdf_html,     methods=["POST"]),
     Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
 
