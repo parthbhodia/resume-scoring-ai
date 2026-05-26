@@ -3228,10 +3228,11 @@ export default function ResumeBuilder({
                   aria-label="Résumé preview and export"
                 >
                   {/* Same component as the suggestions view — highlights matched bullets */}
-                  {(sourcePdfBlobUrl || result.pdfUrl) ? (
+                  {/* After applyGapFix result.pdfUrl is the freshly compiled tailored PDF — prefer it */}
+                  {(result.pdfUrl || sourcePdfBlobUrl) ? (
                       <BuilderPdfSuggestionHighlights
-                        key={`results-pdf-${sourcePdfBlobUrl ?? result.pdfUrl}`}
-                        pdfBlobUrl={sourcePdfBlobUrl ?? result.pdfUrl!}
+                        key={`results-pdf-${result.pdfUrl ?? sourcePdfBlobUrl}`}
+                        pdfBlobUrl={result.pdfUrl ?? sourcePdfBlobUrl!}
                         downloadUrl={result.pdfUrl ?? undefined}
                         filename={`${resumeDownloadStem}.pdf`}
                         maxHeight="100%"

@@ -15,16 +15,20 @@ function BulletCard({
   suggestion,
   accepted,
   rejected,
+  selected,
   onAccept,
   onReject,
   onUndo,
+  onSelect,
 }: {
   suggestion: Suggestion;
   accepted: boolean;
   rejected: boolean;
+  selected: boolean;
   onAccept: () => void;
   onReject: () => void;
   onUndo: () => void;
+  onSelect: () => void;
 }) {
   const [editedSuggestion, setEditedSuggestion] = useState(suggestion.suggested);
   const [editing, setEditing] = useState(false);
@@ -33,13 +37,16 @@ function BulletCard({
 
   return (
     <div
+      onClick={onSelect}
       style={{
         borderRadius: 12,
-        border: `1px solid ${accepted ? "rgba(52,211,153,0.3)" : rejected ? "rgba(248,113,113,0.2)" : "var(--border)"}`,
-        background: accepted ? "rgba(52,211,153,0.04)" : rejected ? "rgba(248,113,113,0.03)" : "var(--surface2)",
+        border: `1px solid ${selected ? "rgba(139,92,246,0.6)" : accepted ? "rgba(52,211,153,0.3)" : rejected ? "rgba(248,113,113,0.2)" : "var(--border)"}`,
+        background: selected ? "rgba(139,92,246,0.06)" : accepted ? "rgba(52,211,153,0.04)" : rejected ? "rgba(248,113,113,0.03)" : "var(--surface2)",
         overflow: "hidden",
         opacity: rejected ? 0.55 : 1,
-        transition: "opacity 0.15s, border-color 0.15s",
+        transition: "opacity 0.15s, border-color 0.15s, background 0.15s",
+        cursor: "pointer",
+        boxShadow: selected ? "0 0 0 2px rgba(139,92,246,0.25)" : undefined,
       }}
     >
       {/* Card header */}
@@ -59,7 +66,7 @@ function BulletCard({
           {/* Checkbox */}
           <button
             type="button"
-            onClick={accepted ? onUndo : onAccept}
+            onClick={(e) => { e.stopPropagation(); accepted ? onUndo() : onAccept(); }}
             style={{
               width: 20,
               height: 20,
@@ -99,7 +106,7 @@ function BulletCard({
           {!accepted && (
             <button
               type="button"
-              onClick={rejected ? onUndo : onReject}
+              onClick={(e) => { e.stopPropagation(); rejected ? onUndo() : onReject(); }}
               title={rejected ? "Undo skip" : "Skip this fix"}
               style={{
                 fontSize: 11,
@@ -118,7 +125,7 @@ function BulletCard({
           {accepted && (
             <button
               type="button"
-              onClick={onUndo}
+              onClick={(e) => { e.stopPropagation(); onUndo(); }}
               style={{
                 fontSize: 11,
                 padding: "2px 8px",
@@ -315,10 +322,12 @@ export default function SuggestionsPanel({
     categoryStatus,
     acceptedIds,
     rejectedIds,
+    selectedId,
     accept,
     reject,
     undoAccept,
     undoReject,
+    select,
     setActiveCategory,
     markCategoryDone,
     markCategorySkipped,
@@ -539,9 +548,11 @@ export default function SuggestionsPanel({
                 suggestion={s}
                 accepted={acceptedIds.has(s.id)}
                 rejected={rejectedIds.has(s.id)}
+                selected={selectedId === s.id}
                 onAccept={() => accept(s.id)}
                 onReject={() => reject(s.id)}
                 onUndo={() => { undoAccept(s.id); undoReject(s.id); }}
+                onSelect={() => select(s.id)}
               />
             ))}
           </div>
