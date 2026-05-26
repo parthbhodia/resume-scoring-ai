@@ -55,6 +55,25 @@ function wrapHighlightHtml(safeInner: string, color: string): string {
   return `<span class="pdfv-hl" style="background:${color};">${safeInner}</span>`;
 }
 
+/**
+ * Match a PDF text layer span (or rolling buffer) against a bullet's normalised text.
+ * Keeps the same strict thresholds used in BuilderPdfSuggestionHighlights to avoid
+ * false positives on short / common phrases.
+ */
+function spanMatchesBullet(spanNorm: string, bulletNorm: string): boolean {
+  // Both must be substantial
+  if (bulletNorm.length < 20 || spanNorm.length < 15) return false;
+  // Exact match
+  if (spanNorm === bulletNorm) return true;
+  // Span contained in bullet (span must be long enough to be meaningful)
+  if (spanNorm.length >= 15 && bulletNorm.includes(spanNorm)) return true;
+  // Bullet contained in span (buffer has accumulated the full bullet)
+  if (bulletNorm.length >= 20 && spanNorm.includes(bulletNorm)) return true;
+  // Both long — opening phrase match
+  if (spanNorm.length >= 25 && bulletNorm.startsWith(spanNorm.slice(0, Math.min(25, spanNorm.length)))) return true;
+  return false;
+}
+
 export default function PdfViewerWithHighlights({
   pdfBlobUrl,
   bulletAnalysis,
@@ -64,6 +83,8 @@ export default function PdfViewerWithHighlights({
   const [loadError, setLoadError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [pageWidth, setPageWidth] = useState(640);
+  // Rolling buffer: accumulate adjacent spans so split bullets can still be matched
+  const spanBufferRef = useRef<string>("");
 
   useEffect(() => {
     const el = containerRef.current;
@@ -78,7 +99,7 @@ export default function PdfViewerWithHighlights({
 
   const bulletData = useMemo(() => {
     return bulletAnalysis
-      .filter((b) => normalizeForMatch(b.originalBullet).length > 12)
+      .filter((b) => normalizeForMatch(b.originalBullet).length >= 15)
       .map((b) => {
         const raw = b.originalBullet.trim();
         return {
@@ -90,21 +111,22 @@ export default function PdfViewerWithHighlights({
       });
   }, [bulletAnalysis]);
 
+  // Reset buffer when bullet data changes (new analysis result)
+  useEffect(() => { spanBufferRef.current = ""; }, [bulletData]);
+
   const customTextRenderer = useCallback<CustomTextRenderer>(
     ({ str }) => {
       const trimmed = str.trim();
-      if (trimmed.length < 10) return str;
+      if (!trimmed) return str;
 
-      const norm = normalizeForMatch(trimmed).toLowerCase();
+      // Accumulate into rolling buffer — limit to 400 chars to avoid cross-bullet pollution
+      spanBufferRef.current = (spanBufferRef.current + " " + trimmed).trim().slice(-400);
+      const bufNorm = normalizeForMatch(spanBufferRef.current).toLowerCase();
+      const singleNorm = normalizeForMatch(trimmed).toLowerCase();
 
       for (const { norm: bulletNorm, color } of bulletData) {
-        if (bulletNorm.includes(norm) && norm.length >= 15) {
-          const safe = escapeHtml(str);
-          return wrapHighlightHtml(safe, color);
-        }
-        if (norm.length >= 20 && bulletNorm.startsWith(norm.slice(0, 25))) {
-          const safe = escapeHtml(str);
-          return wrapHighlightHtml(safe, color);
+        if (spanMatchesBullet(singleNorm, bulletNorm) || spanMatchesBullet(bufNorm, bulletNorm)) {
+          return wrapHighlightHtml(escapeHtml(str), color);
         }
       }
       return str;
