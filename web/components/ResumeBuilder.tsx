@@ -1649,11 +1649,15 @@ export default function ResumeBuilder({
 
       if (resp.ok) {
         const data = await resp.json() as { pdf_url?: string | null };
-        // Update PDF preview with newly compiled file — always bump applySeq to force viewer remount
         if (data.pdf_url) {
           setResult(prev => prev ? { ...prev, pdfUrl: data.pdf_url! } : prev);
         }
         setApplySeq((n) => n + 1);
+
+        // Patch the preview text immediately so ResumePaperView reflects the change
+        if (s.original && s.suggested) {
+          setCandidateProfile((prev) => (prev ?? "").replace(s.original, s.suggested));
+        }
       }
 
       // Optimistic ratings update — move the gap out of its missing list
@@ -1872,11 +1876,22 @@ export default function ResumeBuilder({
         folder: string;
       };
 
-      // Update PDF preview with patched version — always bump applySeq to force viewer remount
+      // Update PDF URL
       if (data.pdf_url) {
         setResult((prev) => prev ? { ...prev, pdfUrl: data.pdf_url! } : prev);
       }
       setApplySeq((n) => n + 1);
+
+      // Immediately patch candidateProfile text so the ResumePaperView preview updates in place
+      setCandidateProfile((prev) => {
+        let updated = prev ?? "";
+        for (const s of acceptedList) {
+          if (s.original && s.suggested) {
+            updated = updated.replace(s.original, s.suggested);
+          }
+        }
+        return updated;
+      });
 
       // Show success feedback + kick off rescore
       setApplyFeedback({ patchesApplied: data.patches_applied, patchesFailed: data.patches_failed, rescoring: true });
@@ -3230,39 +3245,54 @@ export default function ResumeBuilder({
                 <aside
                   className="rb-results-phase3-preview"
                   aria-label="Résumé preview and export"
+                  style={{ display: "flex", flexDirection: "column", minHeight: 0 }}
                 >
-                  {/* Same component as the suggestions view — highlights matched bullets */}
-                  {/* After applyGapFix result.pdfUrl is the freshly compiled tailored PDF — prefer it */}
-                  {(result.pdfUrl || sourcePdfBlobUrl) ? (
-                      <BuilderPdfSuggestionHighlights
-                        key={`results-pdf-${applySeq}-${result.pdfUrl ?? sourcePdfBlobUrl}`}
-                        pdfBlobUrl={result.pdfUrl ?? sourcePdfBlobUrl!}
-                        downloadUrl={result.pdfUrl ?? undefined}
-                        filename={`${resumeDownloadStem}.pdf`}
-                        maxHeight="100%"
-                        suggestions={suggestions.map(s => ({ id: s.id, original: s.original, priority: s.priority }))}
-                        acceptedIds={acceptedIds}
-                        rejectedIds={rejectedIds}
-                        selectedSuggestionId={selectedSuggestionId}
-                        onSelectSuggestion={selectSuggestion}
-                      />
-                    ) : (
-                      <div
+                  {/* Header row: label + Download PDF button */}
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "8px 4px 10px",
+                    flexShrink: 0,
+                    gap: 8,
+                  }}>
+                    <span style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.4 }}>
+                      Line tints follow fix severity — click a line to focus the card.
+                    </span>
+                    {result.pdfUrl && (
+                      <a
+                        href={result.pdfUrl}
+                        download={`${resumeDownloadStem}.pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         style={{
-                          flex: 1,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: 28,
-                          textAlign: "center",
-                          color: "var(--dim)",
-                          fontSize: 13,
+                          display: "inline-flex", alignItems: "center", gap: 5,
+                          padding: "5px 12px", borderRadius: 8,
+                          background: "var(--accent)", color: "#fff",
+                          fontSize: 11, fontWeight: 600, textDecoration: "none",
+                          flexShrink: 0, whiteSpace: "nowrap",
                         }}
                       >
-                        PDF preview loading…
-                      </div>
+                        ⬇ PDF
+                      </a>
                     )}
+                  </div>
 
+                  {/* Scrollable paper preview — same ResumePaperView as the Suggestions phase */}
+                  <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+                    <ResumePaperView
+                      text={(candidateProfile ?? "").trim() || "—"}
+                      highlightOriginals={suggestions.filter(s => !rejectedIds.has(s.id)).map(s => s.original)}
+                      templateFolder={styleReferenceFolder}
+                      interactiveSuggestions={{
+                        suggestions,
+                        acceptedIds,
+                        rejectedIds,
+                        selectedSuggestionId,
+                        onLineSelectSuggestion: (id) => selectSuggestion(id),
+                      }}
+                    />
+                  </div>
                 </aside>
               </section>
 
