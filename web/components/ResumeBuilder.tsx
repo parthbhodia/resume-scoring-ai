@@ -1856,9 +1856,14 @@ export default function ResumeBuilder({
     void generate();
   }, [candidateProfile, bulletEdits, generate]);
 
+  // Download filename should ALWAYS be built from the user's actual data
+  // (candidate name + company + role) — not from result.folder, which is the
+  // backend's template-named storage folder (e.g. "Harshibar_Template1_structured_xxx").
+  // result.folder is a server-side ID, not a display name; users were getting PDFs
+  // named after a LaTeX template instead of themselves.
   const resumeDownloadStem = useMemo(
-    () => (result?.folder ? result.folder : buildResumeFileStem(company, role, candidateProfile)),
-    [result?.folder, company, role, candidateProfile],
+    () => buildResumeFileStem(company, role, candidateProfile),
+    [company, role, candidateProfile],
   );
 
   const downloadResultPdf = useCallback(async () => {
