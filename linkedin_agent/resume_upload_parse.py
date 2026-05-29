@@ -166,13 +166,16 @@ def extract_upload_markdown(
             tmp_path.unlink(missing_ok=True)
 
     if text:
-        return UploadMarkdownOutcome(text, None)
+        # MarkItDown wraps bullets across display lines just like pdfplumber does.
+        # Stitch continuation lines back so downstream bulletAnalysis sees the
+        # full bullet, not the truncated first line.
+        return UploadMarkdownOutcome(_stitch_wrapped_bullets(text), None)
 
     if suffix == ".pdf":
         fb = (pdf_plain_fallback or "").strip() or _extract_pdf_text_pdfplumber(content)
         if fb.strip():
             logger.info("resume_upload_parse: MarkItDown empty; used pdfplumber fallback for %s", filename)
-            return UploadMarkdownOutcome(fb.strip(), None)
+            return UploadMarkdownOutcome(_stitch_wrapped_bullets(fb.strip()), None)
         if markitdown_failed:
             return UploadMarkdownOutcome("", "corrupt_or_unreadable_pdf")
         return UploadMarkdownOutcome("", "pdf_no_text")
@@ -463,12 +466,79 @@ def structured_to_plain_resume_text(data: UploadedResumeStructured) -> str:
     return "\n".join(lines).strip()
 
 
+# Bullet-glyph prefix detector used by the continuation stitcher (mirrors
+# resume_gui.app — keep in sync). Multi-column / tightly-set PDFs wrap a single
+# bullet across multiple display lines; the per-bullet analyzer that downstream
+# code runs would then only see the first line and tag the bullet "incomplete
+# sentence". Stitch them back here so both the structured-extract LLM and the
+# analyzer see the same complete bullet.
+_BULLET_GLYPH_LEAD_RE = re.compile(r"^[•\-\*▪▸●◦‧·・‣⁃►➤○⚫—–‑]")
+_STITCH_STOP_LINE_RE = re.compile(
+    r"^(?:"
+    r"[A-Z][A-Z\s/&]+$"
+    r"|.{0,90}\|.{0,90}\|"
+    r"|.*\b(?:19|20)\d{2}\s*[–—\-]\s*(?:(?:19|20)\d{2}|Present|Current)\b"
+    r"|.*\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(?:19|20)\d{2}\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _stitch_wrapped_bullets(text: str) -> str:
+    """Rejoin wrapped bullet bodies that pdfplumber emitted as separate lines.
+    See resume_gui.app._stitch_wrapped_bullets for the full rule explanation."""
+    lines = text.splitlines()
+    out: List[str] = []
+    in_bullet = False
+    blank_gap = 0
+    for raw in lines:
+        ln = raw.rstrip()
+        stripped = ln.strip()
+        if not stripped:
+            out.append(ln)
+            blank_gap += 1
+            continue
+        if _BULLET_GLYPH_LEAD_RE.match(stripped):
+            out.append(ln)
+            in_bullet = True
+            blank_gap = 0
+            continue
+        if in_bullet and blank_gap <= 1 and out:
+            j = len(out) - 1
+            while j >= 0 and not out[j].strip():
+                j -= 1
+            if j >= 0:
+                prev = out[j].rstrip()
+                prev_tail = prev[-1:] if prev else ""
+                terminated = prev_tail in (".", "!", "?", ";", ":")
+                looks_anchor = bool(_STITCH_STOP_LINE_RE.match(stripped))
+                starts_lower_or_continuation = bool(
+                    re.match(r"^[a-z]", stripped) or stripped.startswith("-")
+                )
+                if (
+                    not terminated
+                    and not looks_anchor
+                    and starts_lower_or_continuation
+                    and len(stripped) <= 200
+                ):
+                    out[j] = f"{prev} {stripped}"
+                    while len(out) > j + 1 and not out[-1].strip():
+                        out.pop()
+                    blank_gap = 0
+                    continue
+        out.append(ln)
+        in_bullet = False
+        blank_gap = 0
+    return "\n".join(out)
+
+
 def _post_clean_resume_text(text: str) -> str:
     """Normalize PDF placeholder glyphs; keep line breaks (same semantics as resume_gui.app)."""
     text = re.sub(r"\(\s*cid\s*:\s*\d+\)", " • ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bUsed\s*:\s*to\b", "Used to", text, flags=re.IGNORECASE)
     lines = [" ".join(ln.split()) for ln in text.splitlines()]
-    return "\n".join(lines).strip()
+    text = "\n".join(lines).strip()
+    return _stitch_wrapped_bullets(text)
 
 
 def _merge_split_word_tokens(tokens: List[str]) -> List[str]:
