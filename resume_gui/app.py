@@ -4189,6 +4189,31 @@ Infer the field from the résumé text and score against that field's expectatio
   quantification issue; pick JD-relevant, high-impact lines first. categoryRewrites.quantification and \
   categoryRewrites.achievementQuality must be DIFFERENT rewrites when both weaknesses apply — \
   never paste the same text into both fields.
+- REWRITE HONESTY (server will reject rewrites that violate this): every improvedBullet and every \
+  categoryRewrites.* value MUST preserve every numeral (digits, percentages, counts, durations) and \
+  every concrete proper noun (Title-Case names, ALL-CAPS acronyms, CamelCase tech names like PostgreSQL, \
+  CI/CD, AWS Lambda, gRPC) that appeared in the originalBullet. Removing "5 refinement cycles", \
+  "3 retries", "PostgreSQL", or "AWS Lambda" while calling the change "readability" or \
+  "language quality" is a lie — the rewrite must add JD vocabulary, not strip the original's content. \
+  Rewrites should be the same length or longer than the original.
+- QUANTIFICATION TRUTHFULNESS: only emit categoryRewrites.quantification when your rewrite actually \
+  adds a number, percent, scale, or [X]/[%]/[$Y] placeholder that was NOT in the original. If you \
+  cannot add a real or [placeholder] number, omit the quantification rewrite entirely. Never tag a \
+  rewrite as quantification when no new numerals appear.
+- EVIDENCE BEFORE CLAIM (server will drop unsupported claims): never claim "missing impact metrics", \
+  "no quantification", or "lacks numbers" as a topIssue / atsWarning / bullet issue / final \
+  recommendation when the résumé text contains numerals (digits, %, $, ×, k+, CGPA, GPA, dates, \
+  counts like "9,000+ records" or "5 refinement cycles"). Count first, then claim. If the résumé \
+  has 5+ numerals overall, do NOT add a "missing metrics" topIssue — the right move is to flag \
+  SPECIFIC bullets that are weakest, not to claim the whole résumé lacks quantification.
+- NEVER claim "duty-only bullets", "weak action verbs", or "lacks ownership" when the actual bullets \
+  start with strong ownership verbs (Architected, Built, Delivered, Designed, Engineered, Developed, \
+  Reduced, Implemented, Shipped, Launched, Led, Drove, Owned, Spearheaded, Scaled, Optimized, etc.). \
+  Read the verbs first. If most bullets lead with strong verbs, the achievementQuality / \
+  languageQuality scores cannot legitimately be below 55.
+- NO TAUTOLOGICAL SUGGESTIONS: do not recommend a structural change ("create separate lines for each \
+  institution", "add bullets for each role", "move skills to top") when the résumé already has that \
+  structure. Read the layout before recommending a layout change.
 - For each originalBullet field: copy the wording EXACTLY from RESUME TEXT (including • or -), \
   after normalizing; do not drop the first letters of words.
 - If no JD is provided: set jobMatch in categoryScores to null, set \
@@ -4328,6 +4353,433 @@ def _llm_json_call(prompt: str) -> Optional[dict]:
     return _grok_json(os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning"))
 
 
+# ── Rewrite-vs-original validator ──────────────────────────────────────────
+#
+# The LLM sometimes emits a "rewrite" that silently drops numerals or proper
+# nouns from the original (e.g. dropping "5 refinement cycles", "3 retries",
+# "AWS Lambda", "PostgreSQL"). When that rewrite is then tagged as
+# `readability` / `languageQuality`, the user sees a category badge that
+# actively misrepresents what the rewrite did. Worse: a `quantification`
+# rewrite that adds no numerals is just noise.
+#
+# These helpers diff original → rewrite and decide whether the rewrite is
+# honest enough to surface. Callers should drop or fall-back when False.
+
+# Tokens we treat as numerals (any digit run, including "5%", "3x", "$10k").
+_NUMERAL_RE = re.compile(r"\d[\d.,]*")
+
+# Tokens we treat as concrete proper nouns / named technologies — Title Case,
+# all-caps acronyms, CamelCase, or slashed/dotted product names. These are
+# the recruiter Ctrl-F targets that must survive any rewrite.
+_PROPER_NOUN_RE = re.compile(
+    r"\b(?:"
+    r"[A-Z]{2,}(?:[/.][A-Z]{2,})*"          # ALL-CAPS / CI/CD / AWS
+    r"|[A-Z][a-z]+(?:[A-Z][a-z]+)+"          # CamelCase / PostgreSQL / GraphQL
+    r"|[A-Z][a-zA-Z0-9]+(?:\.[a-z]+)+"       # node.js, asp.net
+    r")\b"
+)
+
+
+def _rewrite_numerals(text: str) -> set[str]:
+    return set(_NUMERAL_RE.findall(text or ""))
+
+
+def _rewrite_proper_nouns(text: str) -> set[str]:
+    return {m.group(0) for m in _PROPER_NOUN_RE.finditer(text or "")}
+
+
+def _validate_rewrite_against_original(
+    original: str,
+    rewrite: str,
+    *,
+    category: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """Return (is_honest, reason). The rewrite is honest iff:
+      - it preserves every numeral from the original
+      - it preserves every concrete proper noun / acronym / CamelCase tech
+        name from the original
+      - it does not shrink dramatically in length (a clear sign of dropped
+        content) — allow a small trim (≥ 80% of original word count)
+      - if category == "quantification", at least one numeral that was not
+        in the original must appear in the rewrite (otherwise the badge is
+        a lie)
+    Empty rewrites or rewrites identical to the original are considered
+    honest at this layer (callers strip those separately).
+    """
+    o = (original or "").strip()
+    r = (rewrite or "").strip()
+    if not o or not r or o == r:
+        return True, ""
+
+    orig_nums = _rewrite_numerals(o)
+    new_nums = _rewrite_numerals(r)
+    dropped_nums = orig_nums - new_nums
+    if dropped_nums:
+        return False, f"dropped numerals: {sorted(dropped_nums)[:5]}"
+
+    orig_props = _rewrite_proper_nouns(o)
+    new_props = _rewrite_proper_nouns(r)
+    dropped_props = orig_props - new_props
+    if dropped_props:
+        return False, f"dropped proper nouns: {sorted(dropped_props)[:5]}"
+
+    o_wc = len(o.split())
+    r_wc = len(r.split())
+    if o_wc >= 8 and r_wc < int(o_wc * 0.8):
+        return False, f"shrank from {o_wc}→{r_wc} words (>20% drop)"
+
+    if category and category.lower() in ("quantification", "quantify_impact"):
+        added_nums = new_nums - orig_nums
+        if not added_nums:
+            return False, "tagged quantification but no new numerals added"
+
+    return True, ""
+
+
+def _filter_bullet_rewrites(
+    original: str,
+    improved: str,
+    category_rewrites: Optional[dict],
+) -> Tuple[str, dict]:
+    """Drop any rewrite that fails _validate_rewrite_against_original.
+
+    Returns (kept_improved, kept_category_rewrites). When a rewrite is
+    rejected we replace it with empty string so the UI falls back to the
+    original — better silence than a misleading badge.
+    """
+    kept_improved = improved or ""
+    if kept_improved:
+        ok, why = _validate_rewrite_against_original(original, kept_improved)
+        if not ok:
+            logger.info(
+                "rewrite-validator dropped improvedBullet: %s  | orig=%r  | rewrite=%r",
+                why, original[:80], kept_improved[:80],
+            )
+            kept_improved = ""
+
+    kept_cr: dict = {}
+    if isinstance(category_rewrites, dict):
+        for cat, txt in category_rewrites.items():
+            if not isinstance(txt, str) or not txt.strip():
+                continue
+            ok, why = _validate_rewrite_against_original(original, txt, category=str(cat))
+            if ok:
+                kept_cr[str(cat)] = txt
+            else:
+                logger.info(
+                    "rewrite-validator dropped categoryRewrites.%s: %s  | orig=%r  | rewrite=%r",
+                    cat, why, original[:80], txt[:80],
+                )
+    return kept_improved, kept_cr
+
+
+# ── Evidence-grounded issue validator ──────────────────────────────────────
+#
+# The LLM also fabricates *issues* and *recommendations* that contradict the
+# résumé text — e.g. "missing impact metrics" on a résumé with CGPA 9.266,
+# 97.16%, "up to 3 retries", "9,000+ records"; or "duty-style bullets that
+# fail to highlight ownership" on bullets that start with Architected /
+# Built / Engineered / Delivered.
+#
+# When those bogus issues land in topIssues / bulletAnalysis.issues / final-
+# Recommendations they (a) mislead the user and (b) crash the calibrated
+# overall score in _normalize_analysis (weak_penalty + issue_penalty +
+# floor_penalty). Cross-checking each claim against the actual résumé text
+# is the same pattern as the rewrite validator above.
+
+_STRONG_OWNERSHIP_VERBS = (
+    # Build / ship — the core "I made this" cluster
+    "architected", "built", "delivered", "designed", "engineered",
+    "developed", "implemented", "shipped", "launched", "deployed",
+    "rebuilt", "refactored", "modernized", "modernised", "composed",
+    "produced", "authored", "drafted", "created", "generated",
+    "configured", "provisioned", "automated", "migrated", "integrated",
+    "orchestrated", "executed", "wrote", "rewrote",
+    # Lead / own — leadership ownership cluster
+    "led", "drove", "owned", "managed", "directed", "spearheaded",
+    "headed", "supervised", "oversaw", "coordinated", "championed",
+    "founded", "established", "originated", "pioneered", "initiated",
+    "instituted", "introduced", "rolled",
+    # Outcome — measurable result verbs
+    "reduced", "achieved", "increased", "decreased", "improved",
+    "transformed", "accelerated", "scaled", "optimized", "optimised",
+    "streamlined", "boosted", "grew", "saved", "cut", "doubled",
+    "tripled", "expanded", "secured", "negotiated",
+    # Teach / mentor — common in education + early-career résumés;
+    # genuinely ownership verbs, not duty-style
+    "taught", "trained", "coached", "mentored", "facilitated",
+    "instructed", "tutored", "educated", "guided", "handled",
+    "presented", "moderated",
+    # Investigate / resolve — analyst / engineer / consulting verbs
+    "analyzed", "analysed", "researched", "investigated", "diagnosed",
+    "evaluated", "assessed", "resolved", "troubleshot", "debugged",
+    "audited", "validated", "verified", "tested", "benchmarked",
+    # Acquisition / partnership
+    "recruited", "hired", "onboarded", "partnered", "collaborated",
+    "consulted", "advised",
+)
+_STRONG_VERB_RE = re.compile(
+    r"^[\s•\-\*▪▸–—]*(?:" + "|".join(_STRONG_OWNERSHIP_VERBS) + r")\b",
+    re.IGNORECASE,
+)
+
+_MISSING_METRICS_CLAIM_RE = re.compile(
+    # No trailing \b — the right-hand tokens (metric, number, quantif, result)
+    # often appear pluralized or suffixed (metrics / numbers / quantifiable /
+    # quantification / results), and a closing \b would block those matches.
+    r"\b(?:"
+    r"missing\s+(?:impact\s+)?metric|missing\s+number|no\s+metric|no\s+number|"
+    r"lack(?:s|ing)?\s+(?:of\s+)?(?:metric|number|data|quantif|impact|measurable|quantifi)|"
+    r"lack(?:s|ing)?\s+impact|"
+    r"need\s+(?:to\s+)?(?:add|include)\s+(?:metric|number|quantif)|"
+    r"no\s+quantif|not\s+quantif|un[- ]?quantif|"
+    r"add\s+(?:metric|number|quantifi)|specific\s+metric|fact[- ]based|"
+    r"demonstrat\w*\s+result|"
+    r"quantifiable\s+outcome|measurable\s+outcome|measurable\s+result"
+    r")",
+    re.IGNORECASE,
+)
+
+_WEAK_VERB_CLAIM_RE = re.compile(
+    r"\b(?:"
+    r"weak\s+(?:action\s+)?verb|weak\s+verb|"
+    r"duty[- ]only|duty[- ]style|duty[- ]focused|duties?\s+included|task[- ]focused|"
+    r"fail(?:s|ed|ing)?\s+to\s+highlight\s+ownership|"
+    r"no\s+ownership|lack\s+ownership|responsible\s+for|helped\s+with|assisted\s+with"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _resume_numeral_count(text: str) -> int:
+    """Number of distinct numeral tokens in the résumé text (CGPA 9.266 counts as 1)."""
+    return len(_NUMERAL_RE.findall(text or ""))
+
+
+def _resume_strong_verb_share(text: str) -> Tuple[int, int]:
+    """Return (strong_verb_lead_lines, total_bullet_like_lines) over the résumé.
+
+    Denominator is strict — only lines that start with an actual bullet glyph
+    (• – * ▪ ▸) count as bullets. Tech-stack lines like 'Python · Django · …'
+    or section / project headers must NOT inflate the denominator, otherwise
+    the strong-verb majority floor never fires on real résumés.
+    """
+    if not text:
+        return 0, 0
+    # Optional whitespace after the glyph — bullets in real PDFs sometimes
+    # come out as `•managed` with no space, e.g. when extract_words collapses
+    # the glyph and first token. Require a real word char after the glyph so
+    # standalone "•" lines aren't counted.
+    BULLET_LEAD = re.compile(r"^[•\-\*▪▸]\s*(?=\w)")
+    strong = 0
+    total = 0
+    for raw in text.splitlines():
+        ln = raw.strip()
+        if not ln:
+            continue
+        if not BULLET_LEAD.match(ln):
+            continue
+        # Drop the leading glyph + any whitespace before matching the verb.
+        body = BULLET_LEAD.sub("", ln, count=1)
+        total += 1
+        if _STRONG_VERB_RE.search(body):
+            strong += 1
+    return strong, total
+
+
+def _issue_text_blob(item: dict) -> str:
+    parts = []
+    for k in ("issue", "suggestion", "whyItMatters", "category", "warning"):
+        v = item.get(k) if isinstance(item, dict) else None
+        if isinstance(v, str):
+            parts.append(v)
+    return " ".join(parts).lower()
+
+
+def _issue_contradicts_resume(
+    blob: str,
+    has_plenty_of_numerals: bool,
+    has_strong_verb_majority: bool,
+) -> Optional[str]:
+    """Return a non-empty reason string when the issue's claim contradicts evidence."""
+    if has_plenty_of_numerals and _MISSING_METRICS_CLAIM_RE.search(blob):
+        return "claims missing metrics but résumé has plenty of numerals"
+    if has_strong_verb_majority and _WEAK_VERB_CLAIM_RE.search(blob):
+        return "claims weak/duty verbs but most bullets lead with strong ownership verbs"
+    return None
+
+
+# Thresholds. Tuned for typical 1-page résumés: ≥6 numerals is "plenty" and
+# ≥60% strong-verb bullets is a "strong-verb majority". Both are conservative
+# (only drop when the contradiction is overwhelming).
+_NUMERAL_PLENTY_MIN = 6
+_STRONG_VERB_MAJORITY_SHARE = 0.6
+
+
+def _validate_analysis_against_resume(raw: dict, resume_text: str) -> dict:
+    """Drop topIssues, atsWarnings, bullet issue tags, and finalRecommendations
+    whose claim contradicts what the résumé actually shows. Runs BEFORE
+    _normalize_analysis so the calibrated score penalty in that function is
+    based on the cleaned set."""
+    if not isinstance(raw, dict):
+        return raw
+
+    text = resume_text or ""
+    numeral_count = _resume_numeral_count(text)
+    strong, total = _resume_strong_verb_share(text)
+    strong_share = (strong / total) if total else 0.0
+    has_plenty_numerals = numeral_count >= _NUMERAL_PLENTY_MIN
+    has_strong_majority = total >= 5 and strong_share >= _STRONG_VERB_MAJORITY_SHARE
+
+    if not (has_plenty_numerals or has_strong_majority):
+        return raw  # nothing to contradict; let everything through
+
+    # Track whether the validator actually made any changes — when it did,
+    # _normalize_analysis should no longer cap the overall at the LLM's
+    # (proven-untrustworthy) overallScore. Stored on a private key so it
+    # doesn't leak into the API response.
+    adjustments = 0
+
+    # 1. topIssues
+    issues = raw.get("topIssues")
+    if isinstance(issues, list):
+        kept_issues = []
+        for it in issues:
+            if not isinstance(it, dict):
+                kept_issues.append(it)
+                continue
+            reason = _issue_contradicts_resume(
+                _issue_text_blob(it), has_plenty_numerals, has_strong_majority,
+            )
+            if reason:
+                logger.info(
+                    "evidence-validator dropped topIssue: %s | %r",
+                    reason, str(it.get("issue") or "")[:80],
+                )
+                adjustments += 1
+                continue
+            kept_issues.append(it)
+        raw["topIssues"] = kept_issues
+
+    # 2. atsWarnings
+    warnings = raw.get("atsWarnings")
+    if isinstance(warnings, list):
+        kept_warn = []
+        for w in warnings:
+            if not isinstance(w, dict):
+                kept_warn.append(w)
+                continue
+            reason = _issue_contradicts_resume(
+                _issue_text_blob(w), has_plenty_numerals, has_strong_majority,
+            )
+            if reason:
+                logger.info(
+                    "evidence-validator dropped atsWarning: %s | %r",
+                    reason, str(w.get("warning") or "")[:80],
+                )
+                adjustments += 1
+                continue
+            kept_warn.append(w)
+        raw["atsWarnings"] = kept_warn
+
+    # 3. bulletAnalysis.issues  — per-bullet check uses the bullet's OWN text
+    bullets = raw.get("bulletAnalysis")
+    if isinstance(bullets, list):
+        for ba in bullets:
+            if not isinstance(ba, dict):
+                continue
+            orig = str(ba.get("originalBullet") or "")
+            if not orig:
+                continue
+            bullet_nums = _resume_numeral_count(orig)
+            bullet_has_strong_verb = bool(_STRONG_VERB_RE.search(orig.lstrip(" \t•-*▪▸")))
+            issue_tags = ba.get("issues")
+            if not isinstance(issue_tags, list):
+                continue
+            kept_tags = []
+            for tag in issue_tags:
+                t = str(tag or "")
+                if not t.strip():
+                    continue
+                tl = t.lower()
+                if bullet_nums >= 2 and _MISSING_METRICS_CLAIM_RE.search(tl):
+                    logger.info(
+                        "evidence-validator dropped bullet issue tag: bullet has %d numerals | %r",
+                        bullet_nums, t[:80],
+                    )
+                    adjustments += 1
+                    continue
+                if bullet_has_strong_verb and _WEAK_VERB_CLAIM_RE.search(tl):
+                    logger.info(
+                        "evidence-validator dropped bullet issue tag: bullet leads with strong verb | %r",
+                        t[:80],
+                    )
+                    adjustments += 1
+                    continue
+                kept_tags.append(t)
+            ba["issues"] = kept_tags
+
+    # 4. finalRecommendations  — text-only list; same matcher
+    recs = raw.get("finalRecommendations")
+    if isinstance(recs, list):
+        kept_recs = []
+        for r in recs:
+            t = str(r or "")
+            if not t.strip():
+                continue
+            reason = _issue_contradicts_resume(
+                t.lower(), has_plenty_numerals, has_strong_majority,
+            )
+            if reason:
+                logger.info(
+                    "evidence-validator dropped finalRecommendation: %s | %r",
+                    reason, t[:80],
+                )
+                adjustments += 1
+                continue
+            kept_recs.append(t)
+        raw["finalRecommendations"] = kept_recs
+
+    # 5. Re-floor categoryScores that are unjustifiably low given the evidence.
+    # If the résumé has plenty of numerals, quantification can't legitimately
+    # be sub-55. If strong-verb majority, achievementQuality + languageQuality
+    # shouldn't be sub-55 either. These are *floors*, not caps — we only
+    # raise, never lower.
+    cs = raw.get("categoryScores")
+    if isinstance(cs, dict):
+        if has_plenty_numerals:
+            try:
+                q = cs.get("quantification")
+                if isinstance(q, (int, float)) and q < 55:
+                    logger.info("evidence-validator raised quantification %s→55 (numerals=%d)", q, numeral_count)
+                    cs["quantification"] = 55
+                    adjustments += 1
+            except Exception:
+                pass
+        if has_strong_majority:
+            for key in ("achievementQuality", "languageQuality"):
+                try:
+                    v = cs.get(key)
+                    if isinstance(v, (int, float)) and v < 55:
+                        logger.info(
+                            "evidence-validator raised %s %s→55 (strong-verb share=%.0f%%)",
+                            key, v, strong_share * 100,
+                        )
+                        cs[key] = 55
+                        adjustments += 1
+                except Exception:
+                    pass
+        raw["categoryScores"] = cs
+
+    # Private flag — when ≥2 adjustments fired, the LLM has demonstrably been
+    # untrustworthy on this résumé. Tell _normalize_analysis to stop using the
+    # LLM's overallScore as a ceiling and trust our calibration instead.
+    if adjustments >= 2:
+        raw["__validator_adjusted__"] = True
+        logger.info("evidence-validator: %d adjustments made → LLM overall cap disabled", adjustments)
+    return raw
+
+
 def _normalize_analysis(raw: dict) -> dict:
     """Ensure the LLM result has all required keys with sane defaults."""
     cs_defaults = {
@@ -4367,6 +4819,21 @@ def _normalize_analysis(raw: dict) -> dict:
                             cleaned[str(ck)] = _sanitize_bullet_display(cv)
                     if cleaned:
                         ba["categoryRewrites"] = cleaned
+                # Reject rewrites that silently drop numerals / proper nouns /
+                # named technologies from the original, or that claim
+                # "quantification" without actually adding a number. Better to
+                # surface no rewrite than a misleadingly-tagged one.
+                kept_improved, kept_cr = _filter_bullet_rewrites(
+                    ba.get("originalBullet", ""),
+                    ba.get("improvedBullet", ""),
+                    ba.get("categoryRewrites"),
+                )
+                ba["improvedBullet"] = kept_improved
+                if kept_cr:
+                    ba["categoryRewrites"] = kept_cr
+                elif "categoryRewrites" in ba:
+                    # All variant rewrites failed validation — drop the field.
+                    ba.pop("categoryRewrites", None)
 
     # Calibrate overall score so it reflects visible weaknesses.
     # This prevents inflated "90+" overall when there are many weak bullets/issues.
@@ -4390,19 +4857,41 @@ def _normalize_analysis(raw: dict) -> dict:
             elif sev == "medium":
                 medium_issues += 1
 
-    min_cat = min(scores) if scores else 50
-    weak_penalty = min(20, weak_bullets * 3)
-    issue_penalty = min(15, high_issues * 4 + medium_issues * 2)
-    # If any category is weak, overall should drop noticeably.
-    floor_penalty = round(max(0, 70 - min_cat) * 0.35)
-    calibrated = max(0, min(100, round(base_overall - weak_penalty - issue_penalty - floor_penalty)))
+    # ── Calibration v2 ────────────────────────────────────────────────────
+    # Old formula stacked three penalties (weak_bullets × 3, high_issues × 4,
+    # floor of (70 - min_cat) × 0.35) that double-counted the same weaknesses
+    # the category scores already encode. Result: a legitimate cashier CV
+    # with mean=34 got crushed to 0, and a strong résumé got pulled from a
+    # fair 71 down to 62. New formula:
+    #
+    #   1. base_overall  = mean of category scores. This is our truth — it
+    #      already reflects every weakness.
+    #   2. soft_penalty  = small, capped, ONLY counts high-severity legit
+    #      issues. No floor_penalty (redundant with the mean). No weak_bullets
+    #      penalty (the bullet weaknesses are already in achievementQuality /
+    #      quantification / languageQuality).
+    #   3. blended       = midpoint of (calibrated_base, llm_overall) when the
+    #      LLM's overall is plausible. When the validator fired (LLM proven
+    #      untrustworthy on this résumé), we skip the blend and use the base.
+    #   4. floor at 20   = any résumé that produced category scores at all
+    #      deserves at least 20 (reserve <20 for non-résumés / parse failures).
+    soft_penalty = min(6, high_issues * 2 + medium_issues)
+    calibrated = max(0, base_overall - soft_penalty)
 
-    # Keep the LLM's intent but avoid implausibly high overall given concrete weaknesses.
     llm_overall = raw.get("overallScore")
-    if isinstance(llm_overall, (int, float)):
-        raw["overallScore"] = int(min(llm_overall, calibrated))
+    validator_adjusted = bool(raw.pop("__validator_adjusted__", False))
+    if validator_adjusted or not isinstance(llm_overall, (int, float)):
+        final = calibrated
     else:
-        raw["overallScore"] = int(calibrated)
+        # Blend toward the midpoint — but if the LLM diverges from base by
+        # more than 20 points, the LLM is probably wrong; lean on calibrated.
+        diff = llm_overall - base_overall
+        if abs(diff) > 20:
+            final = calibrated
+        else:
+            final = round((calibrated + llm_overall) / 2)
+
+    raw["overallScore"] = int(max(20, min(100, round(final))))
     return raw
 
 
@@ -4514,6 +5003,11 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
 
     raw = _llm_json_call(prompt)
     if raw and isinstance(raw, dict):
+        # Strip bogus issues / recommendations that contradict the actual
+        # résumé text BEFORE _normalize_analysis runs its score calibration —
+        # otherwise the calibration penalty fires on lies and the overall
+        # score gets crushed to 36 on a perfectly fine résumé.
+        raw = _validate_analysis_against_resume(raw, text)
         return _normalize_analysis(raw)
 
     logger.warning("LLM unavailable for comprehensive analysis — using regex fallback")
@@ -5295,8 +5789,78 @@ async def api_suggest_gap_fix(request: Request):
         "Rules:\n"
         "- Only rewrite bullets that EXIST verbatim in the résumé — quote each original exactly.\n"
         "- Do NOT invent metrics, employers, dates, or facts not already in the résumé.\n"
-        "- Each rewrite must be a single bullet sentence. Do not split into multiple bullets.\n"
-        "- Focus on vocabulary and framing that matches the job description keywords.\n\n"
+        # A5 — length is flexible upward, never downward
+        "- Length: rewrites should be the same length or longer than the original. They may grow\n"
+        "  to fit new keywords, but they may NOT shrink by dropping content. One bullet → one\n"
+        "  bullet (no splitting), but use as many words as you need to preserve everything.\n"
+        "- Focus on vocabulary and framing that matches the job description keywords.\n"
+        "- KEYWORD PRESERVATION (CRITICAL): the suggested rewrite MUST preserve every concrete\n"
+        "  technical term from the original bullet. Specifically:\n"
+        "    * AWS service names (Lambda, Cognito, API Gateway, Bedrock, S3, SQS, DynamoDB, etc.)\n"
+        "    * Cloud / DevOps tools (Docker, Kubernetes, Terraform, Jenkins, GitHub Actions, etc.)\n"
+        "    * Programming languages and frameworks (Python, Java, Spring Boot, FastAPI, React, etc.)\n"
+        "    * Protocols and standards (gRPC, REST, GraphQL, OAuth, SAML, WCAG, etc.)\n"
+        "    * Database / data engine names (PostgreSQL, Redis, Kafka, RabbitMQ, etc.)\n"
+        "    * Specific product / project nouns (e.g. 'live audio and text', 'CI/CD pipelines',\n"
+        "      'infrastructure as code') — do NOT generalize them to vague phrases like 'live data'.\n"
+        "  You may ADD new keywords from the JD. You may REPHRASE. You may NOT delete any of the\n"
+        "  named technologies, services, protocols, or domain-specific nouns above.\n"
+        # A2 — anti-abstraction rule with concrete examples
+        "- NO ABSTRACTING (CRITICAL): do not replace a specific term with a generic one. Examples\n"
+        "  of changes you must NEVER make:\n"
+        "    * 'live audio and text'  →  'live data'                       ❌ (lost the product)\n"
+        "    * 'PostgreSQL'            →  'database' or 'a relational store' ❌ (lost the engine)\n"
+        "    * 'AWS Lambda'            →  'serverless functions'           ❌ (lost the service)\n"
+        "    * 'Kubernetes'            →  'container orchestration'         ❌ (lost the tool)\n"
+        "    * 'gRPC streaming'        →  'real-time streaming'             ❌ (lost the protocol)\n"
+        "    * 'CI/CD pipelines'       →  'automated deployment'            ❌ (lost the keyword)\n"
+        "  The right move is to ADD JD vocabulary alongside the original specifics, not replace.\n"
+        "- HONESTY: if the bullet's actual content has no genuine connection to the gap, do NOT\n"
+        "  shoehorn the gap's vocabulary in. Skip that bullet and pick a different one, or return\n"
+        "  fewer than 3 suggestions. A weak forced bridge is worse than a missing one.\n\n"
+        # A3 — few-shot examples (good, bad, skip)
+        "Examples of good / bad / skip — STUDY THESE before responding.\n\n"
+        "ORIGINAL bullet: 'Built FastAPI service on AWS Lambda that ingests Kafka events into\n"
+        "                  PostgreSQL with sub-second latency.'\n"
+        "GAP: 'real-time data pipelines'\n"
+        "✅ GOOD rewrite: 'Built FastAPI service on AWS Lambda that powers a real-time data\n"
+        "                  pipeline, ingesting Kafka events into PostgreSQL with sub-second\n"
+        "                  latency.'\n"
+        "   Why: every original keyword (FastAPI, AWS Lambda, Kafka, PostgreSQL) is preserved.\n"
+        "   'real-time data pipeline' is ADDED. Length grew by one phrase.\n"
+        "❌ BAD rewrite:  'Built a real-time data pipeline with sub-second latency on AWS.'\n"
+        "   Why: dropped FastAPI, Lambda (now just 'AWS'), Kafka, PostgreSQL — four keywords\n"
+        "   gone in exchange for one. Bullet is shorter and weaker. NEVER do this.\n\n"
+        "ORIGINAL bullet: 'Designed onboarding flow with progress bars and tooltips for new users.'\n"
+        "GAP: 'experience with retail labor systems'\n"
+        "⊘ SKIP this bullet. There is no honest bridge from onboarding UI work to retail labor\n"
+        "   systems. Forcing a connection ('Designed retail labor onboarding flow…') would be a\n"
+        "   lie. Pick a different bullet, or return fewer suggestions.\n\n"
+        # A4 — self-critique / verification step
+        "Self-check before responding: for EACH suggestion you produce, do these steps mentally:\n"
+        "  1. List every capitalized noun, acronym, and CamelCase term in the ORIGINAL bullet.\n"
+        "  2. Confirm each of those terms appears verbatim in your SUGGESTED rewrite.\n"
+        "  3. If any term from step 1 is missing in step 2, DO NOT emit that suggestion — revise\n"
+        "     it until every term is preserved, or drop the suggestion entirely.\n"
+        "  4. Confirm your rewrite is at least as long as the original (in words).\n"
+        "  5. Confirm at least one phrase from the JOB DESCRIPTION appears in the rewrite (added,\n"
+        "     not substituted).\n"
+        "Only return a suggestion that passes all five checks.\n\n"
+        # Force the category to match what the rewrite actually does — the
+        # server-side validator will reject 'quantification' suggestions that
+        # add no numerals, and reject any rewrite that drops a numeral or
+        # proper noun from the original.
+        "CATEGORY TRUTH: pick the category that matches what your rewrite actually does.\n"
+        "  - 'quantification' is only valid if your rewrite adds a numeral (digits, %, scale, or\n"
+        "    a [X]/[$Y]/[~N] placeholder) that was NOT in the original.\n"
+        "  - 'add_keywords' / 'relevance' are valid when you add JD vocabulary alongside the\n"
+        "    original specifics.\n"
+        "  - 'remove_filler' is the ONLY category that may shrink the bullet, and even then it\n"
+        "    must preserve every numeral and named technology from the original.\n"
+        "  - 'readability' / 'languageQuality' / 'action_verbs' must NOT delete numerals or\n"
+        "    named technologies — they apply to wording and verb choice, not content removal.\n"
+        "  The server will reject any suggestion whose rewrite drops a numeral or proper noun\n"
+        "  from the original, and any 'quantification' suggestion that adds no new numerals.\n\n"
         "Return ONLY a JSON object:\n"
         '{\n'
         '  "suggestions": [\n'
@@ -5306,6 +5870,7 @@ async def api_suggest_gap_fix(request: Request):
         '      "original": "The exact bullet text from the résumé (verbatim)",\n'
         '      "suggested": "The improved bullet text",\n'
         '      "reason": "One sentence explaining how this rewrite addresses the gap.",\n'
+        '      "category": "add_keywords",\n'
         '      "priority": "high"\n'
         '    }\n'
         '  ]\n'
@@ -5328,7 +5893,28 @@ async def api_suggest_gap_fix(request: Request):
         suggestions = data.get("suggestions") if isinstance(data, dict) else []
         if not isinstance(suggestions, list):
             suggestions = []
-        return JSONResponse({"suggestions": suggestions})
+        # Drop any rewrite that silently deletes numerals or proper nouns
+        # from the original bullet — those are the "lossy rewrite tagged
+        # readability" failure mode we saw repeatedly. Better to return
+        # fewer suggestions than a lying one.
+        validated: List[dict] = []
+        for s in suggestions:
+            if not isinstance(s, dict):
+                continue
+            original = str(s.get("original") or "").strip()
+            suggested = str(s.get("suggested") or "").strip()
+            if not original or not suggested:
+                continue
+            cat = str(s.get("category") or "").strip().lower() or None
+            ok, why = _validate_rewrite_against_original(original, suggested, category=cat)
+            if not ok:
+                logger.info(
+                    "suggest-gap-fix dropped suggestion (%s): orig=%r  rewrite=%r",
+                    why, original[:80], suggested[:80],
+                )
+                continue
+            validated.append(s)
+        return JSONResponse({"suggestions": validated})
     except json.JSONDecodeError as exc:
         logger.error("suggest-gap-fix JSON parse error: %s  raw=%s", exc, text[:200])
         return JSONResponse({"error": "AI response could not be parsed."}, status_code=500)
