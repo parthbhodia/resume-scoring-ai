@@ -288,7 +288,7 @@ select option { background: var(--surface); }
   .app-shell-sidebar[data-collapsed="true"] .app-sidebar-label,
   .app-shell-sidebar[data-collapsed="true"] .app-sidebar-brand-text,
   .app-shell-sidebar[data-collapsed="true"] .app-sidebar-legal {
-    display: none;
+    display: none !important;
   }
   .app-shell-sidebar[data-collapsed="true"] .app-nav-row {
     justify-content: center;
