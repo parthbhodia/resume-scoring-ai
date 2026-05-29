@@ -92,7 +92,7 @@ type Suggestion = {
   priority: "high" | "medium" | "low";
 };
 
-/** Rotating coach lines while “Analyze & get suggestions” runs (Resume Builder). */
+/** Rotating coach lines while "Analyze & get suggestions" runs (Resume Builder). */
 const SUGGEST_LOADER_TIPS = [
   "Matching bullets to keywords from the posting…",
   "Looking for vague metrics and weak verbs…",
@@ -101,7 +101,7 @@ const SUGGEST_LOADER_TIPS = [
   "Prioritizing what recruiters skim in the first pass…",
 ] as const;
 
-/** Rotating coach lines while “Generate tailored PDF” runs (Resume Builder). */
+/** Rotating coach lines while "Generate tailored PDF" runs (Resume Builder). */
 const GENERATE_LOADER_TIPS = [
   "Tailoring your experience to this job posting…",
   "Applying your template layout and ATS structure…",
@@ -119,7 +119,7 @@ const UPLOAD_LOADER_TIPS = [
   "After upload, you can merge contact fields into Profile in one click.",
 ] as const;
 
-/** Accent swatches — template “Customize preview” (preview chrome only; PDF uses LaTeX template). */
+/** Accent swatches — template "Customize preview" (preview chrome only; PDF uses LaTeX template). */
 const CUSTOMIZE_ACCENT_SWATCHES: { id: string; hex: string }[] = [
   { id: "ink", hex: "#0f172a" },
   { id: "navy", hex: "#1e3a5f" },
@@ -430,7 +430,7 @@ export default function ResumeBuilder({
   const hasSuggestResearch = suggestResearchQueries.length > 0 || suggestResearchSources.length > 0;
   const reusingSuggestWebForPdf = suggestResearchDigest.trim().length > 0;
   const [storageFailures, setStorageFailures] = useState<{ artifact: "pdf" | "tex"; reason: string }[]>([]);
-  /** Right-panel “Save to library” re-upsert (compile already upserts; this is explicit retry). */
+  /** Right-panel "Save to library" re-upsert (compile already upserts; this is explicit retry). */
   const [libraryReSaveBusy, setLibraryReSaveBusy] = useState(false);
   const [docxExportBusy, setDocxExportBusy] = useState(false);
   const [libraryToast, setLibraryToast] = useState<string | null>(null);
@@ -3420,7 +3420,7 @@ function ResumeBuilderAtsSignInPrompt({
   );
 }
 
-/** Template-studio handoff — post-compile screen aligned with Resunova “Customize preview” (Figma). */
+/** Template-studio handoff — post-compile screen aligned with Resunova "Customize preview" (Figma). */
 function TemplateCustomizePostResult({
   generating,
   statusMsg,
@@ -4253,7 +4253,7 @@ function ResumePaperView({
   lineHeight = 1.55,
   paperPaddingY = 28,
   paperPaddingX = 32,
-  sectionAccentColor = “#0f172a”,
+  sectionAccentColor = "#0f172a",
   gapFixHighlights = [],
   appliedHighlights = [],
 }: {
@@ -4263,7 +4263,7 @@ function ResumePaperView({
   interactiveSuggestions?: BuilderPaperInteractive;
   /** LaTeX `reference_folder` — selects sans vs serif and name treatment to approximate the gallery template. */
   templateFolder?: string | null;
-  /** Optional typography for template “Customize preview” (does not affect exported PDF). */
+  /** Optional typography for template "Customize preview" (does not affect exported PDF). */
   baseFontPx?: number;
   lineHeight?: number;
   /** Bullets currently being targeted by the open gap-fix panel — shown with purple highlight. */

@@ -13,7 +13,21 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
   basePath,
   assetPrefix,
-  transpilePackages: ["react-pdf", "pdfjs-dist"],
+  transpilePackages: ["react-pdf", "pdfjs-dist", "@react-pdf/renderer"],
+  // Turbopack is the default in Next.js 16; provide an empty config to silence
+  // the "webpack config ignored" warning while keeping webpack fallbacks for CI.
+  turbopack: {},
+  webpack: (config) => {
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      canvas: false,
+      fs: false,
+      path: false,
+      stream: false,
+      zlib: false,
+    };
+    return config;
+  },
 };
 
 export default nextConfig;
