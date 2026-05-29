@@ -1238,7 +1238,7 @@ export default function AnalyzeResume() {
             overflow: hidden;
             border-right-color: var(--border);
           }
-          .az-main { padding: 20px 16px 60px !important; }
+          .az-main { padding: 20px 16px 60px !important; -webkit-overflow-scrolling: touch; }
         }
 
         .az-resume-panel {
@@ -1473,26 +1473,32 @@ export default function AnalyzeResume() {
           @media (max-width: 767px) {
             .az-main.az-main-workspace-split {
               display: flex !important;
-              flex-direction: column-reverse !important;
+              flex-direction: column !important;
               overflow-y: auto !important;
+              -webkit-overflow-scrolling: touch;
               padding: 16px 0 60px !important;
             }
             .az-main.az-main-workspace-split .az-mobile-sticky-head {
-              order: 3;
+              order: 1;
               flex-shrink: 0;
             }
             .az-main.az-main-workspace-split .az-split-resume-slot {
               order: 2;
             }
             .az-main.az-main-workspace-split .az-split-work-slot {
-              order: 1;
+              order: 3;
             }
             .az-split-resume-slot {
+              height: auto !important;
               min-height: 42vh !important;
+              max-height: 60vh !important;
+              overflow-y: auto !important;
               border-left: none !important;
               border-bottom: 1px solid var(--border) !important;
             }
             .az-split-work-slot {
+              height: auto !important;
+              overflow-y: visible !important;
               padding: 12px 16px 48px !important;
             }
           }
