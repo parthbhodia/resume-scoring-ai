@@ -283,12 +283,20 @@ select option { background: var(--surface); }
 
 @media (min-width: 768px) {
   .app-shell-sidebar[data-collapsed="true"] {
-    width: 0 !important;
-    min-width: 0;
-    border-right-width: 0;
-    overflow: hidden;
-    opacity: 0;
-    pointer-events: none;
+    width: var(--sidebar-w-compact);
+  }
+  .app-shell-sidebar[data-collapsed="true"] .app-sidebar-label,
+  .app-shell-sidebar[data-collapsed="true"] .app-sidebar-brand-text,
+  .app-shell-sidebar[data-collapsed="true"] .app-sidebar-legal {
+    display: none;
+  }
+  .app-shell-sidebar[data-collapsed="true"] .app-nav-row {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .app-shell-sidebar[data-collapsed="true"] .app-nav-sublink {
+    display: none;
   }
 }
 
@@ -348,9 +356,10 @@ select option { background: var(--surface); }
   transform: translateY(-1px);
 }
 
+/* Floating reopen button no longer shown — collapsed sidebar is an icon rail */
 @media (min-width: 768px) {
   .app-shell-root[data-sidebar-collapsed="true"] .app-shell-sidebar-reopen {
-    display: inline-flex;
+    display: none;
   }
 }
 

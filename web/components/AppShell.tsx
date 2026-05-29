@@ -315,7 +315,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
         data-compact={isTablet ? "true" : "false"}
         data-collapsed={sidebarCollapsed ? "true" : "false"}
         aria-label="Primary navigation"
-        inert={sidebarCollapsed}
       >
         <div style={{ padding: "18px 14px 14px", flexShrink: 0 }}>
           <div
@@ -345,7 +344,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 justifyContent: isTablet ? "center" : "flex-start",
               }}
             >
-              {isTablet ? (
+              {isTablet || sidebarCollapsed ? (
                 <LogoMark size={28} />
               ) : (
                 <LogoFull markSize={26} textColor="var(--text)" />
