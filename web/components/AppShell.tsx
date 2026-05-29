@@ -433,7 +433,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <span className="app-sidebar-label" style={{ flex: 1 }}>History</span>
           </button>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="app-sidebar-footer-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               type="button"
               onClick={toggleTheme}
