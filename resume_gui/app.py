@@ -1673,7 +1673,20 @@ def _llm_extract_with_manifest(text: str) -> tuple[Optional[ResumeDocModel], Opt
     prompt = faithful_extract_prompt(profile_snippet, inv)
 
     try:
-        raw = _llm_json_call(prompt)
+        # Structured extraction is where accuracy matters most — the parsed
+        # ResumeDocModel feeds both the analysis and the rendered preview. A
+        # bad split here (3 schools collapsed into 1) cascades through both.
+        # Route this single call to the reasoning tier (grok-4-fast-reasoning
+        # / gemini-2.5-pro). Real cost: ~8s of extra latency on Analyze, ~1.6×
+        # the cost of that single call. Empirically improves date extraction
+        # (0/3 → 2/3 runs) and reduces miss rates on the entry-split task.
+        # Other calls (analyze prompt, gap-fix, suggestions) stay on the fast
+        # non-reasoning model.
+        if grok_preferred_for_throughput():
+            extract_model = _grok_reasoning_model()
+        else:
+            extract_model = _gemini_reasoning_model()
+        raw = _llm_json_call(prompt, model_override=extract_model)
         if not raw or not isinstance(raw, dict):
             log_extraction_debug("faithful_extract_failed", {"reason": "empty_or_non_dict_llm_response"})
             return None, None
@@ -4287,10 +4300,27 @@ Return ONLY this JSON (no markdown fences, no explanation):
 """
 
 
-def _llm_json_call(prompt: str) -> Optional[dict]:
-    """Call Grok (primary when configured) or Gemini for a JSON response."""
+def _grok_reasoning_model() -> str:
+    """Reasoning-tier Grok for tasks where structural accuracy matters more
+    than latency (e.g. structured résumé extraction). Override via env."""
+    return (os.environ.get("GROK_REASONING_MODEL") or "grok-4-fast-reasoning").strip()
+
+
+def _gemini_reasoning_model() -> str:
+    """Reasoning-tier Gemini fallback."""
+    return (os.environ.get("GEMINI_REASONING_MODEL") or "gemini-2.5-pro").strip()
+
+
+def _llm_json_call(prompt: str, *, model_override: Optional[str] = None) -> Optional[dict]:
+    """Call Grok (primary when configured) or Gemini for a JSON response.
+
+    Pass ``model_override`` to force a specific model (e.g. the reasoning tier
+    for structured extraction). When set, we use the override for the matching
+    provider and fall back to the other provider's default if the override
+    fails. Without override, behavior is unchanged from before.
+    """
     import time
-    selected_model = primary_llm_model_for_resume_workloads()
+    selected_model = (model_override or primary_llm_model_for_resume_workloads()).strip()
 
     def _is_grok_model(model_name: str) -> bool:
         return (model_name or "").strip().lower().startswith("grok")
@@ -4346,10 +4376,21 @@ def _llm_json_call(prompt: str) -> Optional[dict]:
         out = _grok_json(selected_model)
         if out is not None:
             return out
+        # Cross-provider fallback. When we were forced onto a reasoning tier
+        # and it failed, try the reasoning-tier Gemini equivalent before the
+        # default flash model.
+        if model_override:
+            out = _gemini_json(_gemini_reasoning_model())
+            if out is not None:
+                return out
         return _gemini_json(primary_gemini_flash_model())
     out = _gemini_json(selected_model)
     if out is not None:
         return out
+    if model_override:
+        out = _grok_json(_grok_reasoning_model())
+        if out is not None:
+            return out
     return _grok_json(os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning"))
 
 
