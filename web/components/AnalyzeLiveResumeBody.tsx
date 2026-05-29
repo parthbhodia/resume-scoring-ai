@@ -47,8 +47,14 @@ function looksLikeSectionHeading(line: string, strict = false): boolean {
   // In strict mode (used for first-line header detection), only match known section keywords.
   // This prevents "JOHN DOE" or "PARTH BHODIA" from being misidentified as section headings.
   if (strict) return KNOWN_SECTIONS.test(t);
-  if (/[A-Z]/.test(t) && t === t.toUpperCase() && !/^\d/.test(t)) return true;
   if (KNOWN_SECTIONS.test(t)) return true;
+  // Generic ALL-CAPS fallback. Reject lines that look like degree / qualification rows
+  // even though every alpha char happens to be uppercase — these contain digits, percent,
+  // parens, em-/en-dashes, or slashes. E.g. "ICSE — 97.16% (2021)", "B.TECH (CGPA 9.2)",
+  // "AWS / GCP CERT 2022" are NOT section headings; they're content lines that should
+  // stay grouped with the preceding institution / role.
+  if (/[0-9%()/–—]/.test(t)) return false;
+  if (/[A-Z]/.test(t) && t === t.toUpperCase() && !/^\d/.test(t)) return true;
   return false;
 }
 
