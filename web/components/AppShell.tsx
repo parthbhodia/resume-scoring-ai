@@ -357,7 +357,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               aria-label="Hide navigation"
               title="Hide navigation"
             >
-              <NavMenuIcon open />
+              <NavMenuIcon open={!sidebarCollapsed} />
             </button>
           </div>
         </div>
