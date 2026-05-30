@@ -976,7 +976,18 @@ export default function AnalyzeLiveResumeBody({
                   className="az-resume-bullet"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (presentationOnly && hasActionable) {
+                    // Only open the "AI Suggestion" popup when there's an
+                    // actual rewrite to show. After the no-op-rewrite filter
+                    // landed server-side, the popup's "No rewrite suggestion
+                    // available for this bullet" empty state fires often —
+                    // and that empty popup duplicates the score + tag info
+                    // that's already on the flagged-bullet card on the left.
+                    // When no rewrite exists, just route to the card via
+                    // onBulletLinkedSelect (parent scrolls / expands it).
+                    const hasRewrite =
+                      typeof bullet.improvedBullet === "string"
+                      && bullet.improvedBullet.trim().length > 0;
+                    if (presentationOnly && hasRewrite) {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                       const popupTop = Math.max(8, Math.min(rect.top, window.innerHeight - 340));
                       const popupLeft = Math.max(8, rect.left - 336);
