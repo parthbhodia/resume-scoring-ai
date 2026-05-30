@@ -4,6 +4,7 @@ import { useTemplateBuilderStore } from "@/store/templateBuilderStore";
 import type { TemplateBuilderStore } from "@/store/templateBuilderStore";
 import ResumePreview from "./ResumePreview";
 import type { TBFont } from "./types";
+import { apiUrl } from "@/lib/utils";
 
 /* ── Shared style helpers ──────────────────────────────────────── */
 const inputBase: React.CSSProperties = {
@@ -94,6 +95,107 @@ const ENTRY_LABEL_STYLE: React.CSSProperties = {
   color: "var(--text)",
   letterSpacing: 0.1,
 };
+
+/* ── AI-enhanced textarea ──────────────────────────────────────── */
+function countWords(s: string) {
+  return s.trim().split(/\s+/).filter(Boolean).length;
+}
+
+interface AITextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+  type: "bullets" | "summary";
+  context?: { role?: string; company?: string };
+  onEnhanced: (text: string) => void;
+}
+
+function AITextarea({ type, context, onEnhanced, value, style, ...rest }: AITextareaProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [undoVal, setUndoVal] = useState<string | null>(null);
+  const wordCount = countWords(String(value ?? ""));
+  const showBtn = wordCount >= 8;
+
+  const enhance = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl("/api/tb-enhance"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: String(value ?? ""), type, context: context ?? {} }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.enhanced) throw new Error(data.error || "AI error");
+      setUndoVal(String(value ?? ""));
+      onEnhanced(data.enhanced);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [value, type, context, onEnhanced]);
+
+  const undo = useCallback(() => {
+    if (undoVal !== null) {
+      onEnhanced(undoVal);
+      setUndoVal(null);
+    }
+  }, [undoVal, onEnhanced]);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <textarea
+        value={value}
+        style={{ ...textareaBase, ...style as React.CSSProperties, paddingBottom: showBtn ? 36 : undefined }}
+        {...rest}
+      />
+      {showBtn && (
+        <div style={{
+          position: "absolute",
+          bottom: 7,
+          right: 8,
+          display: "flex",
+          gap: 5,
+          alignItems: "center",
+        }}>
+          {error && (
+            <span style={{ fontSize: 10, color: "var(--red, #ef4444)", maxWidth: 140, textAlign: "right" }}>{error}</span>
+          )}
+          {undoVal !== null && !loading && (
+            <button
+              type="button"
+              onClick={undo}
+              title="Undo AI enhancement"
+              style={{
+                fontSize: 10, color: "var(--muted)", background: "var(--surface2)",
+                border: "1px solid var(--border)", borderRadius: 5, padding: "3px 7px",
+                cursor: "pointer", whiteSpace: "nowrap",
+              }}
+            >↩ Undo</button>
+          )}
+          <button
+            type="button"
+            onClick={enhance}
+            disabled={loading}
+            title="Enhance with AI (ATS-optimized)"
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              fontSize: 11, fontWeight: 600,
+              color: loading ? "var(--muted)" : "#fff",
+              background: loading ? "var(--surface2)" : "var(--accent)",
+              border: "none", borderRadius: 5,
+              padding: "4px 9px", cursor: loading ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap", transition: "background 0.15s",
+            }}
+          >
+            {loading
+              ? <><span style={{ width: 10, height: 10, border: "1.5px solid var(--border)", borderTopColor: "var(--muted)", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} /> Enhancing…</>
+              : <>✦ AI Enhance</>}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ── Customization constants ───────────────────────────────────── */
 const ACCENT_PRESETS = [
@@ -382,9 +484,13 @@ function ProfileSection({ store, data }: { store: StoreType; data: StoreType["da
       </Row>
       <FieldWrap>
         <Field label="Professional Summary">
-          <textarea style={textareaBase} value={p.summary}
+          <AITextarea
+            type="summary"
+            value={p.summary}
             onChange={(e) => store.setProfile("summary", e.target.value)}
-            placeholder="Brief 2–3 sentence summary of your experience and goals..." />
+            onEnhanced={(v) => store.setProfile("summary", v)}
+            placeholder="Brief 2–3 sentence summary of your experience and goals..."
+          />
         </Field>
       </FieldWrap>
     </>
@@ -440,9 +546,14 @@ function ExperienceSection({ store, data }: { store: StoreType; data: StoreType[
           </div>
           <FieldWrap>
             <Field label="Key Achievements (one bullet per line)">
-              <textarea style={textareaBase} value={w.bullets}
+              <AITextarea
+                type="bullets"
+                context={{ role: w.jobTitle, company: w.company }}
+                value={w.bullets}
                 onChange={(e) => store.setWork(w.id, "bullets", e.target.value)}
-                placeholder={"• Led team of 5 engineers to ship feature X\n• Reduced latency by 40% via caching"} />
+                onEnhanced={(v) => store.setWork(w.id, "bullets", v)}
+                placeholder={"• Led team of 5 engineers to ship feature X\n• Reduced latency by 40% via caching"}
+              />
             </Field>
           </FieldWrap>
         </div>
@@ -548,9 +659,14 @@ function ProjectsSection({ store, data }: { store: StoreType; data: StoreType["d
           </FieldWrap>
           <FieldWrap>
             <Field label="Description (one bullet per line)">
-              <textarea style={textareaBase} value={p.bullets}
+              <AITextarea
+                type="bullets"
+                context={{ role: p.name }}
+                value={p.bullets}
                 onChange={(e) => store.setProject(p.id, "bullets", e.target.value)}
-                placeholder={"• Built a tool that...\n• Achieved X by doing Y..."} />
+                onEnhanced={(v) => store.setProject(p.id, "bullets", v)}
+                placeholder={"• Built a tool that...\n• Achieved X by doing Y..."}
+              />
             </Field>
           </FieldWrap>
         </div>

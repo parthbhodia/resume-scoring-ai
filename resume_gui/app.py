@@ -6935,6 +6935,90 @@ async def serve_pdf(request: Request):
     return FileResponse(pdf_path, media_type="application/pdf")
 
 
+async def api_tb_enhance(request: Request):
+    """POST /api/tb-enhance — ATS-optimize a block of text from the Template Builder.
+
+    Body: {
+        "text":    str,   -- the raw text (bullets newline-separated, or a summary paragraph)
+        "type":    str,   -- "bullets" | "summary"
+        "context": {      -- optional context for better rewrites
+            "role":    str,
+            "company": str,
+        }
+    }
+    Returns: { "enhanced": str }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    text    = (body.get("text") or "").strip()
+    kind    = (body.get("type") or "bullets").strip()
+    context = body.get("context") or {}
+    role    = (context.get("role") or "").strip()
+    company = (context.get("company") or "").strip()
+
+    if not text:
+        return JSONResponse({"error": "text required"}, status_code=400)
+
+    ctx_line = ""
+    if role or company:
+        ctx_line = f"Role: {role}{' at ' + company if company else ''}\n"
+
+    if kind == "summary":
+        prompt = (
+            "You are an expert resume coach. Rewrite this professional summary to be more compelling "
+            "and ATS-friendly.\n\n"
+            "Rules:\n"
+            "- 2-3 sentences total, concise\n"
+            "- Start with a strong professional identity statement\n"
+            "- Mention key technologies or specializations naturally\n"
+            "- Avoid weak phrases (responsible for, helped with, worked on, assisted)\n"
+            "- Do NOT add made-up metrics or claim experience not in the original\n"
+            f"{ctx_line}\n"
+            f"Original summary:\n{text}\n\n"
+            'Return JSON: { "enhanced": "<improved summary text>" }'
+        )
+    else:
+        # Bullets: each line is one bullet
+        raw_bullets = [b.lstrip("-•* ").strip() for b in text.split("\n") if b.strip()]
+        bullets_block = "\n".join(f"- {b}" for b in raw_bullets)
+        prompt = (
+            "You are an expert resume coach specializing in ATS optimization. "
+            "Rewrite these resume bullet points to be stronger and more ATS-friendly.\n\n"
+            "Rules per bullet:\n"
+            "- Start with a strong past-tense action verb (Led, Built, Designed, Reduced, etc.)\n"
+            "- Include or preserve quantifiable metrics (%, $, numbers, scale) where present in original\n"
+            "- Be specific about technologies and impact\n"
+            "- Keep each bullet under 25 words\n"
+            "- Do NOT invent metrics or experience not mentioned in the original\n"
+            "- Preserve the number of bullets exactly\n\n"
+            f"{ctx_line}"
+            f"Bullets to improve:\n{bullets_block}\n\n"
+            'Return JSON: { "bullets": ["<bullet 1>", "<bullet 2>", ...] }'
+        )
+
+    try:
+        raw = _llm_json_call(prompt)
+        if not raw:
+            return JSONResponse({"error": "AI unavailable"}, status_code=503)
+
+        if kind == "summary":
+            enhanced = (raw.get("enhanced") or "").strip()
+        else:
+            bullets_out = raw.get("bullets") or []
+            enhanced = "\n".join(str(b).lstrip("-•* ").strip() for b in bullets_out if str(b).strip())
+
+        if not enhanced:
+            return JSONResponse({"error": "empty response from AI"}, status_code=500)
+
+        return JSONResponse({"enhanced": enhanced})
+    except Exception as exc:
+        logger.exception("tb-enhance failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 async def api_rewrite_bullet(request: Request):
     """POST /api/rewrite-bullet — score and optionally rewrite a single bullet.
 
@@ -7703,6 +7787,7 @@ routes = [
     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
     Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),
     Route("/api/rewrite-bullet",          api_rewrite_bullet,  methods=["POST"]),
+    Route("/api/tb-enhance",              api_tb_enhance,      methods=["POST"]),
     Route("/api/suggest-changes",         api_suggest_changes, methods=["POST"]),
     Route("/api/suggest-changes-stream",  api_suggest_changes_stream, methods=["POST"]),
     Route("/api/suggest-gap-fix",         api_suggest_gap_fix, methods=["POST"]),
