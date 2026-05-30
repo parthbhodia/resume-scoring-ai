@@ -2,8 +2,9 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTemplateBuilderStore } from "@/store/templateBuilderStore";
 import ResumePreview from "./ResumePreview";
+import type { TBFont } from "./types";
 
-/* ── Shared style helpers (match ManualResumeForm.tsx) ─── */
+/* ── Shared style helpers ──────────────────────────────────────── */
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "9px 12px",
@@ -101,7 +102,23 @@ const removeBtnStyle: React.CSSProperties = {
   display: "block",
 };
 
-type SectionKey = "profile" | "experience" | "education" | "projects" | "skills";
+/* ── Customization constants ───────────────────────────────────── */
+const ACCENT_PRESETS = [
+  { label: "Charcoal", value: "#1a1a1a" },
+  { label: "Navy", value: "#1e3a5f" },
+  { label: "Forest", value: "#1a4731" },
+  { label: "Burgundy", value: "#6b2737" },
+  { label: "Steel", value: "#2d5986" },
+  { label: "Slate", value: "#475569" },
+];
+
+const FONT_OPTIONS: { label: string; value: TBFont }[] = [
+  { label: "Helvetica (Modern)", value: "Helvetica" },
+  { label: "Times Roman (Classic)", value: "Times-Roman" },
+  { label: "Courier (Technical)", value: "Courier" },
+];
+
+type SectionKey = "customize" | "profile" | "experience" | "education" | "projects" | "skills";
 
 export default function TemplateBuilderClient() {
   const store = useTemplateBuilderStore();
@@ -110,7 +127,6 @@ export default function TemplateBuilderClient() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  // Load localStorage on mount (no persist middleware = no SSR issues)
   useEffect(() => {
     store.loadFromStorage();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -121,7 +137,6 @@ export default function TemplateBuilderClient() {
     setIsGenerating(true);
     setDownloadError(null);
     try {
-      // Dynamic import — never at module level (prevents build-time Node.js module issues)
       const [{ pdf }, { default: ResumePDFTemplate }] = await Promise.all([
         import("@react-pdf/renderer"),
         import("./ResumePDFTemplate"),
@@ -148,9 +163,11 @@ export default function TemplateBuilderClient() {
     );
   }
 
+  const c = data.customization;
+
   return (
     <div style={{ display: "flex", height: "100%", minHeight: 0, overflow: "hidden" }}>
-      {/* ── Left: Form Panel ─────────────────────────────────────── */}
+      {/* ── Left: Form Panel ─────────────────────────────────── */}
       <div style={{
         width: 360,
         minWidth: 320,
@@ -173,7 +190,75 @@ export default function TemplateBuilderClient() {
           </button>
         </div>
 
-        {/* Profile Section */}
+        {/* ── Customize Section ─────────────────────────────── */}
+        <button style={sectionHeaderStyle(openSection === "customize")} onClick={() => toggle("customize")}>
+          <span>Customize</span>
+          <span>{openSection === "customize" ? "▲" : "▼"}</span>
+        </button>
+        {openSection === "customize" && (
+          <div style={sectionBodyStyle}>
+            {/* Font */}
+            <Field label="Font Style">
+              <select
+                style={{ ...inputStyle, cursor: "pointer" }}
+                value={c.font}
+                onChange={(e) => store.setCustomization("font", e.target.value)}
+              >
+                {FONT_OPTIONS.map((f) => (
+                  <option key={f.value} value={f.value}>{f.label}</option>
+                ))}
+              </select>
+            </Field>
+
+            {/* Accent color */}
+            <div style={{ marginBottom: 10 }}>
+              <label style={labelStyle}>Accent Color</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {ACCENT_PRESETS.map((p) => (
+                  <button
+                    key={p.value}
+                    title={p.label}
+                    onClick={() => store.setCustomization("accentColor", p.value)}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: "50%",
+                      background: p.value,
+                      border: c.accentColor === p.value
+                        ? "3px solid var(--accent)"
+                        : "2px solid transparent",
+                      outline: c.accentColor === p.value ? "2px solid var(--bg)" : "none",
+                      outlineOffset: "-3px",
+                      cursor: "pointer",
+                      transition: "border 0.15s",
+                      padding: 0,
+                    }}
+                  />
+                ))}
+                {/* Custom color picker */}
+                <label title="Custom color" style={{ position: "relative", cursor: "pointer" }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: "50%",
+                    background: "conic-gradient(red, yellow, lime, cyan, blue, magenta, red)",
+                    border: "2px solid var(--border)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 14, color: "#fff", fontWeight: 700,
+                  }}>
+                    +
+                  </div>
+                  <input
+                    type="color"
+                    value={c.accentColor}
+                    onChange={(e) => store.setCustomization("accentColor", e.target.value)}
+                    style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", height: "100%", cursor: "pointer" }}
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Profile Section ───────────────────────────────── */}
         <button style={sectionHeaderStyle(openSection === "profile")} onClick={() => toggle("profile")}>
           <span>Profile</span>
           <span>{openSection === "profile" ? "▲" : "▼"}</span>
@@ -194,10 +279,16 @@ export default function TemplateBuilderClient() {
                   onChange={(e) => store.setProfile("phone", e.target.value)} placeholder="(555) 000-0000" />
               </Field>
             </Row>
-            <Field label="Location">
-              <input style={inputStyle} value={data.profile.location}
-                onChange={(e) => store.setProfile("location", e.target.value)} placeholder="San Francisco, CA" />
-            </Field>
+            <Row>
+              <Field label="Location">
+                <input style={inputStyle} value={data.profile.location}
+                  onChange={(e) => store.setProfile("location", e.target.value)} placeholder="San Francisco, CA" />
+              </Field>
+              <Field label="Website">
+                <input style={inputStyle} value={data.profile.website}
+                  onChange={(e) => store.setProfile("website", e.target.value)} placeholder="yoursite.dev" />
+              </Field>
+            </Row>
             <Row>
               <Field label="LinkedIn">
                 <input style={inputStyle} value={data.profile.linkedin}
@@ -216,7 +307,7 @@ export default function TemplateBuilderClient() {
           </div>
         )}
 
-        {/* Experience Section */}
+        {/* ── Experience Section ────────────────────────────── */}
         <button style={sectionHeaderStyle(openSection === "experience")} onClick={() => toggle("experience")}>
           <span>Experience ({data.workExperiences.length})</span>
           <span>{openSection === "experience" ? "▲" : "▼"}</span>
@@ -273,7 +364,7 @@ export default function TemplateBuilderClient() {
           </div>
         )}
 
-        {/* Education Section */}
+        {/* ── Education Section ─────────────────────────────── */}
         <button style={sectionHeaderStyle(openSection === "education")} onClick={() => toggle("education")}>
           <span>Education ({data.educations.length})</span>
           <span>{openSection === "education" ? "▲" : "▼"}</span>
@@ -316,13 +407,18 @@ export default function TemplateBuilderClient() {
                       onChange={(ev) => store.setEducation(e.id, "gpa", ev.target.value)} placeholder="3.8" />
                   </Field>
                 </Row>
+                <Field label="Relevant Coursework (optional)">
+                  <input style={inputStyle} value={e.coursework}
+                    onChange={(ev) => store.setEducation(e.id, "coursework", ev.target.value)}
+                    placeholder="Algorithms, Distributed Systems, ML" />
+                </Field>
               </div>
             ))}
             <button style={addBtnStyle} onClick={store.addEducation}>+ Add Education</button>
           </div>
         )}
 
-        {/* Projects Section */}
+        {/* ── Projects Section ──────────────────────────────── */}
         <button style={sectionHeaderStyle(openSection === "projects")} onClick={() => toggle("projects")}>
           <span>Projects ({data.projects.length})</span>
           <span>{openSection === "projects" ? "▲" : "▼"}</span>
@@ -344,9 +440,17 @@ export default function TemplateBuilderClient() {
                   </Field>
                   <Field label="Date / Period">
                     <input style={inputStyle} value={p.date}
-                      onChange={(e) => store.setProject(p.id, "date", e.target.value)} placeholder="2023" />
+                      onChange={(e) => store.setProject(p.id, "date", e.target.value)} placeholder="2024" />
                   </Field>
                 </Row>
+                <Field label="Tech Stack">
+                  <input style={inputStyle} value={p.tech}
+                    onChange={(e) => store.setProject(p.id, "tech", e.target.value)} placeholder="React, Python, PostgreSQL" />
+                </Field>
+                <Field label="Link (optional)">
+                  <input style={inputStyle} value={p.link}
+                    onChange={(e) => store.setProject(p.id, "link", e.target.value)} placeholder="github.com/you/project" />
+                </Field>
                 <Field label="Description (one bullet per line)">
                   <textarea style={textareaStyle} value={p.bullets}
                     onChange={(e) => store.setProject(p.id, "bullets", e.target.value)}
@@ -358,14 +462,14 @@ export default function TemplateBuilderClient() {
           </div>
         )}
 
-        {/* Skills Section */}
+        {/* ── Skills Section ────────────────────────────────── */}
         <button style={sectionHeaderStyle(openSection === "skills")} onClick={() => toggle("skills")}>
           <span>Skills</span>
           <span>{openSection === "skills" ? "▲" : "▼"}</span>
         </button>
         {openSection === "skills" && (
           <div style={sectionBodyStyle}>
-            <Field label="Skills (comma-separated or one per line)">
+            <Field label="Skills (one category per line)">
               <textarea style={{ ...textareaStyle, minHeight: 100 }} value={data.skills}
                 onChange={(e) => store.setSkills(e.target.value)}
                 placeholder={"Languages: Python, TypeScript, Go\nFrameworks: React, FastAPI\nTools: Docker, Postgres"} />
@@ -374,7 +478,7 @@ export default function TemplateBuilderClient() {
         )}
       </div>
 
-      {/* ── Right: Preview Panel ──────────────────────────────── */}
+      {/* ── Right: Preview Panel ──────────────────────────── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, background: "var(--bg)", overflow: "hidden" }}>
         {/* Toolbar */}
         <div style={{

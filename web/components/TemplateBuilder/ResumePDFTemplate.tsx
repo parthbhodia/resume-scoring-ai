@@ -1,58 +1,70 @@
 "use client";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
-import type { TBResumeData } from "./types";
+import type { TBResumeData, TBFont } from "./types";
 
-// Use Helvetica (always available in @react-pdf — no Font.register needed)
-const styles = StyleSheet.create({
-  page: {
-    fontFamily: "Helvetica",
-    fontSize: 10,
-    paddingTop: 36,
-    paddingBottom: 36,
-    paddingHorizontal: 48,
-    color: "#1a1a1a",
-    lineHeight: 1.4,
-  },
-  name: {
-    fontSize: 22,
-    fontFamily: "Helvetica-Bold",
-    letterSpacing: 0.5,
-    marginBottom: 3,
-    color: "#111111",
-  },
-  contactLine: {
-    fontSize: 9,
-    color: "#555555",
-    marginBottom: 16,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-  },
-  contactItem: { marginRight: 8 },
-  sectionTitle: {
-    fontSize: 11,
-    fontFamily: "Helvetica-Bold",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    color: "#333333",
-    marginBottom: 6,
-    paddingBottom: 2,
-    borderBottomWidth: 0.5,
-    borderBottomColor: "#999999",
-  },
-  section: { marginBottom: 12 },
-  jobRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 1 },
-  jobTitle: { fontSize: 10, fontFamily: "Helvetica-Bold", color: "#111111" },
-  company: { fontSize: 10, color: "#333333" },
-  dateLocation: { fontSize: 9, color: "#666666" },
-  bullet: { fontSize: 9.5, color: "#222222", marginLeft: 12, marginBottom: 1.5, flexDirection: "row" },
-  bulletDot: { width: 10, color: "#444444" },
-  bulletText: { flex: 1 },
-  summaryText: { fontSize: 9.5, color: "#333333", lineHeight: 1.5 },
-  skillsText: { fontSize: 9.5, color: "#333333", lineHeight: 1.6 },
-});
+function parseBullets(raw: string): string[] {
+  return raw.split("\n").map((l) => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
+}
 
-function Bullet({ text }: { text: string }) {
+function makeBoldFamily(font: TBFont): string {
+  if (font === "Times-Roman") return "Times-Bold";
+  if (font === "Courier") return "Courier-Bold";
+  return "Helvetica-Bold";
+}
+
+function makeStyles(font: TBFont, accent: string) {
+  const bold = makeBoldFamily(font);
+  return StyleSheet.create({
+    page: {
+      fontFamily: font,
+      fontSize: 10,
+      paddingTop: 36,
+      paddingBottom: 36,
+      paddingHorizontal: 48,
+      color: "#1a1a1a",
+      lineHeight: 1.4,
+    },
+    name: {
+      fontSize: 22,
+      fontFamily: bold,
+      letterSpacing: 0.5,
+      marginBottom: 3,
+      color: "#111111",
+    },
+    contactLine: {
+      fontSize: 9,
+      color: "#555555",
+      marginBottom: 16,
+      flexDirection: "row",
+      flexWrap: "wrap",
+    },
+    contactItem: { marginRight: 6 },
+    sectionTitle: {
+      fontSize: 10.5,
+      fontFamily: bold,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      color: accent,
+      marginBottom: 5,
+      paddingBottom: 2,
+      borderBottomWidth: 0.5,
+      borderBottomColor: accent,
+    },
+    section: { marginBottom: 11 },
+    jobRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 1 },
+    jobTitle: { fontSize: 10, fontFamily: bold, color: "#111111" },
+    company: { fontSize: 10, color: "#333333" },
+    dateLocation: { fontSize: 9, color: "#666666" },
+    bullet: { fontSize: 9.5, color: "#222222", marginLeft: 12, marginBottom: 1.5, flexDirection: "row" },
+    bulletDot: { width: 10, color: "#444444" },
+    bulletText: { flex: 1 },
+    summaryText: { fontSize: 9.5, color: "#333333", lineHeight: 1.5 },
+    skillsText: { fontSize: 9.5, color: "#333333", lineHeight: 1.6 },
+    metaSmall: { fontSize: 9, color: "#666666" },
+  });
+}
+
+function Bullet({ text, styles }: { text: string; styles: ReturnType<typeof makeStyles> }) {
   return (
     <View style={styles.bullet}>
       <Text style={styles.bulletDot}>•</Text>
@@ -61,16 +73,21 @@ function Bullet({ text }: { text: string }) {
   );
 }
 
-function parseBullets(raw: string): string[] {
-  return raw.split("\n").map((l) => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
-}
-
 interface Props { data: TBResumeData }
 
 export default function ResumePDFTemplate({ data }: Props) {
-  const { profile, workExperiences, educations, projects, skills } = data;
+  const { profile, workExperiences, educations, projects, skills, customization } = data;
+  const font = customization?.font ?? "Helvetica";
+  const accent = customization?.accentColor ?? "#1a1a1a";
+  const styles = makeStyles(font, accent);
+
   const contactParts = [
-    profile.email, profile.phone, profile.location, profile.linkedin, profile.github,
+    profile.email,
+    profile.phone,
+    profile.location,
+    profile.website,
+    profile.linkedin,
+    profile.github,
   ].filter(Boolean);
 
   return (
@@ -81,7 +98,9 @@ export default function ResumePDFTemplate({ data }: Props) {
         <Text style={styles.name}>{profile.name || "Your Name"}</Text>
         <View style={styles.contactLine}>
           {contactParts.map((c, i) => (
-            <Text key={i} style={styles.contactItem}>{c}{i < contactParts.length - 1 ? " | " : ""}</Text>
+            <Text key={i} style={styles.contactItem}>
+              {c}{i < contactParts.length - 1 ? "  |  " : ""}
+            </Text>
           ))}
         </View>
 
@@ -110,7 +129,7 @@ export default function ResumePDFTemplate({ data }: Props) {
                     <Text style={styles.company}>{w.company}</Text>
                     {w.location ? <Text style={styles.dateLocation}>{w.location}</Text> : null}
                   </View>
-                  {bullets.map((b, i) => <Bullet key={i} text={b} />)}
+                  {bullets.map((b, i) => <Bullet key={i} text={b} styles={styles} />)}
                 </View>
               );
             })}
@@ -133,7 +152,10 @@ export default function ResumePDFTemplate({ data }: Props) {
                     <Text style={styles.company}>{e.degree}</Text>
                     {e.gpa ? <Text style={styles.dateLocation}>GPA: {e.gpa}</Text> : null}
                   </View>
-                  {e.location ? <Text style={{ fontSize: 9, color: "#666" }}>{e.location}</Text> : null}
+                  {e.location ? <Text style={styles.metaSmall}>{e.location}</Text> : null}
+                  {e.coursework ? (
+                    <Text style={styles.metaSmall}>Coursework: {e.coursework}</Text>
+                  ) : null}
                 </View>
               );
             })}
@@ -149,10 +171,13 @@ export default function ResumePDFTemplate({ data }: Props) {
               return (
                 <View key={p.id} style={{ marginBottom: 6 }}>
                   <View style={styles.jobRow}>
-                    <Text style={styles.jobTitle}>{p.name}</Text>
+                    <Text style={styles.jobTitle}>
+                      {p.name}{p.tech ? `  |  ${p.tech}` : ""}
+                    </Text>
                     {p.date ? <Text style={styles.dateLocation}>{p.date}</Text> : null}
                   </View>
-                  {bullets.map((b, i) => <Bullet key={i} text={b} />)}
+                  {p.link ? <Text style={styles.metaSmall}>{p.link}</Text> : null}
+                  {bullets.map((b, i) => <Bullet key={i} text={b} styles={styles} />)}
                 </View>
               );
             })}

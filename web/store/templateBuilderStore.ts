@@ -1,18 +1,28 @@
 "use client";
 import { create } from "zustand";
-import type { TBResumeData, TBWorkExperience, TBEducation, TBProject, TBProfile } from "@/components/TemplateBuilder/types";
-import { DEFAULT_RESUME, DEFAULT_WORK, DEFAULT_EDU, DEFAULT_PROJECT } from "@/components/TemplateBuilder/types";
+import type {
+  TBResumeData, TBWorkExperience, TBEducation, TBProject, TBProfile, TBCustomization,
+} from "@/components/TemplateBuilder/types";
+import {
+  DEFAULT_RESUME, DEFAULT_CUSTOMIZATION, DEFAULT_WORK, DEFAULT_EDU, DEFAULT_PROJECT, DEMO_RESUME,
+} from "@/components/TemplateBuilder/types";
 
 const STORAGE_KEY = "rn_template_builder";
 
 function safeLoad(): TBResumeData {
-  if (typeof window === "undefined") return DEFAULT_RESUME;
+  if (typeof window === "undefined") return DEMO_RESUME;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_RESUME;
-    return { ...DEFAULT_RESUME, ...JSON.parse(raw) };
+    // First visit — show demo resume so the preview is never blank
+    if (!raw) return DEMO_RESUME;
+    const parsed = JSON.parse(raw) as Partial<TBResumeData>;
+    return {
+      ...DEFAULT_RESUME,
+      ...parsed,
+      customization: { ...DEFAULT_CUSTOMIZATION, ...(parsed.customization ?? {}) },
+    };
   } catch {
-    return DEFAULT_RESUME;
+    return DEMO_RESUME;
   }
 }
 
@@ -36,11 +46,12 @@ interface TemplateBuilderStore {
   addProject: () => void;
   removeProject: (id: string) => void;
   setSkills: (value: string) => void;
+  setCustomization: (field: keyof TBCustomization, value: string) => void;
   reset: () => void;
 }
 
 export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
-  data: DEFAULT_RESUME,
+  data: DEMO_RESUME,
   loaded: false,
 
   loadFromStorage: () => {
@@ -146,6 +157,14 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
   setSkills: (value) => {
     set((s) => {
       const data = { ...s.data, skills: value };
+      safeSave(data);
+      return { data };
+    });
+  },
+
+  setCustomization: (field, value) => {
+    set((s) => {
+      const data = { ...s.data, customization: { ...s.data.customization, [field]: value } };
       safeSave(data);
       return { data };
     });
