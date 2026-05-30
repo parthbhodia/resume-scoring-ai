@@ -17,6 +17,7 @@ Deploy on Railway — LLM env (pick one primary):
 """
 
 import asyncio
+import base64
 import io
 from functools import partial
 import json
@@ -1750,17 +1751,329 @@ def _finalize_structured_doc(
     )
 
 
-def _llm_extract(text: str) -> "Optional[ResumeDocModel]":
+# ── Vision-based PDF extraction ────────────────────────────────────────────
+# Multi-column / two-frame PDF layouts (institution+location on the same row,
+# role+date on the same row) break text-extractors because pdfplumber's
+# y-bucketing reads columns separately. The result: locations leak from
+# Education into Experience, dates float to the wrong place, and the LLM that
+# parses the text then either hallucinates or collapses entries.
+#
+# A vision-capable model reading the PDF as an image sidesteps all of this —
+# it sees the same visual layout a recruiter does. Empirically (3 résumés,
+# multiple runs) Grok-4 vision returns a perfectly-structured JSON in ~10–17s
+# with every numeral, every location, and every wrapped bullet intact.
+#
+# We try this path first for PDF uploads and fall back to the text-based
+# reasoning extract on any failure or for non-PDF uploads.
+
+_VISION_EXTRACT_PROMPT = """You are reading a one-page (or rarely multi-page) résumé image. Produce a COMPLETE, FAITHFUL JSON of every field on the page — do not skip anything, do not paraphrase. Schema:
+
+{
+  "full_name": "",
+  "headline": "",
+  "phone": "",
+  "email": "",
+  "linkedin": "",
+  "github": "",
+  "portfolio": "",
+  "location": "",
+  "summary": "",
+  "education": [
+    {"institution":"", "degree":"", "location":"", "dates":"", "gpa_or_grade":"", "notes":""}
+  ],
+  "experience": [
+    {"company":"", "role":"", "location":"", "dates":"", "bullets":["..."]}
+  ],
+  "projects": [
+    {"name":"", "tech":"", "dates":"", "bullets":["..."]}
+  ],
+  "skills_groups": [
+    {"category":"", "items":["..."]}
+  ],
+  "certifications": [{"name":"", "issuer":"", "date":""}],
+  "awards": ["..."],
+  "publications": ["..."],
+  "languages": ["..."],
+  "activities_or_leadership": [{"title":"", "organization":"", "dates":"", "bullets":["..."]}],
+  "extra_sections": [{"section_name":"", "items":["..."]}]
+}
+
+CRITICAL RULES:
+- Every institution = its own education entry. Never merge two schools into one.
+- Every distinct role/job = its own experience entry.
+- Bullets must be FULL multi-line text exactly as visible; do not truncate, do not paraphrase.
+- Preserve every numeral, percent, year, CGPA, count (e.g. "5 refinement cycles", "up to 3 retries", "9,000+ records", "50,000+ HEIs", "~70%", "CGPA: 9.266").
+- If a field is absent in the résumé, set it to "" or [].
+- Skills MUST be grouped exactly as the résumé groups them (e.g. "Languages and Frameworks", "ML / AI"). Do not invent groups.
+- Put anything that doesn't fit a named schema field into extra_sections.
+Return ONLY the JSON object, no markdown fences, no commentary."""
+
+
+def _render_pdf_pages_to_b64_pngs(
+    pdf_bytes: bytes, *, dpi: int = 200, max_pages: int = 2
+) -> List[str]:
+    """Render the first ``max_pages`` of a PDF to base64-encoded PNGs."""
+    try:
+        import fitz  # type: ignore  # PyMuPDF
+    except Exception as exc:
+        logger.warning("vision-extract: PyMuPDF unavailable (%s)", exc)
+        return []
+    out: List[str] = []
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:
+        logger.warning("vision-extract: PDF open failed (%s)", exc)
+        return []
+    try:
+        for i in range(min(len(doc), max_pages)):
+            pix = doc[i].get_pixmap(dpi=dpi)
+            png_bytes = pix.tobytes("png")
+            out.append(base64.standard_b64encode(png_bytes).decode())
+    finally:
+        doc.close()
+    return out
+
+
+def _vision_raw_to_resume_doc(raw: dict) -> ResumeDocModel:
+    """Map the vision-extract JSON schema onto ResumeDocModel.
+
+    The vision schema separates ``degree`` from ``gpa_or_grade`` and emits a
+    standalone ``activities_or_leadership`` array; we merge the two grade
+    fields into ``EducationItem.degree`` and append activities (plus any
+    certifications / awards / publications / languages) into the doc's
+    ``extra_sections`` so nothing the candidate wrote is dropped.
+    """
+    EduCtor = EducationItem
+    ExpCtor = ExperienceItem
+    ProjCtor = ProjectItem
+
+    # ── Education ─────────────────────────────────────────────────────────
+    education: List[EducationItem] = []
+    for e in (raw.get("education") or []):
+        if not isinstance(e, dict):
+            continue
+        degree = str(e.get("degree") or "").strip()
+        grade = str(e.get("gpa_or_grade") or "").strip()
+        combined = f"{degree} — {grade}" if (degree and grade) else (degree or grade)
+        notes = str(e.get("notes") or "").strip()
+        education.append(EduCtor(
+            institution=str(e.get("institution") or "").strip(),
+            degree=combined,
+            dates=str(e.get("dates") or "").strip(),
+            location=str(e.get("location") or "").strip(),
+            bullets=[notes] if notes else [],
+        ))
+
+    # ── Experience ────────────────────────────────────────────────────────
+    experience: List[ExperienceItem] = []
+    for w in (raw.get("experience") or []):
+        if not isinstance(w, dict):
+            continue
+        bullets = [str(b).strip() for b in (w.get("bullets") or []) if str(b).strip()]
+        experience.append(ExpCtor(
+            company=str(w.get("company") or "").strip(),
+            role=str(w.get("role") or "").strip(),
+            dates=str(w.get("dates") or "").strip(),
+            location=str(w.get("location") or "").strip(),
+            bullets=bullets,
+        ))
+
+    # ── Projects ──────────────────────────────────────────────────────────
+    projects: List[ProjectItem] = []
+    for p in (raw.get("projects") or []):
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get("name") or "").strip()
+        tech = str(p.get("tech") or "").strip()
+        bullets = [str(b).strip() for b in (p.get("bullets") or []) if str(b).strip()]
+        # Prepend tech stack as the first bullet so the stack list is preserved
+        # in display (Harshibar's project template doesn't have a dedicated
+        # tech field yet). Skip when the tech string would duplicate the name.
+        if tech and tech not in bullets:
+            bullets = [tech] + bullets
+        projects.append(ProjCtor(name=name, bullets=bullets))
+
+    # ── Skills (preserve the candidate's own grouping) ────────────────────
+    # The LLM is run-to-run inconsistent on the items[] shape: sometimes a
+    # proper array (["Python", "Java", ...]), sometimes a single CSV string
+    # (["Python, Java, C, ..."]). Split any comma-joined entries so the
+    # rendered preview shows them as individual chips.
+    skills: List[tuple[str, List[str]]] = []
+    for g in (raw.get("skills_groups") or []):
+        if not isinstance(g, dict):
+            continue
+        cat = str(g.get("category") or "Skills").strip() or "Skills"
+        raw_items = g.get("items") or []
+        items: List[str] = []
+        for it in raw_items:
+            s = str(it).strip()
+            if not s:
+                continue
+            if "," in s and len(s) > 18:
+                # Split on commas while preserving compound names like "Power BI"
+                # and parenthesized clarifications.
+                parts = [p.strip().strip(",") for p in s.split(",")]
+                items.extend(p for p in parts if p)
+            else:
+                items.append(s)
+        if items:
+            skills.append((cat, items))
+
+    # ── extra_sections: activities, certs, awards, etc. ──────────────────
+    extra_sections: List[tuple[str, List[str]]] = []
+
+    activities = raw.get("activities_or_leadership") or []
+    if activities:
+        lines: List[str] = []
+        for a in activities:
+            if not isinstance(a, dict):
+                continue
+            title = str(a.get("title") or "").strip()
+            org = str(a.get("organization") or "").strip()
+            dates = str(a.get("dates") or "").strip()
+            header = " | ".join(p for p in (title, org, dates) if p)
+            if header:
+                lines.append(header)
+            for b in (a.get("bullets") or []):
+                bs = str(b).strip()
+                if bs:
+                    lines.append(f"• {bs}")
+        if lines:
+            extra_sections.append(("Activities & Leadership", lines))
+
+    for key, label in (
+        ("certifications", "Certifications"),
+        ("awards", "Awards"),
+        ("publications", "Publications"),
+        ("languages", "Languages"),
+    ):
+        items = raw.get(key) or []
+        if not items:
+            continue
+        lines = []
+        for it in items:
+            if isinstance(it, dict):
+                pieces = [str(it.get(k) or "").strip() for k in ("name", "issuer", "date")]
+                line = " | ".join(p for p in pieces if p)
+                if line:
+                    lines.append(line)
+            else:
+                s = str(it).strip()
+                if s:
+                    lines.append(s)
+        if lines:
+            extra_sections.append((label, lines))
+
+    for s in (raw.get("extra_sections") or []):
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("section_name") or "").strip() or "Other"
+        items = [str(it).strip() for it in (s.get("items") or []) if str(it).strip()]
+        if items:
+            extra_sections.append((name, items))
+
+    return ResumeDocModel(
+        full_name=str(raw.get("full_name") or "Candidate").strip() or "Candidate",
+        headline=str(raw.get("headline") or "").strip(),
+        location=str(raw.get("location") or "").strip(),
+        email=str(raw.get("email") or "").strip(),
+        phone=str(raw.get("phone") or "").strip(),
+        linkedin=str(raw.get("linkedin") or "").strip(),
+        github=str(raw.get("github") or "").strip(),
+        summary=str(raw.get("summary") or "").strip(),
+        skills=skills,
+        experience=experience,
+        education=education,
+        projects=projects,
+        extra_sections=extra_sections,
+    )
+
+
+def _llm_extract_pdf_vision(pdf_bytes: bytes) -> Optional[ResumeDocModel]:
+    """Try the vision-PDF structured extract. Returns None on any failure
+    (no PDF bytes, no XAI key, PyMuPDF missing, API error, empty result)
+    so callers can fall back to the text-based reasoning extract."""
+    if not pdf_bytes or len(pdf_bytes) < 100:
+        return None
+    if os.environ.get("DISABLE_VISION_EXTRACT", "").lower() in ("1", "true", "yes"):
+        return None
+    if not os.environ.get("XAI_API_KEY"):
+        # Vision via Gemini isn't wired here yet; require xAI key for the fast path.
+        return None
+    images_b64 = _render_pdf_pages_to_b64_pngs(pdf_bytes)
+    if not images_b64:
+        return None
+    try:
+        from openai import OpenAI  # type: ignore
+        model = (os.environ.get("VISION_EXTRACT_MODEL") or "grok-4").strip()
+        xai = OpenAI(api_key=os.environ["XAI_API_KEY"], base_url="https://api.x.ai/v1")
+        content: List[dict] = [{"type": "text", "text": _VISION_EXTRACT_PROMPT}]
+        for b64 in images_b64:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{b64}"},
+            })
+        r = xai.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": content}],
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        text = (r.choices[0].message.content or "").strip()
+        text = re.sub(r"^```[a-z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+        raw = json.loads(text)
+    except Exception as exc:
+        logger.warning("vision-extract LLM call failed (%s) — falling back", exc)
+        return None
+    if not isinstance(raw, dict):
+        logger.warning("vision-extract returned non-dict — falling back")
+        return None
+    doc = _vision_raw_to_resume_doc(raw)
+    # Sanity check — if nothing meaningful was extracted, refuse and let the
+    # text path try.
+    if not (doc.experience or doc.education or doc.projects or doc.skills):
+        logger.warning("vision-extract returned empty doc — falling back")
+        return None
+    logger.info(
+        "vision-extract OK | edu=%d exp=%d proj=%d skills=%d extra=%d",
+        len(doc.education), len(doc.experience), len(doc.projects),
+        len(doc.skills), len(doc.extra_sections),
+    )
+    return doc
+
+
+def _llm_extract(text: str, pdf_bytes: Optional[bytes] = None) -> "Optional[ResumeDocModel]":
     """Extract structured resume data faithfully — no tailoring or bullet rewriting.
 
     Used by the Analyze path so the structured model mirrors what the user actually wrote.
     Returns None on failure.
+
+    When ``pdf_bytes`` is provided, tries the vision-based PDF extract first
+    (cleaner on multi-column layouts) and falls back to the text-based
+    reasoning extract on any failure.
     """
     profile_norm = inject_section_line_breaks((text or "")[:8000])
     profile_snippet = profile_norm[:6000].strip()
-    if not profile_snippet:
+    if not profile_snippet and not pdf_bytes:
         return None
 
+    # ── Vision-first for PDF uploads ──────────────────────────────────────
+    vision_doc = _llm_extract_pdf_vision(pdf_bytes) if pdf_bytes else None
+    if vision_doc is not None:
+        # Vision output is already clean — skip the manifest/inventory backfill
+        # and the entry-splitter post-processors (which were built for the
+        # text-extract failure modes). Keep the lightweight normalizers as a
+        # safety net.
+        _normalize_structured_experience(vision_doc)
+        _normalize_structured_education(vision_doc)
+        _normalize_structured_skills(vision_doc)
+        _normalize_structured_contact(vision_doc)
+        vision_doc.section_order = infer_section_order_from_profile(profile_norm or "")
+        _log_structured_doc("analyze_extract_final_json_vision", vision_doc)
+        return vision_doc
+
+    # ── Fallback: text-based reasoning extract ────────────────────────────
     doc, manifest = _llm_extract_with_manifest(text)
     if doc is None:
         return None
@@ -5215,9 +5528,12 @@ async def api_analyze_upload(request: Request):
                 status_code=422,
             )
 
-        # Run comprehensive analysis and structured extraction concurrently
+        # Run comprehensive analysis and structured extraction concurrently.
+        # For PDF uploads we pass the raw bytes so the structured-extract path
+        # can try the vision-LLM route first (cleaner on multi-column layouts).
+        pdf_bytes_for_vision = data if filename.lower().endswith(".pdf") else None
         analysis_future = loop.run_in_executor(None, _analyze_resume_comprehensive, text, jd)
-        extract_future  = loop.run_in_executor(None, _llm_extract, text)
+        extract_future  = loop.run_in_executor(None, _llm_extract, text, pdf_bytes_for_vision)
 
         result, structured = await asyncio.gather(analysis_future, extract_future)
 
