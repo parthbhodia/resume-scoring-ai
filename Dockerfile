@@ -21,6 +21,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install the Chromium browser binary + system libraries Playwright needs
+# (libnss3, libnspr4, libatk, libxkbcommon, etc.). `--with-deps` runs an
+# apt-get inside playwright's installer so we don't have to hand-list every
+# .deb. Without this, /api/export-pdf-html crashes with a Starlette 500
+# *before* the CORS middleware runs, which surfaces in the browser as a
+# CORS error rather than the underlying "Chromium binary missing" message.
+RUN playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY . .
 
 # Default library root on Railway (ephemeral — resumes persist only per-instance)

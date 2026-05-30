@@ -7552,6 +7552,14 @@ async def api_export_pdf_html(request: Request) -> Response:
 
     Body: { html: string, filename?: string }
     Returns: PDF bytes (application/pdf)
+
+    Any exception from the Playwright pipeline (Chromium binary missing,
+    out-of-memory, page-load timeout) is caught and returned as a JSON 500.
+    If we let the exception escape, Starlette's default error handler runs
+    BEFORE the CORS middleware, the browser sees a bare 500 with no
+    Access-Control-Allow-Origin header, and the surface error is a
+    confusing CORS block instead of the real "Chromium not installed" /
+    similar root cause.
     """
     try:
         body = await request.json()
@@ -7566,9 +7574,11 @@ async def api_export_pdf_html(request: Request) -> Response:
 
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
-    from playwright.sync_api import sync_playwright
 
     def render_pdf():
+        # Lazy import so the module load doesn't blow up the whole app when
+        # Playwright isn't installed (e.g. in a stripped-down dev image).
+        from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
@@ -7584,8 +7594,31 @@ async def api_export_pdf_html(request: Request) -> Response:
             return pdf_bytes
 
     loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        pdf_bytes = await loop.run_in_executor(executor, render_pdf)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pdf_bytes = await loop.run_in_executor(executor, render_pdf)
+    except ImportError as exc:
+        logger.exception("export-pdf-html: Playwright not installed")
+        return JSONResponse(
+            {"error": "PDF export unavailable: Playwright/Chromium not installed on this server.",
+             "detail": str(exc)},
+            status_code=503,
+        )
+    except Exception as exc:
+        logger.exception("export-pdf-html: render failed")
+        # Detect the "Executable doesn't exist" message Playwright emits when
+        # the browser binary isn't present — distinct from generic crashes.
+        msg = str(exc)
+        if "Executable doesn't exist" in msg or "playwright install" in msg.lower():
+            return JSONResponse(
+                {"error": "PDF export unavailable: Chromium binary missing. Run `playwright install chromium` on the server.",
+                 "detail": msg[:500]},
+                status_code=503,
+            )
+        return JSONResponse(
+            {"error": "PDF export failed.", "detail": msg[:500]},
+            status_code=500,
+        )
 
     safe_filename = filename.replace('"', '').replace('\\', '') or "resume.pdf"
     return Response(
