@@ -5629,6 +5629,48 @@ def _normalize_analysis(raw: dict) -> dict:
                     ba.pop("categoryRewrites", None)
                 ba["issues"] = kept_issues
 
+        # ── Drop flagged-but-helpless bullets ────────────────────────────
+        # After the rewrite validator has stripped no-op / lossy rewrites,
+        # any bullet that ends up with:
+        #   • no improvedBullet
+        #   • no categoryRewrites
+        #   • score >= 70 (already decent)
+        # is dead-end UX — the user sees "this bullet needs work" with
+        # nothing to act on. Mirrors the category-level Option A fix
+        # (d4f2641): if we can't help, we don't ask the user to think
+        # about it. A truly weak bullet (<70) without a rewrite stays in
+        # so the user at least knows it scored low — they can use the
+        # issue tags as general guidance.
+        pruned: list = []
+        dropped_helpless = 0
+        for ba in bullets:
+            if not isinstance(ba, dict):
+                pruned.append(ba)
+                continue
+            improved = (ba.get("improvedBullet") or "").strip()
+            cr = ba.get("categoryRewrites") or {}
+            has_any_cr = isinstance(cr, dict) and any(
+                isinstance(v, str) and v.strip() for v in cr.values()
+            )
+            score = ba.get("score")
+            if (
+                not improved
+                and not has_any_cr
+                and isinstance(score, (int, float))
+                and score >= 70
+            ):
+                dropped_helpless += 1
+                logger.info(
+                    "rewrite-validator dropped flagged-but-helpless bullet "
+                    "(score=%s, no rewrite, no categoryRewrites): %r",
+                    score, str(ba.get("originalBullet") or "")[:80],
+                )
+                continue
+            pruned.append(ba)
+        if dropped_helpless:
+            raw["bulletAnalysis"] = pruned
+            bullets = pruned
+
     # Calibrate overall score so it reflects visible weaknesses.
     # This prevents inflated "90+" overall when there are many weak bullets/issues.
     weak_bullets = 0
