@@ -31,7 +31,7 @@ function safeSave(data: TBResumeData) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
 }
 
-interface TemplateBuilderStore {
+export interface TemplateBuilderStore {
   data: TBResumeData;
   loaded: boolean;
   loadFromStorage: () => void;

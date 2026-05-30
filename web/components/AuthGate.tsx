@@ -13,6 +13,7 @@ const PUBLIC_ROUTES = new Set<string>([
   "/privacy",
   "/contact",
   "/blog",
+  "/template-builder",
 ]);
 // Path prefixes that bypass auth — recipient share pages live at /r/<shortid>.
 const PUBLIC_PREFIXES = ["/r/", "/blog/"];
