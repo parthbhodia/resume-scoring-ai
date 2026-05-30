@@ -981,6 +981,13 @@ export default function AnalyzeResume() {
                 {completedCategories.map(({ key, label }) => {
                   const score = result.categoryScores[key];
                   const isActive = activeCategory === key;
+                  // A category can land in COMPLETED with score >= 70 yet
+                  // still have weak bullets attached (e.g. Achievement 82
+                  // with one duty-only line). Surface the bullet count so
+                  // the user knows there's still work available — softer
+                  // amber styling distinguishes it from the red TOP FIXES
+                  // badge so the visual hierarchy stays clear.
+                  const affectedCount = countBulletsInCategory(bulletPrimaryCategories, key);
                   return (
                     <button
                       key={key}
@@ -999,6 +1006,9 @@ export default function AnalyzeResume() {
                       }}
                       onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.background = "var(--surface2)"; }}
                       onMouseLeave={e => { e.currentTarget.style.opacity = isActive ? "1" : "0.8"; e.currentTarget.style.background = isActive ? "rgba(227,242,253,0.75)" : "transparent"; }}
+                      title={affectedCount > 0
+                        ? `${affectedCount} bullet${affectedCount === 1 ? "" : "s"} flagged in this category`
+                        : "No flagged bullets in this category"}
                     >
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
                         <circle cx="6" cy="6" r="5" fill="rgba(52,211,153,0.15)" stroke="var(--green)" strokeWidth="1.2"/>
@@ -1007,6 +1017,14 @@ export default function AnalyzeResume() {
                       <span style={{ flex: 1, fontSize: 11.5, fontWeight: 500, color: "var(--muted)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {label}
                       </span>
+                      {affectedCount > 0 && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 10,
+                          background: "rgba(245,158,11,0.13)", color: "var(--amber)", flexShrink: 0,
+                        }}>
+                          {affectedCount}
+                        </span>
+                      )}
                       <span style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", flexShrink: 0 }}>
                         {score ?? "–"}
                       </span>
