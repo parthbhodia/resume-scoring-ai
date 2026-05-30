@@ -78,7 +78,7 @@ export default function MatchBreakdownCards({
                     {c.name}
                   </div>
                   {isAddressed && (
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, background: "rgba(52,211,153,0.18)", color: "var(--green, #34d399)", letterSpacing: 0.3, flexShrink: 0, whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, background: "rgba(52,211,153,0.18)", color: "var(--green-ink, #34d399)", letterSpacing: 0.3, flexShrink: 0, whiteSpace: "nowrap" }}>
                       ✓ Fixed
                     </span>
                   )}

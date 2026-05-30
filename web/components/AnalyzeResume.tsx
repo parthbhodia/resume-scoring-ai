@@ -2114,7 +2114,12 @@ export default function AnalyzeResume() {
                     {result.topStrengths.slice(0, 3).map((s, i) => (
                       <span key={i} style={{
                         fontSize: 12, fontWeight: 600, padding: "4px 12px",
-                        borderRadius: 20, background: "rgba(52,211,153,0.12)", color: "var(--green)",
+                        borderRadius: 20, background: "rgba(52,211,153,0.12)",
+                        // Use --green-ink (light: #047857, dark: #34d399) so chip
+                        // text stays readable on the faint green tint in BOTH themes.
+                        // The default --green is #34d399 in both modes — fine on
+                        // dark, ~2:1 contrast on white (fails WCAG AA).
+                        color: "var(--green-ink)",
                       }}>
                         {s}
                       </span>
