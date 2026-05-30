@@ -1,5 +1,21 @@
+# Resunova — web/ context
+
+**Before editing anything in this directory, read `../CLAUDE.md` first** — it has the project-wide architecture map, the honesty-pipeline reference, the current download-path (HTML→Chromium, no longer LaTeX for Analyze), and the running changelog. This file only covers what's specific to the Next.js frontend.
+
 <!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+## This is NOT the Next.js you know
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
+
+## Frontend-specific tips
+
+- **State**: Zustand stores live in `store/` (`resumeAnalyzeStore`, `suggestionsStore`). Hooks in `hooks/`. UI components in `components/`.
+- **API base URL** comes from `NEXT_PUBLIC_API_URL` (defaults to `http://localhost:8765`). `apiUrl()` from `lib/utils.ts` is the helper.
+- **Auth bypass** for local Analyze testing: set `NEXT_PUBLIC_DEV_BYPASS_AUTH=true` in `.env.local`. Mock user gets injected by `lib/supabase.ts`.
+- **Downloads**: prefer `hooks/useHtmlPdfExport.ts` (DOM → Chromium → PDF). Only use `useAnalyzeExport`/`useResumeExport` (the LaTeX path) for the tailor flow.
+- **Categorization mirror**: `lib/analysisCategoryMatch.ts` (`guessIssueCategory`, `buildBulletPrimaryCategories`) MUST stay in sync with backend prompt expectations. If you change category names or add a new one, update both sides.
+
+## After committing frontend changes
+
+Update `../CLAUDE.md`'s "Recent changes" log (newest entry at the top). Capture the architectural decision or invariant, not the diff itself.
