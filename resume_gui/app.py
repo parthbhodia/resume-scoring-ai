@@ -1848,13 +1848,29 @@ def _vision_raw_to_resume_doc(raw: dict) -> ResumeDocModel:
     ProjCtor = ProjectItem
 
     # ── Education ─────────────────────────────────────────────────────────
+    # The vision LLM is run-to-run inconsistent about whether the grade lives
+    # in `degree` (as "B.Tech ... CGPA: 9.266 (Ongoing)"), in `gpa_or_grade`
+    # ("CGPA: 9.266 (Ongoing)"), or both. Combine only when the degree text
+    # doesn't already include the grade — otherwise we end up with
+    # "B.Tech ... CGPA: 9.266 (Ongoing) — CGPA: 9.266 (Ongoing)".
     education: List[EducationItem] = []
     for e in (raw.get("education") or []):
         if not isinstance(e, dict):
             continue
         degree = str(e.get("degree") or "").strip()
         grade = str(e.get("gpa_or_grade") or "").strip()
-        combined = f"{degree} — {grade}" if (degree and grade) else (degree or grade)
+        # Strip a possible trailing date / status from the grade for the
+        # containment check ("CGPA: 9.266 (Ongoing)" vs "CGPA: 9.266").
+        grade_core = re.sub(r"\s*\(\s*[^)]+\s*\)\s*$", "", grade).strip()
+        if degree and grade:
+            if grade_core and grade_core.lower() in degree.lower():
+                combined = degree
+            elif grade.lower() in degree.lower():
+                combined = degree
+            else:
+                combined = f"{degree} — {grade}"
+        else:
+            combined = degree or grade
         notes = str(e.get("notes") or "").strip()
         education.append(EduCtor(
             institution=str(e.get("institution") or "").strip(),
@@ -1865,16 +1881,34 @@ def _vision_raw_to_resume_doc(raw: dict) -> ResumeDocModel:
         ))
 
     # ── Experience ────────────────────────────────────────────────────────
+    # Vision is run-to-run inconsistent about whether the location lives in
+    # `location` or gets embedded into `company` as "Company · Location" /
+    # "Company, Location". Detect the embedded form and strip the location
+    # out so we don't end up with "Co · Tardeo, Mumbai | Tardeo, Mumbai".
     experience: List[ExperienceItem] = []
     for w in (raw.get("experience") or []):
         if not isinstance(w, dict):
             continue
+        company = str(w.get("company") or "").strip()
+        location = str(w.get("location") or "").strip()
+        if company and location:
+            # Try common embedded patterns: " · ", " - ", " | ", ", "
+            for sep in (" · ", " - ", " | "):
+                if sep in company:
+                    left, right = company.split(sep, 1)
+                    if location.lower() == right.strip().lower() or location.lower() in right.strip().lower():
+                        company = left.strip()
+                        break
+            # Trailing ", Location" pattern — only strip when the comma-tail
+            # is a clear location match (avoid eating legit "Company, Inc.").
+            if company.lower().endswith(f", {location.lower()}"):
+                company = company[: -(len(location) + 2)].strip()
         bullets = [str(b).strip() for b in (w.get("bullets") or []) if str(b).strip()]
         experience.append(ExpCtor(
-            company=str(w.get("company") or "").strip(),
+            company=company,
             role=str(w.get("role") or "").strip(),
             dates=str(w.get("dates") or "").strip(),
-            location=str(w.get("location") or "").strip(),
+            location=location,
             bullets=bullets,
         ))
 
@@ -2086,16 +2120,32 @@ def _synthesize_text_from_resume_doc(doc: ResumeDocModel) -> str:
 
     if doc.education:
         out.extend(["", "EDUCATION"])
+        # Year-or-status hint embedded as "(YYYY)" / "(Ongoing|Present|Current|Now)"
+        # at the end of the degree string. Lift it onto the entry header line
+        # so it renders right-aligned (Harshibar style) instead of leaking out
+        # as a parenthesized fragment that the frontend treats as a bullet.
+        _trailing_date_re = re.compile(
+            r"\s*\(\s*((?:19|20)\d{2}|Ongoing|Present|Current|Now|"
+            r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(?:19|20)\d{2})\s*\)\s*$",
+            re.IGNORECASE,
+        )
         for e in doc.education:
             inst = (e.institution or "").strip()
             loc = (e.location or "").strip()
-            dates = (e.dates or "").strip()
+            explicit_dates = (e.dates or "").strip()
+            degree = (e.degree or "").strip()
+            cleaned_degree = degree
+            year_from_degree = ""
+            m = _trailing_date_re.search(degree) if degree else None
+            if m:
+                year_from_degree = m.group(1).strip()
+                cleaned_degree = degree[: m.start()].rstrip()
+            dates = explicit_dates or year_from_degree
             header_pieces = [p for p in (inst, loc, dates) if p]
             if header_pieces:
                 out.append(" | ".join(header_pieces))
-            degree = (e.degree or "").strip()
-            if degree:
-                out.append(degree)
+            if cleaned_degree:
+                out.append(cleaned_degree)
             for b in (e.bullets or []):
                 bs = (b or "").strip()
                 if bs:
