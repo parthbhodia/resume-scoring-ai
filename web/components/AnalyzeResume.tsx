@@ -664,12 +664,36 @@ export default function AnalyzeResume() {
       })
     : [];
 
-  // Split categories into TOP FIXES (score < 70) vs COMPLETED (score >= 70)
+  // Split categories into TOP FIXES (score < 70 AND has actionable content)
+  // vs COMPLETED (score >= 70 OR low score but nothing actionable). A
+  // category lacking any flagged bullets AND any related topIssue has no
+  // real fix to surface — putting it in TOP FIXES leads to the dead-end
+  // "No specific issues found" detail view the user shouldn't have to
+  // click through. Honesty alignment with the rewrite-validator: if the
+  // category has nothing to do, don't list it as a fix.
+  const categoryHasActionableContent = (key: string): boolean => {
+    if (!result) return false;
+    const bullets = getBulletsForCategory(
+      key,
+      result.bulletAnalysis,
+      bulletPrimaryCategories,
+    );
+    if (bullets.length > 0) return true;
+    const related = result.topIssues.filter((issue) => {
+      const guessed = guessIssueCategory(
+        `${issue.issue} ${issue.whyItMatters} ${issue.suggestion}`,
+      );
+      return guessed === key;
+    });
+    return related.length > 0;
+  };
+
   const topFixCategories = result
     ? CATEGORY_LABELS
         .filter(({ key }) => {
           const s = result.categoryScores[key];
-          return s !== null && s !== undefined && s < 70;
+          if (s === null || s === undefined || s >= 70) return false;
+          return categoryHasActionableContent(key);
         })
         .sort((a, b) => (result.categoryScores[a.key] ?? 100) - (result.categoryScores[b.key] ?? 100))
     : [];
@@ -677,7 +701,10 @@ export default function AnalyzeResume() {
   const completedCategories = result
     ? CATEGORY_LABELS.filter(({ key }) => {
         const s = result.categoryScores[key];
-        return s !== null && s !== undefined && s >= 70;
+        if (s === null || s === undefined) return false;
+        // Score >= 70 OR low-score-with-no-actionable-content (the latter
+        // would otherwise be a flagged category the user can't act on).
+        return s >= 70 || !categoryHasActionableContent(key);
       })
     : [];
 
