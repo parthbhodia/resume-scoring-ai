@@ -4901,6 +4901,17 @@ def _gemini_reasoning_model() -> str:
     return (os.environ.get("GEMINI_REASONING_MODEL") or "gemini-2.5-pro").strip()
 
 
+def _analysis_model() -> str:
+    """Model for the main résumé-analysis prompt (the one that produces
+    bulletAnalysis with issue tags + improvedBullet and topIssues +
+    categoryScores). Defaults to the full grok-4 reasoning tier — same model
+    we use for vision-extract — because the analysis is where dishonest tags
+    and weak rewrites cost the user most. Latency hit (~8-10s) is worth the
+    quality gain. Override via env: ANALYSIS_MODEL=grok-4-fast-reasoning for
+    a cheaper/faster middle ground, or =grok-4-fast-non-reasoning to revert."""
+    return (os.environ.get("ANALYSIS_MODEL") or "grok-4").strip()
+
+
 def _llm_json_call(prompt: str, *, model_override: Optional[str] = None) -> Optional[dict]:
     """Call Grok (primary when configured) or Gemini for a JSON response.
 
@@ -5740,7 +5751,10 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
         resume_text=text[:6000],
     )
 
-    raw = _llm_json_call(prompt)
+    # Route the main analysis through the reasoning tier (default grok-4 —
+    # same model used for vision-extract). Better quality on bullet-issue
+    # tagging + rewrite generation, at ~8-10s extra latency per request.
+    raw = _llm_json_call(prompt, model_override=_analysis_model())
     if raw and isinstance(raw, dict):
         # Strip bogus issues / recommendations that contradict the actual
         # résumé text BEFORE _normalize_analysis runs its score calibration —
