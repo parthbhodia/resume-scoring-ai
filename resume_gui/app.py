@@ -5322,15 +5322,17 @@ _STRONG_VERB_MAJORITY_SHARE = 0.6
 # the résumé, not warnings. "No tables detected" doesn't deserve a warning
 # label — the absence of tables is precisely what ATS-friendly résumés want.
 _NON_ISSUE_ATS_WARNING_RE = re.compile(
+    # Trailing `s?\b` on the noun alternatives so plurals match without
+    # accidentally eating compounds like "tablespace" / "graphical".
     r"\b(?:"
-    r"no\s+(?:table|graphic|image|column|header|footer|text\s*box|chart|icon|sidebar)|"
-    r"no\s+multi[- ]column|"
-    r"no\s+(?:embedded|complex)\s+(?:formatting|layout)|"
-    r"standard\s+(?:heading|section|format)|"
-    r"plain[- ]text\s+(?:heading|format|layout)|"
-    r"ats[- ]friendly\s+(?:layout|format|structure)|"
-    r"no\s+(?:non[- ]standard|unusual)\s+formatting"
-    r")\b",
+    r"no\s+(?:table|graphic|image|column|header|footer|text\s*box|chart|icon|sidebar)s?\b|"
+    r"no\s+multi[- ]column\b|"
+    r"no\s+(?:embedded|complex)\s+(?:formatting|layout)s?\b|"
+    r"standard\s+(?:heading|section|format)s?\b|"
+    r"plain[- ]text\s+(?:heading|format|layout)s?\b|"
+    r"ats[- ]friendly\s+(?:layout|format|structure)s?\b|"
+    r"no\s+(?:non[- ]standard|unusual)\s+formatting\b"
+    r")",
     re.IGNORECASE,
 )
 

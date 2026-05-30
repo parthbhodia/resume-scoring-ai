@@ -1,0 +1,701 @@
+"""Per-dimension regression tests for the Analyze pipeline.
+
+Covers each `categoryScores` dimension plus the cross-cutting validators
+(rewrite filter, evidence validator, ATS-warning non-issue filter,
+calibration v2, synthesizer, helpers). All tests run against pure-Python
+helpers — no LLM calls — so they're deterministic and CI-safe.
+
+Run with:  pytest resume_gui/tests/test_analyze_dimensions.py -v
+"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+# Allow `import resume_gui.app` from a fresh checkout without env config.
+os.environ.setdefault("XAI_API_KEY", "test")
+os.environ.setdefault("GOOGLE_API_KEY", "test")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+import pytest  # noqa: E402
+
+from resume_gui.app import (  # noqa: E402
+    _filter_bullet_rewrites,
+    _normalize_analysis,
+    _resume_numeral_count,
+    _resume_strong_verb_share,
+    _split_collapsed_education_entries,
+    _stitch_wrapped_bullets,
+    _strip_non_issue_ats_warnings,
+    _synthesize_text_from_resume_doc,
+    _validate_analysis_against_resume,
+    _validate_rewrite_against_original,
+    _vision_raw_to_resume_doc,
+)
+from resume_gui.renderers.latex_renderer import (  # noqa: E402
+    EducationItem,
+    ExperienceItem,
+    ProjectItem,
+    ResumeDocModel,
+)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Shared helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _all_cats() -> tuple[str, ...]:
+    return (
+        "readability",
+        "atsCompatibility",
+        "achievementQuality",
+        "quantification",
+        "sectionStructure",
+        "languageQuality",
+        "technicalBranding",
+    )
+
+
+def _category_scores(default: int = 65, **overrides) -> dict:
+    cs: dict = {k: default for k in _all_cats()}
+    cs["jobMatch"] = None
+    cs.update(overrides)
+    return cs
+
+
+STRONG_RESUME = (
+    "• Architected payment platform on AWS Lambda + PostgreSQL handling 9,000+ TPS\n"
+    "• Built ML pipeline with XGBoost cutting fraud loss 70% across 50,000+ users\n"
+    "• Delivered FastAPI gateway with sub-50ms p99 latency over 3 services\n"
+    "• Engineered Kafka ingestion handling 1,000+ events/sec on 5 nodes\n"
+    "• Reduced cold-start time from 800ms to 180ms (4× speedup)\n"
+    "• Designed multi-region DR with RPO < 30s across 2 AWS regions\n"
+    "• Implemented CI/CD pipeline cutting deploy time 65%"
+)
+
+WEAK_RESUME = (
+    "• helped with various tasks around the office\n"
+    "• assisted senior staff on projects\n"
+    "• worked on assignments as needed\n"
+    "• maintained files and records\n"
+    "• was responsible for various duties\n"
+    "• participated in team meetings"
+)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DIMENSION 1 — Quantification
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestQuantificationDimension:
+    """Bullets with %, $, scale, time-saved, count metrics."""
+
+    def test_strong_resume_floors_quantification_to_55(self):
+        """Résumé with 6+ numerals → category floored, lying low score raised."""
+        raw = {"categoryScores": _category_scores(quantification=30)}
+        result = _validate_analysis_against_resume(raw, STRONG_RESUME)
+        assert result["categoryScores"]["quantification"] >= 55
+
+    def test_weak_resume_no_floor(self):
+        """Résumé with no real metrics → no artificial floor."""
+        raw = {"categoryScores": _category_scores(quantification=30)}
+        result = _validate_analysis_against_resume(raw, WEAK_RESUME)
+        assert result["categoryScores"]["quantification"] == 30
+
+    def test_missing_metrics_topissue_dropped_on_strong_resume(self):
+        raw = {
+            "categoryScores": _category_scores(),
+            "topIssues": [
+                {"issue": "Missing impact metrics across bullets",
+                 "severity": "high",
+                 "suggestion": "Add measurable outcomes"},
+            ],
+        }
+        result = _validate_analysis_against_resume(raw, STRONG_RESUME)
+        assert result["topIssues"] == []
+
+    def test_missing_metrics_topissue_kept_on_weak_resume(self):
+        raw = {
+            "categoryScores": _category_scores(),
+            "topIssues": [
+                {"issue": "Missing impact metrics across bullets",
+                 "severity": "high",
+                 "suggestion": "Add measurable outcomes"},
+            ],
+        }
+        result = _validate_analysis_against_resume(raw, WEAK_RESUME)
+        assert len(result["topIssues"]) == 1
+
+    def test_lying_quantification_tag_stripped(self):
+        """No-op rewrite tagged 'quantification' — strip the tag."""
+        orig = "Designed and implemented secure modules for form handling."
+        improved = "Designed and implemented secure modules for form handling."
+        kept_imp, kept_cr, kept_issues = _filter_bullet_rewrites(
+            orig, improved, {}, ["quantification", "achievementQuality"],
+        )
+        assert "quantification" not in [str(t).lower() for t in kept_issues]
+        assert "achievementQuality" in kept_issues
+        assert kept_imp == ""
+
+    def test_honest_quantification_rewrite_kept(self):
+        """Rewrite that actually adds numerals — tag and rewrite both kept."""
+        orig = "Built a service that handles real-time data."
+        improved = "Built a service handling 10,000 events/sec at sub-50ms p99 latency."
+        kept_imp, _, kept_issues = _filter_bullet_rewrites(
+            orig, improved, {}, ["quantification"],
+        )
+        assert "quantification" in kept_issues
+        assert kept_imp == improved
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DIMENSION 2 — Achievement Quality (strong-verb ownership vs duty-only)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestAchievementQualityDimension:
+
+    def test_strong_verb_majority_floors_achievement(self):
+        """≥60% bullets lead with strong verbs → achievementQuality floored."""
+        raw = {"categoryScores": _category_scores(achievementQuality=35)}
+        result = _validate_analysis_against_resume(raw, STRONG_RESUME)
+        s, t = _resume_strong_verb_share(STRONG_RESUME)
+        assert t >= 5 and s / t >= 0.6
+        assert result["categoryScores"]["achievementQuality"] >= 55
+
+    def test_weak_verbs_no_floor(self):
+        raw = {"categoryScores": _category_scores(achievementQuality=35)}
+        result = _validate_analysis_against_resume(raw, WEAK_RESUME)
+        assert result["categoryScores"]["achievementQuality"] == 35
+
+    def test_duty_only_topissue_dropped_on_strong_resume(self):
+        raw = {
+            "categoryScores": _category_scores(),
+            "topIssues": [
+                {"issue": "Duty-style bullets that fail to highlight ownership",
+                 "severity": "high"},
+            ],
+        }
+        result = _validate_analysis_against_resume(raw, STRONG_RESUME)
+        assert result["topIssues"] == []
+
+    def test_weak_verb_topissue_kept_on_weak_resume(self):
+        raw = {
+            "categoryScores": _category_scores(),
+            "topIssues": [
+                {"issue": "Weak action verbs throughout",
+                 "severity": "high"},
+            ],
+        }
+        result = _validate_analysis_against_resume(raw, WEAK_RESUME)
+        assert len(result["topIssues"]) == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DIMENSION 3 — ATS Compatibility (warnings phrased as actual issues, not non-issues)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestATSCompatibilityDimension:
+
+    @pytest.mark.parametrize("warning", [
+        "No tables or graphics detected",
+        "No graphics detected",
+        "No multi-column layout",
+        "Standard headings used",
+        "Plain-text format throughout",
+        "ATS-friendly layout confirmed",
+        "No non-standard formatting",
+        "No icons or charts present",
+    ])
+    def test_non_issue_warning_dropped(self, warning):
+        raw = {"atsWarnings": [{"warning": warning, "suggestion": "keep it up"}]}
+        _strip_non_issue_ats_warnings(raw)
+        assert raw["atsWarnings"] == []
+
+    @pytest.mark.parametrize("warning", [
+        "Contact info uses non-standard separators",
+        "Section header 'CAREER' may not parse cleanly",
+        "Multiple consecutive blank lines",
+        "Embedded image of email may not parse",
+    ])
+    def test_real_warning_kept(self, warning):
+        raw = {"atsWarnings": [{"warning": warning, "suggestion": "fix it"}]}
+        _strip_non_issue_ats_warnings(raw)
+        assert len(raw["atsWarnings"]) == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DIMENSION 4 — Readability (bullet length, line wrapping)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestReadabilityDimension:
+
+    def test_wrapped_bullets_stitched_back(self):
+        """Multi-line wrapped bullet emitted as separate lines gets joined.
+
+        The stitcher is deliberately conservative: continuations must start
+        with lowercase / hyphen so we don't accidentally swallow capitalized
+        new content. Both real cases from KrishResume PDFs match that shape.
+        """
+        text = (
+            "• Built an iterative LLM feedback loop for automated EDA on uploaded CSV/Excel/JSON datasets, generating statistical\n"
+            "summaries, correlations, and visualizations across up to 5 refinement cycles\n"
+            "• Reduced cold-start from 800ms to 180ms via container optimization\n"
+            "across 5 regions."
+        )
+        out = _stitch_wrapped_bullets(text)
+        lines = [ln for ln in out.split("\n") if ln.strip()]
+        assert len(lines) == 2
+        assert "summaries, correlations" in lines[0]
+        assert "5 refinement cycles" in lines[0]
+        assert "across 5 regions" in lines[1]
+
+    def test_section_heading_breaks_continuation(self):
+        text = (
+            "• Built a service that does many things\n"
+            "EDUCATION"
+        )
+        out = _stitch_wrapped_bullets(text)
+        # EDUCATION must not be stitched into the bullet.
+        assert "Built a service that does many things" in out
+        assert "EDUCATION" in out
+        assert "many things EDUCATION" not in out
+
+    def test_terminated_bullet_does_not_swallow_next_line(self):
+        text = (
+            "• Built a service. \n"
+            "additional context not part of bullet"
+        )
+        out = _stitch_wrapped_bullets(text)
+        # Ends in period → not a continuation candidate.
+        assert "Built a service. additional" not in out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DIMENSION 5 — Section Structure (entry splits, education grouping)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestSectionStructureDimension:
+
+    def test_collapsed_education_entries_get_split(self):
+        """LLM merges 3 schools into one entry → splitter restores 3 entries."""
+        doc = ResumeDocModel(
+            full_name="Test User",
+            education=[
+                EducationItem(
+                    institution="D.J. Sanghvi College of Engineering",
+                    degree="",
+                    dates="Higher Secondary Certificate — 79.67% (2023)",
+                    location="",
+                    bullets=[
+                        "B.Tech in Computer Engineering — CGPA: 9.266",
+                        "Kishinchand Chellaram College",
+                        "Greenlawns High School",
+                        "ICSE — 97.16% (2021)",
+                    ],
+                ),
+            ],
+        )
+        _split_collapsed_education_entries(doc)
+        assert len(doc.education) == 3
+        insts = [e.institution for e in doc.education]
+        assert insts == [
+            "D.J. Sanghvi College of Engineering",
+            "Kishinchand Chellaram College",
+            "Greenlawns High School",
+        ]
+        # The mis-placed HSC degree gets moved into Kishinchand's degree slot.
+        assert "Higher Secondary Certificate" in doc.education[1].degree
+        assert "ICSE" in doc.education[2].degree
+
+    def test_clean_education_unaffected(self):
+        doc = ResumeDocModel(
+            full_name="Test",
+            education=[
+                EducationItem(institution="MIT", degree="BS CS", dates="2020"),
+                EducationItem(institution="Stanford", degree="MS CS", dates="2022"),
+            ],
+        )
+        _split_collapsed_education_entries(doc)
+        assert len(doc.education) == 2
+        assert doc.education[0].institution == "MIT"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DIMENSION 6 — Language Quality (passive voice, weak verbs, grammar)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestLanguageQualityDimension:
+
+    def test_strong_verb_majority_floors_language_quality(self):
+        raw = {"categoryScores": _category_scores(languageQuality=35)}
+        result = _validate_analysis_against_resume(raw, STRONG_RESUME)
+        assert result["categoryScores"]["languageQuality"] >= 55
+
+    def test_no_op_rewrite_dropped(self):
+        """LLM 'improved' rewrite identical to original — drop it."""
+        orig = "• Designed and implemented secure PHP modules."
+        improved = "• Designed and implemented secure PHP modules."
+        kept_imp, _, _ = _filter_bullet_rewrites(orig, improved, {}, [])
+        assert kept_imp == ""
+
+    def test_whitespace_only_change_treated_as_noop(self):
+        orig = "Designed   the   system."
+        improved = "Designed the system."
+        kept_imp, _, _ = _filter_bullet_rewrites(orig, improved, {}, [])
+        assert kept_imp == ""
+
+    def test_real_rewrite_kept(self):
+        orig = "Designed the system."
+        improved = "Architected a distributed system handling 10k req/s."
+        kept_imp, _, _ = _filter_bullet_rewrites(orig, improved, {}, [])
+        assert kept_imp == improved
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DIMENSION 7 — Technical Branding (proper nouns, named tech, CamelCase)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestTechnicalBrandingDimension:
+
+    def test_rewrite_dropping_proper_noun_rejected(self):
+        ok, reason = _validate_rewrite_against_original(
+            "Built FastAPI service on AWS Lambda with PostgreSQL.",
+            "Built a service with a database.",
+        )
+        assert not ok
+        assert "dropped" in reason.lower()
+
+    def test_rewrite_dropping_acronym_rejected(self):
+        ok, _ = _validate_rewrite_against_original(
+            "Implemented CI/CD pipeline reducing release time.",
+            "Implemented automated deployment reducing release time.",
+        )
+        assert not ok
+
+    def test_rewrite_preserving_tech_accepted(self):
+        ok, _ = _validate_rewrite_against_original(
+            "Built FastAPI service on AWS Lambda with PostgreSQL.",
+            "Built FastAPI service on AWS Lambda powering real-time pipeline ingesting from PostgreSQL.",
+        )
+        assert ok
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DIMENSION 8 — Job Match (no JD = null jobMatch; doesn't fire validator)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestJobMatchDimension:
+
+    def test_no_jd_keeps_job_match_null(self):
+        raw = {"categoryScores": _category_scores(jobMatch=None)}
+        result = _normalize_analysis(raw)
+        assert result["categoryScores"]["jobMatch"] is None
+
+    def test_keyword_analysis_default_shape(self):
+        raw = {"categoryScores": _category_scores()}
+        result = _normalize_analysis(raw)
+        ka = result.get("keywordAnalysis")
+        assert ka is not None
+        assert "matchedKeywords" in ka and "missingKeywords" in ka
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Cross-cutting — Rewrite quantification claim
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestRewriteValidator:
+
+    def test_dropping_numeral_rejected(self):
+        ok, reason = _validate_rewrite_against_original(
+            "Reduced latency by 50% across 1000 services.",
+            "Reduced latency across services.",
+        )
+        assert not ok
+        assert "numeral" in reason.lower()
+
+    def test_quantification_claim_requires_new_numeral(self):
+        ok, reason = _validate_rewrite_against_original(
+            "Designed onboarding flow.",
+            "Improved onboarding flow.",
+            category="quantification",
+        )
+        assert not ok
+        assert "numeral" in reason.lower()
+
+    def test_quantification_claim_with_new_numeral_accepted(self):
+        ok, _ = _validate_rewrite_against_original(
+            "Reduced latency through caching.",
+            "Reduced latency by [40%] through caching, serving 10k requests/min.",
+            category="quantification",
+        )
+        assert ok
+
+    def test_extreme_shrinkage_rejected(self):
+        """Word-count drop > 20% should fail. The validator returns at the
+        first failure; numeral-loss is checked before shrinkage so use a
+        numeral-free original to isolate the shrinkage rule."""
+        ok, reason = _validate_rewrite_against_original(
+            "Designed and implemented a multi-region disaster recovery system across AWS regions with automated failover and full observability tooling.",
+            "Designed a DR system.",
+        )
+        assert not ok
+        # First failure could be proper-noun loss (AWS) OR shrinkage —
+        # either is honest evidence the rewrite is bad.
+        assert any(kw in reason.lower() for kw in ("shr", "drop"))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Calibration v2
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestCalibration:
+
+    def test_overall_score_floors_at_20(self):
+        raw = {
+            "overallScore": 5,
+            "categoryScores": {k: 10 for k in _all_cats()},
+        }
+        result = _normalize_analysis(raw)
+        assert result["overallScore"] >= 20
+
+    def test_extreme_inflation_rejected(self):
+        """LLM said 90 but categoryScores mean is 55 → use calibrated."""
+        raw = {
+            "overallScore": 90,
+            "categoryScores": _category_scores(default=55),
+        }
+        result = _normalize_analysis(raw)
+        # Mean ≈ 55, soft_penalty ≤ 6 → final in 49-55 range, NOT 90.
+        assert result["overallScore"] < 80
+
+    def test_honest_blend_within_band(self):
+        """LLM 60, mean 65 → blend ≈ 62."""
+        raw = {
+            "overallScore": 60,
+            "categoryScores": _category_scores(default=65),
+        }
+        result = _normalize_analysis(raw)
+        assert 55 <= result["overallScore"] <= 70
+
+    def test_validator_adjustment_disables_llm_cap(self):
+        """When evidence validator floored categories AND dropped issues, the
+        LLM's overall is no longer trusted — use calibrated."""
+        raw = {
+            "overallScore": 20,  # LLM was crushing the résumé
+            "categoryScores": _category_scores(quantification=30, achievementQuality=30, languageQuality=30),
+            "topIssues": [
+                {"issue": "Missing impact metrics", "severity": "high"},
+                {"issue": "Duty-only bullets", "severity": "high"},
+            ],
+        }
+        validated = _validate_analysis_against_resume(raw, STRONG_RESUME)
+        result = _normalize_analysis(validated)
+        # Floors raised categories to 55 + topIssues dropped → calibrated > 20.
+        assert result["overallScore"] > 20
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Synthesizer
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _build_test_doc() -> ResumeDocModel:
+    return ResumeDocModel(
+        full_name="Krish Shah",
+        phone="+91 8452951044",
+        email="krishshah0505@gmail.com",
+        linkedin="linkedin.com/in/krish",
+        github="github.com/KrishShah0505",
+        education=[
+            EducationItem(
+                institution="D.J. Sanghvi College of Engineering",
+                degree="B.Tech in Computer Engineering — CGPA: 9.266 (Ongoing)",
+                location="Vile Parle, Mumbai",
+                dates="",
+            ),
+            EducationItem(
+                institution="Kishinchand Chellaram College",
+                degree="Higher Secondary Certificate — 79.67% (2023)",
+                location="Churchgate, Mumbai",
+                dates="",
+            ),
+        ],
+        experience=[
+            ExperienceItem(
+                role="Backend Developer Intern",
+                company="Navlakhi Education",
+                location="Tardeo, Mumbai",
+                dates="June 2024 – July 2024",
+                bullets=[
+                    "Designed and implemented secure PHP server-side modules.",
+                    "Reduced manual data-entry toil by automating insertion pipelines.",
+                ],
+            ),
+        ],
+        projects=[
+            ProjectItem(
+                name="Querify",
+                bullets=[
+                    "Python · Django · React · LLM (Llama 3) · MySQL · MongoDB",
+                    "Architected a multi-agent NLP pipeline.",
+                ],
+            ),
+        ],
+        skills=[
+            ("Languages and Frameworks", ["Python", "Java", "C", "React"]),
+            ("ML / AI", ["Scikit-learn", "XGBoost", "CatBoost"]),
+        ],
+    )
+
+
+class TestSynthesizer:
+
+    def test_header_first_two_lines(self):
+        text = _synthesize_text_from_resume_doc(_build_test_doc())
+        lines = text.split("\n")
+        assert lines[0] == "Krish Shah"
+        assert "krishshah0505@gmail.com" in lines[1]
+        assert "linkedin.com/in/krish" in lines[1]
+
+    def test_education_year_lifted_to_header(self):
+        """`(Ongoing)` should appear in the entry header pipe slot, not as a bullet."""
+        text = _synthesize_text_from_resume_doc(_build_test_doc())
+        # Find D.J. Sanghvi line
+        dj_line = next(l for l in text.split("\n") if l.startswith("D.J. Sanghvi"))
+        assert "Ongoing" in dj_line
+        # And the degree line should NOT still contain "(Ongoing)"
+        idx = text.split("\n").index(dj_line)
+        degree_line = text.split("\n")[idx + 1]
+        assert "(Ongoing)" not in degree_line
+        assert "CGPA: 9.266" in degree_line
+        # And there's no stray "• Ongoing" anywhere.
+        assert "• Ongoing" not in text
+
+    def test_education_year_real_year_lifted(self):
+        text = _synthesize_text_from_resume_doc(_build_test_doc())
+        kch = next(l for l in text.split("\n") if l.startswith("Kishinchand"))
+        assert "2023" in kch
+        # Year stripped from degree line.
+        idx = text.split("\n").index(kch)
+        deg = text.split("\n")[idx + 1]
+        assert "(2023)" not in deg
+
+    def test_experience_4_pipe_header(self):
+        text = _synthesize_text_from_resume_doc(_build_test_doc())
+        exp = next(l for l in text.split("\n") if l.startswith("Backend Developer Intern"))
+        parts = exp.split(" | ")
+        assert len(parts) == 4
+        assert "Navlakhi Education" in parts[1]
+        assert "Tardeo, Mumbai" in parts[2]
+        assert "2024" in parts[3]
+
+    def test_skills_section_preserves_groups(self):
+        text = _synthesize_text_from_resume_doc(_build_test_doc())
+        assert "SKILLS" in text
+        assert "Languages and Frameworks: Python, Java, C, React" in text
+        assert "ML / AI: Scikit-learn, XGBoost, CatBoost" in text
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Vision-raw → ResumeDocModel mapper
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestVisionRawMapper:
+
+    def test_degree_and_grade_merged_when_separate(self):
+        raw = {
+            "education": [{
+                "institution": "MIT",
+                "degree": "BS Computer Science",
+                "gpa_or_grade": "GPA: 3.9",
+                "dates": "2022",
+            }],
+        }
+        doc = _vision_raw_to_resume_doc(raw)
+        assert len(doc.education) == 1
+        assert "GPA: 3.9" in doc.education[0].degree
+        assert "BS Computer Science" in doc.education[0].degree
+
+    def test_degree_and_grade_not_double_merged(self):
+        """If grade is already inside degree, don't append it again."""
+        raw = {
+            "education": [{
+                "institution": "D.J. Sanghvi",
+                "degree": "B.Tech in CE — CGPA: 9.266 (Ongoing)",
+                "gpa_or_grade": "CGPA: 9.266 (Ongoing)",
+            }],
+        }
+        doc = _vision_raw_to_resume_doc(raw)
+        assert doc.education[0].degree.count("CGPA: 9.266") == 1
+
+    def test_location_embedded_in_company_stripped(self):
+        raw = {
+            "experience": [{
+                "company": "Navlakhi Education · Tardeo, Mumbai",
+                "role": "Backend Intern",
+                "location": "Tardeo, Mumbai",
+                "dates": "June 2024 – July 2024",
+                "bullets": ["did things"],
+            }],
+        }
+        doc = _vision_raw_to_resume_doc(raw)
+        assert doc.experience[0].company == "Navlakhi Education"
+        assert doc.experience[0].location == "Tardeo, Mumbai"
+
+    def test_csv_skill_string_split(self):
+        raw = {
+            "skills_groups": [{
+                "category": "Languages",
+                "items": ["Python, Java, C, HTML/CSS, SQL"],
+            }],
+        }
+        doc = _vision_raw_to_resume_doc(raw)
+        assert doc.skills[0][1] == ["Python", "Java", "C", "HTML/CSS", "SQL"]
+
+    def test_array_skill_passthrough(self):
+        raw = {
+            "skills_groups": [{
+                "category": "Languages",
+                "items": ["Python", "Java", "C"],
+            }],
+        }
+        doc = _vision_raw_to_resume_doc(raw)
+        assert doc.skills[0][1] == ["Python", "Java", "C"]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Resume-text helpers
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestResumeHelpers:
+
+    def test_numeral_count_strong(self):
+        assert _resume_numeral_count(STRONG_RESUME) >= 6
+
+    def test_numeral_count_weak(self):
+        assert _resume_numeral_count(WEAK_RESUME) < 3
+
+    def test_strong_verb_share_strong(self):
+        s, t = _resume_strong_verb_share(STRONG_RESUME)
+        assert t >= 5
+        assert s / t >= 0.6
+
+    def test_strong_verb_share_weak(self):
+        s, t = _resume_strong_verb_share(WEAK_RESUME)
+        # Cashier-style résumé: most bullets are weak verbs.
+        if t > 0:
+            assert s / t < 0.5
