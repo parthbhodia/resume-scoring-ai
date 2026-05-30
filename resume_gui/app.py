@@ -5067,24 +5067,48 @@ def _validate_rewrite_against_original(
     return True, ""
 
 
+def _normalize_for_rewrite_diff(s: str) -> str:
+    """Collapse whitespace + bullet glyphs + punctuation for no-op detection."""
+    if not s:
+        return ""
+    t = re.sub(r"^[\s•\-\*▪▸●◦‧·・‣⁃►➤○⚫—–‑]+", "", s.strip())
+    t = re.sub(r"\s+", " ", t)
+    return t.lower().strip(" .,:;")
+
+
 def _filter_bullet_rewrites(
     original: str,
     improved: str,
     category_rewrites: Optional[dict],
-) -> Tuple[str, dict]:
-    """Drop any rewrite that fails _validate_rewrite_against_original.
+    issues: Optional[List[Any]] = None,
+) -> Tuple[str, dict, List[Any]]:
+    """Drop any rewrite that fails _validate_rewrite_against_original, drop
+    no-op rewrites that are byte-equal (after whitespace/punctuation normalize)
+    to the original, and strip "quantification" from the issues tag list when
+    neither the rewrite nor the category rewrites actually add new numerals.
 
-    Returns (kept_improved, kept_category_rewrites). When a rewrite is
-    rejected we replace it with empty string so the UI falls back to the
-    original — better silence than a misleading badge.
+    Returns (kept_improved, kept_category_rewrites, kept_issues). When a
+    rewrite is rejected we replace it with empty string so the UI falls back
+    to the original — better silence than a misleading badge.
     """
     kept_improved = improved or ""
+    orig_norm = _normalize_for_rewrite_diff(original)
+
     if kept_improved:
         ok, why = _validate_rewrite_against_original(original, kept_improved)
         if not ok:
             logger.info(
                 "rewrite-validator dropped improvedBullet: %s  | orig=%r  | rewrite=%r",
                 why, original[:80], kept_improved[:80],
+            )
+            kept_improved = ""
+        elif _normalize_for_rewrite_diff(kept_improved) == orig_norm:
+            # The "rewrite" is identical to the original after whitespace /
+            # punctuation normalization. A no-op rewrite shown as "AI IMPROVED"
+            # is dishonest — better to surface nothing.
+            logger.info(
+                "rewrite-validator dropped no-op improvedBullet (identical to original): %r",
+                original[:80],
             )
             kept_improved = ""
 
@@ -5094,14 +5118,50 @@ def _filter_bullet_rewrites(
             if not isinstance(txt, str) or not txt.strip():
                 continue
             ok, why = _validate_rewrite_against_original(original, txt, category=str(cat))
-            if ok:
-                kept_cr[str(cat)] = txt
-            else:
+            if not ok:
                 logger.info(
                     "rewrite-validator dropped categoryRewrites.%s: %s  | orig=%r  | rewrite=%r",
                     cat, why, original[:80], txt[:80],
                 )
-    return kept_improved, kept_cr
+                continue
+            if _normalize_for_rewrite_diff(txt) == orig_norm:
+                logger.info(
+                    "rewrite-validator dropped no-op categoryRewrites.%s (identical to original): %r",
+                    cat, original[:80],
+                )
+                continue
+            kept_cr[str(cat)] = txt
+
+    # ── Strip lying "quantification" tag ──────────────────────────────────
+    # The LLM regularly stamps a bullet with `issues: ["quantification", ...]`
+    # then emits a rewrite that adds zero numerals. The badge tells the user
+    # the bullet needs metrics — but the AI's own proposed fix is identical
+    # prose. Drop the tag in that case so the user isn't misled.
+    kept_issues: List[Any] = list(issues or [])
+    if kept_issues:
+        lowered = [str(t).strip().lower() for t in kept_issues]
+        quant_keys = {"quantification", "quantify_impact", "quantify"}
+        has_quant_tag = any(t in quant_keys for t in lowered)
+        if has_quant_tag:
+            orig_nums = _rewrite_numerals(original)
+            added_anywhere = False
+            for candidate in [kept_improved] + list(kept_cr.values()):
+                if not candidate:
+                    continue
+                if _rewrite_numerals(candidate) - orig_nums:
+                    added_anywhere = True
+                    break
+            if not added_anywhere:
+                kept_issues = [
+                    t for t in kept_issues
+                    if str(t).strip().lower() not in quant_keys
+                ]
+                logger.info(
+                    "rewrite-validator stripped 'quantification' tag — no new numerals in any rewrite: %r",
+                    original[:80],
+                )
+
+    return kept_improved, kept_cr, kept_issues
 
 
 # ── Evidence-grounded issue validator ──────────────────────────────────────
@@ -5247,6 +5307,46 @@ _NUMERAL_PLENTY_MIN = 6
 _STRONG_VERB_MAJORITY_SHARE = 0.6
 
 
+# Phrasings the LLM emits as atsWarnings that are actually GOOD facts about
+# the résumé, not warnings. "No tables detected" doesn't deserve a warning
+# label — the absence of tables is precisely what ATS-friendly résumés want.
+_NON_ISSUE_ATS_WARNING_RE = re.compile(
+    r"\b(?:"
+    r"no\s+(?:table|graphic|image|column|header|footer|text\s*box|chart|icon|sidebar)|"
+    r"no\s+multi[- ]column|"
+    r"no\s+(?:embedded|complex)\s+(?:formatting|layout)|"
+    r"standard\s+(?:heading|section|format)|"
+    r"plain[- ]text\s+(?:heading|format|layout)|"
+    r"ats[- ]friendly\s+(?:layout|format|structure)|"
+    r"no\s+(?:non[- ]standard|unusual)\s+formatting"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_non_issue_ats_warnings(raw: dict) -> None:
+    """Drop atsWarnings whose text describes a non-issue (good fact framed as
+    a warning). Always-on; doesn't depend on evidence thresholds because these
+    phrasings are wrong on any résumé regardless of its content."""
+    warnings = raw.get("atsWarnings")
+    if not isinstance(warnings, list):
+        return
+    kept = []
+    for w in warnings:
+        if not isinstance(w, dict):
+            kept.append(w)
+            continue
+        blob = _issue_text_blob(w)
+        if _NON_ISSUE_ATS_WARNING_RE.search(blob):
+            logger.info(
+                "evidence-validator dropped non-issue atsWarning: %r",
+                str(w.get("warning") or "")[:80],
+            )
+            continue
+        kept.append(w)
+    raw["atsWarnings"] = kept
+
+
 def _validate_analysis_against_resume(raw: dict, resume_text: str) -> dict:
     """Drop topIssues, atsWarnings, bullet issue tags, and finalRecommendations
     whose claim contradicts what the résumé actually shows. Runs BEFORE
@@ -5261,6 +5361,10 @@ def _validate_analysis_against_resume(raw: dict, resume_text: str) -> dict:
     strong_share = (strong / total) if total else 0.0
     has_plenty_numerals = numeral_count >= _NUMERAL_PLENTY_MIN
     has_strong_majority = total >= 5 and strong_share >= _STRONG_VERB_MAJORITY_SHARE
+
+    # Always-on cleanup that doesn't depend on evidence thresholds: drop
+    # atsWarnings phrased as non-issues. These can fire on any résumé.
+    _strip_non_issue_ats_warnings(raw)
 
     if not (has_plenty_numerals or has_strong_majority):
         return raw  # nothing to contradict; let everything through
@@ -5292,7 +5396,7 @@ def _validate_analysis_against_resume(raw: dict, resume_text: str) -> dict:
             kept_issues.append(it)
         raw["topIssues"] = kept_issues
 
-    # 2. atsWarnings
+    # 2. atsWarnings — existing evidence-contradiction check
     warnings = raw.get("atsWarnings")
     if isinstance(warnings, list):
         kept_warn = []
@@ -5451,13 +5555,16 @@ def _normalize_analysis(raw: dict) -> dict:
                     if cleaned:
                         ba["categoryRewrites"] = cleaned
                 # Reject rewrites that silently drop numerals / proper nouns /
-                # named technologies from the original, or that claim
-                # "quantification" without actually adding a number. Better to
-                # surface no rewrite than a misleadingly-tagged one.
-                kept_improved, kept_cr = _filter_bullet_rewrites(
+                # named technologies from the original, claim "quantification"
+                # without actually adding a number, or are byte-identical to
+                # the original ("AI IMPROVED" that produces the same prose).
+                # Also strip a lying "quantification" tag from issues[] when
+                # no rewrite actually adds numerals.
+                kept_improved, kept_cr, kept_issues = _filter_bullet_rewrites(
                     ba.get("originalBullet", ""),
                     ba.get("improvedBullet", ""),
                     ba.get("categoryRewrites"),
+                    ba.get("issues"),
                 )
                 ba["improvedBullet"] = kept_improved
                 if kept_cr:
@@ -5465,6 +5572,7 @@ def _normalize_analysis(raw: dict) -> dict:
                 elif "categoryRewrites" in ba:
                     # All variant rewrites failed validation — drop the field.
                     ba.pop("categoryRewrites", None)
+                ba["issues"] = kept_issues
 
     # Calibrate overall score so it reflects visible weaknesses.
     # This prevents inflated "90+" overall when there are many weak bullets/issues.
