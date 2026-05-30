@@ -9,6 +9,14 @@ import {
 
 const STORAGE_KEY = "rn_template_builder";
 
+function isMeaningfulResume(parsed: Partial<TBResumeData>): boolean {
+  // Require at least one work entry with bullets OR one education entry with a degree
+  const hasWorkContent = parsed.workExperiences?.some((w) => w.bullets?.trim() || w.company?.trim());
+  const hasEduContent = parsed.educations?.some((e) => e.school?.trim() || e.degree?.trim());
+  const hasSkills = parsed.skills?.trim();
+  return !!(hasWorkContent || hasEduContent || hasSkills);
+}
+
 function safeLoad(): TBResumeData {
   if (typeof window === "undefined") return DEMO_RESUME;
   try {
@@ -16,6 +24,8 @@ function safeLoad(): TBResumeData {
     // First visit — show demo resume so the preview is never blank
     if (!raw) return DEMO_RESUME;
     const parsed = JSON.parse(raw) as Partial<TBResumeData>;
+    // If saved data has no meaningful content, show the demo
+    if (!isMeaningfulResume(parsed)) return DEMO_RESUME;
     return {
       ...DEFAULT_RESUME,
       ...parsed,
@@ -171,7 +181,7 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
   },
 
   reset: () => {
-    const data = DEFAULT_RESUME;
+    const data = DEMO_RESUME;
     safeSave(data);
     set({ data });
   },

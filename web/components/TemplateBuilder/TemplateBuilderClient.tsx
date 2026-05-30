@@ -192,9 +192,10 @@ export default function TemplateBuilderClient() {
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button
             onClick={store.reset}
+            title="Restore example resume"
             style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: "5px 11px", cursor: "pointer" }}
           >
-            Reset
+            Load Example
           </button>
           {downloadError && (
             <span style={{ fontSize: 11, color: "var(--red, #ef4444)", maxWidth: 200 }}>{downloadError}</span>
