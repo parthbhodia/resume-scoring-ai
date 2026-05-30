@@ -203,6 +203,7 @@ The 58 dimension tests in `resume_gui/tests/test_analyze_dimensions.py` defend i
 
 ## Recent changes (running log — newest first; **append after every commit**)
 
+- **`f2f7108`** — This file. Root `CLAUDE.md` added with architecture map, honesty-pipeline reference, component map, LLM tier matrix, 8 named invariants, and this running log. `web/AGENTS.md` updated to point at it. The maintenance rule (read at session start, update after every commit) lives at the top of CLAUDE.md.
 - **`af79efc`** — Analyze "Download PDF" no longer goes through LaTeX. Captures `paperRef.current.outerHTML` and routes through `/api/export-pdf-html` (Chromium). Now byte-for-byte WYSIWYG with the preview. LaTeX path stays for tailor flow. Drive-by improvements to LaTeX path (section order pass-through, tech-stack `ProjectItem.tech` field, arrow encoding fix in `_latex_escape`) so the tailor flow's LaTeX output stops drifting from preview too.
 - **`da08374`** — Added amber count badge to COMPLETED sidebar entries. A category like Achievement 82 with 1 weak bullet now shows `Achievement [1] 82` instead of looking identical to fully-clean categories. TOP FIXES badge stays red (existing). No badge = fully clean.
 - **`d4f2641`** — Honest categorization in the sidebar. A category < 70 with no flagged bullets and no related topIssues now moves to COMPLETED instead of sitting in TOP FIXES as a dead-end. Both buckets now check `categoryHasActionableContent(key)`.
