@@ -44,6 +44,11 @@ def _latex_escape(value: str) -> str:  # noqa: C901
     for ch in "•·▪‣◦⁃∙":
         text = text.replace(ch, "")
 
+    # NOTE: Arrow and math-symbol substitutions are deferred until AFTER
+    # the backslash + dollar-sign escapes (steps 2 and 3) so the
+    # backslashes we introduce here ($\rightarrow$, $\times$, etc.) aren't
+    # mangled into $\textbackslash{} rightarrow$.
+
     # -----------------------------------------------------------------------
     # Step 2 -- Escape the backslash FIRST (standard LaTeX rule).
     # Any \ remaining at this point came from the original user text; our
@@ -130,6 +135,7 @@ class ProjectItem:
 
     name: str
     bullets: list[str] = field(default_factory=list)
+    tech: str = ""  # optional tech-stack tagline rendered next to the project name
 
 
 @dataclass

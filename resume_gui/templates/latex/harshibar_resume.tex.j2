@@ -171,7 +171,9 @@
 \section{PROJECTS}
 \resumeSubHeadingListStart
 {% for proj in doc.projects %}
-  {% if proj.name %}
+  {% if proj.name and proj.tech %}
+  \resumeProjectHeading{\textbf{ {{ proj.name|latex }} } $|$ \emph{ {{ proj.tech|latex }} }}{}
+  {% elif proj.name %}
   \resumeProjectHeading{\textbf{ {{ proj.name|latex }} }}{}
   {% endif %}
   {% if proj.bullets|length %}

@@ -13,6 +13,9 @@ import {
   type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
 import { DEFAULT_REFERENCE_FOLDER, distinctStyleTemplates, hasMultipleStyleTemplates } from "@/lib/resumeTemplates";
+import { useHtmlPdfExport } from "@/hooks/useHtmlPdfExport";
+import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
+import { ownerSlugFromProfile } from "@/lib/resumeFileName";
 
 // Re-export for legacy imports from this file path
 export { CATEGORY_ISSUE_KEYWORDS } from "@/lib/analysisCategoryMatch";
@@ -228,6 +231,24 @@ export default function AnnotatedResumePanel({
   const [selectedReferenceFolder, setSelectedReferenceFolder] = useState<string>(DEFAULT_REFERENCE_FOLDER);
   const scrollRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
+
+  // HTML→Chromium PDF export (same pipeline ResumeBuilder uses for its
+  // "Download PDF rendered from HTML — WYSIWYG, no LaTeX" button). The
+  // exported PDF is a literal capture of paperRef.current's outerHTML, so
+  // the download matches the preview byte-for-byte instead of going through
+  // the lossy LaTeX renderer.
+  const { exportPdf: exportHtmlPdf, exporting: htmlPdfExporting, error: htmlPdfError } = useHtmlPdfExport();
+  const candidateProfile = useResumeAnalyzeStore((s) => s.extractedText);
+  const htmlPdfFilename = useMemo(() => {
+    // Derive a stable filename stem from the candidate's name in the
+    // preview. Falls back to "resume" if name detection misses.
+    const owner = ownerSlugFromProfile(candidateProfile || extractedText || "");
+    return owner === "User" ? "resume.pdf" : `${owner}_resume.pdf`;
+  }, [candidateProfile, extractedText]);
+  const handleHtmlPdfDownload = useCallback(() => {
+    if (!paperRef.current) return;
+    void exportHtmlPdf(paperRef.current, htmlPdfFilename);
+  }, [exportHtmlPdf, htmlPdfFilename]);
   const [mirrorBox, setMirrorBox] = useState<{
     top: number;
     height: number;
@@ -611,39 +632,52 @@ export default function AnnotatedResumePanel({
                 justifyContent: "flex-end",
               }}
             >
-              {onExportPdf ? (
-                <button
-                  type="button"
-                  disabled={exportingResume || !exportPdfEnabled}
-                  onClick={() => onExportPdf({ referenceFolder: selectedReferenceFolder })}
-                  title={
-                    exportPdfEnabled
-                      ? "Download PDF — Harshibar LaTeX layout with your bullet edits (same engine as Résumé Builder)."
-                      : "PDF export needs a structured résumé from analysis — re-upload your file if this stays disabled."
-                  }
-                  aria-label="Download résumé PDF"
-                  style={{
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    letterSpacing: 0.12,
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: exportPdfEnabled
-                      ? exportingResume ? "var(--surface3)" : "var(--accent)"
-                      : "var(--surface2)",
-                    color: exportPdfEnabled ? "#fff" : "var(--dim)",
-                    cursor: exportingResume ? "wait" : exportPdfEnabled ? "pointer" : "not-allowed",
-                    fontFamily: "inherit",
-                    flexShrink: 0,
-                    whiteSpace: "nowrap",
-                    boxShadow: exportPdfEnabled && !exportingResume ? "var(--shadow-sm)" : "none",
-                    opacity: exportPdfEnabled ? 1 : 0.72,
-                  }}
-                >
-                  {exportingResume ? "Generating PDF…" : "Download PDF"}
-                </button>
-              ) : null}
+              {(() => {
+                // Use the WYSIWYG HTML→Chromium pipeline. The button stays
+                // enabled whenever we have something to render (paperRef is
+                // populated once the preview mounts) — no dependency on the
+                // backend structured-resume "canExport" flag the LaTeX path
+                // needed. The legacy `onExportPdf` prop is kept in the type
+                // signature for parents that still pass it but is unused
+                // here; we'll drop the prop in a follow-up once nothing
+                // depends on it.
+                void onExportPdf;  // intentionally unused — see comment above
+                const busy = htmlPdfExporting;
+                const enabled = exportPdfEnabled !== false;
+                return (
+                  <button
+                    type="button"
+                    disabled={busy || !enabled}
+                    onClick={handleHtmlPdfDownload}
+                    title={
+                      enabled
+                        ? "Download PDF — WYSIWYG, what you see in the preview is what you get. Rendered via headless Chromium, no LaTeX."
+                        : "PDF export needs a rendered preview — wait for analysis to finish."
+                    }
+                    aria-label="Download résumé PDF"
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: 0.12,
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: enabled
+                        ? busy ? "var(--surface3)" : "var(--accent)"
+                        : "var(--surface2)",
+                      color: enabled ? "#fff" : "var(--dim)",
+                      cursor: busy ? "wait" : enabled ? "pointer" : "not-allowed",
+                      fontFamily: "inherit",
+                      flexShrink: 0,
+                      whiteSpace: "nowrap",
+                      boxShadow: enabled && !busy ? "var(--shadow-sm)" : "none",
+                      opacity: enabled ? 1 : 0.72,
+                    }}
+                  >
+                    {busy ? "Generating PDF…" : "Download PDF"}
+                  </button>
+                );
+              })()}
               {onExportDocx ? (
                 <button
                   type="button"

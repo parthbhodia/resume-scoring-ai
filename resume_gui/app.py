@@ -655,19 +655,61 @@ def _education_item_from_csv_line(line: str) -> EducationItem:
     return EducationItem(institution=raw)
 
 
+# Action-verb starts that disqualify a line from being a tech-stack tagline
+# (so we don't accidentally promote a real achievement bullet into the project
+# header). Conservative — only verbs we know lead a real bullet.
+_PROJECT_BULLET_LEAD_RE = re.compile(
+    r"^(?:Architected|Built|Designed|Developed|Delivered|Engineered|"
+    r"Implemented|Reduced|Created|Migrated|Integrated|Launched|Shipped|"
+    r"Drove|Led|Owned|Established|Optimi[sz]ed|Streamlined|Automated|"
+    r"Refactored|Improved|Increased|Scaled|Authored|Composed|Orchestrated|"
+    r"Configured|Trained|Mentored|Coordinated|Spearheaded|Productionized|"
+    r"Productionised)\b",
+    re.IGNORECASE,
+)
+
+
+def _line_looks_like_tech_stack(line: str) -> bool:
+    """A line like "Python · Django · React · LLM (Llama 3) · MySQL · MongoDB"
+    that the vision extractor sometimes packs into ``bullets[0]``.
+
+    Markers:
+      - has ≥2 middot/bullet separators (" · ") or " | " separators
+      - doesn't start with an action verb (those are real achievement bullets)
+      - short (one display line)
+      - no sentence-ending punctuation
+    """
+    t = (line or "").strip()
+    if not t or len(t) > 220:
+        return False
+    if _PROJECT_BULLET_LEAD_RE.match(t):
+        return False
+    if t.endswith((".", "!", "?", ";")):
+        return False
+    sep_count = t.count(" · ") + t.count(" | ")
+    return sep_count >= 2
+
+
 def _project_items_from_llm_projects(raw_projects: Any) -> list[ProjectItem]:
     out: list[ProjectItem] = []
     for proj in raw_projects or []:
         if not isinstance(proj, dict):
             continue
         name_p = _clean_model_text(proj.get("name") or "")
+        tech_p = _clean_model_text(str(proj.get("tech") or ""))
         p_buls = [_clean_model_text(b) for b in (proj.get("bullets") or []) if _clean_model_text(b)]
+        # Vision extractor packs tech stack into bullets[0]. Promote it onto
+        # the project's `tech` field so the template can render it next to
+        # the name instead of as a bogus achievement bullet.
+        if not tech_p and p_buls and _line_looks_like_tech_stack(p_buls[0]):
+            tech_p = p_buls[0]
+            p_buls = p_buls[1:]
         if name_p and p_buls:
-            out.append(ProjectItem(name=name_p, bullets=p_buls))
+            out.append(ProjectItem(name=name_p, bullets=p_buls, tech=tech_p))
         elif name_p:
-            out.append(ProjectItem(name=name_p, bullets=[]))
+            out.append(ProjectItem(name=name_p, bullets=[], tech=tech_p))
         elif p_buls:
-            out.append(ProjectItem(name="", bullets=p_buls))
+            out.append(ProjectItem(name="", bullets=p_buls, tech=tech_p))
     return out
 
 
@@ -2297,7 +2339,7 @@ def _resume_doc_to_dict(doc: "ResumeDocModel") -> dict:
             for e in (doc.education or [])
         ],
         "projects": [
-            {"name": p.name, "bullets": list(p.bullets)}
+            {"name": p.name, "bullets": list(p.bullets), "tech": getattr(p, "tech", "")}
             for p in (doc.projects or [])
         ],
         "extra_sections": [
@@ -7408,7 +7450,15 @@ def _doc_from_structured_dict(
         if title and lines:
             extra_sections.append((title, lines))
 
-    return ResumeDocModel(
+    # Preserve the source PDF's section order (Education-first résumés
+    # otherwise get flipped to the default Experience-first order, which
+    # contradicts what the live preview showed the user).
+    raw_section_order = structured.get("section_order")
+    if isinstance(raw_section_order, list):
+        section_order = [str(s).strip() for s in raw_section_order if str(s).strip()]
+    else:
+        section_order = []
+    doc_kwargs = dict(
         full_name=_clean_model_text(str(structured.get("full_name") or "Candidate")) or "Candidate",
         headline=_clean_model_text(str(structured.get("headline") or "")),
         location=_clean_model_text(str(structured.get("location") or "")),
@@ -7423,6 +7473,9 @@ def _doc_from_structured_dict(
         projects=projects,
         extra_sections=extra_sections,
     )
+    if section_order:
+        doc_kwargs["section_order"] = section_order
+    return ResumeDocModel(**doc_kwargs)
 
 
 async def api_analyze_export_pdf(request: Request):
