@@ -28,15 +28,16 @@ function makeStyles(font: TBFont, accent: string) {
       fontSize: 22,
       fontFamily: bold,
       letterSpacing: 0.5,
-      marginBottom: 3,
+      marginBottom: 4,
       color: "#111111",
+      width: "100%",
     },
     contactLine: {
       fontSize: 9,
       color: "#555555",
-      marginBottom: 16,
       flexDirection: "row",
       flexWrap: "wrap",
+      width: "100%",
     },
     contactItem: { marginRight: 6 },
     sectionTitle: {
@@ -95,13 +96,15 @@ export default function ResumePDFTemplate({ data }: Props) {
       <Page size="LETTER" style={styles.page}>
 
         {/* Header */}
-        <Text style={styles.name}>{profile.name || "Your Name"}</Text>
-        <View style={styles.contactLine}>
-          {contactParts.map((c, i) => (
-            <Text key={i} style={styles.contactItem}>
-              {c}{i < contactParts.length - 1 ? "  |  " : ""}
-            </Text>
-          ))}
+        <View style={{ flexDirection: "column", marginBottom: 14, width: "100%" }}>
+          <Text style={styles.name}>{profile.name || "Your Name"}</Text>
+          <View style={styles.contactLine}>
+            {contactParts.map((c, i) => (
+              <Text key={i} style={styles.contactItem}>
+                {c}{i < contactParts.length - 1 ? "  |  " : ""}
+              </Text>
+            ))}
+          </View>
         </View>
 
         {/* Summary */}
