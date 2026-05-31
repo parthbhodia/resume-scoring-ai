@@ -648,10 +648,19 @@ export default function AnalyzeResume() {
   );
 
   useEffect(() => {
-    // Auto-open the first flagged bullet card when a category is selected
-    // so users immediately see the suggestion without having to click.
+    // Auto-open a flagged bullet card when a category is selected so users
+    // immediately see the suggestion without having to click.
     if (!result?.bulletAnalysis) { setExpandedFlaggedBulletIdx(null); return; }
     if (activeCategory) {
+      // If this category switch was triggered by clicking a bullet in the
+      // preview, open *that* bullet's card. Otherwise default to the first
+      // flagged bullet in the category.
+      const pending = pendingExpandIdxRef.current;
+      pendingExpandIdxRef.current = null;
+      if (pending !== null) {
+        setExpandedFlaggedBulletIdx(pending);
+        return;
+      }
       const firstFlaggedIdx = result.bulletAnalysis.findIndex((b) =>
         bulletMatchesAnalysisCategory(b, activeCategory, result.bulletAnalysis, result.bulletAnalysis.indexOf(b), categoryAssignmentOpts)
       );
