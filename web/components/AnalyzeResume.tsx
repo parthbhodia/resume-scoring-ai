@@ -2047,7 +2047,11 @@ export default function AnalyzeResume() {
                           ))}
                         </div>
                       )}
-                      {activeCategory && CATEGORY_REWRITE_HINTS[activeCategory] && (
+                      {/* Only show the generic category hint when there's an
+                          actual rewrite to accompany it — otherwise it reads as
+                          a misleading "fix" on a bullet that has none. */}
+                      {activeCategory && CATEGORY_REWRITE_HINTS[activeCategory]
+                        && (draft.trim() || categoryRewriteBase.trim()) && (
                         <p style={{
                           fontSize: 12,
                           color: "var(--muted)",
@@ -2110,6 +2114,22 @@ export default function AnalyzeResume() {
                             </button>
                           )}
                         />
+                      )}
+                      {/* No auto-rewrite for this bullet under the active
+                          category — be honest rather than show a misleading
+                          generic hint with nothing actionable. */}
+                      {!(draft.trim() || categoryRewriteBase.trim()) && (
+                        <p style={{
+                          fontSize: 12,
+                          color: "var(--muted)",
+                          lineHeight: 1.55,
+                          margin: "2px 0 0",
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          background: "var(--surface2)",
+                        }}>
+                          No auto-rewrite for this one. The score reflects the issues tagged above — edit the line directly in Résumé Builder to address them.
+                        </p>
                       )}
                         </div>
                       )}
