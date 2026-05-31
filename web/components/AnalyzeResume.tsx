@@ -648,7 +648,18 @@ export default function AnalyzeResume() {
   );
 
   useEffect(() => {
-    setExpandedFlaggedBulletIdx(null);
+    // Auto-open the first flagged bullet card when a category is selected
+    // so users immediately see the suggestion without having to click.
+    if (!result?.bulletAnalysis) { setExpandedFlaggedBulletIdx(null); return; }
+    if (activeCategory) {
+      const firstFlaggedIdx = result.bulletAnalysis.findIndex((b) =>
+        bulletMatchesAnalysisCategory(b, activeCategory, result.bulletAnalysis, result.bulletAnalysis.indexOf(b), categoryAssignmentOpts)
+      );
+      setExpandedFlaggedBulletIdx(firstFlaggedIdx >= 0 ? firstFlaggedIdx : null);
+    } else {
+      setExpandedFlaggedBulletIdx(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCategory]);
 
   const onFile = (f: File | null | undefined) => {

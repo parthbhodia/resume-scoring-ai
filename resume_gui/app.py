@@ -5129,6 +5129,21 @@ def _normalize_for_rewrite_diff(s: str) -> str:
     return t.lower().strip(" .,:;")
 
 
+def _word_jaccard(a: str, b: str) -> float:
+    """Jaccard similarity between word bags of two strings (0–1).
+
+    Used to catch near-no-op rewrites that change only connectors or
+    punctuation (e.g. '; researched' → ' and researched').
+    """
+    wa = set(re.findall(r"\b\w+\b", a.lower()))
+    wb = set(re.findall(r"\b\w+\b", b.lower()))
+    if not wa and not wb:
+        return 1.0
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
 def _filter_bullet_rewrites(
     original: str,
     improved: str,
@@ -5164,6 +5179,14 @@ def _filter_bullet_rewrites(
                 original[:80],
             )
             kept_improved = ""
+        elif _word_jaccard(original, kept_improved) >= 0.88:
+            # Near-identical rewrite — only punctuation/connectors changed
+            # (e.g. ";" → "and"). Not worth surfacing as an AI improvement.
+            logger.info(
+                "rewrite-validator dropped near-no-op improvedBullet (jaccard=%.2f): orig=%r rewrite=%r",
+                _word_jaccard(original, kept_improved), original[:80], kept_improved[:80],
+            )
+            kept_improved = ""
 
     kept_cr: dict = {}
     if isinstance(category_rewrites, dict):
@@ -5181,6 +5204,12 @@ def _filter_bullet_rewrites(
                 logger.info(
                     "rewrite-validator dropped no-op categoryRewrites.%s (identical to original): %r",
                     cat, original[:80],
+                )
+                continue
+            if _word_jaccard(original, txt) >= 0.88:
+                logger.info(
+                    "rewrite-validator dropped near-no-op categoryRewrites.%s (jaccard=%.2f): %r",
+                    cat, _word_jaccard(original, txt), original[:80],
                 )
                 continue
             kept_cr[str(cat)] = txt
