@@ -18,7 +18,8 @@ from linkedin_agent.resume_upload_parse import (
     _det_canonical_section,
     _det_quality_ok,
     _extract_docx_structured,
-    parse_upload_resume_full_pipeline,
+    parse_upload_bytes,
+    structured_to_plain_resume_text,
 )
 
 _DATASET_DIR = (
@@ -35,7 +36,7 @@ _DATASET_DIR = (
 
 class TestDetHelpers(unittest.TestCase):
     def test_canonical_section_maps_experience(self):
-        self.assertEqual(_det_canonical_section("PROFESSIONAL EXPERIENCE"), "work_experience")
+        self.assertEqual(_det_canonical_section("PROFESSIONAL EXPERIENCE"), "experience")
 
     def test_quality_ok_with_name_only(self):
         self.assertTrue(
@@ -71,6 +72,29 @@ class TestDetHelpers(unittest.TestCase):
         self.assertEqual(result.full_name, "Balaji Gopalakrishnan")
         self.assertEqual(result.email, "balaji@example.com")
 
+    def test_pdf_bullet_glyph_rows_attach_to_following_text(self):
+        lines = [
+            "PROJECTS",
+            "EXTRA CURRICULAR ACTIVITIES",
+            "• •",
+            "Student’s event co-ordinator and manager for Spoural Cultural Fest- ARIP Jan-Feb 2023",
+            "• Student Representative of Women’s Development Cell at ARIP- 2020-2022",
+        ]
+
+        def heading(i: int) -> bool:
+            return lines[i] in {"PROJECTS", "EXTRA CURRICULAR ACTIVITIES"}
+
+        result = _build_structured_from_lines(lines, is_heading_fn=heading)
+        self.assertIsNotNone(result)
+        assert result is not None
+
+        plain = structured_to_plain_resume_text(result)
+        self.assertNotIn("• •", plain)
+        self.assertIn(
+            "• Student’s event co-ordinator and manager for Spoural Cultural Fest- ARIP Jan-Feb 2023",
+            plain,
+        )
+
 
 class TestDocxDatasetSmoke(unittest.TestCase):
     @unittest.skipUnless(_HAS_DOCX, "python-docx not installed")
@@ -93,11 +117,7 @@ class TestDocxDatasetSmoke(unittest.TestCase):
     def test_pipeline_returns_ready_deterministic_for_docx(self):
         path = next(_DATASET_DIR.glob("*.docx"))
         content = path.read_bytes()
-        structured, plain, status, hints = parse_upload_resume_full_pipeline(
-            "fallback markdown",
-            file_content=content,
-            filename=path.name,
-        )
+        structured, plain, status, hints = parse_upload_bytes(content, path.name, "fallback markdown")
         self.assertEqual(status, "ready_deterministic")
         self.assertTrue(structured)
         self.assertTrue(plain)

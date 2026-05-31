@@ -32,7 +32,7 @@ export type Block =
 
 /** Known resume section titles (full trimmed line). Strict mode avoids mistaking ALL-CAPS names for sections. */
 const KNOWN_SECTIONS =
-  /^(?:EXPERIENCE|WORK\s+HISTORY|WORK\s+EXPERIENCE|PROFESSIONAL\s+EXPERIENCE|PROFESSIONAL\s+HISTORY|EMPLOYMENT(?:\s+HISTORY)?|CAREER(?:\s+HISTORY|\s+OVERVIEW|\s+SUMMARY)?|EDUCATION|SKILLS|SUMMARY|PROFILE|PROJECTS|CERTIFICATIONS|AWARDS|PUBLICATIONS|LANGUAGES|VOLUNTEER|PROFESSIONAL\s+SUMMARY|TECHNICAL\s+SKILLS|ACHIEVEMENTS?|REFERENCES|OBJECTIVE|ACTIVITIES|HONORS|LEADERSHIP|INTERESTS|EXTRACURRICULAR)\s*$/iu;
+  /^(?:EXPERIENCE|WORK\s+HISTORY|WORK\s+EXPERIENCE|PROFESSIONAL\s+EXPERIENCE|PROFESSIONAL\s+HISTORY|EMPLOYMENT(?:\s+HISTORY)?|CAREER(?:\s+HISTORY|\s+OVERVIEW|\s+SUMMARY)?|EDUCATION|SKILLS|SUMMARY|PROFILE|PROJECTS|CERTIFICATIONS|AWARDS|PUBLICATIONS|LANGUAGES|VOLUNTEER|PROFESSIONAL\s+SUMMARY|TECHNICAL\s+SKILLS|ACHIEVEMENTS?|REFERENCES|OBJECTIVE|ACTIVITIES(?:\s*&\s*LEADERSHIP)?|CO-?CURRICULAR\s+ACTIVITIES|EXTRA\s+CURRICULAR\s+ACTIVITIES|EXTRACURRICULAR(?:\s+ACTIVITIES)?|HONORS|LEADERSHIP|INTERESTS)\s*$/iu;
 
 /** Exported for AnnotatedResumePanel extract heuristics (identity line vs lone section heading). */
 export function lineLooksLikeStandaloneSectionHeading(line: string): boolean {
@@ -495,6 +495,86 @@ function renderSkillsLine(text: string): ReactNode {
   );
 }
 
+type ResumeSectionRole =
+  | "education"
+  | "experience"
+  | "skills"
+  | "projects"
+  | "summary"
+  | "activities"
+  | "other";
+
+function roleForKnownSection(text: string): ResumeSectionRole | null {
+  const t = text.trim();
+  if (!KNOWN_SECTIONS.test(t)) return null;
+  if (/\beducation\b/i.test(t)) return "education";
+  if (/\b(skill|technical skills)\b/i.test(t)) return "skills";
+  if (/\b(project|portfolio)\b/i.test(t)) return "projects";
+  if (/\b(experience|work|employment|career)\b/i.test(t)) return "experience";
+  if (/\b(summary|profile|objective)\b/i.test(t)) return "summary";
+  if (/\b(activity|activities|leadership|honors|interest)\b/i.test(t)) return "activities";
+  return "other";
+}
+
+function currentSectionRole(blocks: Block[], index: number): ResumeSectionRole | null {
+  for (let j = index - 1; j >= 0; j--) {
+    const block = blocks[j];
+    if (block?.type !== "section") continue;
+    const role = roleForKnownSection(block.text);
+    if (role) return role;
+  }
+  return null;
+}
+
+const EDUCATION_INSTITUTION_RE =
+  /\b(university|college|institute|school|academy|polytechnic|faculty|department|vidyapeeth|steinhardt|charusat)\b/i;
+
+function looksLikeEducationInstitutionLine(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.length > 180) return false;
+  if (lineLooksLikeBulletLead(t)) return false;
+  if (splitLeadingLabelAndValue(t)) return false;
+  return EDUCATION_INSTITUTION_RE.test(t);
+}
+
+function splitLeadingLabelAndValue(text: string): { hasBullet: boolean; label: string; value: string } | null {
+  const m = text.trim().match(/^([•●▪◦○–—\-]\s*)?([^:]{2,42}):\s*(.+)$/u);
+  if (!m) return null;
+  const label = m[2].trim();
+  const value = m[3].trim();
+  if (!label || !value || label.split(/\s+/).length > 5) return null;
+  return { hasBullet: Boolean(m[1]), label, value };
+}
+
+function renderLabeledLine(text: string): ReactNode {
+  const split = splitLeadingLabelAndValue(text);
+  if (!split) return renderInline(softenRunOnExtractLine(text));
+  const body = (
+    <>
+      <strong>{split.label}:</strong>{" "}
+      {renderInline(softenRunOnExtractLine(split.value))}
+    </>
+  );
+  if (!split.hasBullet) return body;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+      <span style={{ color: "var(--resume-paper-dim)" }}>•</span>
+      <span>{body}</span>
+    </span>
+  );
+}
+
+function renderMetricLineWithLabel(text: string): ReactNode {
+  const split = splitLeadingLabelAndValue(text);
+  if (!split) return highlightMetricSpans(text);
+  return (
+    <>
+      <strong>{split.label}:</strong>{" "}
+      {highlightMetricSpans(split.value)}
+    </>
+  );
+}
+
 function EntryHeaderLine({ line }: { line: string }) {
   const t = line.trim();
 
@@ -869,15 +949,18 @@ export default function AnalyzeLiveResumeBody({
 
         /* ── Section heading ── */
         if (blk.type === "section") {
+          const isPrimarySection = Boolean(roleForKnownSection(blk.text));
           return (
             <div key={bi} style={{
-              marginTop: 18,
-              marginBottom: 7,
-              paddingBottom: 3,
-              borderBottom: "1.5px solid var(--resume-paper-accent)",
-              fontSize: 9,
+              marginTop: isPrimarySection ? 17 : 11,
+              marginBottom: isPrimarySection ? 7 : 5,
+              paddingBottom: isPrimarySection ? 3 : 2,
+              borderBottom: isPrimarySection
+                ? "1.5px solid var(--resume-paper-accent)"
+                : "1px solid color-mix(in srgb, var(--resume-paper-accent) 72%, transparent)",
+              fontSize: isPrimarySection ? 9 : 10,
               fontWeight: 800,
-              letterSpacing: 1.6,
+              letterSpacing: isPrimarySection ? 1.6 : 1.25,
               color: "var(--resume-paper-accent)",
               textTransform: "uppercase",
               fontFamily: "system-ui, sans-serif",
@@ -889,15 +972,10 @@ export default function AnalyzeLiveResumeBody({
 
         /* ── Paragraph / entry header ── */
         if (blk.type === "paragraph") {
-          const prevBlk = bi > 0 ? blocks[bi - 1] : null;
-          const inSkillsSection =
-            !!prevBlk &&
-            prevBlk.type === "section" &&
-            /\bskills\b/i.test(prevBlk.text);
-          const inExperienceSection =
-            !!prevBlk &&
-            prevBlk.type === "section" &&
-            /\b(experience|work|employment)\b/i.test(prevBlk.text);
+          const sectionRole = currentSectionRole(blocks, bi);
+          const inSkillsSection = sectionRole === "skills";
+          const inExperienceSection = sectionRole === "experience";
+          const inEducationSection = sectionRole === "education";
           const paragraphLines = inSkillsSection
             ? mergeWrappedSkillsLines(blk.lines)
             : inExperienceSection
@@ -905,7 +983,7 @@ export default function AnalyzeLiveResumeBody({
               : blk.lines;
 
           return (
-            <div key={bi} style={{ marginBottom: 6 }}>
+            <div key={bi} style={{ marginBottom: presentationOnly ? 5 : 6 }}>
               {paragraphLines.map((ln, li) => {
                 const t = ln.trim();
                 if (!t || isPlaceholderIdentityLine(ln)) return null;
@@ -916,6 +994,23 @@ export default function AnalyzeLiveResumeBody({
                     </div>
                   );
                 }
+                if (inEducationSection && looksLikeEducationInstitutionLine(t)) {
+                  return (
+                    <div key={li} style={{
+                      fontSize: 10.65,
+                      fontWeight: 700,
+                      color: "var(--resume-paper-ink)",
+                      lineHeight: 1.35,
+                      marginTop: li > 0 ? 5 : 0,
+                      marginBottom: 1,
+                      fontFamily: "system-ui, sans-serif",
+                      overflowWrap: "anywhere",
+                      wordBreak: "break-word",
+                    }}>
+                      {renderInline(softenRunOnExtractLine(t))}
+                    </div>
+                  );
+                }
                 // Plain paragraph text (summary, skills list, location, etc.)
                 return (
                   <div key={li} style={{
@@ -923,13 +1018,13 @@ export default function AnalyzeLiveResumeBody({
                     color: "var(--resume-paper-ink)",
                     lineHeight: 1.55,
                     marginBottom: 2,
-                    fontFamily: li === 0 ? "'Georgia', serif" : "system-ui, sans-serif",
+                    fontFamily: inSkillsSection ? "system-ui, sans-serif" : li === 0 ? "'Georgia', serif" : "system-ui, sans-serif",
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
                   }}>
                     {inSkillsSection
                       ? renderSkillsLine(normalizeSkillsLineSpacing(t))
-                      : renderInline(softenRunOnExtractLine(t))}
+                      : renderLabeledLine(t)}
                   </div>
                 );
               })}
@@ -940,7 +1035,7 @@ export default function AnalyzeLiveResumeBody({
         /* ── Bullet rows ── */
         const bulletRows = collapseAdjacentSameBulletRows(blk.items, bulletAnalysis);
         return (
-          <div key={bi} style={{ marginBottom: 10, marginTop: 4 }}>
+          <div key={bi} style={{ marginBottom: presentationOnly ? 7 : 10, marginTop: presentationOnly ? 2 : 4 }}>
             {bulletRows.map(({ rawLine, bulletIdx }, ii) => {
               const bullet = bulletAnalysis[bulletIdx];
               if (!bullet) return null;
@@ -1021,7 +1116,7 @@ export default function AnalyzeLiveResumeBody({
                     )}
 
                     <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-                      {highlightMetricSpans(showText)}
+                      {renderMetricLineWithLabel(showText)}
                       {previewLineApplied && (
                         <span className="az-pdf-ignore az-preview-applied-mark"
                           title={presentationOnly ? "Suggestion applied" : "Preview updated"}

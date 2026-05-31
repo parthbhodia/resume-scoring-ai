@@ -1392,6 +1392,36 @@ def _build_structured_from_lines(
     if not lines:
         return None
 
+    # PyMuPDF can emit list bullets as separate glyph-only rows, e.g.
+    # ["• •", "Student representative ..."]. Re-attach those rows so preview
+    # matching keeps the content as a normal left-aligned bullet.
+    normalized_lines: List[str] = []
+    normalized_heading_flags: List[bool] = []
+    original_heading_flags = [bool(is_heading_fn(i)) for i in range(len(lines))]
+    i = 0
+    while i < len(lines):
+        text = (lines[i] or "").strip()
+        if re.fullmatch(r"[•●▪◦○–—\-\s]+", text or ""):
+            j = i + 1
+            while j < len(lines) and not (lines[j] or "").strip():
+                j += 1
+            if j < len(lines) and not original_heading_flags[j]:
+                next_text = (lines[j] or "").strip()
+                if next_text and not re.match(r"^[•●▪◦○–—\-]\s*", next_text):
+                    normalized_lines.append(f"• {next_text}")
+                    normalized_heading_flags.append(False)
+                    i = j + 1
+                    continue
+            i += 1
+            continue
+        normalized_lines.append(lines[i])
+        normalized_heading_flags.append(original_heading_flags[i])
+        i += 1
+    lines = normalized_lines
+
+    def is_heading_idx(idx: int) -> bool:
+        return 0 <= idx < len(normalized_heading_flags) and normalized_heading_flags[idx]
+
     result = UploadedResumeStructured()
 
     # Contact from header block
@@ -1422,7 +1452,7 @@ def _build_structured_from_lines(
     summary_lines: List[str] = []
 
     for i, text in enumerate(lines):
-        if is_heading_fn(i):
+        if is_heading_idx(i):
             sec = _det_canonical_section(text)
             if sec:
                 current_section = sec
@@ -1437,11 +1467,11 @@ def _build_structured_from_lines(
         bullet_text = re.sub(r"^[•●▪◦○–—\-]\s*", "", text).strip() if is_bullet else ""
 
         if current_section == "summary":
-            if not is_heading_fn(i):
+            if not is_heading_idx(i):
                 summary_lines.append(text)
 
         elif current_section == "skills":
-            if not is_heading_fn(i):
+            if not is_heading_idx(i):
                 skills_raw.append(text)
 
         elif current_section == "experience":
