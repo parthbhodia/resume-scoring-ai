@@ -12,13 +12,16 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import LibraryResumeDetailPanel from "./LibraryResumeDetailPanel";
 import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
-import type { ResumeRecord } from "@/lib/types";
 import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
-import { fetchResumes, getSupabaseClient } from "@/lib/supabase";
+import { fetchLibraryItems, getSupabaseClient, type LibraryItem } from "@/lib/supabase";
 import { RESUME_LIBRARY_CHANGED_EVENT } from "@/lib/resumeLibraryEvents";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 
-type SortKey = "recent" | "score" | "company";
+type SortKey = "recent" | "score" | "name";
+type FilterKey = "all" | "analyzed" | "tailored" | "default";
 
 /** Aligns with Analyze bullet bands: strong ≥70, improvable 55–69, weak &lt;55 */
 function matchScoreBand(score: number): "strong" | "mid" | "weak" {
@@ -27,19 +30,49 @@ function matchScoreBand(score: number): "strong" | "mid" | "weak" {
   return "weak";
 }
 
+function analysisResult(item: LibraryItem): Record<string, unknown> {
+  return item.kind === "analyzed" && item.analysis.result && typeof item.analysis.result === "object"
+    ? item.analysis.result as Record<string, unknown>
+    : {};
+}
+
+function issueLabel(raw: unknown): string {
+  if (typeof raw === "string") return raw.trim();
+  if (!raw || typeof raw !== "object") return "";
+  const obj = raw as Record<string, unknown>;
+  for (const key of ["issue", "title", "description", "whyItMatters", "suggestion"]) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function getAnalysisIssues(item: LibraryItem, limit = 2): string[] {
+  const issues = analysisResult(item).topIssues;
+  if (!Array.isArray(issues)) return [];
+  return issues.map(issueLabel).filter(Boolean).slice(0, limit);
+}
+
+function getAnalysisExtractedText(item: LibraryItem): string {
+  const text = analysisResult(item).extractedText;
+  return typeof text === "string" ? text.trim() : "";
+}
+
 export default function ResumeLibrary({ onUseAsBase }: {
   onUseAsBase?: (folder: string) => void;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedFolder = (searchParams?.get("resume") ?? "").trim();
-  const [resumes, setResumes] = useState<ResumeRecord[]>([]);
+  const selectedAnalysisId = (searchParams?.get("analysis") ?? "").trim();
+  const [items, setItems] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** `null` until first auth check completes — avoids flashing the wrong empty state. */
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [filter, setFilter] = useState("");
+  const [kindFilter, setKindFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<SortKey>("recent");
 
   useEffect(() => {
@@ -53,12 +86,12 @@ export default function ResumeLibrary({ onUseAsBase }: {
       setSignedIn(!!session?.user?.id);
       setLoading(true);
       try {
-        const rows = await fetchResumes();
-        if (!cancelled) setResumes(rows);
+        const rows = await fetchLibraryItems();
+        if (!cancelled) setItems(rows);
       } catch (e: unknown) {
-        console.error("[library] fetchResumes", e);
+        console.error("[library] fetchLibraryItems", e);
         if (!cancelled) {
-          setResumes([]);
+          setItems([]);
           setLoadError(e instanceof Error ? e.message : String(e));
         }
       } finally {
@@ -106,41 +139,72 @@ export default function ResumeLibrary({ onUseAsBase }: {
     }
   };
 
-  const selectedRecord = useMemo(() => {
-    if (!selectedFolder) return null;
-    return resumes.find(r => r.folder === selectedFolder) ?? null;
-  }, [resumes, selectedFolder]);
+  const selectedItem = useMemo(() => {
+    if (selectedAnalysisId) {
+      return items.find(item => item.kind === "analyzed" && item.id === selectedAnalysisId) ?? null;
+    }
+    if (selectedFolder) {
+      return items.find(item => item.kind === "tailored" && item.record.folder === selectedFolder) ?? null;
+    }
+    return null;
+  }, [items, selectedAnalysisId, selectedFolder]);
 
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    let arr = resumes.filter(r =>
-      !f || r.company.toLowerCase().includes(f) || r.role.toLowerCase().includes(f),
-    );
+    let arr = items.filter(item => {
+      if (kindFilter === "analyzed" && item.kind !== "analyzed") return false;
+      if (kindFilter === "tailored" && item.kind !== "tailored") return false;
+      if (kindFilter === "default" && !item.isDefault) return false;
+      if (!f) return true;
+      const issueText = item.kind === "analyzed" ? getAnalysisIssues(item).join(" ") : "";
+      return `${item.title} ${item.subtitle} ${issueText}`.toLowerCase().includes(f);
+    });
     if (sort === "recent") {
-      arr = [...arr].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+      arr = [...arr].sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
     } else if (sort === "score") {
       arr = [...arr].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
     } else {
-      arr = [...arr].sort((a, b) => a.company.localeCompare(b.company));
+      arr = [...arr].sort((a, b) => a.title.localeCompare(b.title));
     }
     return arr;
-  }, [resumes, filter, sort]);
+  }, [items, filter, kindFilter, sort]);
 
-  const openResume = (folder: string) => {
-    router.push(`/?view=library&resume=${encodeURIComponent(folder)}`);
+  const openItem = (item: LibraryItem) => {
+    if (item.kind === "analyzed") {
+      router.push(`/?view=library&analysis=${encodeURIComponent(item.id)}`);
+      return;
+    }
+    router.push(`/?view=library&resume=${encodeURIComponent(item.record.folder)}`);
   };
 
   const closeDetail = () => {
     router.push("/?view=library");
   };
 
-  const useAsBase = (r: ResumeRecord) => {
+  const useAsBase = (item: LibraryItem) => {
+    if (item.kind !== "tailored") return;
+    const r = item.record;
     onUseAsBase?.(r.folder);
     stashTailorPrefillFromLibrary(r);
     try {
       sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
     } catch { /* ignore */ }
     router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(r.folder)}&intent=job`);
+  };
+
+  const openAnalysis = (item: LibraryItem) => {
+    if (item.kind !== "analyzed") return;
+    router.push(`/?view=analyze&analysis=${encodeURIComponent(item.id)}`);
+  };
+
+  const tailorFromAnalysis = (item: LibraryItem) => {
+    if (item.kind !== "analyzed") return;
+    const text = getAnalysisExtractedText(item);
+    try {
+      if (text) sessionStorage.setItem("rn_builder_profile_prefill", text);
+      sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+    } catch { /* ignore */ }
+    router.push("/?view=builder&flow=tailor&fromAnalyze=1");
   };
 
   return (
@@ -292,7 +356,7 @@ export default function ResumeLibrary({ onUseAsBase }: {
         }
       `}</style>
 
-      {selectedFolder ? (
+      {selectedFolder || selectedAnalysisId ? (
         <button
           type="button"
           className={`library-backdrop is-open`}
@@ -325,17 +389,17 @@ export default function ResumeLibrary({ onUseAsBase }: {
                     lineHeight: 1.15,
                   }}
                 >
-                  Resume Library
+                  Resume Hub
                 </h1>
                 <p style={{ fontSize: 13.5, color: "var(--muted)", letterSpacing: "-0.02em", lineHeight: 1.55, margin: 0, maxWidth: 520 }}>
                   {loading || signedIn === null
                     ? "Loading…"
                     : signedIn
-                      ? `${resumes.length} saved resume${resumes.length === 1 ? "" : "s"}`
-                      : "Sign in to sync saved résumés from the builder"}
+                      ? `${items.length} saved item${items.length === 1 ? "" : "s"} across Analyze and Builder`
+                      : "Sign in to sync analyzed and tailored résumés"}
                 </p>
               </div>
-              <button
+              <Button
                 type="button"
                 onClick={() => {
                   try {
@@ -343,22 +407,10 @@ export default function ResumeLibrary({ onUseAsBase }: {
                   } catch { /* ignore */ }
                   router.push("/?view=builder&flow=tailor&intent=job");
                 }}
-                style={{
-                  flexShrink: 0,
-                  padding: "10px 18px",
-                  borderRadius: "var(--radius-lg, 12px)",
-                  border: "none",
-                  background: "var(--accent)",
-                  color: "#fff",
-                  fontWeight: 600,
-                  fontSize: 13,
-                  letterSpacing: "-0.02em",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
+                className="shrink-0"
               >
                 + New Resume
-              </button>
+              </Button>
             </header>
 
             {signedIn === false ? (
@@ -382,28 +434,17 @@ export default function ResumeLibrary({ onUseAsBase }: {
                 }}
               >
                 <span style={{ flex: "1 1 220px", minWidth: 0 }}>
-                  The Library only lists résumés tied to your account. After you sign in with Google, new runs from the
-                  builder are saved here automatically.
+                  The Resume Hub only lists items tied to your account. After you sign in with Google, Analyze runs and
+                  Builder exports are saved here automatically.
                 </span>
-                <button
+                <Button
                   type="button"
                   disabled={oauthBusy}
                   onClick={() => void signInWithGoogle()}
-                  style={{
-                    flexShrink: 0,
-                    padding: "10px 18px",
-                    borderRadius: 10,
-                    border: "none",
-                    background: "var(--accent)",
-                    color: "#fff",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: oauthBusy ? "wait" : "pointer",
-                    fontFamily: "inherit",
-                  }}
+                  className="shrink-0"
                 >
                   {oauthBusy ? "Redirecting…" : "Sign in with Google"}
-                </button>
+                </Button>
               </div>
             ) : null}
 
@@ -428,10 +469,21 @@ export default function ResumeLibrary({ onUseAsBase }: {
               <input
                 value={filter}
                 onChange={e => setFilter(e.target.value)}
-                placeholder="Search resumes…"
-                aria-label="Search resumes"
+                placeholder="Search resumes, analyses, issues…"
+                aria-label="Search resume hub"
                 style={{ flex: "1 1 220px", minWidth: 0 }}
               />
+              <select
+                value={kindFilter}
+                onChange={e => setKindFilter(e.target.value as FilterKey)}
+                aria-label="Filter library item type"
+                style={{ width: "auto", minWidth: 140, flexShrink: 0 }}
+              >
+                <option value="all">All</option>
+                <option value="analyzed">Analyzed</option>
+                <option value="tailored">Tailored</option>
+                <option value="default">Default</option>
+              </select>
               <select
                 value={sort}
                 onChange={e => setSort(e.target.value as SortKey)}
@@ -439,24 +491,23 @@ export default function ResumeLibrary({ onUseAsBase }: {
                 style={{ width: "auto", minWidth: 150, flexShrink: 0 }}
               >
                 <option value="recent">Most recent</option>
-                <option value="score">Highest match</option>
-                <option value="company">Company A–Z</option>
+                <option value="score">Highest score</option>
+                <option value="name">Name A-Z</option>
               </select>
             </div>
 
             {loading ? (
               <div className="library-grid" aria-busy>
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <div
+                  <Skeleton
                     key={i}
-                    className={`skeleton stagger-${Math.min(i + 1, 4)}`}
-                    style={{ height: 300, borderRadius: "var(--radius-xl, 14px)" }}
+                    className={`h-[300px] rounded-xl stagger-${Math.min(i + 1, 4)}`}
                   />
                 ))}
               </div>
             ) : filtered.length === 0 ? (
               <EmptyLibrary
-                hasAny={resumes.length > 0}
+                hasAny={items.length > 0}
                 filter={filter}
                 signedIn={signedIn === true}
                 onGoBuilder={() => {
@@ -468,14 +519,20 @@ export default function ResumeLibrary({ onUseAsBase }: {
               />
             ) : (
               <div className="library-grid">
-                {filtered.map((r, i) => (
+                {filtered.map((item, i) => (
                   <ResumeCard
-                    key={r.id}
-                    record={r}
-                    isSelected={selectedFolder === r.folder}
+                    key={item.key}
+                    item={item}
+                    isSelected={
+                      item.kind === "analyzed"
+                        ? selectedAnalysisId === item.id
+                        : selectedFolder === item.record.folder
+                    }
                     stagger={Math.min(i % 5, 4)}
-                    onOpen={() => openResume(r.folder)}
-                    onUseAsBase={() => useAsBase(r)}
+                    onOpen={() => openItem(item)}
+                    onUseAsBase={() => useAsBase(item)}
+                    onOpenAnalysis={() => openAnalysis(item)}
+                    onTailorAnalysis={() => tailorFromAnalysis(item)}
                   />
                 ))}
               </div>
@@ -483,14 +540,20 @@ export default function ResumeLibrary({ onUseAsBase }: {
           </div>
         </div>
 
-        {selectedFolder ? (
+        {selectedFolder || selectedAnalysisId ? (
           <LibraryResumeDetailPanel
-            meta={selectedRecord}
+            item={selectedItem}
             loading={loading}
-            notFound={!loading && !selectedRecord}
+            notFound={!loading && !selectedItem}
             onClose={closeDetail}
             onTailorNewJob={() => {
-              if (selectedRecord) useAsBase(selectedRecord);
+              if (selectedItem) useAsBase(selectedItem);
+            }}
+            onOpenAnalysis={() => {
+              if (selectedItem) openAnalysis(selectedItem);
+            }}
+            onTailorAnalysis={() => {
+              if (selectedItem) tailorFromAnalysis(selectedItem);
             }}
           />
         ) : null}
@@ -530,56 +593,53 @@ function EmptyLibrary({
         {hasAny
           ? `Nothing matches “${filter}”. Try another search or clear the filter.`
           : signedIn
-            ? "Tailor a résumé to a job posting — we’ll save each version here with match scores so you can compare and reuse."
-            : "Use “Sign in with Google” above, then generate from the Résumé Builder — successful runs are saved to this library."}
+            ? "Analyze a résumé or tailor one to a job posting — saved runs appear here so you can compare, improve, and reuse them."
+            : "Use “Sign in with Google” above, then analyze or generate a résumé — successful runs are saved to this hub."}
       </p>
       {!hasAny && signedIn && (
-        <button
+        <Button
           type="button"
           onClick={onGoBuilder}
-          style={{
-            padding: "11px 22px",
-            borderRadius: "var(--radius-lg, 12px)",
-            border: "none",
-            background: "var(--accent)",
-            color: "#fff",
-            fontWeight: 600,
-            fontSize: 13,
-            letterSpacing: "-0.02em",
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
         >
           Open Résumé Builder
-        </button>
+        </Button>
       )}
     </div>
   );
 }
 
 function ResumeCard({
-  record,
+  item,
   isSelected,
   stagger,
   onOpen,
   onUseAsBase,
+  onOpenAnalysis,
+  onTailorAnalysis,
 }: {
-  record: ResumeRecord;
+  item: LibraryItem;
   isSelected?: boolean;
   stagger: number;
   onOpen: () => void;
   onUseAsBase: () => void;
+  onOpenAnalysis: () => void;
+  onTailorAnalysis: () => void;
 }) {
-  const displayPdf = useMemo(() => displayPdfUrlForResume(record), [record.folder, record.tex_path, record.pdf_url]);
-  const sc = record.score;
-  const dateStr = record.created_at
-    ? new Date(record.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+  const displayPdf = useMemo(
+    () => item.kind === "tailored" ? displayPdfUrlForResume(item.record) : null,
+    [item],
+  );
+  const sc = item.score;
+  const dateStr = item.createdAt
+    ? new Date(item.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
     : "—";
   const band = sc != null ? matchScoreBand(sc) : null;
+  const issues = item.kind === "analyzed" ? getAnalysisIssues(item) : [];
 
   const scoreBadge =
     sc != null ? (
-      <span
+      <Badge
+        variant="secondary"
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -596,49 +656,89 @@ function ResumeCard({
         }}
       >
         {sc}/100
-      </span>
+      </Badge>
     ) : (
-      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)" }}>No score</span>
+      <Badge variant="outline" style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)" }}>No score</Badge>
     );
 
   const actions = (className: string) => (
-    <div className={className} style={{ display: "flex", gap: 8 }}>
-      <button
+    <div className={className} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <Button
         type="button"
         onClick={e => {
           e.stopPropagation();
-          onOpen();
+          if (item.kind === "analyzed") onOpenAnalysis();
+          else onOpen();
         }}
         style={actionBtnPrimary}
       >
-        View
-      </button>
-      <button
-        type="button"
-        onClick={e => {
-          e.stopPropagation();
-          onUseAsBase();
-        }}
-        title="Start the builder with this version as the base"
-        style={actionBtnGhost}
-      >
-        Use as base
-      </button>
-      {displayPdf && (
-        <a
-          href={displayPdf}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
-          title="Download PDF"
-          style={{ ...actionBtnGhost, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}
-        >
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden>
-            <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M2 11h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-          </svg>
-          PDF
-        </a>
+        {item.kind === "analyzed" ? "Open analysis" : "Details"}
+      </Button>
+      {item.kind === "analyzed" ? (
+        <>
+          <Button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              onOpenAnalysis();
+            }}
+            title="Reopen with saved preview edits if available in this browser"
+            style={actionBtnGhost}
+          >
+            Continue edits
+          </Button>
+          <Button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              onTailorAnalysis();
+            }}
+            style={actionBtnGhost}
+          >
+            Tailor
+          </Button>
+          <Button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              onOpenAnalysis();
+            }}
+            title="Open analysis, then use Download PDF from the preview"
+            style={actionBtnGhost}
+          >
+            Export PDF
+          </Button>
+        </>
+      ) : (
+        <>
+          <Button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              onUseAsBase();
+            }}
+            title="Start the builder with this version as the base"
+            style={actionBtnGhost}
+          >
+            Use as base
+          </Button>
+          {displayPdf && (
+            <a
+              href={displayPdf}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              title="View PDF"
+              style={{ ...actionBtnGhost, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden>
+                <path d="M6.5 2v7M3.5 6.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M2 11h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+              View PDF
+            </a>
+          )}
+        </>
       )}
     </div>
   );
@@ -660,53 +760,83 @@ function ResumeCard({
           onOpen();
         }
       }}
-      aria-label={`${record.company}, ${record.role}. Open resume.`}
+      aria-label={`${item.title}, ${item.subtitle}. Open ${item.kind === "analyzed" ? "analysis" : "resume"}.`}
     >
       <div className="library-card-preview">
-        <div
-          style={{
-            position: "relative",
-            zIndex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 6,
-            padding: 12,
-          }}
-        >
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden style={{ opacity: 0.4 }}>
-            <path d="M7 3h8l4 4v14H7V3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-            <path d="M14 3v4h4M9 12h6M9 16h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-          </svg>
-          {displayPdf ? (
-            <span
-              title={record.pdf_url ? "Stored PDF link" : "API PDF path (not saved to library — open to verify)"}
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: "var(--accent)",
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
-                padding: "4px 10px",
-                borderRadius: "var(--radius-pill, 99px)",
-                background: "var(--accent-bg)",
-              }}
-            >
-              PDF ready
-            </span>
-          ) : (
-            <span style={{ fontSize: 10, fontWeight: 600, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              No PDF yet
-            </span>
-          )}
-        </div>
+        {item.kind === "analyzed" ? (
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              padding: 18,
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              background:
+                "radial-gradient(circle at top left, rgba(47,129,247,0.16), transparent 42%), linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <Badge variant="secondary" style={kindBadgeAnalyzed}>Analyzed</Badge>
+              {scoreBadge}
+            </div>
+            <div style={{ display: "grid", gap: 6 }}>
+              <div style={{ height: 6, width: "78%", borderRadius: 99, background: "var(--border)" }} />
+              <div style={{ height: 6, width: "92%", borderRadius: 99, background: "var(--border)" }} />
+              <div style={{ height: 6, width: "58%", borderRadius: 99, background: "var(--border)" }} />
+            </div>
+            <Badge variant="outline" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              Improvement plan saved
+            </Badge>
+          </div>
+        ) : (
+          <div
+            style={{
+              position: "relative",
+              zIndex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              padding: 12,
+            }}
+          >
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden style={{ opacity: 0.4 }}>
+              <path d="M7 3h8l4 4v14H7V3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+              <path d="M14 3v4h4M9 12h6M9 16h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+            <Badge variant="secondary" style={kindBadgeTailored}>{item.isDefault ? "Default" : "Tailored"}</Badge>
+            {displayPdf ? (
+              <Badge
+                variant="secondary"
+                title={item.record.pdf_url ? "Stored PDF link" : "API PDF path (not saved to library — open to verify)"}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "var(--accent)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                  padding: "4px 10px",
+                  borderRadius: "var(--radius-pill, 99px)",
+                  background: "var(--accent-bg)",
+                }}
+              >
+                PDF ready
+              </Badge>
+            ) : (
+              <Badge variant="outline" style={{ fontSize: 10, fontWeight: 600, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                No PDF yet
+              </Badge>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="library-card-body">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-          {scoreBadge}
-          <time dateTime={record.created_at} style={{ fontSize: 11, color: "var(--dim)", whiteSpace: "nowrap", flexShrink: 0 }}>
+          {item.kind === "analyzed" ? <Badge variant="secondary" style={kindBadgeAnalyzed}>Analyzed</Badge> : scoreBadge}
+          <time dateTime={item.createdAt} style={{ fontSize: 11, color: "var(--dim)", whiteSpace: "nowrap", flexShrink: 0 }}>
             {dateStr}
           </time>
         </div>
@@ -726,7 +856,7 @@ function ResumeCard({
               overflow: "hidden",
             }}
           >
-            {record.company}
+            {item.title}
           </h2>
           <p
             style={{
@@ -735,13 +865,23 @@ function ResumeCard({
               letterSpacing: "-0.02em",
               lineHeight: 1.45,
               display: "-webkit-box",
-              WebkitLineClamp: 2,
+              WebkitLineClamp: item.kind === "analyzed" && issues.length ? 1 : 2,
               WebkitBoxOrient: "vertical",
               overflow: "hidden",
             }}
           >
-            {record.role}
+            {item.subtitle}
           </p>
+          {item.kind === "analyzed" && issues.length > 0 && (
+            <div style={{ marginTop: 8, display: "grid", gap: 5 }}>
+              {issues.map((issue, i) => (
+                <div key={`${issue}-${i}`} style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.35, display: "flex", gap: 6 }}>
+                  <span style={{ color: "var(--amber)", fontWeight: 800 }}>•</span>
+                  <span style={{ display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{issue}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {actions("library-card-actions library-card-actions--static")}
@@ -752,8 +892,35 @@ function ResumeCard({
   );
 }
 
+const kindBadgeAnalyzed: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "4px 10px",
+  borderRadius: "var(--radius-pill, 99px)",
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  background: "var(--accent-bg)",
+  color: "var(--accent)",
+};
+
+const kindBadgeTailored: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "4px 10px",
+  borderRadius: "var(--radius-pill, 99px)",
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  background: "var(--amber-bg)",
+  color: "var(--amber)",
+};
+
 const actionBtnPrimary: CSSProperties = {
-  flex: 1,
+  flex: "1 1 calc(50% - 4px)",
+  minWidth: 92,
   fontSize: 12,
   fontWeight: 600,
   padding: "8px 12px",
@@ -767,7 +934,8 @@ const actionBtnPrimary: CSSProperties = {
 };
 
 const actionBtnGhost: CSSProperties = {
-  flex: 1,
+  flex: "1 1 calc(50% - 4px)",
+  minWidth: 92,
   fontSize: 12,
   fontWeight: 600,
   padding: "8px 12px",

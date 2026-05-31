@@ -3518,6 +3518,131 @@ def _supabase_table(table_name: str):
         return None
 
 
+def _supabase_client_for_service_role():
+    """Return the shared Supabase service-role client, else None."""
+    try:
+        try:
+            from resume_gui.storage import _get_client  # type: ignore
+        except ImportError:
+            from storage import _get_client  # type: ignore
+        return _get_client()
+    except Exception as exc:
+        logger.warning("supabase client unavailable: %s", exc)
+        return None
+
+
+def _bearer_token_from_request(request: Request) -> str:
+    raw = (request.headers.get("authorization") or "").strip()
+    if not raw.lower().startswith("bearer "):
+        return ""
+    return raw.split(" ", 1)[1].strip()
+
+
+def _value_from_obj(obj: Any, key: str) -> Optional[str]:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        value = obj.get(key)
+    else:
+        value = getattr(obj, key, None)
+    return str(value).strip() if value is not None and str(value).strip() else None
+
+
+def _authenticated_supabase_user(request: Request) -> Tuple[Optional[str], Optional[str]]:
+    """Verify the browser's Supabase JWT and return (user_id, email)."""
+    token = _bearer_token_from_request(request)
+    if not token:
+        return None, None
+    client = _supabase_client_for_service_role()
+    if client is None:
+        return None, None
+    try:
+        resp = client.auth.get_user(token)
+        user_obj = getattr(resp, "user", None)
+        if user_obj is None and isinstance(resp, dict):
+            user_obj = resp.get("user")
+        user_id = _value_from_obj(user_obj, "id")
+        email = _value_from_obj(user_obj, "email")
+        return user_id, (email.lower() if email else None)
+    except Exception as exc:
+        logger.warning("supabase auth token verification failed: %s", exc)
+        return None, None
+
+
+def _advisor_scope_for_request(request: Request) -> Tuple[Optional[dict], Optional[JSONResponse]]:
+    """Return institution/student scope for an authenticated advisor."""
+    advisor_user_id, advisor_email = _authenticated_supabase_user(request)
+    if not advisor_user_id or not advisor_email:
+        return None, JSONResponse({"error": "authentication required"}, status_code=401)
+
+    advisor_table = _supabase_table("institution_advisors")
+    institution_table = _supabase_table("institutions")
+    student_table = _supabase_table("institution_students")
+    if advisor_table is None or institution_table is None or student_table is None:
+        return None, JSONResponse({"error": "advisor access schema unavailable"}, status_code=503)
+
+    try:
+        memberships: list[dict] = []
+        by_email = (
+            advisor_table
+            .select("institution_id,advisor_email,advisor_user_id,role")
+            .eq("active", True)
+            .eq("advisor_email", advisor_email)
+            .execute()
+        )
+        memberships.extend(by_email.data or [])
+
+        by_user = (
+            advisor_table
+            .select("institution_id,advisor_email,advisor_user_id,role")
+            .eq("active", True)
+            .eq("advisor_user_id", advisor_user_id)
+            .execute()
+        )
+        memberships.extend(by_user.data or [])
+
+        institution_ids = sorted({
+            str(row.get("institution_id"))
+            for row in memberships
+            if row.get("institution_id")
+        })
+        if not institution_ids:
+            return None, JSONResponse({"error": "unauthorized"}, status_code=403)
+
+        institutions_resp = (
+            institution_table
+            .select("id,slug,name,email_domain")
+            .in_("id", institution_ids)
+            .execute()
+        )
+        institutions = institutions_resp.data or []
+
+        students_resp = (
+            student_table
+            .select("institution_id,student_user_id,student_email")
+            .in_("institution_id", institution_ids)
+            .execute()
+        )
+        student_rows = students_resp.data or []
+        student_ids = sorted({
+            str(row.get("student_user_id"))
+            for row in student_rows
+            if row.get("student_user_id")
+        })
+
+        return {
+            "advisor_user_id": advisor_user_id,
+            "advisor_email": advisor_email,
+            "institution_ids": institution_ids,
+            "institutions": institutions,
+            "student_ids": student_ids,
+            "student_rows": student_rows,
+        }, None
+    except Exception as exc:
+        logger.warning("advisor scope lookup failed: %s", exc)
+        return None, JSONResponse({"error": "advisor scope lookup failed"}, status_code=500)
+
+
 def _load_template_tex_from_supabase(reference_folder: str) -> Optional[str]:
     """Load canonical template tex from `resume_templates` table when available.
 
@@ -6134,9 +6259,12 @@ async def api_analyze_upload(request: Request):
             result["bulletMap"]        = bullet_map
             _log_structured_doc("analyze_upload_structured_resume", structured)
 
-        # Persist analysis result for student history + cohort analytics (best-effort)
-        user_id = (form.get("user_id") or "").strip()
-        user_email = (form.get("user_email") or "").strip()
+        # Persist analysis result for student history + cohort analytics (best-effort).
+        # Prefer the verified Supabase session over form fields; advisor institution
+        # membership is derived from this email, so client-supplied email is not enough.
+        auth_user_id, auth_user_email = _authenticated_supabase_user(request)
+        user_id = auth_user_id or (form.get("user_id") or "").strip()
+        user_email = auth_user_email or ""
         if user_id and isinstance(result, dict):
             try:
                 await loop.run_in_executor(None, _persist_analysis, result, user_id, user_email, bool(jd))
@@ -6207,15 +6335,32 @@ async def api_my_analyses(request: Request):
 async def api_cohort_stats(request: Request):
     """GET /api/cohort-stats — aggregate analysis stats across all students.
 
-    Checks X-User-Email header against the ADVISOR_EMAILS env var (comma-separated list).
+    Verifies the Supabase session and scopes rows to the advisor's institutions.
     Returns cohort-level score distributions, weakest dimensions, and
     most common issue types — suitable for career center dashboards.
     """
-    import os as _os
-    advisor_emails = {e.strip().lower() for e in _os.environ.get("ADVISOR_EMAILS", "").split(",") if e.strip()}
-    user_email     = (request.headers.get("x-user-email") or "").strip().lower()
-    if not advisor_emails or user_email not in advisor_emails:
-        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    scope, scope_error = _advisor_scope_for_request(request)
+    if scope_error is not None:
+        return scope_error
+
+    dim_keys = ["readability", "atsCompatibility", "jobMatch", "achievementQuality",
+                "quantification", "sectionStructure", "languageQuality", "technicalBranding"]
+    empty_dim_avgs = {dk: None for dk in dim_keys}
+
+    student_ids = (scope or {}).get("student_ids") or []
+    if not student_ids:
+        return JSONResponse({
+            "student_count": 0,
+            "analysis_count": 0,
+            "avg_overall": None,
+            "score_tiers": {"low": 0, "mid": 0, "good": 0, "strong": 0},
+            "dimension_avgs": empty_dim_avgs,
+            "weakest_dims": [],
+            "top_issues": [],
+            "student_roster": [],
+            "institutions": (scope or {}).get("institutions") or [],
+            "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        })
 
     table = _supabase_table("resume_analyses")
     if table is None:
@@ -6225,6 +6370,7 @@ async def api_cohort_stats(request: Request):
         resp = (
             table
             .select("user_id,user_email,score,result,created_at")
+            .in_("user_id", student_ids)
             .order("created_at", desc=True)
             .limit(2000)
             .execute()
@@ -6235,16 +6381,24 @@ async def api_cohort_stats(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
     if not rows:
-        return JSONResponse({"student_count": 0, "analysis_count": 0})
+        return JSONResponse({
+            "student_count": 0,
+            "analysis_count": 0,
+            "avg_overall": None,
+            "score_tiers": {"low": 0, "mid": 0, "good": 0, "strong": 0},
+            "dimension_avgs": empty_dim_avgs,
+            "weakest_dims": [],
+            "top_issues": [],
+            "student_roster": [],
+            "institutions": (scope or {}).get("institutions") or [],
+            "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        })
 
     from collections import Counter as _Counter
 
     def _avg(vals):
         clean = [v for v in vals if isinstance(v, (int, float))]
         return round(sum(clean) / len(clean), 1) if clean else None
-
-    dim_keys = ["readability", "atsCompatibility", "jobMatch", "achievementQuality",
-                "quantification", "sectionStructure", "languageQuality", "technicalBranding"]
 
     overall_scores = [r.get("score") for r in rows if r.get("score") is not None]
     dim_avgs = {}
@@ -6297,6 +6451,7 @@ async def api_cohort_stats(request: Request):
         "weakest_dims":    [{"dimension": d, "avg": v} for d, v in weakest_dims[:3]],
         "top_issues":      top_issues,
         "student_roster":  student_roster,
+        "institutions":    (scope or {}).get("institutions") or [],
         "generated_at":    __import__("datetime").datetime.utcnow().isoformat() + "Z",
     })
 
@@ -6305,17 +6460,17 @@ async def api_cohort_stats(request: Request):
 async def api_student_detail(request: Request):
     """GET /api/student-detail?student_id=<uuid> — full analysis history + resume list for one student.
 
-    Advisor-only: requires X-User-Email header matching ADVISOR_EMAILS env var.
+    Advisor-only: requires a Supabase session with access to the student's institution.
     """
-    import os as _os
-    advisor_emails = {e.strip().lower() for e in _os.environ.get("ADVISOR_EMAILS", "").split(",") if e.strip()}
-    user_email     = (request.headers.get("x-user-email") or "").strip().lower()
-    if not advisor_emails or user_email not in advisor_emails:
-        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    scope, scope_error = _advisor_scope_for_request(request)
+    if scope_error is not None:
+        return scope_error
 
     student_id = (request.query_params.get("student_id") or "").strip()
     if not student_id:
         return JSONResponse({"error": "student_id required"}, status_code=400)
+    if student_id not in set((scope or {}).get("student_ids") or []):
+        return JSONResponse({"error": "student outside advisor scope"}, status_code=403)
 
     analyses_table = _supabase_table("resume_analyses")
     resumes_table  = _supabase_table("resumes")

@@ -15,6 +15,30 @@ export interface AnalyzeRecord {
   result:    any;
 }
 
+export type LibraryItem =
+  | {
+      kind: "tailored";
+      key: string;
+      id: string;
+      title: string;
+      subtitle: string;
+      score: number | null;
+      createdAt: string;
+      isDefault: boolean;
+      record: ResumeRecord;
+    }
+  | {
+      kind: "analyzed";
+      key: string;
+      id: string;
+      title: string;
+      subtitle: string;
+      score: number | null;
+      createdAt: string;
+      isDefault: false;
+      analysis: AnalyzeRecord;
+    };
+
 // Lazy singleton — avoids crashing at build time when env vars aren't set
 let _client: SupabaseClient | null = null;
 
@@ -367,6 +391,44 @@ export async function deleteAnalysis(id: string): Promise<void> {
     .delete()
     .eq("id", id);
   if (error) throw error;
+}
+
+/** Unified Library feed: generated/tailored artifacts plus saved Analyze runs. */
+export async function fetchLibraryItems(): Promise<LibraryItem[]> {
+  const [resumes, analyses] = await Promise.all([
+    fetchResumes(),
+    fetchAnalyses(50),
+  ]);
+
+  const tailored: LibraryItem[] = resumes.map((record) => ({
+    kind: "tailored",
+    key: `tailored:${record.folder}`,
+    id: record.id,
+    title: record.company || "Tailored résumé",
+    subtitle: record.role || "Generated for a job",
+    score: record.score,
+    createdAt: record.created_at,
+    isDefault: !!record.is_default,
+    record,
+  }));
+
+  const analyzed: LibraryItem[] = analyses.map((analysis) => ({
+    kind: "analyzed",
+    key: `analyzed:${analysis.id}`,
+    id: analysis.id,
+    title: analysis.label || "Analyzed résumé",
+    subtitle: "Resume analysis",
+    score: analysis.score,
+    createdAt: analysis.createdAt,
+    isDefault: false,
+    analysis,
+  }));
+
+  return [...tailored, ...analyzed].sort((a, b) => {
+    const d = Number(b.isDefault) - Number(a.isDefault);
+    if (d !== 0) return d;
+    return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+  });
 }
 
 /* ── User profile (Tailor defaults + EEO) ─────────────────────────────────── */

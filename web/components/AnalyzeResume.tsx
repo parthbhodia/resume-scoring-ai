@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FocusEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import ScoreRing from "./ScoreRing";
 import BulletImprovedEditor from "./BulletImprovedEditor";
 import {
@@ -234,6 +235,7 @@ function lsPush(uid: string, rec: AnalyzeRecord) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function AnalyzeResume() {
+  const searchParams = useSearchParams();
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging]         = useState(false);
   const [loading, setLoading]           = useState(false);
@@ -251,6 +253,7 @@ export default function AnalyzeResume() {
    *  remember which bullet to auto-expand so the [activeCategory] effect opens
    *  *that* card instead of defaulting to the first flagged one. */
   const pendingExpandIdxRef = useRef<number | null>(null);
+  const restoredFromUrlRef = useRef(false);
   /** Desktop: improvement plan column (scores + category fixes). */
   const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
@@ -387,7 +390,10 @@ export default function AnalyzeResume() {
     if (userId)    fd.append("user_id", userId);
     if (userEmail) fd.append("user_email", userEmail);
     try {
-      const resp = await fetch(apiUrl("/api/analyze-upload"), { method: "POST", body: fd });
+      const supabase = getSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined;
+      const resp = await fetch(apiUrl("/api/analyze-upload"), { method: "POST", body: fd, headers });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "Analysis failed");
       const res = mergeAnalyzeApiJson(json as Record<string, unknown>) as unknown as AnalysisResult;
@@ -448,6 +454,16 @@ export default function AnalyzeResume() {
     setHistoryRestoreActive(true);
     setImprovementPlanVisible(true);
   }, []);
+
+  useEffect(() => {
+    if (restoredFromUrlRef.current || loadingHistory) return;
+    const id = (searchParams?.get("analysis") ?? "").trim();
+    if (!id) return;
+    const rec = azHistory.find((row) => row.id === id);
+    if (!rec) return;
+    restoredFromUrlRef.current = true;
+    restoreRecord(rec);
+  }, [azHistory, loadingHistory, restoreRecord, searchParams]);
 
   const deleteRecord = useCallback(async (id: string) => {
     // Optimistic remove

@@ -100,6 +100,11 @@ function fmtShort(d: string | null): string {
   catch { return d; }
 }
 
+async function advisorAuthHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await getSupabaseClient().auth.getSession();
+  return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+}
+
 // ── Shared UI pieces ──────────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -188,23 +193,24 @@ function ScoreSparkline({ history }: { history: ScorePoint[] }) {
 // ── Student Detail Panel ──────────────────────────────────────────────────────
 
 function StudentDetailPanel({
-  studentId, advisorEmail, onBack,
-}: { studentId: string; advisorEmail: string; onBack: () => void }) {
+  studentId, onBack,
+}: { studentId: string; onBack: () => void }) {
   const [detail, setDetail]   = useState<StudentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`${apiUrl("/api/student-detail")}?student_id=${encodeURIComponent(studentId)}`, {
-      headers: { "X-User-Email": advisorEmail },
-    })
+    advisorAuthHeaders()
+      .then(headers => fetch(`${apiUrl("/api/student-detail")}?student_id=${encodeURIComponent(studentId)}`, { headers }))
       .then(r => r.ok ? r.json() : r.json().then((e: { error?: string }) => Promise.reject(e.error ?? `HTTP ${r.status}`)))
-      .then(d => setDetail(d as StudentDetail))
-      .catch(e => setError(typeof e === "string" ? e : "Failed to load."))
-      .finally(() => setLoading(false));
-  }, [studentId, advisorEmail]);
+      .then(d => { if (!cancelled) setDetail(d as StudentDetail); })
+      .catch(e => { if (!cancelled) setError(typeof e === "string" ? e : "Failed to load."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [studentId]);
 
   return (
     <div style={{ maxWidth: 1060, margin: "0 auto", padding: "40px 32px 100px" }}>
@@ -389,10 +395,9 @@ function StudentDetailPanel({
 // ── Cohort Overview ───────────────────────────────────────────────────────────
 
 function CohortOverview({
-  data, advisorEmail, onRefresh, onSelectStudent,
+  data, onRefresh, onSelectStudent,
 }: {
   data: CohortStats;
-  advisorEmail: string;
   onRefresh: () => void;
   onSelectStudent: (id: string) => void;
 }) {
@@ -528,20 +533,39 @@ function CohortOverview({
 
 export default function AdvisorDashboard() {
   const [userEmail,  setUserEmail]  = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [data,       setData]       = useState<CohortStats | null>(null);
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [oauthBusy, setOauthBusy] = useState(false);
 
   useEffect(() => {
-    getSupabaseClient().auth.getUser().then(({ data: d }) => setUserEmail(d.user?.email ?? null));
+    const supabase = getSupabaseClient();
+    let cancelled = false;
+    supabase.auth.getUser().then(({ data: d }) => {
+      if (cancelled) return;
+      setUserEmail(d.user?.email ?? null);
+      setAuthChecked(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserEmail(session?.user?.email ?? null);
+      setAuthChecked(true);
+      setData(null);
+      setSelectedId(null);
+    });
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const load = useCallback(async (email: string) => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const resp = await fetch(apiUrl("/api/cohort-stats"), { headers: { "X-User-Email": email } });
+      const resp = await fetch(apiUrl("/api/cohort-stats"), { headers: await advisorAuthHeaders() });
+      if (resp.status === 401) { setError("not_signed_in"); return; }
       if (resp.status === 403) { setError("not_authorized"); return; }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       setData(await resp.json() as CohortStats);
@@ -553,15 +577,53 @@ export default function AdvisorDashboard() {
   }, []);
 
   useEffect(() => {
-    if (userEmail) void load(userEmail);
-    else if (userEmail === null) setLoading(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userEmail]);
+    if (!authChecked) return;
+    if (userEmail) {
+      void load();
+    } else {
+      setLoading(false);
+      setData(null);
+    }
+  }, [authChecked, userEmail, load]);
+
+  const signInWithGoogle = async () => {
+    setOauthBusy(true);
+    setError(null);
+    try {
+      const redirectTo = typeof window !== "undefined" ? window.location.href : undefined;
+      const { error: signInError } = await getSupabaseClient().auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo },
+      });
+      if (signInError) setError(signInError.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start Google sign-in.");
+    } finally {
+      setOauthBusy(false);
+    }
+  };
 
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", gap: 10, color: "var(--dim)", fontSize: 13 }}>
       <div style={{ width: 16, height: 16, border: "1.5px solid var(--border)", borderTopColor: "var(--dim)", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
       Loading
+    </div>
+  );
+
+  if (error === "not_signed_in" || (authChecked && !userEmail)) return (
+    <div style={{ maxWidth: 480, margin: "96px auto", padding: "0 28px" }}>
+      <div style={{ fontSize: 13, color: "var(--dim)", marginBottom: 6 }}>Google sign-in required</div>
+      <h2 style={{ fontSize: 20, fontWeight: 500, letterSpacing: -0.5, marginBottom: 12 }}>Sign in to open the advisor dashboard.</h2>
+      <p style={{ fontSize: 13, color: "var(--dim)", lineHeight: 1.7, marginBottom: 18 }}>
+        UMBC advisors use their Google account so access can be checked against the institution roster.
+      </p>
+      <button
+        onClick={() => void signInWithGoogle()}
+        disabled={oauthBusy}
+        style={{ padding: "8px 16px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 6, background: "var(--text)", color: "var(--bg)", cursor: oauthBusy ? "wait" : "pointer" }}
+      >
+        {oauthBusy ? "Redirecting..." : "Sign in with Google"}
+      </button>
     </div>
   );
 
@@ -578,7 +640,7 @@ export default function AdvisorDashboard() {
   if (error) return (
     <div style={{ maxWidth: 480, margin: "96px auto", padding: "0 28px" }}>
       <p style={{ fontSize: 13, color: "var(--dim)" }}>{error}</p>
-      <button onClick={() => userEmail && void load(userEmail)} style={{ marginTop: 12, padding: "7px 16px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 6, background: "none", color: "var(--text)", cursor: "pointer" }}>
+      <button onClick={() => userEmail && void load()} style={{ marginTop: 12, padding: "7px 16px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 6, background: "none", color: "var(--text)", cursor: "pointer" }}>
         Try again
       </button>
     </div>
@@ -590,7 +652,6 @@ export default function AdvisorDashboard() {
     return (
       <StudentDetailPanel
         studentId={selectedId}
-        advisorEmail={userEmail ?? ""}
         onBack={() => setSelectedId(null)}
       />
     );
@@ -599,8 +660,7 @@ export default function AdvisorDashboard() {
   return (
     <CohortOverview
       data={data}
-      advisorEmail={userEmail ?? ""}
-      onRefresh={() => userEmail && void load(userEmail)}
+      onRefresh={() => userEmail && void load()}
       onSelectStudent={setSelectedId}
     />
   );
