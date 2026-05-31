@@ -2,6 +2,10 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "./globals.css";
 import AuthGate from "@/components/AuthGate";
+import { Geist } from "next/font/google";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const SITE_URL  = "https://www.resunova.io";
 const SITE_NAME = "Resunova";
@@ -125,7 +129,7 @@ const jsonLd = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={cn("font-sans", geist.variable)}>
       <head>
         {/* Inline theme-init: read localStorage before first paint → no FOUC. Default = light. */}
         <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('rn-theme')||'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();` }} />

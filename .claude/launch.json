@@ -3,8 +3,9 @@
   "configurations": [
     {
       "name": "resume-scoring-web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "/Users/mslcomx/.nvm/versions/node/v20.18.1/bin/node",
+      "runtimeArgs": ["node_modules/.bin/next", "dev"],
+      "cwd": "web",
       "port": 3000
     }
   ]
