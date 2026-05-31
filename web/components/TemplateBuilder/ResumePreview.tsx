@@ -64,6 +64,8 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
     profile.website, profile.linkedin, profile.github,
   ].filter(Boolean);
 
+  const featuredWithSkill = skills.featuredSkills.filter((f) => f.skill.trim());
+
   return (
     <div style={PAGE}>
       {/* Header */}
@@ -153,10 +155,40 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
       )}
 
       {/* Skills */}
-      {skills.trim() && (
+      {(featuredWithSkill.length > 0 || skills.descriptions.trim()) && (
         <>
           <div style={SECTION_TITLE}>Skills</div>
-          <div style={{ fontSize: 9.5, color: "#333", lineHeight: 1.6 }}>{skills}</div>
+
+          {/* Featured skills — 3-column grid */}
+          {featuredWithSkill.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px 16px", marginBottom: 6 }}>
+              {featuredWithSkill.map((fs, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5, color: "#222" }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {fs.skill}
+                  </span>
+                  <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+                    {Array.from({ length: 5 }, (_, ci) => (
+                      <div key={ci} style={{
+                        width: 7, height: 7, borderRadius: "50%",
+                        background: ci < fs.rating ? accent : "#d9d9d9",
+                        flexShrink: 0,
+                      }} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Category description lines */}
+          {skills.descriptions.trim() && (
+            <div style={{ fontSize: 9.5, color: "#333", lineHeight: 1.6 }}>
+              {skills.descriptions.split("\n").filter(Boolean).map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>

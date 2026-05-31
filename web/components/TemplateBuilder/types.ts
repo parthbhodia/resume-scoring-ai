@@ -47,12 +47,22 @@ export interface TBCustomization {
   accentColor: string; // hex — used for section title text/rule
 }
 
+export interface TBFeaturedSkill {
+  skill: string;
+  rating: number; // 0–5 (number of filled circles out of 5)
+}
+
+export interface TBSkills {
+  featuredSkills: TBFeaturedSkill[]; // fixed array of 6
+  descriptions: string; // newline-separated category lines, e.g. "Languages: Python, Go"
+}
+
 export interface TBResumeData {
   profile: TBProfile;
   workExperiences: TBWorkExperience[];
   educations: TBEducation[];
   projects: TBProject[];
-  skills: string; // comma-separated or newline-separated
+  skills: TBSkills;
   customization: TBCustomization;
 }
 
@@ -80,12 +90,16 @@ export const DEFAULT_PROJECT = (): TBProject => ({
   name: "", tech: "", link: "", date: "", bullets: "",
 });
 
+export const DEFAULT_FEATURED_SKILL = (): TBFeaturedSkill => ({ skill: "", rating: 4 });
+export const DEFAULT_FEATURED_SKILLS = (): TBFeaturedSkill[] => Array.from({ length: 6 }, DEFAULT_FEATURED_SKILL);
+export const DEFAULT_SKILLS = (): TBSkills => ({ featuredSkills: DEFAULT_FEATURED_SKILLS(), descriptions: "" });
+
 export const DEFAULT_RESUME: TBResumeData = {
   profile: DEFAULT_PROFILE,
   workExperiences: [DEFAULT_WORK()],
   educations: [DEFAULT_EDU()],
   projects: [DEFAULT_PROJECT()],
-  skills: "",
+  skills: DEFAULT_SKILLS(),
   customization: DEFAULT_CUSTOMIZATION,
 };
 
@@ -166,9 +180,19 @@ export const DEMO_RESUME: TBResumeData = {
         "1,200+ GitHub stars; featured in JavaScript Weekly",
     },
   ],
-  skills:
-    "Languages: TypeScript, Python, Go, SQL\n" +
-    "Frontend: React, Next.js, Tailwind CSS\n" +
-    "Backend: Node.js, FastAPI, PostgreSQL, Redis, Kafka\n" +
-    "Cloud & DevOps: AWS (EC2, S3, Lambda), Docker, Kubernetes, GitHub Actions",
+  skills: {
+    featuredSkills: [
+      { skill: "TypeScript", rating: 5 },
+      { skill: "Python",     rating: 5 },
+      { skill: "React",      rating: 4 },
+      { skill: "Next.js",    rating: 4 },
+      { skill: "PostgreSQL", rating: 4 },
+      { skill: "AWS",        rating: 3 },
+    ],
+    descriptions:
+      "Languages: TypeScript, Python, Go, SQL\n" +
+      "Frontend: React, Next.js, Tailwind CSS\n" +
+      "Backend: Node.js, FastAPI, PostgreSQL, Redis, Kafka\n" +
+      "Cloud & DevOps: AWS (EC2, S3, Lambda), Docker, Kubernetes, GitHub Actions",
+  },
 };

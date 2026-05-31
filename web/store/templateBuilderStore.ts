@@ -1,19 +1,21 @@
 "use client";
 import { create } from "zustand";
 import type {
-  TBResumeData, TBWorkExperience, TBEducation, TBProject, TBProfile, TBCustomization,
+  TBResumeData, TBWorkExperience, TBEducation, TBProject, TBProfile, TBCustomization, TBSkills,
 } from "@/components/TemplateBuilder/types";
 import {
-  DEFAULT_RESUME, DEFAULT_CUSTOMIZATION, DEFAULT_WORK, DEFAULT_EDU, DEFAULT_PROJECT, DEMO_RESUME,
+  DEFAULT_RESUME, DEFAULT_CUSTOMIZATION, DEFAULT_WORK, DEFAULT_EDU, DEFAULT_PROJECT, DEFAULT_SKILLS, DEMO_RESUME,
 } from "@/components/TemplateBuilder/types";
 
 const STORAGE_KEY = "rn_template_builder";
 
 function isMeaningfulResume(parsed: Partial<TBResumeData>): boolean {
-  // Require at least one work entry with bullets OR one education entry with a degree
   const hasWorkContent = parsed.workExperiences?.some((w) => w.bullets?.trim() || w.company?.trim());
   const hasEduContent = parsed.educations?.some((e) => e.school?.trim() || e.degree?.trim());
-  const hasSkills = parsed.skills?.trim();
+  const skills = parsed.skills as TBSkills | string | undefined;
+  const hasSkills = typeof skills === "string"
+    ? !!(skills as string).trim()
+    : !!(skills?.featuredSkills?.some((f) => f.skill?.trim()) || skills?.descriptions?.trim());
   return !!(hasWorkContent || hasEduContent || hasSkills);
 }
 
@@ -21,14 +23,20 @@ function safeLoad(): TBResumeData {
   if (typeof window === "undefined") return DEMO_RESUME;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    // First visit — show demo resume so the preview is never blank
     if (!raw) return DEMO_RESUME;
     const parsed = JSON.parse(raw) as Partial<TBResumeData>;
-    // If saved data has no meaningful content, show the demo
     if (!isMeaningfulResume(parsed)) return DEMO_RESUME;
+
+    // Migrate old string-format skills to the new structured format
+    const rawSkills = parsed.skills as TBSkills | string | undefined;
+    const skills: TBSkills = typeof rawSkills === "string"
+      ? { ...DEFAULT_SKILLS(), descriptions: rawSkills }
+      : { ...DEFAULT_SKILLS(), ...(rawSkills ?? {}) };
+
     return {
       ...DEFAULT_RESUME,
       ...parsed,
+      skills,
       customization: { ...DEFAULT_CUSTOMIZATION, ...(parsed.customization ?? {}) },
     };
   } catch {
@@ -55,7 +63,8 @@ export interface TemplateBuilderStore {
   setProject: (id: string, field: keyof TBProject, value: string) => void;
   addProject: () => void;
   removeProject: (id: string) => void;
-  setSkills: (value: string) => void;
+  setFeaturedSkill: (idx: number, skill: string, rating: number) => void;
+  setSkillDescriptions: (value: string) => void;
   setCustomization: (field: keyof TBCustomization, value: string) => void;
   reset: () => void;
 }
@@ -164,9 +173,20 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
     });
   },
 
-  setSkills: (value) => {
+  setFeaturedSkill: (idx, skill, rating) => {
     set((s) => {
-      const data = { ...s.data, skills: value };
+      const featuredSkills = s.data.skills.featuredSkills.map((fs, i) =>
+        i === idx ? { skill, rating } : fs
+      );
+      const data = { ...s.data, skills: { ...s.data.skills, featuredSkills } };
+      safeSave(data);
+      return { data };
+    });
+  },
+
+  setSkillDescriptions: (value) => {
+    set((s) => {
+      const data = { ...s.data, skills: { ...s.data.skills, descriptions: value } };
       safeSave(data);
       return { data };
     });

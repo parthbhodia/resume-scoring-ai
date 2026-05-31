@@ -91,6 +91,8 @@ export default function ResumePDFTemplate({ data }: Props) {
     profile.github,
   ].filter(Boolean);
 
+  const featuredWithSkill = skills.featuredSkills.filter((f) => f.skill.trim());
+
   return (
     <Document title={profile.name ? `${profile.name} Resume` : "Resume"}>
       <Page size="LETTER" style={styles.page}>
@@ -188,10 +190,39 @@ export default function ResumePDFTemplate({ data }: Props) {
         )}
 
         {/* Skills */}
-        {skills.trim() ? (
+        {(featuredWithSkill.length > 0 || skills.descriptions.trim()) ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Skills</Text>
-            <Text style={styles.skillsText}>{skills}</Text>
+
+            {/* Featured skills — 3-column grid, 2 per column */}
+            {featuredWithSkill.length > 0 && (
+              <View style={{ flexDirection: "row", marginBottom: 5 }}>
+                {[0, 1, 2].map((col) => (
+                  <View key={col} style={{ width: "33.33%" }}>
+                    {[featuredWithSkill[col], featuredWithSkill[col + 3]]
+                      .filter(Boolean)
+                      .map((fs, i) => (
+                        <View key={i} style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                          <Text style={{ fontSize: 9, color: "#222", marginRight: 4 }}>{fs.skill}</Text>
+                          {Array.from({ length: 5 }, (_, ci) => (
+                            <View key={ci} style={{
+                              width: 6, height: 6, borderRadius: 3, marginLeft: 2,
+                              backgroundColor: ci < fs.rating ? accent : "#d9d9d9",
+                            }} />
+                          ))}
+                        </View>
+                      ))}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Category description lines */}
+            {skills.descriptions.trim() ? (
+              skills.descriptions.split("\n").filter(Boolean).map((line, i) => (
+                <Text key={i} style={styles.skillsText}>{line}</Text>
+              ))
+            ) : null}
           </View>
         ) : null}
 

@@ -677,16 +677,57 @@ function ProjectsSection({ store, data }: { store: StoreType; data: StoreType["d
 }
 
 function SkillsSection({ store, data }: { store: StoreType; data: StoreType["data"] }) {
+  const { featuredSkills, descriptions } = data.skills;
   return (
     <>
       <SectionHeading>Skills</SectionHeading>
-      <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.5 }}>
-        List your skills grouped by category, one group per line.
+
+      {/* Featured skills with proficiency circles */}
+      <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 10px", lineHeight: 1.5 }}>
+        Featured skills — shown with proficiency dots in the résumé.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 20 }}>
+        {featuredSkills.map((fs, idx) => (
+          <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              style={{ ...inputBase, flex: 1, fontSize: 12 }}
+              placeholder={`Skill ${idx + 1}`}
+              value={fs.skill}
+              onChange={(e) => store.setFeaturedSkill(idx, e.target.value, fs.rating)}
+            />
+            <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+              {Array.from({ length: 5 }, (_, ci) => (
+                <button
+                  key={ci}
+                  title={`${ci + 1} / 5`}
+                  onClick={() => store.setFeaturedSkill(idx, fs.skill, ci + 1 === fs.rating ? 0 : ci + 1)}
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                    background: ci < fs.rating ? "var(--accent)" : "var(--border)",
+                    transition: "background 0.1s",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Category description lines */}
+      <label style={labelStyle}>Skill categories</label>
+      <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px", lineHeight: 1.5 }}>
+        One category per line, e.g. "Languages: Python, Go"
       </p>
       <textarea
-        style={{ ...textareaBase, minHeight: 140 }}
-        value={data.skills}
-        onChange={(e) => store.setSkills(e.target.value)}
+        style={{ ...textareaBase, minHeight: 120 }}
+        value={descriptions}
+        onChange={(e) => store.setSkillDescriptions(e.target.value)}
         placeholder={"Languages: Python, TypeScript, Go\nFrontend: React, Next.js, Tailwind\nBackend: Node.js, FastAPI, PostgreSQL\nCloud: AWS, Docker, Kubernetes"}
       />
     </>
