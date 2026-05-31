@@ -4,7 +4,7 @@ import TemplateBuilderShell from "@/components/TemplateBuilder/TemplateBuilderSh
 export const metadata: Metadata = {
   title: "Resume Template Builder",
   description:
-    "Build and download a professional ATS-friendly resume PDF for free — no sign-up required. Everything runs in your browser.",
+    "Build and download a professional ATS-friendly resume PDF for free — no sign-up required.",
 };
 
 export default function TemplateBuilderPage() {

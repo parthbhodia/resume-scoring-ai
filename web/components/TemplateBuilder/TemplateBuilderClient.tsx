@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTemplateBuilderStore } from "@/store/templateBuilderStore";
 import type { TemplateBuilderStore } from "@/store/templateBuilderStore";
+import { useHtmlPdfExport } from "@/hooks/useHtmlPdfExport";
 import ResumePreview from "./ResumePreview";
 import type { TBFont } from "./types";
 import { PAGE_WIDTH_OPTIONS, STYLE_PRESETS } from "./templateStyles";
@@ -231,34 +232,23 @@ export default function TemplateBuilderClient() {
   const store = useTemplateBuilderStore();
   const { data, loaded } = store;
   const [activeTab, setActiveTab] = useState<SectionKey>("profile");
-  const [isGenerating, setIsGenerating] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const { exportPdf: exportHtmlPdf, exporting: isGenerating, error: htmlPdfError } = useHtmlPdfExport();
 
   useEffect(() => {
     store.loadFromStorage();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDownload = useCallback(async () => {
-    setIsGenerating(true);
+  const handleDownload = useCallback(() => {
     setDownloadError(null);
-    try {
-      const [{ pdf }, { default: ResumePDFTemplate }] = await Promise.all([
-        import("@react-pdf/renderer"),
-        import("./ResumePDFTemplate"),
-      ]);
-      const blob = await pdf(<ResumePDFTemplate data={data} />).toBlob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${data.profile.name.replace(/\s+/g, "_") || "resume"}.pdf`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-    } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : "Failed to generate PDF");
-    } finally {
-      setIsGenerating(false);
+    if (!previewRef.current) {
+      setDownloadError("Resume preview is not ready yet.");
+      return;
     }
-  }, [data]);
+    const filenameStem = data.profile.name.trim().replace(/\s+/g, "_") || "resume";
+    void exportHtmlPdf(previewRef.current, `${filenameStem}.pdf`);
+  }, [data.profile.name, exportHtmlPdf]);
 
   if (!loaded) {
     return (
@@ -300,8 +290,8 @@ export default function TemplateBuilderClient() {
           >
             Load Example
           </button>
-          {downloadError && (
-            <span style={{ fontSize: 11, color: "var(--red, #ef4444)", maxWidth: 200 }}>{downloadError}</span>
+          {(downloadError || htmlPdfError) && (
+            <span style={{ fontSize: 11, color: "var(--red, #ef4444)", maxWidth: 200 }}>{downloadError || htmlPdfError}</span>
           )}
           <button
             onClick={handleDownload}
@@ -421,7 +411,7 @@ export default function TemplateBuilderClient() {
             alignItems: "flex-start",
           }}>
             <div style={{ transform: "scale(0.82)", transformOrigin: "top center", minWidth: "8.5in" }}>
-              <ResumePreview data={data} />
+              <ResumePreview ref={previewRef} data={data} />
             </div>
           </div>
         </div>

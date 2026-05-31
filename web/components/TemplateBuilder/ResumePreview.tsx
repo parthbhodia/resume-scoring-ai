@@ -1,4 +1,5 @@
 "use client";
+import { forwardRef } from "react";
 import type { TBResumeData, TBFont } from "./types";
 import { getPageWidth, getStylePreset } from "./templateStyles";
 
@@ -12,7 +13,7 @@ const FONT_STACK: Record<TBFont, string> = {
   "Courier": "'Courier New', Courier, monospace",
 };
 
-export default function ResumePreview({ data }: { data: TBResumeData }) {
+const ResumePreview = forwardRef<HTMLDivElement, { data: TBResumeData }>(function ResumePreview({ data }, ref) {
   const { profile, workExperiences, educations, projects, skills, customization } = data;
   const preset = getStylePreset(customization?.stylePreset);
   const pageWidth = getPageWidth(customization?.pageWidth);
@@ -70,7 +71,7 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
   const featuredWithSkill = skills.featuredSkills.filter((f) => f.skill.trim());
 
   return (
-    <div style={PAGE}>
+    <div ref={ref} style={PAGE}>
       {/* Header */}
       <div style={NAME}>{profile.name || <span style={{ color: "#bbb" }}>Your Name</span>}</div>
       <div style={CONTACT}>
@@ -196,4 +197,6 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
       )}
     </div>
   );
-}
+});
+
+export default ResumePreview;
