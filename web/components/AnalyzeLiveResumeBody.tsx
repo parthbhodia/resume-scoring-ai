@@ -1014,7 +1014,7 @@ export default function AnalyzeLiveResumeBody({
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
                     {/* Score badge — visible in non-presentation mode only */}
                     {!presentationOnly && (
-                      <span className={`az-score-badge az-score-badge--${bullet.score >= 70 ? "strong" : bullet.score >= 55 ? "fair" : "weak"}`} style={{ flexShrink: 0, marginTop: 1 }}>
+                      <span className={`az-pdf-ignore az-score-badge az-score-badge--${bullet.score >= 70 ? "strong" : bullet.score >= 55 ? "fair" : "weak"}`} style={{ flexShrink: 0, marginTop: 1 }}>
                         {bullet.score}
                       </span>
                     )}
@@ -1022,7 +1022,7 @@ export default function AnalyzeLiveResumeBody({
                     <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                       {highlightMetricSpans(showText)}
                       {previewLineApplied && (
-                        <span className="az-preview-applied-mark"
+                        <span className="az-pdf-ignore az-preview-applied-mark"
                           title={presentationOnly ? "Suggestion applied" : "Preview updated"}
                           style={{ marginLeft: 5, fontSize: 9, fontWeight: 800, color: presentationOnly ? "var(--green)" : "var(--amber)" }}
                         >
@@ -1030,7 +1030,7 @@ export default function AnalyzeLiveResumeBody({
                         </span>
                       )}
                       {presentationOnly && hasActionable && !previewLineApplied && (
-                        <span title="Click to see AI suggestion" style={{ marginLeft: 5, fontSize: 9, color: "var(--resume-paper-muted)" }}>✦</span>
+                        <span className="az-pdf-ignore" title="Click to see AI suggestion" style={{ marginLeft: 5, fontSize: 9, color: "var(--resume-paper-muted)" }}>✦</span>
                       )}
                     </span>
                   </div>
