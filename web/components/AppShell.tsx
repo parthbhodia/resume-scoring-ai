@@ -15,7 +15,7 @@ import { useEffect, useState, useCallback, useMemo, type ReactNode } from "react
 import { AppShellSidebarContext } from "@/contexts/AppShellSidebarContext";
 import { UmbcProvider } from "@/contexts/UmbcContext";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
 import { apiUrl } from "@/lib/utils";
@@ -165,8 +165,10 @@ export function useAppView(): AppView {
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const active = useAppView();
+  const onTemplateBuilderPage = (pathname ?? "").replace(/\/$/, "") === "/template-builder";
   const { isTablet } = useAppBreakpoints();
   const flowRaw = (searchParams?.get("flow") || "tailor").toLowerCase();
   const builderFlow: "tailor" | "template" =
@@ -260,8 +262,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, [menuOpen]);
 
   useEffect(() => {
-    setBuilderOpen(active === "builder");
-  }, [active]);
+    setBuilderOpen(active === "builder" || onTemplateBuilderPage);
+  }, [active, onTemplateBuilderPage]);
 
   useEffect(() => {
     setLayoutOnlyForNav(readBuilderLayoutOnlyFlag());
@@ -291,9 +293,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
   };
 
   const initial = (user?.email || "?").charAt(0).toUpperCase();
-  const builderActive = active === "builder";
+  const builderActive = active === "builder" || onTemplateBuilderPage;
   const navBuilderSubflow: "tailor" | "template" =
-    builderActive && builderFlow === "tailor" && layoutOnlyForNav
+    onTemplateBuilderPage
+      ? "template"
+      : builderActive && builderFlow === "tailor" && layoutOnlyForNav
       ? "template"
       : builderFlow;
 
@@ -306,7 +310,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     onClick?: () => void;
     extraActive?: boolean;
   }) => {
-    const isActive = extraActive ?? (view === active);
+    const isActive = extraActive ?? (!onTemplateBuilderPage && view === active);
     return (
       <button
         type="button"
@@ -425,17 +429,26 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <div className="app-nav-builder-drawer-inner" inert={builderOpen ? undefined : true}>
                 <div className="app-sidebar-sublabel" style={{ paddingLeft: isTablet ? 0 : 4, display: "flex", flexDirection: "column", gap: 3 }}>
                   {[
-                    { flow: "tailor" as const, label: "Tailor to a job" },
-                  ].map(({ flow, label }) => {
-                    const subActive = builderActive && navBuilderSubflow === flow;
+                    { key: "tailor" as const, label: "Tailor to a job" },
+                    { key: "template" as const, label: "Template Builder" },
+                  ].map(({ key, label }) => {
+                    const subActive = builderActive && navBuilderSubflow === key;
                     return (
                       <button
-                        key={flow}
+                        key={key}
                         type="button"
                         className="app-nav-sublink"
                         data-active={subActive}
                         aria-current={subActive ? "page" : undefined}
-                        onClick={() => goBuilderFlow(flow)}
+                        onClick={() => {
+                          if (key === "template") {
+                            router.push("/template-builder/");
+                            setHistoryOpen(false);
+                            setBuilderOpen(false);
+                            return;
+                          }
+                          goBuilderFlow(key);
+                        }}
                       >
                         {label}
                       </button>

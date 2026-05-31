@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
+import AppShell from "@/components/AppShell";
 import TemplateBuilderShell from "@/components/TemplateBuilder/TemplateBuilderShell";
 
 export const metadata: Metadata = {
@@ -9,16 +11,27 @@ export const metadata: Metadata = {
 
 export default function TemplateBuilderPage() {
   return (
+    <Suspense fallback={<TemplateBuilderPageSkeleton />}>
+      <AppShell>
+        <TemplateBuilderShell />
+      </AppShell>
+    </Suspense>
+  );
+}
+
+function TemplateBuilderPageSkeleton() {
+  return (
     <div
       style={{
-        height: "100vh",
+        minHeight: "100vh",
         display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
+        alignItems: "center",
+        justifyContent: "center",
         background: "var(--bg, #0d1117)",
+        color: "var(--muted, #94a3b8)",
       }}
     >
-      <TemplateBuilderShell />
+      Loading template builder...
     </div>
   );
 }
