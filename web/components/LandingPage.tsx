@@ -265,7 +265,7 @@ export default function LandingPage() {
               onClick={() => scrollTo(id)}
               style={{
                 background: "none", border: "none", color: C.muted,
-                fontSize: "var(--font-size-base)".5, cursor: "pointer", fontFamily: "inherit",
+                fontSize: 13.5, cursor: "pointer", fontFamily: "inherit",
                 fontWeight: 500, letterSpacing: -0.2, padding: 0, transition: "color 0.15s",
               }}
               onMouseEnter={e => { (e.target as HTMLElement).style.color = C.ink; }}
@@ -848,7 +848,7 @@ function FeatureCell({ f, dark, C }: { f: typeof FEATURES[0]; dark: boolean; C: 
       {/* Feature number — bold blue DM Sans, no serif */}
       <div style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, color: T.blue, letterSpacing: "0.08em", marginBottom: 14 }}>{f.num}</div>
       <h3 style={{ fontSize: "var(--font-size-2xl)", fontWeight: 700, color: C.ink, margin: "0 0 10px", letterSpacing: -0.4 }}>{f.title}</h3>
-      <p style={{ fontSize: "var(--font-size-base)".5, color: C.muted, lineHeight: 1.72, margin: 0 }}>{f.desc}</p>
+      <p style={{ fontSize: 13.5, color: C.muted, lineHeight: 1.72, margin: 0 }}>{f.desc}</p>
     </div>
   );
 }

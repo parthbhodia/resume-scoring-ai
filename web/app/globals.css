@@ -1,5 +1,36 @@
 @import "tailwindcss";
 
+/* ── Tailwind v4: expose CSS variables as utility classes ─────── */
+@theme inline {
+  --color-bg:         var(--bg);
+  --color-surface:    var(--surface);
+  --color-surface2:   var(--surface2);
+  --color-surface3:   var(--surface3);
+  --color-border:     var(--border);
+  --color-text:       var(--text);
+  --color-muted:      var(--muted);
+  --color-dim:        var(--dim);
+  --color-accent:     var(--accent);
+  --color-accent-h:   var(--accent-h);
+  --color-amber:      var(--amber);
+  --color-green:      var(--green);
+  --color-red:        var(--red);
+
+  --font-size-xs:     9px;
+  --font-size-sm:     11px;
+  --font-size-base:   13px;
+  --font-size-lg:     15px;
+  --font-size-xl:     18px;
+  --font-size-2xl:    26px;
+  --font-size-3xl:    36px;
+  --font-size-4xl:    52px;
+
+  --radius-sm:        var(--radius);
+  --radius-md:        var(--radius-lg);
+  --radius-lg:        var(--radius-xl);
+  --radius-full:      var(--radius-pill);
+}
+
 /* ── Dark theme (default) ────────────────────────────────────── */
 /*    Cool navy-black — removes the muddy warm tint               */
 :root,
