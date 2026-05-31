@@ -183,11 +183,13 @@ Gemini fallback chain kicks in when Grok hits quota or errors. Slugs: `GEMINI_RE
 6. **A category in TOP FIXES must have actionable content** (≥1 flagged bullet OR ≥1 related topIssue). Otherwise it moves to COMPLETED.
 7. **Score has a floor of 20.** Anything that parsed and produced category scores deserves at least 20.
 8. **The Analyze "Download PDF" matches the preview.** Goes through Chromium, not LaTeX.
+9. **The backend owns bullet category bucketing.** Each `bulletAnalysis` item carries `primaryCategory` + `issueCategories` (validated by `_normalize_bullet_categories` against `_CATEGORY_SCORE_KEYS`). The frontend trusts them verbatim; it does NOT re-derive categories with regex when they're present. A bullet's `primaryCategory` must be a category it can offer a rewrite for, and "quantification" never appears in either field without a numeral-adding rewrite. The `guessIssueCategory`/`inferBaseCategory` heuristics survive only as a fallback for legacy restored-history payloads.
 
-The 58 dimension tests in `resume_gui/tests/test_analyze_dimensions.py` defend invariants 1-7. **Run them after any change to validators / calibration / synthesizer**:
+The 66 dimension tests in `resume_gui/tests/test_analyze_dimensions.py` defend invariants 1-9. **Run them after any change to validators / calibration / synthesizer / category normalization**:
 
 ```bash
 .venv/bin/python -m pytest resume_gui/tests/test_analyze_dimensions.py -v
+# (no .venv in this container — `python3 -m pytest …` after the dep-install noted in the changelog)
 ```
 
 ---
@@ -202,6 +204,8 @@ The 58 dimension tests in `resume_gui/tests/test_analyze_dimensions.py` defend i
 ---
 
 ## Recent changes (running log — newest first; **append after every commit**)
+
+- **structured bullet categories (this session)** — Root-cause fix for the recurring "misleading hint / wrong rewrite" class of bug. The frontend used to *re-derive* each bullet's category with a ~150-line regex pile (`guessIssueCategory`, `buildBulletPrimaryCategories`, `inferBaseCategory`) and could disagree with what the backend intended — that disagreement is what surfaced quantification hints on `sectionStructure` bullets, dead-end TOP FIXES, etc. **Now the backend is authoritative.** The analysis prompt emits `primaryCategory` (the single categoryScores key `improvedBullet` fixes) and `issueCategories` (every key the bullet is weak in) per bullet. `_normalize_bullet_categories` in `app.py` validates/backfills them and guarantees three invariants: (1) both fields ⊆ `_CATEGORY_SCORE_KEYS`; (2) `issueCategories` always contains `primaryCategory`; (3) **"quantification" appears in neither field unless a surviving rewrite actually adds a numeral** — same evidence test as the issues[] strip, so the category bucket and the tag can never disagree. Frontend `analysisCategoryMatch.ts`: `buildBulletPrimaryCategories` now trusts `primaryCategory` verbatim when every bullet has a valid one (fast path), falling back to the regex heuristics only for legacy restored-history payloads that predate the fields. `getRewriteForCategory` / `bulletMatchesAnalysisCategory` / `inferPrimaryCategoryFromBullet` prefer the explicit field. New invariant #9 (see Validators). 8 new tests in `test_analyze_dimensions.py` (`TestBulletCategoryNormalization`) — suite now 66, all green. **NOTE:** the container's `cryptography` rust binding panics on import of `resume_gui.app`; fixed this session with `pip install --upgrade cryptography` + installing `sse_starlette`, `beautifulsoup4`, `google-genai`. Future sessions running pytest may need the same.
 
 - **`2912c26`** — Fixed misleading quantification hint showing on all flagged bullets. `getRewriteForCategory` in `web/lib/analysisCategoryMatch.ts` had a fallback that returned `bullet.improvedBullet` as the "quantification rewrite" whenever `bulletSignalsQuantificationWeakness` was true — even for bullets whose primary category was `sectionStructure` or `readability`. This made `categoryRewriteBase` non-empty for those bullets, triggering the "Add a number where it helps…" hint alongside an irrelevant rewrite. Fix: removed both `quantification` and `achievementQuality` category-specific fallbacks. A rewrite is now returned only if (a) user has a draft, (b) `categoryRewrites[category]` exists, or (c) primary category matches. All other bullets fall through to the "No auto-rewrite for this one" message. Also removed the now-dead `bulletSignalsQuantificationWeakness` helper.
 

@@ -28,6 +28,12 @@ export function mergeAnalyzeApiJson(json: Record<string, unknown>): Record<strin
       if (cr && typeof cr === "object" && !Array.isArray(cr)) {
         b.categoryRewrites = cr;
       }
+      const pc = b.primaryCategory ?? b.primary_category;
+      if (typeof pc === "string" && pc.trim() !== "") b.primaryCategory = pc;
+      const ic = b.issueCategories ?? b.issue_categories;
+      if (Array.isArray(ic)) {
+        b.issueCategories = ic.filter((x): x is string => typeof x === "string");
+      }
       const rawIssues = b.issues;
       b.issues = Array.isArray(rawIssues) ? rawIssues.filter((x): x is string => typeof x === "string") : [];
       return b;

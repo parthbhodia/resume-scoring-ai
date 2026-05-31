@@ -21,8 +21,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import pytest  # noqa: E402
 
 from resume_gui.app import (  # noqa: E402
+    _CATEGORY_SCORE_KEYS,
     _filter_bullet_rewrites,
     _normalize_analysis,
+    _normalize_bullet_categories,
     _resume_numeral_count,
     _resume_strong_verb_share,
     _split_collapsed_education_entries,
@@ -699,3 +701,131 @@ class TestResumeHelpers:
         # Cashier-style résumé: most bullets are weak verbs.
         if t > 0:
             assert s / t < 0.5
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Structured bullet category fields (primaryCategory / issueCategories)
+#
+# These back the frontend contract: the UI now buckets bullets by these fields
+# verbatim instead of re-deriving them with regex. The whole point is that the
+# backend never hands the UI a category it can't act on — esp. a phantom
+# "quantification" bucket that triggers the "Add a number…" hint with no rewrite.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBulletCategoryNormalization:
+
+    def test_primary_always_valid_key(self):
+        primary, cats = _normalize_bullet_categories(
+            "garbage_not_a_real_category", ["also_garbage"],
+            original="Was responsible for handling tickets.",
+            improved="Resolved 30+ support tickets weekly, cutting backlog.",
+            category_rewrites=None,
+            issues=["passive voice", "duty-only"],
+        )
+        assert primary in _CATEGORY_SCORE_KEYS
+        assert all(c in _CATEGORY_SCORE_KEYS for c in cats)
+
+    def test_primary_always_in_issue_categories(self):
+        primary, cats = _normalize_bullet_categories(
+            "languageQuality", [],
+            original="Was responsible for the thing.",
+            improved="Owned the thing end to end.",
+            category_rewrites=None,
+            issues=["passive voice"],
+        )
+        assert primary == "languageQuality"
+        assert "languageQuality" in cats
+
+    def test_unsupported_quantification_stripped_from_issue_categories(self):
+        """LLM tagged quantification but no rewrite adds a numeral → the
+        category bucket must drop quantification (mirrors the issues[] strip)."""
+        primary, cats = _normalize_bullet_categories(
+            "languageQuality", ["quantification", "languageQuality"],
+            original="Improved the onboarding flow for new users.",
+            improved="Streamlined the onboarding flow for new users.",
+            category_rewrites=None,
+            issues=["wordy", "quantification"],
+        )
+        assert "quantification" not in cats
+        assert primary == "languageQuality"
+
+    def test_supported_quantification_kept(self):
+        """A rewrite that adds a new numeral legitimizes the quantification
+        bucket — it must survive."""
+        primary, cats = _normalize_bullet_categories(
+            "quantification", ["quantification"],
+            original="Reduced page load time through caching.",
+            improved="Reduced page load time by [40%] through caching.",
+            category_rewrites=None,
+            issues=["quantification"],
+        )
+        assert primary == "quantification"
+        assert "quantification" in cats
+
+    def test_quantification_primary_rederived_when_unsupported(self):
+        """If the LLM made quantification the primaryCategory but no rewrite
+        adds a numeral, primary must move to a category we can act on — never
+        stay on the phantom quantification bucket."""
+        primary, cats = _normalize_bullet_categories(
+            "quantification", ["quantification", "achievementQuality"],
+            original="Was responsible for managing the team backlog.",
+            improved="Owned the team backlog end to end.",
+            category_rewrites=None,
+            issues=["duty-only", "quantification"],
+        )
+        assert primary != "quantification"
+        assert primary in _CATEGORY_SCORE_KEYS
+        assert "quantification" not in cats
+
+    def test_category_with_rewrite_is_always_listed(self):
+        """A surviving categoryRewrites key is legitimate even if the LLM
+        forgot to list it in issueCategories."""
+        primary, cats = _normalize_bullet_categories(
+            "achievementQuality", ["achievementQuality"],
+            original="Helped with the migration to PostgreSQL.",
+            improved="Led the migration to PostgreSQL.",
+            category_rewrites={"achievementQuality": "Drove the PostgreSQL migration to completion."},
+            issues=["duty-only"],
+        )
+        assert "achievementQuality" in cats
+        assert primary == "achievementQuality"
+
+    def test_missing_primary_backfilled_from_issue_text(self):
+        primary, cats = _normalize_bullet_categories(
+            None, None,
+            original="Handled passive duties as assigned.",
+            improved="",
+            category_rewrites=None,
+            issues=["passive voice"],
+        )
+        assert primary in _CATEGORY_SCORE_KEYS
+        assert primary in cats
+
+    def test_normalize_analysis_backfills_bullet_categories(self):
+        """End-to-end through _normalize_analysis: every surviving bullet gets
+        valid primaryCategory + issueCategories, and a phantom quantification
+        claim with no numeric rewrite never reaches the UI."""
+        raw = {
+            "overallScore": 70,
+            "categoryScores": _category_scores(default=65),
+            "bulletAnalysis": [
+                {
+                    "originalBullet": "Was responsible for the onboarding docs.",
+                    "score": 45,
+                    "primaryCategory": "quantification",
+                    "issueCategories": ["quantification", "languageQuality"],
+                    "issues": ["quantification", "passive voice"],
+                    # No numeral added anywhere → quantification is a lie.
+                    "improvedBullet": "Owned the onboarding documentation.",
+                },
+            ],
+        }
+        result = _normalize_analysis(raw)
+        bullets = result["bulletAnalysis"]
+        assert len(bullets) == 1
+        ba = bullets[0]
+        assert ba["primaryCategory"] in _CATEGORY_SCORE_KEYS
+        assert ba["primaryCategory"] != "quantification"
+        assert "quantification" not in ba["issueCategories"]
+        assert "quantification" not in [str(i).lower() for i in ba["issues"]]

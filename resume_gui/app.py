@@ -4834,6 +4834,14 @@ Infer the field from the résumé text and score against that field's expectatio
   quantification issue; pick JD-relevant, high-impact lines first. categoryRewrites.quantification and \
   categoryRewrites.achievementQuality must be DIFFERENT rewrites when both weaknesses apply — \
   never paste the same text into both fields.
+- CATEGORY HONESTY (the UI buckets bullets by these fields — get them right): \
+  set primaryCategory to the single categoryScores key that improvedBullet actually fixes, and \
+  issueCategories to EVERY categoryScores key the bullet is weak in (a superset that always includes \
+  primaryCategory). Do NOT list "quantification" in issueCategories unless the bullet genuinely lacks \
+  numbers AND you can add a real or [placeholder] metric. If a bullet's only weakness is structure or \
+  phrasing, primaryCategory is "sectionStructure"/"languageQuality" and issueCategories must NOT include \
+  "quantification". A bullet whose primaryCategory is X must have a categoryRewrites entry for X OR use \
+  improvedBullet as the X fix — never flag a category you cannot offer a rewrite for.
 - REWRITE HONESTY (server will reject rewrites that violate this): every improvedBullet and every \
   categoryRewrites.* value MUST preserve every numeral (digits, percentages, counts, durations) and \
   every concrete proper noun (Title-Case names, ALL-CAPS acronyms, CamelCase tech names like PostgreSQL, \
@@ -4908,6 +4916,8 @@ Return ONLY this JSON (no markdown fences, no explanation):
     {{
       "originalBullet": "<exact bullet text, truncated to 150 chars>",
       "score": <0-100>,
+      "primaryCategory": "<the ONE categoryScores key this bullet's improvedBullet addresses: quantification | achievementQuality | languageQuality | sectionStructure | readability | technicalBranding | atsCompatibility | jobMatch>",
+      "issueCategories": ["<every categoryScores key this bullet is weak in — superset of primaryCategory, e.g. [\\"quantification\\", \\"languageQuality\\"]>"],
       "issues": ["<issue 1>", "<issue 2>"],
       "improvedBullet": "<rewrite for the bullet's PRIMARY weakness only>",
       "categoryRewrites": {{
@@ -5244,6 +5254,120 @@ def _filter_bullet_rewrites(
                 )
 
     return kept_improved, kept_cr, kept_issues
+
+
+# Canonical categoryScores keys. The bullet's primaryCategory / issueCategories
+# MUST be drawn from this set — the frontend buckets bullets by these and shows
+# a per-category rewrite hint, so a bullet tagged with a key outside this set
+# (or a key it has no rewrite for) is exactly the "misleading hint" class of bug.
+_CATEGORY_SCORE_KEYS = (
+    "readability", "atsCompatibility", "jobMatch", "achievementQuality",
+    "quantification", "sectionStructure", "languageQuality", "technicalBranding",
+)
+
+# Light text → category map. Backend-only backfill for when the LLM omits
+# primaryCategory (or emits an invalid one). This is intentionally small and is
+# NOT the frontend's job: the frontend now trusts primaryCategory/issueCategories
+# verbatim. Keep this conservative — when unsure, fall through to the default.
+_ISSUE_TEXT_CATEGORY_HINTS: Tuple[Tuple[str, str], ...] = (
+    ("quantif", "quantification"),
+    ("metric", "quantification"),
+    ("number", "quantification"),
+    ("passive", "languageQuality"),
+    ("verb", "languageQuality"),
+    ("filler", "languageQuality"),
+    ("wordy", "languageQuality"),
+    ("duty", "achievementQuality"),
+    ("ownership", "achievementQuality"),
+    ("impact", "achievementQuality"),
+    ("achievement", "achievementQuality"),
+    ("outcome", "achievementQuality"),
+    ("keyword", "jobMatch"),
+    ("ats", "atsCompatibility"),
+    ("section", "sectionStructure"),
+    ("structure", "sectionStructure"),
+    ("format", "readability"),
+    ("readab", "readability"),
+    ("tech", "technicalBranding"),
+)
+
+
+def _infer_bullet_category_from_text(issues: Optional[List[Any]]) -> str:
+    """Best-effort single category from free-text issue tags. Used only to
+    backfill a missing/invalid primaryCategory. Defaults to achievementQuality
+    (the most common weak-bullet bucket) when nothing matches."""
+    for tag in issues or []:
+        low = str(tag).strip().lower()
+        for needle, cat in _ISSUE_TEXT_CATEGORY_HINTS:
+            if needle in low:
+                return cat
+    return "achievementQuality"
+
+
+def _normalize_bullet_categories(
+    raw_primary: Any,
+    raw_issue_cats: Any,
+    *,
+    original: str,
+    improved: str,
+    category_rewrites: Optional[dict],
+    issues: Optional[List[Any]],
+) -> Tuple[str, List[str]]:
+    """Produce a trustworthy (primaryCategory, issueCategories) pair.
+
+    Invariants the frontend now relies on (so it can delete its regex pile):
+      1. primaryCategory ∈ _CATEGORY_SCORE_KEYS.
+      2. issueCategories ⊆ _CATEGORY_SCORE_KEYS, deduped, and always contains
+         primaryCategory.
+      3. "quantification" appears in neither field unless some surviving rewrite
+         (improvedBullet or a categoryRewrites value) actually adds a numeral
+         that wasn't in the original — mirrors the lying-tag strip so the
+         category bucket and the issues[] tag never disagree.
+      4. If primaryCategory would have been "quantification" but that claim is
+         unsupported, it is re-derived from the remaining issueCategories /
+         issue text rather than left dangling.
+    """
+    valid = set(_CATEGORY_SCORE_KEYS)
+
+    # Does any surviving rewrite add a numeral the original lacked?
+    orig_nums = _rewrite_numerals(original)
+    quant_supported = False
+    for candidate in [improved] + list((category_rewrites or {}).values()):
+        if candidate and (_rewrite_numerals(candidate) - orig_nums):
+            quant_supported = True
+            break
+
+    # Normalize issueCategories: keep only valid keys, dedupe, preserve order.
+    issue_cats: List[str] = []
+    if isinstance(raw_issue_cats, list):
+        for c in raw_issue_cats:
+            key = str(c).strip()
+            if key in valid and key not in issue_cats:
+                issue_cats.append(key)
+
+    # A category that has a surviving rewrite is always legitimate, even if the
+    # LLM forgot to list it.
+    for ck in (category_rewrites or {}):
+        if ck in valid and ck not in issue_cats:
+            issue_cats.append(ck)
+
+    # Drop unsupported quantification claims everywhere.
+    if not quant_supported:
+        issue_cats = [c for c in issue_cats if c != "quantification"]
+
+    # Resolve primaryCategory.
+    primary = str(raw_primary).strip() if raw_primary is not None else ""
+    if primary == "quantification" and not quant_supported:
+        primary = ""  # force re-derive
+    if primary not in valid:
+        primary = issue_cats[0] if issue_cats else _infer_bullet_category_from_text(issues)
+        if primary == "quantification" and not quant_supported:
+            primary = "achievementQuality"
+
+    if primary not in issue_cats:
+        issue_cats.insert(0, primary)
+
+    return primary, issue_cats
 
 
 # ── Evidence-grounded issue validator ──────────────────────────────────────
@@ -5657,6 +5781,22 @@ def _normalize_analysis(raw: dict) -> dict:
                     # All variant rewrites failed validation — drop the field.
                     ba.pop("categoryRewrites", None)
                 ba["issues"] = kept_issues
+
+                # Backfill + validate the structured category fields the
+                # frontend now trusts verbatim (no more guessIssueCategory
+                # regex pile). primaryCategory/issueCategories are guaranteed
+                # to be valid categoryScores keys and consistent with the
+                # surviving rewrites (esp. the quantification claim).
+                primary_cat, issue_cats = _normalize_bullet_categories(
+                    ba.get("primaryCategory"),
+                    ba.get("issueCategories"),
+                    original=ba.get("originalBullet", ""),
+                    improved=kept_improved,
+                    category_rewrites=ba.get("categoryRewrites"),
+                    issues=kept_issues,
+                )
+                ba["primaryCategory"] = primary_cat
+                ba["issueCategories"] = issue_cats
 
         # ── Drop flagged-but-helpless bullets ────────────────────────────
         # After the rewrite validator has stripped no-op / lossy rewrites,

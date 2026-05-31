@@ -68,6 +68,9 @@ interface AnalysisResult {
     issues: string[];
     improvedBullet: string;
     categoryRewrites?: Partial<Record<string, string>>;
+    /** Backend-authoritative category bucketing (see analysisCategoryMatch). */
+    primaryCategory?: string;
+    issueCategories?: string[];
   }>;
   /** Plain text from PDF/LaTeX extraction — drives live preview when present. */
   extractedText?: string;

@@ -73,7 +73,31 @@ export type CategoryRewriteBullet = {
   categoryRewrites?: Partial<Record<string, string>>;
   issues?: string[];
   score: number;
+  /**
+   * Backend-supplied category bucketing (since the structured-fields change).
+   * When present and valid these are authoritative — the heuristics below are
+   * only a fallback for restored-history payloads that predate the fields.
+   * `_normalize_analysis` guarantees primaryCategory ∈ CATEGORY_SCORE_KEYS,
+   * issueCategories ⊆ keys ∪ {primaryCategory}, and that "quantification" only
+   * appears when a surviving rewrite actually adds a numeral.
+   */
+  primaryCategory?: string;
+  issueCategories?: string[];
 };
+
+/** Canonical categoryScores keys — mirror of backend `_CATEGORY_SCORE_KEYS`. */
+export const CATEGORY_SCORE_KEYS = [
+  "readability", "atsCompatibility", "jobMatch", "achievementQuality",
+  "quantification", "sectionStructure", "languageQuality", "technicalBranding",
+] as const;
+
+const CATEGORY_KEY_SET = new Set<string>(CATEGORY_SCORE_KEYS);
+
+/** Authoritative primary category from the backend, if it supplied a valid one. */
+function explicitPrimaryCategory(bullet: CategoryRewriteBullet): string | null {
+  const p = bullet.primaryCategory;
+  return typeof p === "string" && CATEGORY_KEY_SET.has(p) ? p : null;
+}
 
 /** API / restored history rows may omit `issues`; treat as empty. */
 export function bulletIssueList(bullet: CategoryRewriteBullet): string[] {
@@ -202,6 +226,16 @@ export function buildBulletPrimaryCategories(
 ): string[] {
   if (!bullets.length) return [];
 
+  // Fast path: if the backend supplied a valid primaryCategory for EVERY
+  // bullet, trust it verbatim. This is the post-structured-fields contract —
+  // no guessing, no quant-share rebalancing that can disagree with the
+  // backend's own tagging. Mixed/missing (legacy restored payloads) falls
+  // through to the heuristic for the whole list so its global quant capping
+  // stays coherent.
+  if (bullets.every((b) => explicitPrimaryCategory(b) !== null)) {
+    return bullets.map((b) => explicitPrimaryCategory(b) as string);
+  }
+
   const jdKeywords = opts.jdKeywords ?? [];
   const targetShare = opts.targetQuantShare ?? TARGET_QUANTIFIED_BULLET_SHARE;
   const categories = bullets.map((b) => inferBaseCategory(b));
@@ -247,6 +281,8 @@ export function inferPrimaryCategoryFromBullet(
   index?: number,
   opts?: CategoryAssignmentOptions,
 ): string {
+  const explicit = explicitPrimaryCategory(bullet);
+  if (explicit) return explicit;
   if (allBullets?.length) {
     const idx = index ?? allBullets.indexOf(bullet);
     if (idx >= 0) return buildBulletPrimaryCategories(allBullets, opts)[idx] ?? inferBaseCategory(bullet);
@@ -263,6 +299,8 @@ export function bulletMatchesAnalysisCategory(
   opts?: CategoryAssignmentOptions,
 ): boolean {
   if (!category) return false;
+  const explicit = explicitPrimaryCategory(bullet);
+  if (explicit) return explicit === category;
   if (allBullets?.length) {
     const idx = bulletIndex ?? allBullets.indexOf(bullet);
     if (idx >= 0) {
@@ -304,9 +342,10 @@ export function getRewriteForCategory(
   const focused = bullet.categoryRewrites?.[category]?.trim();
   if (focused) return focused;
 
-  const primary = allBullets?.length
-    ? buildBulletPrimaryCategories(allBullets, opts)[bulletIndex ?? allBullets.indexOf(bullet)]
-    : inferBaseCategory(bullet);
+  const primary = explicitPrimaryCategory(bullet)
+    ?? (allBullets?.length
+      ? buildBulletPrimaryCategories(allBullets, opts)[bulletIndex ?? allBullets.indexOf(bullet)]
+      : inferBaseCategory(bullet));
 
   if (primary === category && bullet.improvedBullet?.trim()) {
     return bullet.improvedBullet.trim();
