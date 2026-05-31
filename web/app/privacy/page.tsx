@@ -224,7 +224,7 @@ export default function PrivacyPage() {
               <li>Database access is controlled by Row-Level Security (RLS) policies — your data is only accessible to your account</li>
               <li>Authentication is handled by Supabase Auth with Google OAuth 2.0</li>
             </ul>
-            <p>No system is 100% secure. If you discover a security vulnerability, please disclose it responsibly to <a href="mailto:security@resunova.io" style={{ color: "var(--accent)" }}>security@resunova.io</a>.</p>
+            <p>No system is 100% secure. If you discover a security vulnerability, please disclose it responsibly to <a href="mailto:parthbhodia08@gmail.com" style={{ color: "var(--accent)" }}>parthbhodia08@gmail.com</a>.</p>
           </Section>
 
           <Section title="10. Children's Privacy">
