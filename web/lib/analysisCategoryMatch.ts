@@ -291,11 +291,6 @@ export function filterIssuesForCategory(issues: string[] | undefined | null, cat
   return filtered.length > 0 ? filtered : list;
 }
 
-function bulletSignalsQuantificationWeakness(bullet: CategoryRewriteBullet): boolean {
-  if (hasStrongQuantification(bullet.originalBullet)) return false;
-  return bulletSignalsExplicitQuantIssue(bullet);
-}
-
 /** Rewrite text for the active category. */
 export function getRewriteForCategory(
   bullet: CategoryRewriteBullet,
@@ -315,14 +310,6 @@ export function getRewriteForCategory(
 
   if (primary === category && bullet.improvedBullet?.trim()) {
     return bullet.improvedBullet.trim();
-  }
-  const general = bullet.improvedBullet?.trim() ?? "";
-  if (!general) return "";
-  if (category === "quantification" && bulletSignalsQuantificationWeakness(bullet)) {
-    return general;
-  }
-  if (category === "achievementQuality" && bulletSignalsAchievementWeakness(bullet)) {
-    return general;
   }
   return "";
 }
