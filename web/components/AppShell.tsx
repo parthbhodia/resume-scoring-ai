@@ -530,7 +530,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <nav className="app-sidebar-legal" style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11, paddingTop: 4 }}>
-            <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: "var(--dim)", textDecoration: "none" }}>{CONTACT_EMAIL}</a>
             <Link href="/contact" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Contact</Link>
             <Link href="/terms" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Terms</Link>
             <Link href="/privacy" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Privacy</Link>

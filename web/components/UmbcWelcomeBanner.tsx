@@ -23,7 +23,7 @@ export function UmbcWelcomeBanner() {
       <div style={{ flex: 1 }}>
         <span style={{ marginRight: 6 }}>⚡</span>
         <strong>Tailored for UMBC students</strong> — Our analysis follows UMBC Career Center resume guidelines.
-        <a href="/contact" style={{ color: "#fff", textDecoration: "underline", marginLeft: 8 }}>Learn more</a>
+        <a href="https://careers.umbc.edu/" target="_blank" rel="noopener noreferrer" style={{ color: "#fff", textDecoration: "underline", marginLeft: 8 }}>Learn more</a>
       </div>
       <button
         onClick={() => setDismissed(true)}
