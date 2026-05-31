@@ -3643,6 +3643,23 @@ def _advisor_scope_for_request(request: Request) -> Tuple[Optional[dict], Option
         return None, JSONResponse({"error": "advisor scope lookup failed"}, status_code=500)
 
 
+async def api_advisor_access(request: Request):
+    """GET /api/advisor-access — lightweight yes/no check for Advisor nav visibility."""
+    scope, scope_error = _advisor_scope_for_request(request)
+    if scope_error is not None:
+        status = getattr(scope_error, "status_code", 500)
+        if status == 401:
+            return JSONResponse({"allowed": False, "reason": "sign_in_required"})
+        if status == 403:
+            return JSONResponse({"allowed": False, "reason": "not_authorized"})
+        return scope_error
+
+    return JSONResponse({
+        "allowed": True,
+        "institutions": (scope or {}).get("institutions") or [],
+    })
+
+
 def _load_template_tex_from_supabase(reference_folder: str) -> Optional[str]:
     """Load canonical template tex from `resume_templates` table when available.
 
@@ -8102,6 +8119,7 @@ routes = [
     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
     Route("/api/my-analyses",             api_my_analyses,     methods=["GET"]),
+    Route("/api/advisor-access",          api_advisor_access,  methods=["GET"]),
     Route("/api/cohort-stats",            api_cohort_stats,    methods=["GET"]),
     Route("/api/student-detail",          api_student_detail,  methods=["GET"]),
     Route("/api/export-docx",             api_export_docx,     methods=["POST"]),

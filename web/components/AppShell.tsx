@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
+import { apiUrl } from "@/lib/utils";
 import { CONTACT_EMAIL } from "@/lib/brand";
 import { isUmbcUser } from "@/lib/userDomainDetection";
 import { LogoFull, LogoMark } from "./BrandLogo";
@@ -178,6 +179,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [advisorAllowed, setAdvisorAllowed] = useState(false);
 
   useEffect(() => {
     setSidebarCollapsed(readSidebarCollapsed());
@@ -212,15 +214,38 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const supabase = getSupabaseClient();
-    supabase.auth.getUser().then(({ data }) => {
-      const currentUser = data.user ?? null;
+
+    const syncAdvisorAccess = async (accessToken?: string | null) => {
+      if (!accessToken) {
+        setAdvisorAllowed(false);
+        return;
+      }
+      try {
+        const resp = await fetch(apiUrl("/api/advisor-access"), {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!resp.ok) {
+          setAdvisorAllowed(false);
+          return;
+        }
+        const json = await resp.json() as { allowed?: boolean };
+        setAdvisorAllowed(json.allowed === true);
+      } catch {
+        setAdvisorAllowed(false);
+      }
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      const currentUser = data.session?.user ?? null;
       setUser(currentUser);
       setIsUmbc(isUmbcUser(currentUser?.email));
+      void syncAdvisorAccess(data.session?.access_token);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_ev, s) => {
       const currentUser = s?.user ?? null;
       setUser(currentUser);
       setIsUmbc(isUmbcUser(currentUser?.email));
+      void syncAdvisorAccess(s?.access_token);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -425,7 +450,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <NavRow view="cover-letter" />
           <NavRow view="jobs" />
           <NavRow view="profile" />
-          <NavRow view="advisor" />
+          {advisorAllowed ? <NavRow view="advisor" /> : null}
         </nav>
 
         <div style={{ borderTop: "1px solid var(--border)", padding: "10px 10px 12px", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>

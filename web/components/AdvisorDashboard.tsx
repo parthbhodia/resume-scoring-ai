@@ -671,14 +671,25 @@ export default function AdvisorDashboard() {
   );
 
   if (error === "not_authorized") return (
-    <Card className="mx-auto mt-24 max-w-[480px]">
+    <Card className="mx-auto mt-24 max-w-[520px]">
       <CardHeader>
-        <Badge variant="destructive" className="w-fit">Access restricted</Badge>
-        <CardTitle>This view is for career advisors only.</CardTitle>
+        <Badge variant="outline" className="w-fit">Advisor access not enabled</Badge>
+        <CardTitle>This account is not on the advisor roster.</CardTitle>
         <CardDescription>
-          Your account <span className="text-foreground">{userEmail}</span> does not have advisor access.
+          You are signed in as <span className="text-foreground">{userEmail}</span>. Advisor dashboards are only shown
+          to approved institution accounts. Sign in with an approved UMBC advisor email, or ask an administrator to add
+          this email to the advisor access list.
         </CardDescription>
       </CardHeader>
+      <Separator />
+      <CardContent className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={() => void getSupabaseClient().auth.signOut()}>
+          Sign out
+        </Button>
+        <Button variant="ghost" onClick={() => userEmail && void load()}>
+          Check again
+        </Button>
+      </CardContent>
     </Card>
   );
 
