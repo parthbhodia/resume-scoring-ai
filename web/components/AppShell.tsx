@@ -218,6 +218,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const expandSidebar = useCallback(() => {
+    setSidebarCollapsed(false);
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "0");
+    } catch { /* ignore */ }
+  }, []);
+
   const collapseSidebar = useCallback(() => {
     setSidebarCollapsed(true);
     try {
@@ -429,7 +436,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
               className="app-nav-row"
               data-active={builderActive}
               data-expanded={builderOpen}
-              onClick={() => setBuilderOpen(o => !o)}
+              onClick={() => {
+                if (sidebarCollapsed) {
+                  expandSidebar();
+                  setBuilderOpen(true);
+                  return;
+                }
+                setBuilderOpen(o => !o);
+              }}
               aria-expanded={builderOpen}
               style={{ marginBottom: builderOpen ? 4 : 0 }}
             >
