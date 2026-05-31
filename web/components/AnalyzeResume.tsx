@@ -1231,7 +1231,7 @@ export default function AnalyzeResume() {
 
         /* Desktop scrim never shows — sidebar is inline, not overlaying */
         .az-sidebar-scrim-desktop { display: none !important; }
-        /* Left pill: reopen improvement plan + past analyses when the rail is collapsed */
+        /* Collapsed score rail: compact affordances that expand the score/fix plan */
         .az-sidebar-restore-fab {
           display: none;
           position: fixed;
@@ -1242,10 +1242,11 @@ export default function AnalyzeResume() {
           align-items: center;
           justify-content: center;
           flex-direction: column;
-          gap: 8px;
-          padding: 10px 6px;
-          min-height: 150px;
-          border-radius: 0 12px 12px 0;
+          gap: 6px;
+          width: 58px;
+          min-height: 82px;
+          padding: 9px 6px;
+          border-radius: 0 16px 16px 0;
           border: 1px solid var(--border);
           border-left: none;
           background: var(--surface);
@@ -1258,25 +1259,42 @@ export default function AnalyzeResume() {
           letter-spacing: -0.02em;
           transition: background var(--transition), color var(--transition), box-shadow var(--transition);
         }
-        .az-sidebar-restore-fab span {
-          writing-mode: vertical-rl;
-          text-orientation: mixed;
-          letter-spacing: 0.02em;
+        .az-score-fab-score {
+          min-width: 28px;
+          height: 24px;
+          padding: 0 5px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid currentColor;
+          background: color-mix(in srgb, currentColor 10%, transparent);
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 1;
+        }
+        .az-score-fab-label {
+          font-size: 9.5px;
+          line-height: 1;
+          color: var(--dim);
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
         }
         .az-sidebar-scan-fab {
           display: none;
           position: fixed;
           left: 0;
-          top: calc(50% + 98px);
+          top: calc(50% + 76px);
           transform: translateY(-50%);
           z-index: 1001;
           align-items: center;
           justify-content: center;
           flex-direction: column;
-          gap: 8px;
-          padding: 10px 6px;
-          min-height: 132px;
-          border-radius: 0 12px 12px 0;
+          gap: 5px;
+          width: 58px;
+          min-height: 66px;
+          padding: 8px 6px;
+          border-radius: 0 16px 16px 0;
           border: 1px solid var(--border);
           border-left: none;
           background: var(--surface);
@@ -1290,9 +1308,11 @@ export default function AnalyzeResume() {
           transition: background var(--transition), color var(--transition), box-shadow var(--transition);
         }
         .az-sidebar-scan-fab span {
-          writing-mode: vertical-rl;
-          text-orientation: mixed;
-          letter-spacing: 0.02em;
+          font-size: 9.5px;
+          line-height: 1;
+          color: var(--dim);
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
         }
         @media (min-width: 768px) {
           .az-sidebar-restore-fab.is-visible {
@@ -1474,7 +1494,7 @@ export default function AnalyzeResume() {
         </div>
       </aside>
 
-      {/* Desktop: left pill — reopen scores + past analyses when the plan rail is hidden */}
+      {/* Desktop: compact score rail — parent action opens the full score/fix plan */}
       <button
         type="button"
         className={`az-sidebar-restore-fab${!improvementPlanVisible ? " is-visible" : ""}`}
@@ -1491,10 +1511,16 @@ export default function AnalyzeResume() {
         }}
       >
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden style={{ flexShrink: 0, opacity: 0.85 }}>
-          <rect x="2" y="3" width="4" height="10" rx="1" stroke="currentColor" strokeWidth="1.35" fill="none" />
-          <rect x="7" y="3" width="7" height="10" rx="1" stroke="currentColor" strokeWidth="1.35" fill="none" />
+          <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.35" />
+          <path d="M8 8l2.3-2.3" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+          <path d="M5 10.5h6" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" opacity="0.75" />
         </svg>
-        <span>{"Scores & history"}</span>
+        {result ? (
+          <span className="az-score-fab-score" style={{ color: scoreColor(result.overallScore) }}>
+            {result.overallScore}
+          </span>
+        ) : null}
+        <span className="az-score-fab-label">Scores</span>
       </button>
       <button
         type="button"
