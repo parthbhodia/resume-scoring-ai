@@ -790,6 +790,7 @@ export default function AnalyzeLiveResumeBody({
           background: transparent !important;
           box-shadow: none !important;
           animation: none !important;
+          cursor: default !important;
         }
         .az-clean-export .az-score-badge,
         .az-clean-export .az-preview-applied-mark {

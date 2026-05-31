@@ -4,77 +4,74 @@ import { apiUrl } from "@/lib/utils";
 
 /**
  * Strip Analyze annotation chrome from a cloned DOM before PDF export.
- * The live preview shows colored bullet backgrounds, score badges, chevrons,
- * issue chips, and improved-bullet editors. None of those belong in the PDF.
+ *
+ * Strategy:
+ *  1. Remove .az-pdf-ignore elements (score badges, ✦ markers, etc. — all
+ *     already marked at the render site).
+ *  2. Add .az-clean-export to the root so the inline <style> in
+ *     AnalyzeLiveResumeBody activates its own clean-export rules (strips
+ *     bullet backgrounds, pulse animations, preview marks).
+ *  3. Strip the paper-card chrome (shadow, border, radius) from the root —
+ *     looks fine in the browser but wrong in a flat PDF page.
+ *  4. Inject the full set of --resume-paper-* CSS custom properties so
+ *     headless Chromium (which has no globals.css) resolves them correctly.
+ *  5. Strip [data-bullet-idx] annotation backgrounds — defense-in-depth for
+ *     the non-live-doc fallback path.
  */
 function cleanForExport(source: HTMLElement): HTMLElement {
   const clone = source.cloneNode(true) as HTMLElement;
 
-  // Remove elements explicitly marked as PDF-only UI chrome
+  // 1. Remove all explicitly marked UI chrome
   clone.querySelectorAll(".az-pdf-ignore").forEach((el) => el.remove());
 
-  // Strip analysis annotation chrome from bullet rows
+  // 2. Activate the component's own clean-export CSS rules
+  clone.classList.add("az-clean-export");
+
+  // 3. Strip paper-card presentation chrome
+  clone.style.boxShadow = "none";
+  clone.style.border = "none";
+  clone.style.borderRadius = "0";
+
+  // 4. Strip [data-bullet-idx] annotation backgrounds (fallback non-live path)
   clone.querySelectorAll<HTMLElement>("[data-bullet-idx]").forEach((row) => {
-    // Reset colored row backgrounds to transparent
     row.style.background = "transparent";
     row.style.boxShadow = "none";
     row.style.borderLeft = "none";
     row.style.cursor = "default";
-
-    // Remove every child element that is NOT the bullet text span:
-    // score badge (first flex child span), chevron SVG, issue chip wrapper,
-    // improved-bullet editor wrapper, preview-applied marker.
-    // Keep only <span> children that contain the actual bullet text
-    // (identified by having flex: 1 or containing text content).
-    const directChildren = Array.from(row.children);
-    directChildren.forEach((child) => {
-      const el = child as HTMLElement;
-      // The outer flex row that contains score badge + text + chevron
-      if (el.style.display === "flex" || getComputedStyle(el).display === "flex") {
-        // Inside this row: remove score badge (short span with numeric text)
-        // and chevron SVG; keep the text span
-        Array.from(el.children).forEach((gc) => {
-          const gcel = gc as HTMLElement;
-          // Score badge: short text content that is a number
-          if (gcel.tagName === "SPAN" && /^\d+$/.test(gcel.textContent?.trim() ?? "")) {
-            gcel.remove();
-            return;
-          }
-          // Chevron SVG
-          if (gcel.tagName === "SVG" || gcel.tagName === "svg") {
-            gcel.remove();
-            return;
-          }
-          // Session-applied marker dot (tiny ● span)
-          if (gcel.tagName === "SPAN" && (gcel.textContent?.trim() === "●" || gcel.textContent?.trim() === "✦")) {
-            gcel.remove();
-          }
-        });
-      } else {
-        // Issue chips div, BulletImprovedEditor, or any other non-text block
-        // — remove everything that isn't the main flex bullet row
-        el.remove();
-      }
-    });
   });
 
-  // Neutralize CSS custom properties that might bleed in (dark mode vars, etc.)
-  // by adding an inline override block
+  // 5. Inject complete CSS variable definitions + export overrides.
+  //    Headless Chromium has no globals.css so every var must be spelled out.
   const style = clone.ownerDocument?.createElement("style") ?? document.createElement("style");
   style.textContent = `
     :root {
-      --resume-paper-bg: #ffffff;
-      --resume-paper-ink: #111111;
-      --resume-paper-muted: #555555;
-      --resume-paper-border: #e5e7eb;
-      --resume-paper-row-hover: transparent;
-      --red-bg: transparent;
-      --yellow-bg: transparent;
+      /* Light-mode resume paper palette — mirrors globals.css */
+      --resume-paper-bg:       #ffffff;
+      --resume-paper-ink:      #0f172a;
+      --resume-paper-muted:    #475569;
+      --resume-paper-dim:      #64748b;
+      --resume-paper-accent:   #0969da;
+      --resume-paper-border:   rgba(15,23,42,0.10);
+      --resume-paper-row:      #f8fafc;
+      --resume-paper-row-hover:transparent;
+
+      /* Annotation colour vars — all transparent in PDF */
+      --red-bg:   transparent;
+      --yellow-bg:transparent;
       --green-bg: transparent;
       --surface2: transparent;
     }
-    [data-bullet-idx] { background: transparent !important; border-left: none !important; }
-    .az-pdf-ignore { display: none !important; }
+
+    /* Ensure annotation backgrounds never bleed through */
+    [data-bullet-idx]            { background: transparent !important; border-left: none !important; }
+    .az-pdf-ignore               { display: none !important; }
+
+    /* Disable all animations and transitions — prevents Chromium capturing
+       a mid-animation frame (e.g. the mirror-pulse outline) */
+    *, *::before, *::after {
+      animation: none !important;
+      transition: none !important;
+    }
   `;
   clone.prepend(style);
 
@@ -97,8 +94,8 @@ export function useHtmlPdfExport() {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: white; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #ffffff; }
   @page { size: Letter; margin: 0; }
 </style>
 </head>
