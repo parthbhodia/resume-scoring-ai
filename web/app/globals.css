@@ -12,7 +12,7 @@
   --color-surface3:   var(--surface3);
   --color-border:     var(--border);
   --color-text:       var(--text);
-  --color-muted:      var(--muted);
+  --color-rn-muted:   var(--muted);
   --color-dim:        var(--dim);
   --color-accent:     var(--accent);
   --color-accent-h:   var(--accent-h);
@@ -51,8 +51,9 @@
   --color-ring:         var(--ring);
   --color-input:         var(--input);
   --color-destructive:         var(--destructive);
+  --color-muted:         var(--surface2);
   --color-accent-foreground:         var(--accent-foreground);
-  --color-muted-foreground:         var(--muted-foreground);
+  --color-muted-foreground:         var(--muted);
   --color-secondary-foreground:         var(--secondary-foreground);
   --color-secondary:         var(--secondary);
   --color-primary-foreground:         var(--primary-foreground);
@@ -61,8 +62,8 @@
   --color-popover:         var(--popover);
   --color-card-foreground:         var(--card-foreground);
   --color-card:         var(--card);
-  --color-foreground:         var(--foreground);
-  --color-background:         var(--background);
+  --color-foreground:         var(--text);
+  --color-background:         var(--bg);
   --radius-xl:         calc(var(--radius) * 1.4);
   --radius-2xl:         calc(var(--radius) * 1.8);
   --radius-3xl:         calc(var(--radius) * 2.2);
@@ -160,8 +161,8 @@
 
 /* Typography scale — centralized font sizes, weights, and line-heights */
 :root,
-[data-theme=”dark”],
-[data-theme=”light”] {
+[data-theme="dark"],
+[data-theme="light"] {
   --font-size-xs:        9px;
   --font-size-sm:        11px;
   --font-size-base:      13px;
@@ -185,8 +186,8 @@
 
 /* Analyze “Edit” preview: always print-white paper + dark ink (independent of app chrome theme). */
 :root,
-[data-theme=”dark”],
-[data-theme=”light”] {
+[data-theme="dark"],
+[data-theme="light"] {
   --resume-paper-bg:       #ffffff;
   --resume-paper-ink:      #0f172a;
   --resume-paper-muted:    #475569;
@@ -207,7 +208,7 @@
   --color-green:    var(--green);
   --color-yellow:   var(--yellow);
   --color-red:      var(--red);
-  --color-muted:    var(--muted);
+  --color-rn-muted: var(--muted);
   --color-dim:      var(--dim);
   --color-rb-text:  var(--text);
 }
@@ -216,9 +217,7 @@
 
 html, body {
   height: 100%;
-  /* DM Sans loaded via layout.tsx Google Fonts — gives the app the same
-     refined feel as the landing page without the serif heaviness */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-sans), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   background: var(--bg);
   color: var(--text);
@@ -801,6 +800,126 @@ select option { background: var(--surface); }
   --sidebar-ring:         oklch(0.708 0 0);
 }
 
+/* App/shadcn bridge:
+   shadcn's starter variables use names like --muted and --accent, but this
+   app already uses those as readable text/action tokens. Keep app tokens
+   authoritative, then map shadcn semantic colors onto the same palette. */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:          #0d1117;
+  --surface:     #161b22;
+  --surface2:    #1e2329;
+  --surface3:    #252c37;
+  --border:      rgba(230,237,243,0.12);
+  --border-h:    rgba(230,237,243,0.22);
+  --text:        #f0f6fc;
+  --muted:       rgba(240,246,252,0.74);
+  --dim:         rgba(240,246,252,0.54);
+  --accent:      #58a6ff;
+  --accent-h:    #79c0ff;
+  --accent-bg:   rgba(88,166,255,0.15);
+  --amber:       #fbbf24;
+  --amber-h:     #fcd34d;
+  --amber-bg:    rgba(251,191,36,0.16);
+  --amber-ink:   #fcd34d;
+  --green:       #34d399;
+  --green-bg:    rgba(52,211,153,0.16);
+  --green-ink:   #6ee7b7;
+  --yellow:      #fbbf24;
+  --yellow-bg:   rgba(251,191,36,0.15);
+  --red:         #f87171;
+  --red-bg:      rgba(248,113,113,0.16);
+  --red-ink:     #fca5a5;
+  --orange:      #f59e0b;
+  --glass-bg:    rgba(13,17,23,0.90);
+  --shadow:      0 4px 32px rgba(0,0,0,0.44);
+  --shadow-sm:   0 1px 4px rgba(0,0,0,0.26);
+  --shadow-card: 0 8px 28px rgba(0,0,0,0.22);
+
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --popover: var(--surface);
+  --popover-foreground: var(--text);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface2);
+  --secondary-foreground: var(--text);
+  --muted-foreground: var(--muted);
+  --accent-foreground: var(--text);
+  --destructive: var(--red);
+  --input: rgba(240,246,252,0.16);
+  --ring: var(--accent);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--surface2);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--accent);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg:          #f7f9fc;
+  --surface:     #ffffff;
+  --surface2:    #eef3f8;
+  --surface3:    #dbe4ee;
+  --border:      rgba(15,23,42,0.14);
+  --border-h:    rgba(15,23,42,0.26);
+  --text:        #0f172a;
+  --muted:       #475569;
+  --dim:         #64748b;
+  --accent:      #0969da;
+  --accent-h:    #0559c7;
+  --accent-bg:   rgba(9,105,218,0.11);
+  --amber:       #b45309;
+  --amber-h:     #92400e;
+  --amber-bg:    rgba(180,83,9,0.12);
+  --amber-ink:   #92400e;
+  --green:       #059669;
+  --green-h:     #047857;
+  --green-bg:    rgba(5,150,105,0.12);
+  --green-ink:   #047857;
+  --yellow:      #a16207;
+  --yellow-bg:   rgba(161,98,7,0.12);
+  --red:         #dc2626;
+  --red-bg:      rgba(220,38,38,0.12);
+  --red-ink:     #991b1b;
+  --orange:      #c2410c;
+  --glass-bg:    rgba(255,255,255,0.90);
+  --shadow:      0 14px 40px rgba(15,23,42,0.11);
+  --shadow-sm:   0 1px 4px rgba(15,23,42,0.08);
+  --shadow-card: 0 10px 28px rgba(15,23,42,0.08);
+
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --popover: var(--surface);
+  --popover-foreground: var(--text);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface2);
+  --secondary-foreground: var(--text);
+  --muted-foreground: var(--muted);
+  --accent-foreground: var(--text);
+  --destructive: var(--red);
+  --input: rgba(15,23,42,0.16);
+  --ring: var(--accent);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--surface2);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--accent);
+}
+
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 .az-btn {
   display: inline-flex;
@@ -829,7 +948,7 @@ select option { background: var(--surface); }
   color: var(--muted);
   border-color: var(--border);
 }
-.az-btn--ghost:hover:not(:disabled) { background: var(--surface2); color: var(--fg); }
+.az-btn--ghost:hover:not(:disabled) { background: var(--surface2); color: var(--text); }
 .az-btn--danger {
   background: transparent;
   color: var(--az-weak-text);
@@ -917,8 +1036,8 @@ select option { background: var(--surface); }
   padding: var(--az-2) var(--az-3);
   font-size: 10.5px;
   line-height: 1.5;
-  color: var(--fg);
-  font-family: 'Georgia', serif;
+  color: var(--text);
+  font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
 }
 
 /* ── Bullet edit textarea ────────────────────────────────────────────────── */
@@ -932,9 +1051,9 @@ select option { background: var(--surface); }
   border-radius: 6px;
   border: 1.5px solid var(--border);
   background: var(--bg);
-  color: var(--fg);
+  color: var(--text);
   resize: vertical;
-  font-family: 'Georgia', serif;
+  font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
   transition: border-color 0.15s;
   outline: none;
 }
@@ -951,7 +1070,7 @@ select option { background: var(--surface); }
 .az-bullet-accepted-text {
   font-size: 10.5px;
   line-height: 1.45;
-  color: var(--fg);
+  color: var(--text);
   margin-bottom: var(--az-1);
   word-break: break-word;
 }
@@ -1032,7 +1151,7 @@ select option { background: var(--surface); }
   letter-spacing: -0.6px;
   line-height: 1.15;
   color: var(--text);
-  font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  font-family: var(--font-sans), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .az-analyze-hero-sub {

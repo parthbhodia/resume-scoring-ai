@@ -841,7 +841,7 @@ export default function AnalyzeResume() {
   /* ── Shared sidebar: pinned strip (score / recent header) + scrollable body ─── */
   const sidebarPinned = !result ? (
     <>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6, fontFamily: "'Cormorant Garant', Georgia, serif" }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6, fontFamily: "var(--font-sans), Inter, system-ui, sans-serif" }}>
         Recent Analyses
       </div>
       <div style={{ fontSize: 10.5, color: "var(--dim)", lineHeight: 1.45 }}>
@@ -1607,7 +1607,7 @@ export default function AnalyzeResume() {
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                 <ScoreRing score={result.overallScore} size={80} label="" />
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, fontFamily: "'Cormorant Garant', Georgia, serif", marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, fontFamily: "var(--font-sans), Inter, system-ui, sans-serif", marginBottom: 4 }}>
                     Resume Score
                   </div>
                   <div style={{ fontSize: 32, fontWeight: 700, color: scoreColor(result.overallScore), lineHeight: 1 }}>
@@ -2591,7 +2591,7 @@ export default function AnalyzeResume() {
               }}>
                 <div>
                   <div style={{
-                    fontFamily: "'Cormorant Garant', Georgia, serif",
+                    fontFamily: "var(--font-sans), Inter, system-ui, sans-serif",
                     fontSize: 26, fontWeight: 600, letterSpacing: -0.5,
                     color: "var(--text)", marginBottom: 6,
                   }}>

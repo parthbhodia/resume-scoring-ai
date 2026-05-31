@@ -344,7 +344,7 @@ export default function LandingPage() {
               <GoogleG /> Get started — it&apos;s free
             </Button>
             <Button variant="outline" onClick={() => scrollTo("how")}
-              className="px-6 py-3 text-[15px] rounded-[10px] border-border text-muted hover:border-accent hover:text-accent bg-transparent"
+              className="px-6 py-3 text-[15px] rounded-[10px] border-border text-[color:var(--muted)] hover:border-accent hover:text-accent bg-transparent"
             >See how it works</Button>
           </div>
 
