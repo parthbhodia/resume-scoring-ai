@@ -483,8 +483,20 @@ export default function ResumeBuilder({
     setSuggestResearchDigest("");
     setSuggestResearchQueries([]);
     setSuggestResearchSources([]);
-  }, [resetSuggestions, selectSuggestion]);
+  }, [resetSuggestions, selectSuggestion, setSuggestError]);
+  const suggestStreamAbortRef = useRef<AbortController | null>(null);
+  const generateStreamAbortRef = useRef<AbortController | null>(null);
+  const resetActiveTailorWork = useCallback(() => {
+    suggestStreamAbortRef.current?.abort();
+    suggestStreamAbortRef.current = null;
+    generateStreamAbortRef.current?.abort();
+    generateStreamAbortRef.current = null;
+    setSuggestLoading(false);
+    setGenerating(false);
+    setStatusMsg("");
+  }, [setSuggestLoading]);
   const tryAnotherJob = useCallback(() => {
+    resetActiveTailorWork();
     clearSuggestionsState();
     setResult(null);
     setPreview("");
@@ -494,8 +506,15 @@ export default function ResumeBuilder({
     setAtsResult(null);
     setAtsError(null);
     clearDraft();
-  }, [clearSuggestionsState]);
-  const suggestStreamAbortRef = useRef<AbortController | null>(null);
+  }, [clearSuggestionsState, resetActiveTailorWork]);
+
+  useEffect(() => {
+    return () => {
+      suggestStreamAbortRef.current?.abort();
+      generateStreamAbortRef.current?.abort();
+    };
+  }, []);
+
   const builderMainScrollRef = useRef<HTMLElement | null>(null);
   const scrollBuilderToTop = useCallback((behavior: ScrollBehavior = "auto") => {
     builderMainScrollRef.current?.scrollTo({ top: 0, behavior });
@@ -1247,6 +1266,10 @@ export default function ResumeBuilder({
   }, []);
 
   const generate = useCallback(async (): Promise<GeneratePdfOutcome | null> => {
+    generateStreamAbortRef.current?.abort();
+    const ac = new AbortController();
+    generateStreamAbortRef.current = ac;
+
     setGenerating(true);
     setError(null);
     setStatusMsg("Connecting…");
@@ -1352,6 +1375,7 @@ export default function ResumeBuilder({
       const resp = await fetch(apiUrl("/api/generate-stream"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: ac.signal,
         body: JSON.stringify({
           company: effCompany, role: effRole, job_description: effJd,
           model, base_folder: baseFolder,
@@ -1510,6 +1534,9 @@ export default function ResumeBuilder({
       }
       return null;
     } catch (e: unknown) {
+      if (e instanceof Error && e.name === "AbortError") {
+        return null;
+      }
       setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : String(e)));
       if (!studioHandoff) {
         setResult((r) => (r && !r.ratings && !r.pdfUrl ? null : r));
@@ -1517,6 +1544,10 @@ export default function ResumeBuilder({
       setGenerating(false);
       setStatusMsg("");
       return null;
+    } finally {
+      if (generateStreamAbortRef.current === ac) {
+        generateStreamAbortRef.current = null;
+      }
     }
   }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources, scrollBuilderToTop]);
 
