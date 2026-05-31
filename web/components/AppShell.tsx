@@ -19,7 +19,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
 import { apiUrl } from "@/lib/utils";
-import { CONTACT_EMAIL } from "@/lib/brand";
 import { isUmbcUser } from "@/lib/userDomainDetection";
 import { LogoFull, LogoMark } from "./BrandLogo";
 import { UmbcWelcomeBanner } from "./UmbcWelcomeBanner";
@@ -120,6 +119,23 @@ const VIEW_ICONS: Record<AppView, ReactNode> = {
 const BADGES: Partial<Record<AppView, string>> = {
   jobs: "Soon",
   "cover-letter": "Soon",
+};
+
+const BUILDER_SUBFLOW_ICONS: Record<"tailor" | "template", ReactNode> = {
+  tailor: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="2.5" y="5" width="11" height="8.5" rx="1.5" stroke="currentColor" strokeWidth="1.35"/>
+      <path d="M5.5 5V4a1.5 1.5 0 011.5-1.5h2A1.5 1.5 0 0110.5 4v1" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round"/>
+      <path d="M8 7.4l.45.95.95.45-.95.45L8 10.2l-.45-.95-.95-.45.95-.45L8 7.4z" fill="currentColor"/>
+    </svg>
+  ),
+  template: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="1.6" stroke="currentColor" strokeWidth="1.35"/>
+      <path d="M2.5 6h11M6.5 6v7.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
+      <path d="M8.7 8.6h2.4M8.7 10.8h2.4" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round"/>
+    </svg>
+  ),
 };
 
 const SIDEBAR_COLLAPSED_KEY = "rn-app-sidebar-collapsed";
@@ -362,10 +378,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <div
             style={{
               display: "flex",
-              flexDirection: isTablet ? "column" : "row",
+              flexDirection: isTablet || sidebarCollapsed ? "column" : "row",
               alignItems: "center",
               gap: 8,
-              justifyContent: isTablet ? "center" : "space-between",
+              justifyContent: isTablet || sidebarCollapsed ? "center" : "space-between",
             }}
           >
             <button
@@ -381,9 +397,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 padding: 0,
                 cursor: "pointer",
                 fontFamily: "inherit",
-                flex: isTablet ? undefined : 1,
+                flex: isTablet || sidebarCollapsed ? undefined : 1,
                 minWidth: 0,
-                justifyContent: isTablet ? "center" : "flex-start",
+                justifyContent: isTablet || sidebarCollapsed ? "center" : "flex-start",
               }}
             >
               {isTablet || sidebarCollapsed ? (
@@ -450,7 +466,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
                           goBuilderFlow(key);
                         }}
                       >
-                        {label}
+                        <span className="app-nav-sublink-icon" aria-hidden>
+                          {BUILDER_SUBFLOW_ICONS[key]}
+                        </span>
+                        <span>{label}</span>
                       </button>
                     );
                   })}
@@ -515,17 +534,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
               )}
             </button>
 
-            <div data-user-menu style={{ position: "relative", flex: 1, minWidth: 0 }}>
+            <div data-user-menu style={{ position: "relative", flexShrink: 0 }}>
               <button
                 type="button"
                 onClick={() => setMenuOpen(o => !o)}
+                title="Account menu"
+                aria-label="Account menu"
                 style={{
-                  width: "100%",
-                  height: 40,
-                  borderRadius: "var(--radius)",
-                  border: `1px solid ${menuOpen ? "var(--accent)" : "var(--border)"}`,
-                  background: menuOpen ? "var(--accent-bg)" : "var(--surface2)",
-                  color: "var(--text)",
+                  width: 32,
+                  height: 32,
+                  borderRadius: "50%",
+                  border: "none",
+                  background: "var(--accent)",
+                  color: "#fff",
                   cursor: "pointer",
                   fontFamily: "inherit",
                   fontWeight: 600,
@@ -533,23 +554,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: 8,
-                  padding: "0 8px",
+                  padding: 0,
+                  boxShadow: menuOpen ? "0 0 0 3px var(--accent-bg)" : "none",
                 }}
               >
-                <span style={{ width: 26, height: 26, borderRadius: "50%", background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, flexShrink: 0 }}>
-                  {initial}
-                </span>
-                <span className="app-sidebar-label" style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>
-                  {user?.email || "…"}
-                </span>
+                {initial}
               </button>
               {menuOpen && (
                 <div
                   style={{
                     position: "absolute",
                     bottom: "calc(100% + 8px)",
-                    left: 0,
                     right: 0,
                     minWidth: 160,
                     background: "var(--surface)",
@@ -568,7 +583,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <nav className="app-sidebar-legal" style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11, paddingTop: 4 }}>
-            <Link href="/contact" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Contact</Link>
             <Link href="/terms" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Terms</Link>
             <Link href="/privacy" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Privacy</Link>
           </nav>

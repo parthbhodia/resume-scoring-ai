@@ -4991,6 +4991,12 @@ Infer the field from the résumé text and score against that field's expectatio
   "3 retries", "PostgreSQL", or "AWS Lambda" while calling the change "readability" or \
   "language quality" is a lie — the rewrite must add JD vocabulary, not strip the original's content. \
   Rewrites should be the same length or longer than the original.
+- SUBSTANTIVE REWRITES ONLY: a rewrite that only changes tense, plurality, punctuation, or one weak \
+  verb form is NOT an improvedBullet. "Conduct price verification..." → "Conducted price verification..." \
+  is invalid. For duty phrasing / achievementQuality / languageQuality, rewrite the bullet into \
+  ownership + scope + outcome, e.g. "Verified Bloomberg and market pricing data across $500M+ AUM \
+  hedge-fund portfolios, improving NAV precision and valuation accuracy." If you cannot improve \
+  substance, omit improvedBullet/categoryRewrites for that category.
 - QUANTIFICATION TRUTHFULNESS: only emit categoryRewrites.quantification when your rewrite actually \
   adds a number, percent, scale, or [X]/[%]/[$Y] placeholder that was NOT in the original. If you \
   cannot add a real or [placeholder] number, omit the quantification rewrite entirely. Never tag a \
@@ -5296,6 +5302,41 @@ def _word_jaccard(a: str, b: str) -> float:
     return len(wa & wb) / len(wa | wb)
 
 
+def _token_morph_variants(token: str) -> set:
+    """Return conservative variants for no-op tense/plural changes."""
+    t = token.lower()
+    variants = {t}
+    if len(t) >= 5 and t.endswith("ed"):
+        root = t[:-2]
+        variants.add(root)
+        variants.add(root + "e")
+    if len(t) >= 6 and t.endswith("ing"):
+        root = t[:-3]
+        variants.add(root)
+        variants.add(root + "e")
+    if len(t) >= 4 and t.endswith("s") and not t.endswith("ss"):
+        variants.add(t[:-1])
+    return variants
+
+
+def _is_morphology_only_rewrite(original: str, rewrite: str) -> bool:
+    """Detect rewrites that only change word form, e.g. Conduct → Conducted."""
+    orig_words = re.findall(r"\b[a-zA-Z]+\b", original.lower())
+    rewrite_words = re.findall(r"\b[a-zA-Z]+\b", rewrite.lower())
+    if not orig_words or len(orig_words) != len(rewrite_words):
+        return False
+
+    changed = 0
+    for ow, rw in zip(orig_words, rewrite_words):
+        if ow == rw:
+            continue
+        if _token_morph_variants(ow).isdisjoint(_token_morph_variants(rw)):
+            return False
+        changed += 1
+
+    return 0 < changed <= 2
+
+
 def _filter_bullet_rewrites(
     original: str,
     improved: str,
@@ -5339,6 +5380,14 @@ def _filter_bullet_rewrites(
                 _word_jaccard(original, kept_improved), original[:80], kept_improved[:80],
             )
             kept_improved = ""
+        elif _is_morphology_only_rewrite(original, kept_improved):
+            # Tense/plural-only edits look like progress in the UI but do not
+            # materially improve the bullet (e.g. "Conduct" → "Conducted").
+            logger.info(
+                "rewrite-validator dropped morphology-only improvedBullet: orig=%r rewrite=%r",
+                original[:80], kept_improved[:80],
+            )
+            kept_improved = ""
 
     kept_cr: dict = {}
     if isinstance(category_rewrites, dict):
@@ -5362,6 +5411,12 @@ def _filter_bullet_rewrites(
                 logger.info(
                     "rewrite-validator dropped near-no-op categoryRewrites.%s (jaccard=%.2f): %r",
                     cat, _word_jaccard(original, txt), original[:80],
+                )
+                continue
+            if _is_morphology_only_rewrite(original, txt):
+                logger.info(
+                    "rewrite-validator dropped morphology-only categoryRewrites.%s: %r",
+                    cat, original[:80],
                 )
                 continue
             kept_cr[str(cat)] = txt

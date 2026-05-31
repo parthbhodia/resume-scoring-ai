@@ -147,6 +147,76 @@ function bulletSignalsExplicitQuantIssue(bullet: CategoryRewriteBullet): boolean
   return issueMatchesCategoryKeywords(issueBlob, "quantification");
 }
 
+function normalizeForRewriteDiff(value: string): string {
+  return value
+    .trim()
+    .replace(/^[\s•\-*▪▸●◦‧·・‣⁃►➤○⚫—–‑]+/, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/[ .,:;]+$/g, "");
+}
+
+function wordJaccard(a: string, b: string): number {
+  const aw = new Set(a.toLowerCase().match(/\b\w+\b/g) ?? []);
+  const bw = new Set(b.toLowerCase().match(/\b\w+\b/g) ?? []);
+  if (aw.size === 0 && bw.size === 0) return 1;
+  if (aw.size === 0 || bw.size === 0) return 0;
+  let overlap = 0;
+  for (const word of aw) {
+    if (bw.has(word)) overlap += 1;
+  }
+  return overlap / new Set([...aw, ...bw]).size;
+}
+
+function tokenMorphVariants(token: string): Set<string> {
+  const t = token.toLowerCase();
+  const variants = new Set([t]);
+  if (t.length >= 5 && t.endsWith("ed")) {
+    const root = t.slice(0, -2);
+    variants.add(root);
+    variants.add(`${root}e`);
+  }
+  if (t.length >= 6 && t.endsWith("ing")) {
+    const root = t.slice(0, -3);
+    variants.add(root);
+    variants.add(`${root}e`);
+  }
+  if (t.length >= 4 && t.endsWith("s") && !t.endsWith("ss")) {
+    variants.add(t.slice(0, -1));
+  }
+  return variants;
+}
+
+function isMorphologyOnlyRewrite(original: string, rewrite: string): boolean {
+  const originalWords = original.toLowerCase().match(/\b[a-zA-Z]+\b/g) ?? [];
+  const rewriteWords = rewrite.toLowerCase().match(/\b[a-zA-Z]+\b/g) ?? [];
+  if (originalWords.length === 0 || originalWords.length !== rewriteWords.length) return false;
+
+  let changed = 0;
+  for (let i = 0; i < originalWords.length; i += 1) {
+    const originalWord = originalWords[i];
+    const rewriteWord = rewriteWords[i];
+    if (originalWord === rewriteWord) continue;
+
+    const originalVariants = tokenMorphVariants(originalWord);
+    const rewriteVariants = tokenMorphVariants(rewriteWord);
+    if (![...originalVariants].some((variant) => rewriteVariants.has(variant))) {
+      return false;
+    }
+    changed += 1;
+  }
+
+  return changed > 0 && changed <= 2;
+}
+
+export function isTrivialRewrite(original: string, rewrite?: string | null): boolean {
+  const text = rewrite?.trim() ?? "";
+  if (!text) return true;
+  if (normalizeForRewriteDiff(original) === normalizeForRewriteDiff(text)) return true;
+  if (wordJaccard(original, text) >= 0.88) return true;
+  return isMorphologyOnlyRewrite(original, text);
+}
+
 /** Priority score for adding metrics (higher = flag under Quantification first). */
 export function quantificationImpactScore(
   bullet: CategoryRewriteBullet,
@@ -340,14 +410,18 @@ export function getRewriteForCategory(
 ): string {
   if (userDraft != null && userDraft.trim() !== "") return userDraft.trim();
   const focused = bullet.categoryRewrites?.[category]?.trim();
-  if (focused) return focused;
+  if (focused && !isTrivialRewrite(bullet.originalBullet, focused)) return focused;
 
   const primary = explicitPrimaryCategory(bullet)
     ?? (allBullets?.length
       ? buildBulletPrimaryCategories(allBullets, opts)[bulletIndex ?? allBullets.indexOf(bullet)]
       : inferBaseCategory(bullet));
 
-  if (primary === category && bullet.improvedBullet?.trim()) {
+  if (
+    primary === category
+    && bullet.improvedBullet?.trim()
+    && !isTrivialRewrite(bullet.originalBullet, bullet.improvedBullet)
+  ) {
     return bullet.improvedBullet.trim();
   }
   return "";

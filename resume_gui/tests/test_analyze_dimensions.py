@@ -354,6 +354,20 @@ class TestLanguageQualityDimension:
         kept_imp, _, _ = _filter_bullet_rewrites(orig, improved, {}, [])
         assert kept_imp == ""
 
+    def test_tense_only_rewrite_dropped(self):
+        orig = "Conduct price verification using Bloomberg and market data, enhancing valuation accuracy and improving NAV precision."
+        improved = "Conducted price verification using Bloomberg and market data, enhancing valuation accuracy and improving NAV precision."
+        kept_imp, _, _ = _filter_bullet_rewrites(orig, improved, {}, ["duty phrasing"])
+        assert kept_imp == ""
+
+    def test_tense_only_category_rewrite_dropped(self):
+        orig = "Conduct price verification using Bloomberg and market data."
+        category_rewrites = {
+            "languageQuality": "Conducted price verification using Bloomberg and market data."
+        }
+        _, kept_cr, _ = _filter_bullet_rewrites(orig, "", category_rewrites, ["duty phrasing"])
+        assert kept_cr == {}
+
     def test_real_rewrite_kept(self):
         orig = "Designed the system."
         improved = "Architected a distributed system handling 10k req/s."

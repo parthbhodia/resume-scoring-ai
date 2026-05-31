@@ -504,6 +504,10 @@ type ResumeSectionRole =
   | "activities"
   | "other";
 
+const RESUME_HEADING_FONT = "var(--az-resume-heading-font, 'Georgia', 'Times New Roman', serif)";
+const RESUME_BODY_FONT = "var(--az-resume-body-font, 'Georgia', 'Times New Roman', serif)";
+const RESUME_UI_FONT = "var(--az-resume-ui-font, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)";
+
 function roleForKnownSection(text: string): ResumeSectionRole | null {
   const t = text.trim();
   if (!KNOWN_SECTIONS.test(t)) return null;
@@ -586,19 +590,19 @@ function EntryHeaderLine({ line }: { line: string }) {
     const datePart = isLastDate ? last : null;
 
     return (
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "0 8px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "0 8px", lineHeight: 1.22 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: "system-ui, sans-serif" }}>
+          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: RESUME_UI_FONT }}>
             {mains[0]}
           </span>
           {mains.slice(1).map((p, i) => (
-            <span key={i} style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: "system-ui, sans-serif" }}>
+            <span key={i} style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: RESUME_UI_FONT }}>
               {"·"} {p}
             </span>
           ))}
         </div>
         {datePart && (
-          <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: "system-ui, sans-serif", flexShrink: 0 }}>
+          <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: RESUME_UI_FONT, flexShrink: 0 }}>
             {datePart}
           </span>
         )}
@@ -622,19 +626,19 @@ function EntryHeaderLine({ line }: { line: string }) {
     const metaParts = rest.slice(metaStart);
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 1, lineHeight: 1.22 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: "system-ui, sans-serif" }}>
+          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: RESUME_UI_FONT }}>
             {title}
           </span>
           {metaParts.length > 0 && (
-            <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: "system-ui, sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
+            <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: RESUME_UI_FONT, flexShrink: 0, whiteSpace: "nowrap" }}>
               {metaParts.join(" · ")}
             </span>
           )}
         </div>
         {institutionParts.length > 0 && (
-          <span style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: "system-ui, sans-serif" }}>
+          <span style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: RESUME_UI_FONT }}>
             {institutionParts.join(" · ")}
           </span>
         )}
@@ -645,7 +649,7 @@ function EntryHeaderLine({ line }: { line: string }) {
   // Year-range line without pipe — treat as date/location
   return (
     <div style={{ display: "flex", justifyContent: "flex-end" }}>
-      <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontStyle: "italic", fontFamily: "system-ui, sans-serif" }}>
+      <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontStyle: "italic", fontFamily: RESUME_UI_FONT, lineHeight: 1.22 }}>
         {renderInline(t)}
       </span>
     </div>
@@ -834,10 +838,10 @@ export default function AnalyzeLiveResumeBody({
     <div style={{
       background: "var(--resume-paper-bg)",
       color: "var(--resume-paper-ink)",
-      padding: "32px 36px 52px",
-      fontFamily: "'Georgia', 'Times New Roman', serif",
-      fontSize: 10.8,
-      lineHeight: 1.45,
+      padding: "var(--az-resume-paper-padding, 32px 36px 52px)",
+      fontFamily: RESUME_BODY_FONT,
+      fontSize: "var(--az-resume-base-font-size, 10.8px)",
+      lineHeight: "var(--az-resume-line-height, 1.45)",
       minHeight: 120,
       overflowWrap: "anywhere",
       wordBreak: "break-word",
@@ -918,7 +922,7 @@ export default function AnalyzeLiveResumeBody({
                   letterSpacing: 0.4,
                   color: "var(--resume-paper-ink)",
                   marginBottom: 7,
-                  fontFamily: "'Georgia', serif",
+                  fontFamily: RESUME_HEADING_FONT,
                 }}>
                   {renderInline(nameLine)}
                 </div>
@@ -932,7 +936,7 @@ export default function AnalyzeLiveResumeBody({
                   gap: "0 4px",
                   fontSize: 9.4,
                   color: "var(--resume-paper-muted)",
-                  fontFamily: "system-ui, sans-serif",
+                  fontFamily: RESUME_UI_FONT,
                   lineHeight: 1.7,
                 }}>
                   {contactItems.map((item, ci) => (
@@ -952,7 +956,7 @@ export default function AnalyzeLiveResumeBody({
           const isPrimarySection = Boolean(roleForKnownSection(blk.text));
           return (
             <div key={bi} style={{
-              marginTop: isPrimarySection ? 17 : 11,
+              marginTop: isPrimarySection ? "var(--az-resume-section-margin-top, 17px)" : 11,
               marginBottom: isPrimarySection ? 7 : 5,
               paddingBottom: isPrimarySection ? 3 : 2,
               borderBottom: isPrimarySection
@@ -963,7 +967,7 @@ export default function AnalyzeLiveResumeBody({
               letterSpacing: isPrimarySection ? 1.6 : 1.25,
               color: "var(--resume-paper-accent)",
               textTransform: "uppercase",
-              fontFamily: "system-ui, sans-serif",
+              fontFamily: RESUME_UI_FONT,
             }}>
               {blk.text}
             </div>
@@ -983,13 +987,13 @@ export default function AnalyzeLiveResumeBody({
               : blk.lines;
 
           return (
-            <div key={bi} style={{ marginBottom: presentationOnly ? 5 : 6 }}>
+            <div key={bi} style={{ marginBottom: inEducationSection ? (presentationOnly ? 3 : 4) : presentationOnly ? 5 : 6 }}>
               {paragraphLines.map((ln, li) => {
                 const t = ln.trim();
                 if (!t || isPlaceholderIdentityLine(ln)) return null;
                 if (looksLikeEntryHeader(t)) {
                   return (
-                    <div key={li} style={{ marginBottom: li === 0 ? 2 : 1 }}>
+                    <div key={li} style={{ marginBottom: inEducationSection ? 0 : li === 0 ? 2 : 1 }}>
                       <EntryHeaderLine line={t} />
                     </div>
                   );
@@ -1000,10 +1004,10 @@ export default function AnalyzeLiveResumeBody({
                       fontSize: 10.65,
                       fontWeight: 700,
                       color: "var(--resume-paper-ink)",
-                      lineHeight: 1.35,
-                      marginTop: li > 0 ? 5 : 0,
-                      marginBottom: 1,
-                      fontFamily: "system-ui, sans-serif",
+                      lineHeight: 1.22,
+                      marginTop: li > 0 ? 4 : 0,
+                      marginBottom: 0,
+                      fontFamily: RESUME_UI_FONT,
                       overflowWrap: "anywhere",
                       wordBreak: "break-word",
                     }}>
@@ -1014,11 +1018,11 @@ export default function AnalyzeLiveResumeBody({
                 // Plain paragraph text (summary, skills list, location, etc.)
                 return (
                   <div key={li} style={{
-                    fontSize: 10.4,
+                    fontSize: inEducationSection ? 10.25 : 10.4,
                     color: "var(--resume-paper-ink)",
-                    lineHeight: 1.55,
-                    marginBottom: 2,
-                    fontFamily: inSkillsSection ? "system-ui, sans-serif" : li === 0 ? "'Georgia', serif" : "system-ui, sans-serif",
+                    lineHeight: inEducationSection ? 1.28 : 1.55,
+                    marginBottom: inEducationSection ? 0 : 2,
+                    fontFamily: inSkillsSection || inEducationSection ? RESUME_UI_FONT : li === 0 ? RESUME_BODY_FONT : RESUME_UI_FONT,
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
                   }}>

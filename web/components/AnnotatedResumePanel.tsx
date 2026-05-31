@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import AnalyzeLiveResumeBody, {
   lineLooksLikeStandaloneSectionHeading,
@@ -112,6 +112,61 @@ function mirrorToneStyles(score: number): { bar: string; bg: string; shadow: str
     shadow: "0 0 20px rgba(248, 113, 113, 0.18)",
   };
 }
+
+type PreviewStyleId = "classic" | "modern" | "compact";
+
+const PREVIEW_STYLE_OPTIONS: Array<{
+  id: PreviewStyleId;
+  label: string;
+  vars: Record<string, string>;
+}> = [
+  {
+    id: "classic",
+    label: "Classic",
+    vars: {
+      "--az-resume-heading-font": "'Georgia', 'Times New Roman', serif",
+      "--az-resume-body-font": "'Georgia', 'Times New Roman', serif",
+      "--az-resume-ui-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "--az-resume-base-font-size": "10.8px",
+      "--az-resume-line-height": "1.42",
+      "--az-resume-paper-padding": "32px 36px 52px",
+      "--az-resume-section-margin-top": "17px",
+    },
+  },
+  {
+    id: "modern",
+    label: "Modern",
+    vars: {
+      "--az-resume-heading-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "--az-resume-body-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "--az-resume-ui-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "--az-resume-base-font-size": "10.6px",
+      "--az-resume-line-height": "1.4",
+      "--az-resume-paper-padding": "30px 36px 50px",
+      "--az-resume-section-margin-top": "16px",
+    },
+  },
+  {
+    id: "compact",
+    label: "Compact",
+    vars: {
+      "--az-resume-heading-font": "'Georgia', 'Times New Roman', serif",
+      "--az-resume-body-font": "'Georgia', 'Times New Roman', serif",
+      "--az-resume-ui-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "--az-resume-base-font-size": "10.2px",
+      "--az-resume-line-height": "1.34",
+      "--az-resume-paper-padding": "26px 34px 44px",
+      "--az-resume-section-margin-top": "13px",
+    },
+  },
+];
+
+const PREVIEW_ACCENTS = [
+  { label: "Blue", value: "#0969da" },
+  { label: "Slate", value: "#334155" },
+  { label: "Emerald", value: "#047857" },
+  { label: "Amber", value: "#b45309" },
+];
 
 /** When the API omits `extractedText`, rebuild a minimal "page" from bullets + section headers.
  *  Only emits the heading for the section that has bullets — avoids empty PROJECTS/EDUCATION shells. */
@@ -229,6 +284,8 @@ export default function AnnotatedResumePanel({
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [selectedReferenceFolder, setSelectedReferenceFolder] = useState<string>(DEFAULT_REFERENCE_FOLDER);
+  const [previewStyleId, setPreviewStyleId] = useState<PreviewStyleId>("classic");
+  const [previewAccent, setPreviewAccent] = useState(PREVIEW_ACCENTS[0].value);
   const scrollRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
 
@@ -327,6 +384,14 @@ export default function AnnotatedResumePanel({
         ? "synthetic"
         : "none";
   const useLiveDoc = extractKind !== "none";
+  const previewStyleVars = useMemo(() => {
+    const preset = PREVIEW_STYLE_OPTIONS.find((option) => option.id === previewStyleId)
+      ?? PREVIEW_STYLE_OPTIONS[0];
+    return {
+      ...preset.vars,
+      "--resume-paper-accent": previewAccent,
+    } as CSSProperties;
+  }, [previewStyleId, previewAccent]);
 
   const flaggedCount = activeCategory
     ? bulletPrimaryCategories.filter((c) => c === activeCategory).length
@@ -624,6 +689,73 @@ export default function AnnotatedResumePanel({
           )}
           {useLiveDoc ? (
             <div
+              className="az-pdf-ignore"
+              aria-label="Preview style controls"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 6px",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                background: "var(--surface2)",
+              }}
+            >
+              <span style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: "var(--dim)",
+                textTransform: "uppercase",
+                letterSpacing: 0.45,
+              }}>
+                Style
+              </span>
+              <select
+                value={previewStyleId}
+                onChange={(event) => setPreviewStyleId(event.target.value as PreviewStyleId)}
+                aria-label="Preview resume style"
+                style={{
+                  width: "auto",
+                  minWidth: 92,
+                  height: 28,
+                  padding: "3px 24px 3px 8px",
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: "var(--surface)",
+                }}
+              >
+                {PREVIEW_STYLE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                {PREVIEW_ACCENTS.map((accent) => {
+                  const active = previewAccent === accent.value;
+                  return (
+                    <button
+                      key={accent.value}
+                      type="button"
+                      aria-label={`${accent.label} accent`}
+                      title={`${accent.label} accent`}
+                      onClick={() => setPreviewAccent(accent.value)}
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: 999,
+                        border: active ? "2px solid var(--text)" : "1px solid var(--border-h)",
+                        background: accent.value,
+                        boxShadow: active ? `0 0 0 2px ${accent.value}33` : "none",
+                        cursor: "pointer",
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {useLiveDoc ? (
+            <div
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -846,6 +978,7 @@ export default function AnnotatedResumePanel({
           ref={paperRef}
           className="az-resume-paper"
           style={{
+            ...previewStyleVars,
             position: "relative",
             background: "var(--resume-paper-bg)",
             borderRadius: 3,

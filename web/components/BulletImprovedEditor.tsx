@@ -9,6 +9,10 @@ type Props = {
   onChange: (next: string) => void;
   onReset: () => void;
   canReset: boolean;
+  eyebrow?: string;
+  helperText?: string;
+  resetLabel?: string;
+  accentColor?: string;
   /** Shown next to "AI Improved" — typically a Copy control */
   toolbarRight?: ReactNode;
   /** Textarea min height in px */
@@ -60,6 +64,10 @@ export default function BulletImprovedEditor({
   onChange,
   onReset,
   canReset,
+  eyebrow = "AI Improved",
+  helperText = "Edit below",
+  resetLabel = "Reset to AI",
+  accentColor = "var(--green)",
   toolbarRight,
   minHeight = 72,
   layout = "card",
@@ -93,7 +101,7 @@ export default function BulletImprovedEditor({
           <div style={{
             fontSize: 10,
             fontWeight: 700,
-            color: "var(--green)",
+            color: accentColor,
             display: "flex",
             alignItems: "center",
             gap: 4,
@@ -103,7 +111,7 @@ export default function BulletImprovedEditor({
             <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden>
               <path d="M6 1v10M2 7l4 4 4-4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            AI Improved
+            {eyebrow}
           </div>
           <span style={{
             fontSize: 10,
@@ -111,7 +119,7 @@ export default function BulletImprovedEditor({
             color: "var(--dim)",
             letterSpacing: 0.2,
           }}>
-            Edit below
+            {helperText}
           </span>
           {canReset && (
             <button
@@ -132,7 +140,7 @@ export default function BulletImprovedEditor({
                 fontFamily: "inherit",
               }}
             >
-              Reset to AI
+              {resetLabel}
             </button>
           )}
         </div>

@@ -12,6 +12,7 @@ import {
   filterIssuesForCategory,
   getRewriteForCategory,
   inferPrimaryCategoryFromBullet,
+  isTrivialRewrite,
   CATEGORY_REWRITE_HINTS,
   type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
@@ -1936,12 +1937,16 @@ export default function AnalyzeResume() {
                           categoryAssignmentOpts,
                         )
                       : (bullet.improvedBullet ?? "");
+                    const hasTrustedRewrite = categoryRewriteBase.trim().length > 0;
                     const draft = rewriteEdits[safeIdx] ?? categoryRewriteBase;
                     const bulletIssues = Array.isArray(bullet.issues) ? bullet.issues : [];
                     const categoryIssues = activeCategory
                       ? filterIssuesForCategory(bulletIssues, activeCategory)
                       : bulletIssues;
                     const previewMain = previewLineOverrides[safeIdx] ?? bullet.originalBullet;
+                    const editorDraft = hasTrustedRewrite
+                      ? draft
+                      : (rewriteEdits[safeIdx] ?? previewMain);
                     const previewLineAppliedHere = previewLineOverrides[safeIdx] !== undefined;
                     const isFlaggedAccordionOpen = expandedFlaggedBulletIdx === safeIdx;
                     const bColor = bullet.score < 50
@@ -2066,7 +2071,7 @@ export default function AnalyzeResume() {
                           actual rewrite to accompany it — otherwise it reads as
                           a misleading "fix" on a bullet that has none. */}
                       {activeCategory && CATEGORY_REWRITE_HINTS[activeCategory]
-                        && (draft.trim() || categoryRewriteBase.trim()) && (
+                        && hasTrustedRewrite && (
                         <p style={{
                           fontSize: 12,
                           color: "var(--muted)",
@@ -2080,7 +2085,7 @@ export default function AnalyzeResume() {
                           {CATEGORY_REWRITE_HINTS[activeCategory]}
                         </p>
                       )}
-                      {(draft.trim() || categoryRewriteBase.trim()) && (
+                      {hasTrustedRewrite ? (
                         <BulletImprovedEditor
                           layout="card"
                           value={draft}
@@ -2129,22 +2134,58 @@ export default function AnalyzeResume() {
                             </button>
                           )}
                         />
-                      )}
-                      {/* No auto-rewrite for this bullet under the active
-                          category — be honest rather than show a misleading
-                          generic hint with nothing actionable. */}
-                      {!(draft.trim() || categoryRewriteBase.trim()) && (
-                        <p style={{
-                          fontSize: 12,
-                          color: "var(--muted)",
-                          lineHeight: 1.55,
-                          margin: "2px 0 0",
-                          padding: "8px 10px",
-                          borderRadius: 8,
-                          background: "var(--surface2)",
-                        }}>
-                          No auto-rewrite for this one. The score reflects the issues tagged above — edit the line directly in Résumé Builder to address them.
-                        </p>
+                      ) : (
+                        <>
+                          <p style={{
+                            fontSize: 12,
+                            color: "var(--muted)",
+                            lineHeight: 1.55,
+                            margin: "2px 0 0",
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            background: "var(--surface2)",
+                            borderLeft: "3px solid var(--amber)",
+                          }}>
+                            No trusted AI rewrite was generated for this bullet. Edit the original below, then replace the preview line when it reads better.
+                          </p>
+                          <BulletImprovedEditor
+                            layout="card"
+                            value={editorDraft}
+                            onChange={v => patchBulletRewrite(safeIdx, v)}
+                            onReset={() => patchBulletRewrite(safeIdx, null)}
+                            canReset={rewriteEdits[safeIdx] !== undefined}
+                            eyebrow="Manual edit"
+                            helperText="Start from the original"
+                            resetLabel="Reset to original"
+                            accentColor="var(--amber)"
+                            minHeight={64}
+                            previewLineApplied={previewLineAppliedHere}
+                            onReplaceInPreview={() => patchPreviewLine(safeIdx, editorDraft.trim())}
+                            onRevertPreviewLine={() => patchPreviewLine(safeIdx, null)}
+                            onTextareaFocus={() => onBulletWorkspaceTextareaFocus(safeIdx)}
+                            onTextareaBlur={e => onBulletWorkspaceTextareaBlur(safeIdx, e)}
+                            toolbarRight={(
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  copyBullet(editorDraft, safeIdx);
+                                }}
+                                style={{
+                                  display: "inline-flex", alignItems: "center", gap: 5,
+                                  padding: "4px 11px", borderRadius: 7,
+                                  border: `1px solid ${copiedBullet === safeIdx ? "rgba(251,191,36,0.55)" : "rgba(251,191,36,0.34)"}`,
+                                  background: copiedBullet === safeIdx ? "rgba(251,191,36,0.16)" : "rgba(251,191,36,0.08)",
+                                  color: "var(--amber)", fontSize: 11, fontWeight: 600,
+                                  cursor: "pointer", fontFamily: "inherit",
+                                  transition: "all 0.15s",
+                                }}
+                              >
+                                {copiedBullet === safeIdx ? "Copied!" : "Copy draft"}
+                              </button>
+                            )}
+                          />
+                        </>
                       )}
                         </div>
                       )}
@@ -2392,9 +2433,14 @@ export default function AnalyzeResume() {
                       : bullet.score < 70
                       ? "rgba(245,158,11,0.12)"
                       : "rgba(52,211,153,0.12)";
-                    const baseImp = bullet.improvedBullet ?? "";
-                    const draftAcc = rewriteEdits[i] ?? baseImp;
+                    const baseImp = isTrivialRewrite(bullet.originalBullet, bullet.improvedBullet)
+                      ? ""
+                      : (bullet.improvedBullet ?? "");
                     const previewAcc = previewLineOverrides[i] ?? bullet.originalBullet;
+                    const hasAccordionRewrite = baseImp.trim().length > 0;
+                    const draftAcc = hasAccordionRewrite
+                      ? (rewriteEdits[i] ?? baseImp)
+                      : (rewriteEdits[i] ?? previewAcc);
                     const previewLineAppliedAcc = previewLineOverrides[i] !== undefined;
                     return (
                       <div
@@ -2462,7 +2508,7 @@ export default function AnalyzeResume() {
                                 <span style={{ marginLeft: 6, color: "#fbbf24", fontSize: 11, fontWeight: 700 }} title="Preview line replaced for this session">●</span>
                               )}
                             </div>
-                            {bullet.improvedBullet ? (
+                            {hasAccordionRewrite ? (
                               <BulletImprovedEditor
                                 layout="plain"
                                 value={draftAcc}
@@ -2494,7 +2540,57 @@ export default function AnalyzeResume() {
                                   </button>
                                 )}
                               />
-                            ) : null}
+                            ) : (
+                              <>
+                                <p style={{
+                                  fontSize: 12,
+                                  color: "var(--muted)",
+                                  lineHeight: 1.55,
+                                  margin: 0,
+                                  padding: "8px 10px",
+                                  borderRadius: 8,
+                                  background: "var(--surface2)",
+                                  borderLeft: "3px solid var(--amber)",
+                                }}>
+                                  No trusted AI rewrite for this bullet. Use the draft below for a manual cleanup.
+                                </p>
+                                <BulletImprovedEditor
+                                  layout="plain"
+                                  value={draftAcc}
+                                  onChange={v => patchBulletRewrite(i, v)}
+                                  onReset={() => patchBulletRewrite(i, null)}
+                                  canReset={rewriteEdits[i] !== undefined}
+                                  eyebrow="Manual edit"
+                                  helperText="Start from the original"
+                                  resetLabel="Reset to original"
+                                  accentColor="var(--amber)"
+                                  previewLineApplied={previewLineAppliedAcc}
+                                  onReplaceInPreview={() => patchPreviewLine(i, draftAcc.trim())}
+                                  onRevertPreviewLine={() => patchPreviewLine(i, null)}
+                                  onTextareaFocus={() => onBulletWorkspaceTextareaFocus(i)}
+                                  onTextareaBlur={e => onBulletWorkspaceTextareaBlur(i, e)}
+                                  toolbarRight={(
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        copyBullet(draftAcc, i);
+                                      }}
+                                      style={{
+                                        display: "inline-flex", alignItems: "center", gap: 4,
+                                        padding: "3px 9px", borderRadius: 6,
+                                        border: `1px solid ${copiedBullet === i ? "rgba(251,191,36,0.55)" : "rgba(251,191,36,0.34)"}`,
+                                        background: copiedBullet === i ? "rgba(251,191,36,0.16)" : "rgba(251,191,36,0.08)",
+                                        color: "var(--amber)", fontSize: 10.5, fontWeight: 600,
+                                        cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+                                      }}
+                                    >
+                                      {copiedBullet === i ? "✓ Copied" : "Copy draft"}
+                                    </button>
+                                  )}
+                                />
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
