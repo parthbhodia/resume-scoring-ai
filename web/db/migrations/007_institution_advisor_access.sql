@@ -15,6 +15,7 @@ create or replace function public.email_domain(email text)
 returns text
 language sql
 immutable
+set search_path = pg_catalog
 as $$
   select nullif(split_part(lower(btrim(coalesce(email, ''))), '@', 2), '')
 $$;
@@ -25,16 +26,35 @@ create table if not exists public.institutions (
   id           uuid primary key default gen_random_uuid(),
   slug         text not null unique,
   name         text not null,
+  institution_type text not null default 'university',
   email_domain citext not null unique,
   created_at   timestamptz not null default now(),
   constraint institutions_slug_check check (slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'),
+  constraint institutions_type_check check (
+    institution_type in ('university', 'college', 'high_school', 'bootcamp', 'workforce_program', 'nonprofit', 'other')
+  ),
   constraint institutions_email_domain_check check (email_domain::text ~ '^[a-z0-9.-]+\.[a-z]{2,}$')
 );
 
-insert into public.institutions (slug, name, email_domain)
-values ('umbc', 'University of Maryland, Baltimore County', 'umbc.edu')
+alter table public.institutions
+  add column if not exists institution_type text not null default 'university';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'institutions_type_check'
+  ) then
+    alter table public.institutions
+      add constraint institutions_type_check
+      check (institution_type in ('university', 'college', 'high_school', 'bootcamp', 'workforce_program', 'nonprofit', 'other'));
+  end if;
+end $$;
+
+insert into public.institutions (slug, name, institution_type, email_domain)
+values ('umbc', 'University of Maryland Baltimore County', 'university', 'umbc.edu')
 on conflict (slug) do update
 set name = excluded.name,
+    institution_type = excluded.institution_type,
     email_domain = excluded.email_domain;
 
 -- ── advisors ────────────────────────────────────────────────────────────────
@@ -43,12 +63,18 @@ create table if not exists public.institution_advisors (
   institution_id uuid not null references public.institutions (id) on delete cascade,
   advisor_email  citext not null,
   advisor_user_id uuid references auth.users (id) on delete set null,
+  display_name   text,
+  title          text,
   role           text not null default 'advisor',
   active         boolean not null default true,
   created_at     timestamptz not null default now(),
   primary key (institution_id, advisor_email),
   constraint institution_advisors_role_check check (role in ('advisor', 'admin'))
 );
+
+alter table public.institution_advisors
+  add column if not exists display_name text,
+  add column if not exists title text;
 
 create index if not exists institution_advisors_user_idx
   on public.institution_advisors (advisor_user_id)
@@ -61,6 +87,7 @@ create index if not exists institution_advisors_email_idx
 create or replace function public.validate_institution_advisor_domain()
 returns trigger
 language plpgsql
+set search_path = public, pg_catalog
 as $$
 declare
   expected_domain text;
@@ -88,9 +115,20 @@ before insert or update of institution_id, advisor_email
 on public.institution_advisors
 for each row execute function public.validate_institution_advisor_domain();
 
--- To grant the UMBC advisor once you have her email:
--- insert into public.institution_advisors (institution_id, advisor_email)
--- select id, 'advisor.name@umbc.edu'
+-- Seed a UMBC test advisor account.
+insert into public.institution_advisors (institution_id, advisor_email, display_name, title, role, active)
+select id, 'pbhodia1@umbc.edu', 'Parth Bhodia', 'Test Advisor', 'advisor', true
+from public.institutions
+where slug = 'umbc'
+on conflict (institution_id, advisor_email) do update
+set display_name = excluded.display_name,
+    title = excluded.title,
+    role = excluded.role,
+    active = excluded.active;
+
+-- To grant another UMBC advisor:
+-- insert into public.institution_advisors (institution_id, advisor_email, display_name, title)
+-- select id, 'advisor.name@umbc.edu', 'Advisor Name', 'Advisor Title'
 -- from public.institutions
 -- where slug = 'umbc';
 
@@ -117,7 +155,7 @@ create or replace function public.sync_institution_student_from_analysis()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, pg_catalog
 as $$
 declare
   matched_institution_id uuid;
@@ -160,6 +198,8 @@ begin
 end;
 $$;
 
+revoke all on function public.sync_institution_student_from_analysis() from public, anon, authenticated;
+
 drop trigger if exists resume_analyses_sync_institution_student on public.resume_analyses;
 create trigger resume_analyses_sync_institution_student
 after insert or update of user_email
@@ -197,9 +237,11 @@ alter table public.institutions enable row level security;
 alter table public.institution_advisors enable row level security;
 alter table public.institution_students enable row level security;
 
+drop policy if exists "authenticated users read institutions" on public.institutions;
 create policy "authenticated users read institutions" on public.institutions
   for select using (auth.role() = 'authenticated');
 
+drop policy if exists "advisors read own advisor memberships" on public.institution_advisors;
 create policy "advisors read own advisor memberships" on public.institution_advisors
   for select using (
     active = true
@@ -209,9 +251,11 @@ create policy "advisors read own advisor memberships" on public.institution_advi
     )
   );
 
+drop policy if exists "students read own institution memberships" on public.institution_students;
 create policy "students read own institution memberships" on public.institution_students
   for select using (student_user_id = auth.uid());
 
+drop policy if exists "advisors read institution students" on public.institution_students;
 create policy "advisors read institution students" on public.institution_students
   for select using (
     exists (
@@ -226,6 +270,7 @@ create policy "advisors read institution students" on public.institution_student
     )
   );
 
+drop policy if exists "advisors read institution analyses" on public.resume_analyses;
 create policy "advisors read institution analyses" on public.resume_analyses
   for select using (
     exists (
@@ -242,6 +287,7 @@ create policy "advisors read institution analyses" on public.resume_analyses
     )
   );
 
+drop policy if exists "advisors read institution resumes" on public.resumes;
 create policy "advisors read institution resumes" on public.resumes
   for select using (
     exists (
@@ -258,6 +304,7 @@ create policy "advisors read institution resumes" on public.resumes
     )
   );
 
+drop policy if exists "advisors read institution criteria" on public.criteria;
 create policy "advisors read institution criteria" on public.criteria
   for select using (
     exists (
@@ -276,6 +323,7 @@ create policy "advisors read institution criteria" on public.criteria
     )
   );
 
+drop policy if exists "advisors read institution resume signals" on public.resume_signals;
 create policy "advisors read institution resume signals" on public.resume_signals
   for select using (
     exists (

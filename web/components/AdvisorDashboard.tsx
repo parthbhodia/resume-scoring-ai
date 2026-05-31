@@ -1,8 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { apiUrl } from "@/lib/utils";
 import { getSupabaseClient } from "@/lib/supabase";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -76,16 +83,16 @@ const DIM_LABELS: Record<string, string> = {
 
 function scoreColor(s: number | null): string {
   if (s === null) return "var(--dim)";
-  if (s >= 75) return "#16a34a";
-  if (s >= 55) return "#92400e";
-  return "#991b1b";
+  if (s >= 75) return "var(--green)";
+  if (s >= 55) return "var(--amber)";
+  return "var(--red)";
 }
 
 function scoreBg(s: number | null): string {
   if (s === null) return "transparent";
-  if (s >= 75) return "rgba(22,163,74,0.09)";
-  if (s >= 55) return "rgba(146,64,14,0.09)";
-  return "rgba(153,27,27,0.09)";
+  if (s >= 75) return "var(--green-bg)";
+  if (s >= 55) return "var(--amber-bg)";
+  return "var(--red-bg)";
 }
 
 function fmt(d: string | null): string {
@@ -107,9 +114,9 @@ async function advisorAuthHeaders(): Promise<Record<string, string>> {
 
 // ── Shared UI pieces ──────────────────────────────────────────────────────────
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--dim)", marginBottom: 14 }}>
+    <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
       {children}
     </div>
   );
@@ -118,12 +125,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function DimRow({ label, value }: { label: string; value: number | null }) {
   const color = scoreColor(value);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
-      <div style={{ width: 148, fontSize: 12, color: "var(--dim)", flexShrink: 0 }}>{label}</div>
-      <div style={{ flex: 1, height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
-        <div style={{ width: `${value ?? 0}%`, height: "100%", background: color, borderRadius: 2, transition: "width 0.9s ease" }} />
-      </div>
-      <div style={{ width: 30, textAlign: "right", fontSize: 12, fontWeight: 500, color, flexShrink: 0 }}>
+    <div className="flex items-center gap-3 border-b border-border py-2 last:border-b-0">
+      <div className="w-36 shrink-0 text-xs text-muted-foreground">{label}</div>
+      <Progress
+        value={value ?? 0}
+        className="flex-1 gap-0"
+        style={{ "--primary": color } as CSSProperties}
+      />
+      <div className="w-8 shrink-0 text-right text-xs font-semibold" style={{ color }}>
         {value !== null ? Math.round(value) : "—"}
       </div>
     </div>
@@ -133,24 +142,55 @@ function DimRow({ label, value }: { label: string; value: number | null }) {
 function TierRow({ label, count, total, color }: { label: string; count: number; total: number; color: string }) {
   const pct = total > 0 ? (count / total) * 100 : 0;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
-      <div style={{ width: 90, fontSize: 12, color: "var(--dim)", flexShrink: 0 }}>{label}</div>
-      <div style={{ flex: 1, height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
-        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2, transition: "width 0.9s ease" }} />
-      </div>
-      <div style={{ width: 28, textAlign: "right", fontSize: 12, color: "var(--text)", flexShrink: 0 }}>{count}</div>
-      <div style={{ width: 34, textAlign: "right", fontSize: 11, color: "var(--dim)", flexShrink: 0 }}>{Math.round(pct)}%</div>
+    <div className="flex items-center gap-3 border-b border-border py-2 last:border-b-0">
+      <div className="w-24 shrink-0 text-xs text-muted-foreground">{label}</div>
+      <Progress value={pct} className="flex-1 gap-0" style={{ "--primary": color } as CSSProperties} />
+      <div className="w-7 shrink-0 text-right text-xs text-foreground">{count}</div>
+      <div className="w-9 shrink-0 text-right text-[11px] text-muted-foreground">{Math.round(pct)}%</div>
     </div>
   );
 }
 
 function KpiCard({ value, label, note }: { value: string | number; label: string; note?: string }) {
   return (
-    <div style={{ padding: "24px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10 }}>
-      <div style={{ fontSize: 30, fontWeight: 300, letterSpacing: -1, color: "var(--text)", lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text)", marginTop: 10 }}>{label}</div>
-      {note && <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 3 }}>{note}</div>}
-    </div>
+    <Card size="sm" className="bg-card/95">
+      <CardContent>
+        <div className="text-3xl font-light leading-none tracking-[-0.04em] text-foreground">{value}</div>
+        <div className="mt-2 text-xs font-medium text-foreground">{label}</div>
+        {note && <div className="mt-1 text-[11px] text-muted-foreground">{note}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AdvisorCard({
+  title,
+  description,
+  children,
+  className,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card className={className}>
+      <CardHeader>
+        <SectionLabel>{title}</SectionLabel>
+        {description ? <CardDescription>{description}</CardDescription> : null}
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+function ScoreBadge({ score }: { score: number | null }) {
+  if (score === null) return <Badge variant="outline">—</Badge>;
+  return (
+    <Badge variant={score >= 75 ? "secondary" : score >= 55 ? "outline" : "destructive"} style={{ color: scoreColor(score), background: scoreBg(score) }}>
+      {score}
+    </Badge>
   );
 }
 
@@ -213,21 +253,25 @@ function StudentDetailPanel({
   }, [studentId]);
 
   return (
-    <div style={{ maxWidth: 1060, margin: "0 auto", padding: "40px 32px 100px" }}>
+    <div className="mx-auto max-w-[1060px] px-8 py-10 pb-24">
 
       {/* Back */}
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onBack}
-        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--dim)", background: "none", border: "none", cursor: "pointer", padding: 0, marginBottom: 28 }}
+        className="mb-7 px-0 text-muted-foreground hover:text-foreground"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
         Back to cohort
-      </button>
+      </Button>
 
       {loading && (
-        <div style={{ display: "flex", gap: 10, color: "var(--dim)", fontSize: 13, alignItems: "center" }}>
-          <div style={{ width: 16, height: 16, border: "1.5px solid var(--border)", borderTopColor: "var(--dim)", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
-          Loading student data…
+        <div className="grid gap-4">
+          <Skeleton className="h-24 rounded-xl" />
+          <div className="grid grid-cols-4 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+          </div>
         </div>
       )}
 
@@ -239,17 +283,15 @@ function StudentDetailPanel({
         return (
           <>
             {/* Header */}
-            <div style={{ marginBottom: 30 }}>
-              <div style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--dim)", marginBottom: 8 }}>
-                Student profile
-              </div>
-              <h2 style={{ fontSize: 20, fontWeight: 400, letterSpacing: -0.4, margin: 0 }}>
+            <div className="mb-8">
+              <Badge variant="outline" className="mb-3">Student profile</Badge>
+              <h2 className="m-0 text-xl font-medium tracking-[-0.03em] text-foreground">
                 {d.user_email ?? "Anonymous student"}
               </h2>
             </div>
 
             {/* KPIs */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 28 }}>
+            <div className="mb-7 grid grid-cols-1 gap-3 md:grid-cols-4">
               <KpiCard value={d.analysis_count} label="Analyses run" />
               <KpiCard value={d.first_score ?? "—"} label="Starting score" />
               <KpiCard value={d.latest_score ?? "—"} label="Current score" />
@@ -261,26 +303,23 @@ function StudentDetailPanel({
             </div>
 
             {/* Score history + Dimensions */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+            <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
 
-              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24 }}>
-                <SectionLabel>Score history</SectionLabel>
+              <AdvisorCard title="Score history">
                 <ScoreSparkline history={d.score_history} />
-              </div>
+              </AdvisorCard>
 
-              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24 }}>
-                <SectionLabel>Average by dimension</SectionLabel>
+              <AdvisorCard title="Average by dimension">
                 {Object.entries(DIM_LABELS).map(([k, label]) => (
                   <DimRow key={k} label={label} value={d.dim_avgs[k as keyof DimAvgs]} />
                 ))}
-              </div>
+              </AdvisorCard>
             </div>
 
             {/* Issues + Strengths */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+            <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
 
-              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24 }}>
-                <SectionLabel>Recurring issues</SectionLabel>
+              <AdvisorCard title="Recurring issues">
                 {d.top_issues.length === 0
                   ? <p style={{ fontSize: 13, color: "var(--dim)" }}>None detected.</p>
                   : d.top_issues.map((item, i) => {
@@ -298,25 +337,23 @@ function StudentDetailPanel({
                       );
                     })
                 }
-              </div>
+              </AdvisorCard>
 
-              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24 }}>
-                <SectionLabel>Latest strengths</SectionLabel>
+              <AdvisorCard title="Latest strengths">
                 {d.latest_strengths.length === 0
                   ? <p style={{ fontSize: 13, color: "var(--dim)" }}>No strengths recorded yet.</p>
                   : d.latest_strengths.map((s, i) => (
-                      <div key={i} style={{ fontSize: 13, color: "var(--dim)", padding: "8px 0", borderBottom: "1px solid var(--border)", lineHeight: 1.5 }}>
+                      <div key={i} className="border-b border-border py-2 text-sm leading-relaxed text-muted-foreground last:border-b-0">
                         {s}
                       </div>
                     ))
                 }
-              </div>
+              </AdvisorCard>
             </div>
 
             {/* Uploaded resume text */}
             {d.latest_resume_text && (
-              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, marginBottom: 16 }}>
-                <SectionLabel>Latest uploaded résumé</SectionLabel>
+              <AdvisorCard title="Latest uploaded résumé" className="mb-4">
                 <pre style={{
                   margin: 0,
                   fontSize: 11.5,
@@ -333,13 +370,12 @@ function StudentDetailPanel({
                 }}>
                   {d.latest_resume_text}
                 </pre>
-              </div>
+              </AdvisorCard>
             )}
 
             {/* Tailored resumes */}
             {d.resumes.length > 0 && (
-              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, marginBottom: 16 }}>
-                <SectionLabel>Tailored résumés</SectionLabel>
+              <AdvisorCard title="Tailored résumés" className="mb-4">
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr>
@@ -355,8 +391,8 @@ function StudentDetailPanel({
                         <td style={{ padding: "11px 12px", fontSize: 13, color: "var(--dim)" }}>{r.company || "—"}</td>
                         <td style={{ padding: "11px 12px" }}>
                           {r.score !== null
-                            ? <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 4, fontSize: 12, fontWeight: 500, color: scoreColor(r.score), background: scoreBg(r.score) }}>{r.score}</span>
-                            : <span style={{ color: "var(--dim)", fontSize: 12 }}>—</span>
+                            ? <ScoreBadge score={r.score} />
+                            : <Badge variant="outline">—</Badge>
                           }
                         </td>
                         <td style={{ padding: "11px 12px", fontSize: 12, color: "var(--dim)" }}>{fmt(r.created_at)}</td>
@@ -383,7 +419,7 @@ function StudentDetailPanel({
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </AdvisorCard>
             )}
           </>
         );
@@ -409,22 +445,22 @@ function CohortOverview({
   );
 
   return (
-    <div style={{ maxWidth: 1060, margin: "0 auto", padding: "40px 32px 100px" }}>
+    <div className="mx-auto max-w-[1060px] px-8 py-10 pb-24">
 
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 36, flexWrap: "wrap", gap: 16 }}>
+      <div className="mb-9 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--dim)", marginBottom: 8 }}>Career Center · Advisor View</div>
-          <h1 style={{ fontSize: 22, fontWeight: 400, letterSpacing: -0.5, margin: 0, color: "var(--text)" }}>Cohort Overview</h1>
-          <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 6 }}>Updated {fmt(data.generated_at)}</div>
+          <Badge variant="outline" className="mb-3">Career Center · Advisor View</Badge>
+          <h1 className="m-0 text-2xl font-medium tracking-[-0.04em] text-foreground">Cohort Overview</h1>
+          <div className="mt-2 text-xs text-muted-foreground">Updated {fmt(data.generated_at)}</div>
         </div>
-        <button onClick={onRefresh} style={{ padding: "7px 16px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 6, background: "none", color: "var(--dim)", cursor: "pointer" }}>
+        <Button onClick={onRefresh} variant="outline" size="sm">
           Refresh
-        </button>
+        </Button>
       </div>
 
       {/* KPIs */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 28 }}>
+      <div className="mb-7 grid grid-cols-1 gap-3 md:grid-cols-4">
         <KpiCard value={data.student_count} label="Students" note="Unique accounts" />
         <KpiCard value={data.analysis_count} label="Analyses completed" />
         <KpiCard value={data.avg_overall !== null ? Math.round(data.avg_overall) : "—"} label="Average score" note="Out of 100" />
@@ -435,44 +471,45 @@ function CohortOverview({
       </div>
 
       {/* Distribution + Attention areas */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24 }}>
-          <SectionLabel>Score distribution</SectionLabel>
-          <TierRow label="Strong  85–100" count={tiers.strong} total={tierTotal} color="#16a34a" />
-          <TierRow label="Good  70–84"    count={tiers.good}   total={tierTotal} color="#2563eb" />
-          <TierRow label="Mid  50–69"     count={tiers.mid}    total={tierTotal} color="#92400e" />
-          <TierRow label="Needs work <50" count={tiers.low}    total={tierTotal} color="#991b1b" />
-        </div>
+      <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <AdvisorCard title="Score distribution">
+          <TierRow label="Strong 85-100" count={tiers.strong} total={tierTotal} color="var(--green)" />
+          <TierRow label="Good 70-84"    count={tiers.good}   total={tierTotal} color="var(--accent)" />
+          <TierRow label="Mid 50-69"     count={tiers.mid}    total={tierTotal} color="var(--amber)" />
+          <TierRow label="Needs work <50" count={tiers.low}   total={tierTotal} color="var(--red)" />
+        </AdvisorCard>
 
-        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24 }}>
-          <SectionLabel>Areas needing attention</SectionLabel>
+        <AdvisorCard title="Areas needing attention">
           {data.weakest_dims.map(d => (
-            <div key={d.dimension} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+            <div key={d.dimension} className="flex justify-between border-b border-border py-2 text-sm">
               <span style={{ color: "var(--dim)" }}>{DIM_LABELS[d.dimension] ?? d.dimension}</span>
               <span style={{ fontWeight: 500, color: scoreColor(d.avg) }}>{Math.round(d.avg)}</span>
             </div>
           ))}
           {data.top_issues.slice(0, 4).map((item, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+            <div key={i} className="flex justify-between border-b border-border py-2 text-sm last:border-b-0">
               <span style={{ color: "var(--dim)" }}>{item.issue}</span>
-              <span style={{ fontSize: 11, color: "var(--dim)" }}>{item.count} students</span>
+              <Badge variant="outline">{item.count} students</Badge>
             </div>
           ))}
-        </div>
+        </AdvisorCard>
       </div>
 
       {/* Dimensions */}
-      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, marginBottom: 16 }}>
-        <SectionLabel>Dimension averages — all students</SectionLabel>
+      <AdvisorCard title="Dimension averages — all students" className="mb-4">
         {Object.entries(DIM_LABELS).map(([k, label]) => (
           <DimRow key={k} label={label} value={data.dimension_avgs[k as keyof DimAvgs]} />
         ))}
-      </div>
+      </AdvisorCard>
 
       {/* Roster */}
-      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+      <Card>
+        <CardHeader>
           <SectionLabel>Student roster</SectionLabel>
+          <CardDescription>Click a student to inspect their analysis history and saved tailored resumes.</CardDescription>
+        </CardHeader>
+        <CardContent>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -508,8 +545,8 @@ function CohortOverview({
                     </td>
                     <td style={{ padding: "12px 12px" }}>
                       {s.latest_score !== null
-                        ? <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 4, fontSize: 12, fontWeight: 500, color: scoreColor(s.latest_score), background: scoreBg(s.latest_score) }}>{s.latest_score}</span>
-                        : <span style={{ color: "var(--dim)", fontSize: 12 }}>—</span>}
+                        ? <ScoreBadge score={s.latest_score} />
+                        : <Badge variant="outline">—</Badge>}
                     </td>
                     <td style={{ padding: "12px 12px", fontSize: 12, color: "var(--dim)" }}>{s.analysis_count}</td>
                     <td style={{ padding: "12px 12px", fontSize: 12, color: "var(--dim)" }}>{fmt(s.latest_at)}</td>
@@ -519,9 +556,10 @@ function CohortOverview({
             </table>
           )
         }
-      </div>
+        </CardContent>
+      </Card>
 
-      <div style={{ marginTop: 24, fontSize: 11, color: "var(--dim)", lineHeight: 1.7 }}>
+      <div className="mt-6 text-[11px] leading-relaxed text-muted-foreground">
         Click any student to view their full profile and score history.
         Tailor/Builder job-fit scores are shown separately on each student&apos;s page.
       </div>
@@ -604,46 +642,58 @@ export default function AdvisorDashboard() {
   };
 
   if (loading) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", gap: 10, color: "var(--dim)", fontSize: 13 }}>
-      <div style={{ width: 16, height: 16, border: "1.5px solid var(--border)", borderTopColor: "var(--dim)", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
-      Loading
+    <div className="mx-auto grid min-h-[60vh] max-w-[760px] content-center gap-4 px-8">
+      <Skeleton className="h-24 rounded-xl" />
+      <div className="grid grid-cols-3 gap-3">
+        <Skeleton className="h-24 rounded-xl" />
+        <Skeleton className="h-24 rounded-xl" />
+        <Skeleton className="h-24 rounded-xl" />
+      </div>
     </div>
   );
 
   if (error === "not_signed_in" || (authChecked && !userEmail)) return (
-    <div style={{ maxWidth: 480, margin: "96px auto", padding: "0 28px" }}>
-      <div style={{ fontSize: 13, color: "var(--dim)", marginBottom: 6 }}>Google sign-in required</div>
-      <h2 style={{ fontSize: 20, fontWeight: 500, letterSpacing: -0.5, marginBottom: 12 }}>Sign in to open the advisor dashboard.</h2>
-      <p style={{ fontSize: 13, color: "var(--dim)", lineHeight: 1.7, marginBottom: 18 }}>
-        UMBC advisors use their Google account so access can be checked against the institution roster.
-      </p>
-      <button
-        onClick={() => void signInWithGoogle()}
-        disabled={oauthBusy}
-        style={{ padding: "8px 16px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 6, background: "var(--text)", color: "var(--bg)", cursor: oauthBusy ? "wait" : "pointer" }}
-      >
-        {oauthBusy ? "Redirecting..." : "Sign in with Google"}
-      </button>
-    </div>
+    <Card className="mx-auto mt-24 max-w-[480px]">
+      <CardHeader>
+        <Badge variant="outline" className="w-fit">Google sign-in required</Badge>
+        <CardTitle>Sign in to open the advisor dashboard.</CardTitle>
+        <CardDescription>
+          UMBC advisors use their Google account so access can be checked against the institution roster.
+        </CardDescription>
+      </CardHeader>
+      <Separator />
+      <CardContent>
+        <Button onClick={() => void signInWithGoogle()} disabled={oauthBusy}>
+          {oauthBusy ? "Redirecting..." : "Sign in with Google"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 
   if (error === "not_authorized") return (
-    <div style={{ maxWidth: 480, margin: "96px auto", padding: "0 28px" }}>
-      <div style={{ fontSize: 13, color: "var(--dim)", marginBottom: 6 }}>Access restricted</div>
-      <h2 style={{ fontSize: 20, fontWeight: 500, letterSpacing: -0.5, marginBottom: 12 }}>This view is for career advisors only.</h2>
-      <p style={{ fontSize: 13, color: "var(--dim)", lineHeight: 1.7 }}>
-        Your account <span style={{ color: "var(--text)" }}>{userEmail}</span> does not have advisor access.
-      </p>
-    </div>
+    <Card className="mx-auto mt-24 max-w-[480px]">
+      <CardHeader>
+        <Badge variant="destructive" className="w-fit">Access restricted</Badge>
+        <CardTitle>This view is for career advisors only.</CardTitle>
+        <CardDescription>
+          Your account <span className="text-foreground">{userEmail}</span> does not have advisor access.
+        </CardDescription>
+      </CardHeader>
+    </Card>
   );
 
   if (error) return (
-    <div style={{ maxWidth: 480, margin: "96px auto", padding: "0 28px" }}>
-      <p style={{ fontSize: 13, color: "var(--dim)" }}>{error}</p>
-      <button onClick={() => userEmail && void load()} style={{ marginTop: 12, padding: "7px 16px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 6, background: "none", color: "var(--text)", cursor: "pointer" }}>
-        Try again
-      </button>
-    </div>
+    <Card className="mx-auto mt-24 max-w-[480px]">
+      <CardHeader>
+        <Badge variant="destructive" className="w-fit">Could not load dashboard</Badge>
+        <CardDescription>{error}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button variant="outline" onClick={() => userEmail && void load()}>
+          Try again
+        </Button>
+      </CardContent>
+    </Card>
   );
 
   if (!data) return null;
