@@ -30,7 +30,7 @@ export default function TermsPage() {
           <LogoFull markSize={26} textColor="var(--text)" />
         </Link>
         <Link href="/" style={{
-          fontSize: 13, color: "var(--dim)", textDecoration: "none",
+          fontSize: "var(--font-size-base)", color: "var(--dim)", textDecoration: "none",
           display: "flex", alignItems: "center", gap: 6,
           transition: "color 0.15s",
         }}>
@@ -46,18 +46,18 @@ export default function TermsPage() {
 
         {/* Title block */}
         <div style={{ marginBottom: 52, paddingBottom: 32, borderBottom: "1px solid var(--border)" }}>
-          <p style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 14 }}>
+          <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 14 }}>
             Legal
           </p>
-          <h1 style={{ fontSize: 40, fontWeight: 800, letterSpacing: -1.2, lineHeight: 1.1, margin: "0 0 18px" }}>
+          <h1 style={{ fontSize: "var(--font-size-4xl)", fontWeight: 800, letterSpacing: -1.2, lineHeight: 1.1, margin: "0 0 18px" }}>
             Terms of Service
           </h1>
-          <p style={{ fontSize: 14, color: "var(--dim)", lineHeight: 1.6 }}>
+          <p style={{ fontSize: "var(--font-size-lg)", color: "var(--dim)", lineHeight: 1.6 }}>
             <b>Effective:</b> {EFFECTIVE} &nbsp;·&nbsp; <b>Last updated:</b> {LAST_UPDATED}
           </p>
         </div>
 
-        <div style={{ fontSize: 15, lineHeight: 1.8, color: "var(--muted)" }}>
+        <div style={{ fontSize: "var(--font-size-lg)", lineHeight: 1.8, color: "var(--muted)" }}>
 
           <Section title="1. Acceptance of Terms">
             <p>By accessing or using Resunova (&ldquo;the Service&rdquo;), you agree to be bound by these Terms of Service. If you do not agree, do not use the Service.</p>
@@ -183,7 +183,7 @@ function Callout({ children }: { children: React.ReactNode }) {
       border: "1px solid var(--border)",
       borderLeft: "3px solid var(--accent)",
       borderRadius: 8,
-      fontSize: 14,
+      fontSize: "var(--font-size-lg)",
       lineHeight: 1.7,
       color: "var(--muted)",
     }}>
@@ -200,7 +200,7 @@ function ContactCard() {
       background: "var(--surface)",
       border: "1px solid var(--border)",
       borderRadius: 12,
-      fontSize: 14,
+      fontSize: "var(--font-size-lg)",
       marginTop: 8,
     }}>
       <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>Resunova</div>
@@ -230,7 +230,7 @@ function PageFooter() {
       display: "flex", alignItems: "center", justifyContent: "space-between",
       flexWrap: "wrap", gap: 12,
       background: "var(--bg)",
-      fontSize: 13, color: "var(--dim)",
+      fontSize: "var(--font-size-base)", color: "var(--dim)",
     }}>
       <span>© 2026 Resunova</span>
       <div style={{ display: "flex", gap: 20 }}>

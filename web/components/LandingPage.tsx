@@ -218,7 +218,7 @@ export default function LandingPage() {
     padding: "13px 26px",
     background: T.blue, color: "#fff",
     border: "none", borderRadius: 10,
-    fontSize: 14, fontWeight: 600, letterSpacing: -0.2,
+    fontSize: "var(--font-size-lg)", fontWeight: 600, letterSpacing: -0.2,
     cursor: loading ? "wait" : "pointer", fontFamily: "inherit",
     transition: "background 0.15s, box-shadow 0.15s",
     opacity: loading ? 0.7 : 1,
@@ -231,7 +231,7 @@ export default function LandingPage() {
     padding: "13px 22px",
     background: "transparent", color: C.muted,
     border: `1px solid ${C.border}`, borderRadius: 10,
-    fontSize: 14, fontWeight: 500, letterSpacing: -0.2,
+    fontSize: "var(--font-size-lg)", fontWeight: 500, letterSpacing: -0.2,
     cursor: "pointer", fontFamily: "inherit",
     transition: "border-color 0.15s, color 0.15s",
     whiteSpace: "nowrap" as const,
@@ -265,7 +265,7 @@ export default function LandingPage() {
               onClick={() => scrollTo(id)}
               style={{
                 background: "none", border: "none", color: C.muted,
-                fontSize: 13.5, cursor: "pointer", fontFamily: "inherit",
+                fontSize: "var(--font-size-base)".5, cursor: "pointer", fontFamily: "inherit",
                 fontWeight: 500, letterSpacing: -0.2, padding: 0, transition: "color 0.15s",
               }}
               onMouseEnter={e => { (e.target as HTMLElement).style.color = C.ink; }}
@@ -305,7 +305,7 @@ export default function LandingPage() {
             display: "inline-flex", alignItems: "center", gap: 8,
             padding: "5px 14px", marginBottom: 36,
             background: C.glow, border: `1px solid ${T.blue}28`,
-            borderRadius: 100, fontSize: 12, color: T.blue,
+            borderRadius: 100, fontSize: "var(--font-size-sm)", color: T.blue,
             fontWeight: 600, letterSpacing: 0.2,
           }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.blue, display: "inline-block" }} />
@@ -323,7 +323,7 @@ export default function LandingPage() {
             in the language<br />of opportunity.
           </h1>
 
-          <p style={{ fontSize: 17, color: C.muted, lineHeight: 1.72, maxWidth: 480, margin: "0 0 44px", letterSpacing: -0.15 }}>
+          <p style={{ fontSize: "var(--font-size-xl)", color: C.muted, lineHeight: 1.72, maxWidth: 480, margin: "0 0 44px", letterSpacing: -0.15 }}>
             Paste any job description and get an AI-tailored resume in 60 seconds — with a match score, gap analysis, and ATS-safe PDF.
             {" "}
             <strong style={{ color: C.ink, fontWeight: 600 }}>Built to get you interview callbacks</strong>
@@ -347,7 +347,7 @@ export default function LandingPage() {
             >See how it works</button>
           </div>
 
-          {error && <p style={{ fontSize: 13, color: "#f85149", marginBottom: 16 }}>{error}</p>}
+          {error && <p style={{ fontSize: "var(--font-size-base)", color: "#f85149", marginBottom: 16 }}>{error}</p>}
 
           {/* Social proof */}
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -357,12 +357,12 @@ export default function LandingPage() {
                   width: 28, height: 28, borderRadius: "50%",
                   background: bg, border: `2px solid ${C.bg}`,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "#fff", fontWeight: 700, fontSize: 11,
+                  color: "#fff", fontWeight: 700, fontSize: "var(--font-size-sm)",
                   marginLeft: i > 0 ? -9 : 0, zIndex: 5 - i, position: "relative",
                 }}>{l}</div>
               ))}
             </div>
-            <span style={{ fontSize: 13, color: C.muted }}>
+            <span style={{ fontSize: "var(--font-size-base)", color: C.muted }}>
               <b style={{ color: C.ink, fontWeight: 600 }}>400+</b> early users · more interview callbacks reported
             </span>
           </div>
@@ -386,9 +386,9 @@ export default function LandingPage() {
             ["FERPA",   "FERPA-informed student privacy"],
           ]).map(([stat, lbl], i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 40px", flexShrink: 0 }}>
-              <span style={{ fontSize: 20, fontWeight: 700, color: T.blue, letterSpacing: -0.5 }}>{stat}</span>
-              <span style={{ fontSize: 13, color: C.muted, whiteSpace: "nowrap" }}>{lbl}</span>
-              <span style={{ color: C.border, marginLeft: 12, fontSize: 18 }}>·</span>
+              <span style={{ fontSize: "var(--font-size-2xl)", fontWeight: 700, color: T.blue, letterSpacing: -0.5 }}>{stat}</span>
+              <span style={{ fontSize: "var(--font-size-base)", color: C.muted, whiteSpace: "nowrap" }}>{lbl}</span>
+              <span style={{ color: C.border, marginLeft: 12, fontSize: "var(--font-size-xl)" }}>·</span>
             </div>
           ))}
         </div>
@@ -397,7 +397,7 @@ export default function LandingPage() {
       {/* ───────────── Features ─────────────────────────────── */}
       <section id="features" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto", scrollMarginTop: 76 }}>
         <div style={{ marginBottom: 64 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
+          <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
             What we analyze
           </p>
           <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0, maxWidth: 540 }}>
@@ -415,13 +415,13 @@ export default function LandingPage() {
       <section id="platform" style={{ background: C.bg2, borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, scrollMarginTop: 76 }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "100px 40px" }}>
           <div style={{ textAlign: "center", marginBottom: 56 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
+            <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
               Built into Resunova
             </p>
             <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
               Templating, sharing &amp; ATS scoring.
             </h2>
-            <p style={{ fontSize: 15, color: C.muted, lineHeight: 1.65, maxWidth: 560, margin: "18px auto 0" }}>
+            <p style={{ fontSize: "var(--font-size-lg)", color: C.muted, lineHeight: 1.65, maxWidth: 560, margin: "18px auto 0" }}>
               Beyond JD tailoring — publish, score, and format your résumé in one place.
             </p>
           </div>
@@ -437,16 +437,16 @@ export default function LandingPage() {
       <section id="approach" style={{ padding: "100px 40px", maxWidth: 1200, margin: "0 auto", scrollMarginTop: 76 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 56, alignItems: "start" }} className="lp-approach-grid">
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
+            <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
               How we build
             </p>
             <h2 className="lp-h2" style={{ fontSize: "clamp(28px, 3.5vw, 44px)", fontWeight: 800, lineHeight: 1.12, letterSpacing: "-0.03em", color: C.ink, margin: "0 0 20px" }}>
               MIT &amp; Harvard guidance. Top-company training.
             </h2>
-            <p style={{ fontSize: 15, color: C.muted, lineHeight: 1.72, margin: "0 0 16px" }}>
+            <p style={{ fontSize: "var(--font-size-lg)", color: C.muted, lineHeight: 1.72, margin: "0 0 16px" }}>
               Our scoring mechanism blends campus career-center playbooks (MIT- and Harvard-style structure) with recruiter-informed match dimensions. Models and checklists are trained and calibrated on résumés and job descriptions from Google, Figma, Meta, Amazon, Adobe, and other top tech roles in our library — then improved responsibly with product data.
             </p>
-            <p style={{ fontSize: 14, color: C.muted, lineHeight: 1.68, margin: 0 }}>
+            <p style={{ fontSize: "var(--font-size-lg)", color: C.muted, lineHeight: 1.68, margin: 0 }}>
               Student data is handled with <strong style={{ color: C.ink, fontWeight: 600 }}>FERPA-informed privacy</strong>
               {" "}— we do not sell personal data. Training and quality work use only what our{" "}
               <Link href="/privacy" prefetch={false} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>Privacy Policy</Link>
@@ -465,7 +465,7 @@ export default function LandingPage() {
       <section id="how" style={{ borderBottom: `1px solid ${C.border}`, scrollMarginTop: 76 }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "100px 40px" }}>
           <div style={{ textAlign: "center", marginBottom: 72 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>The process</p>
+            <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>The process</p>
             <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
               Three steps to your next interview callback.
             </h2>
@@ -474,11 +474,11 @@ export default function LandingPage() {
             {STEPS.map((s, i) => (
               <div key={i}>
                 {/* Step number — large bold DM Sans, blue */}
-                <div style={{ fontSize: 64, fontWeight: 800, color: T.blue, opacity: 0.18, lineHeight: 1, marginBottom: 20, letterSpacing: -3 }}>
+                <div style={{ fontSize: "var(--font-size-4xl)", fontWeight: 800, color: T.blue, opacity: 0.18, lineHeight: 1, marginBottom: 20, letterSpacing: -3 }}>
                   0{i + 1}
                 </div>
-                <h3 style={{ fontSize: 20, fontWeight: 700, color: C.ink, margin: "0 0 12px", letterSpacing: -0.4 }}>{s.title}</h3>
-                <p style={{ fontSize: 14, color: C.muted, lineHeight: 1.72, margin: 0 }}>{s.desc}</p>
+                <h3 style={{ fontSize: "var(--font-size-2xl)", fontWeight: 700, color: C.ink, margin: "0 0 12px", letterSpacing: -0.4 }}>{s.title}</h3>
+                <p style={{ fontSize: "var(--font-size-lg)", color: C.muted, lineHeight: 1.72, margin: 0 }}>{s.desc}</p>
               </div>
             ))}
           </div>
@@ -488,11 +488,11 @@ export default function LandingPage() {
       {/* ───────────── Reviews ──────────────────────────────── */}
       <section id="reviews" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto", scrollMarginTop: 76 }}>
         <div style={{ textAlign: "center", marginBottom: 64 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>Testimonials</p>
+          <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>Testimonials</p>
           <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
             More interview callbacks.
           </h2>
-          <p style={{ fontSize: 15, color: C.muted, lineHeight: 1.65, maxWidth: 560, margin: "20px auto 0" }}>
+          <p style={{ fontSize: "var(--font-size-lg)", color: C.muted, lineHeight: 1.65, maxWidth: 560, margin: "20px auto 0" }}>
             About 400 people have used Resunova so far. What we hear most: recruiter screens and phone interviews. Paraphrased early-user notes, not paid endorsements.
           </p>
         </div>
@@ -512,15 +512,15 @@ export default function LandingPage() {
               (e.currentTarget as HTMLElement).style.borderColor = C.border;
             }}
             >
-              <div style={{ fontSize: 15, color: "#f59e0b", marginBottom: 16, letterSpacing: 2 }}>★★★★★</div>
-              <p style={{ fontSize: 15, fontStyle: "italic", color: C.ink, lineHeight: 1.68, margin: "0 0 22px", fontWeight: 400, letterSpacing: -0.1 }}>
+              <div style={{ fontSize: "var(--font-size-lg)", color: "#f59e0b", marginBottom: 16, letterSpacing: 2 }}>★★★★★</div>
+              <p style={{ fontSize: "var(--font-size-lg)", fontStyle: "italic", color: C.ink, lineHeight: 1.68, margin: "0 0 22px", fontWeight: 400, letterSpacing: -0.1 }}>
                 &ldquo;{r.quote}&rdquo;
               </p>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ width: 32, height: 32, borderRadius: "50%", background: r.col, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 12 }}>{r.avatar}</div>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{r.name}</div>
-                  <div style={{ fontSize: 11, color: C.muted }}>
+                  <div style={{ fontSize: "var(--font-size-base)", fontWeight: 600, color: C.ink }}>{r.name}</div>
+                  <div style={{ fontSize: "var(--font-size-sm)", color: C.muted }}>
                     {r.role}
                     {r.company ? ` · ${r.company}` : ""}
                   </div>
@@ -536,14 +536,14 @@ export default function LandingPage() {
         <h2 style={{ fontSize: "clamp(40px, 5.5vw, 68px)", fontWeight: 800, lineHeight: 1.06, letterSpacing: "-0.04em", color: "#fff", margin: "0 0 20px" }}>
           Your next interview<br />starts here.
         </h2>
-        <p style={{ fontSize: 18, color: "rgba(255,255,255,0.78)", margin: "0 0 44px", lineHeight: 1.65, maxWidth: 560, marginLeft: "auto", marginRight: "auto" }}>
+        <p style={{ fontSize: "var(--font-size-xl)", color: "rgba(255,255,255,0.78)", margin: "0 0 44px", lineHeight: 1.65, maxWidth: 560, marginLeft: "auto", marginRight: "auto" }}>
           <strong style={{ color: "#fff", fontWeight: 600 }}>Completely free</strong>
           {" "}— for students, lifelong learners, and anyone in the job-seeking community. No credit card, no hidden tiers. Tailor in 60 seconds and apply with a résumé built to earn interview callbacks.
         </p>
         <button onClick={signIn} disabled={loading} style={{
           display: "inline-flex", alignItems: "center", gap: 10,
           padding: "16px 36px", background: "#fff", color: T.blue,
-          border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700,
+          border: "none", borderRadius: 12, fontSize: "var(--font-size-xl)", fontWeight: 700,
           cursor: loading ? "wait" : "pointer", fontFamily: "inherit",
           letterSpacing: -0.3, boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
           transition: "opacity 0.15s",
@@ -568,9 +568,9 @@ export default function LandingPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <LogoMark size={22} />
-            <span style={{ fontSize: 14, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>Resunova</span>
+            <span style={{ fontSize: "var(--font-size-lg)", fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>Resunova</span>
           </div>
-          <p style={{ fontSize: 13, color: C.muted, margin: 0, lineHeight: 1.65, maxWidth: 440 }}>
+          <p style={{ fontSize: "var(--font-size-base)", color: C.muted, margin: 0, lineHeight: 1.65, maxWidth: 440 }}>
             Offered <strong style={{ color: C.ink, fontWeight: 600 }}>completely free</strong> for students and the wider community — because strong tools should help everyone, not only those who can pay.
             {" "}
             We <strong style={{ color: C.ink, fontWeight: 600 }}>never sell your data</strong>
@@ -582,7 +582,7 @@ export default function LandingPage() {
             <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>{CONTACT_EMAIL}</a>
             {" "}— we typically reply within two business days.
           </p>
-          <span style={{ fontSize: 12, color: C.muted }}>© 2026 Resunova. All rights reserved.</span>
+          <span style={{ fontSize: "var(--font-size-sm)", color: C.muted }}>© 2026 Resunova. All rights reserved.</span>
         </div>
         <nav className="lp-footer-nav" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }} aria-label="Legal">
           {[
@@ -595,7 +595,7 @@ export default function LandingPage() {
               key={href}
               href={href}
               prefetch={false}
-              style={{ fontSize: 13, color: C.muted, textDecoration: "none", fontWeight: 500, transition: "color 0.15s" }}
+              style={{ fontSize: "var(--font-size-base)", color: C.muted, textDecoration: "none", fontWeight: 500, transition: "color 0.15s" }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.ink; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.muted; }}
             >
@@ -604,7 +604,7 @@ export default function LandingPage() {
           ))}
           <a
             href={SITE_URL}
-            style={{ fontSize: 12, color: C.muted, textDecoration: "none", marginTop: 4 }}
+            style={{ fontSize: "var(--font-size-sm)", color: C.muted, textDecoration: "none", marginTop: 4 }}
           >
             {SITE_URL.replace(/^https:\/\//, "")}
           </a>
@@ -676,8 +676,8 @@ function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
         <div>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: C.muted, textTransform: "uppercase", marginBottom: 4 }}>Overall Match</div>
           {/* Score number — DM Sans bold, blue */}
-          <div style={{ fontSize: 52, fontWeight: 800, lineHeight: 1, letterSpacing: -2, color: T.blue }}>
-            78<span style={{ fontSize: 20, color: C.muted, fontWeight: 400, letterSpacing: 0 }}>/100</span>
+          <div style={{ fontSize: "var(--font-size-4xl)", fontWeight: 800, lineHeight: 1, letterSpacing: -2, color: T.blue }}>
+            78<span style={{ fontSize: "var(--font-size-2xl)", color: C.muted, fontWeight: 400, letterSpacing: 0 }}>/100</span>
           </div>
         </div>
         {/* Mini ring */}
@@ -699,8 +699,8 @@ function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
         {BARS.map((b, i) => (
           <div key={i}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-              <span style={{ fontSize: 12, color: C.muted }}>{b.label}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: b.col }}>{b.val}%</span>
+              <span style={{ fontSize: "var(--font-size-sm)", color: C.muted }}>{b.label}</span>
+              <span style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: b.col }}>{b.val}%</span>
             </div>
             <div style={{ height: 5, borderRadius: 3, background: dark ? T.dBg : T.bg2, overflow: "hidden" }}>
               <div style={{
@@ -718,10 +718,10 @@ function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
 
       {/* Bullet rewrite */}
       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: C.muted, textTransform: "uppercase", marginBottom: 10 }}>AI Rewrite</div>
-      <div style={{ padding: "10px 12px", borderRadius: 8, background: dark ? "rgba(248,81,73,0.09)" : "rgba(207,34,46,0.07)", borderLeft: "3px solid #f85149", fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 8, textDecoration: "line-through", opacity: 0.65 }}>
+      <div style={{ padding: "10px 12px", borderRadius: 8, background: dark ? "rgba(248,81,73,0.09)" : "rgba(207,34,46,0.07)", borderLeft: "3px solid #f85149", fontSize: "var(--font-size-sm)", color: C.muted, lineHeight: 1.6, marginBottom: 8, textDecoration: "line-through", opacity: 0.65 }}>
         &ldquo;Worked on backend API features&rdquo;
       </div>
-      <div style={{ padding: "10px 12px", borderRadius: 8, background: dark ? "rgba(63,185,80,0.08)" : "rgba(26,127,55,0.08)", borderLeft: `3px solid ${T.green}`, fontSize: 12, color: C.ink, lineHeight: 1.6 }}>
+      <div style={{ padding: "10px 12px", borderRadius: 8, background: dark ? "rgba(63,185,80,0.08)" : "rgba(26,127,55,0.08)", borderLeft: `3px solid ${T.green}`, fontSize: "var(--font-size-sm)", color: C.ink, lineHeight: 1.6 }}>
         &ldquo;Architected REST API serving 2M+ daily requests, cutting P95 latency 40%&rdquo;
       </div>
 
@@ -817,7 +817,7 @@ function PlatformHighlightCard({
             style={{
               display: "inline-block",
               marginTop: 10,
-              fontSize: 13,
+              fontSize: "var(--font-size-base)",
               fontWeight: 600,
               color: T.blue,
               textDecoration: "none",
@@ -846,9 +846,9 @@ function FeatureCell({ f, dark, C }: { f: typeof FEATURES[0]; dark: boolean; C: 
       }}
     >
       {/* Feature number — bold blue DM Sans, no serif */}
-      <div style={{ fontSize: 11, fontWeight: 700, color: T.blue, letterSpacing: "0.08em", marginBottom: 14 }}>{f.num}</div>
-      <h3 style={{ fontSize: 20, fontWeight: 700, color: C.ink, margin: "0 0 10px", letterSpacing: -0.4 }}>{f.title}</h3>
-      <p style={{ fontSize: 13.5, color: C.muted, lineHeight: 1.72, margin: 0 }}>{f.desc}</p>
+      <div style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, color: T.blue, letterSpacing: "0.08em", marginBottom: 14 }}>{f.num}</div>
+      <h3 style={{ fontSize: "var(--font-size-2xl)", fontWeight: 700, color: C.ink, margin: "0 0 10px", letterSpacing: -0.4 }}>{f.title}</h3>
+      <p style={{ fontSize: "var(--font-size-base)".5, color: C.muted, lineHeight: 1.72, margin: 0 }}>{f.desc}</p>
     </div>
   );
 }

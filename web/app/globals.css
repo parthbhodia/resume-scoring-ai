@@ -89,10 +89,35 @@
   --transition:  0.18s cubic-bezier(0.4,0,0.2,1);
 }
 
+/* Typography scale — centralized font sizes, weights, and line-heights */
+:root,
+[data-theme=”dark”],
+[data-theme=”light”] {
+  --font-size-xs:        9px;
+  --font-size-sm:        11px;
+  --font-size-base:      13px;
+  --font-size-lg:        15px;
+  --font-size-xl:        18px;
+  --font-size-2xl:       26px;
+  --font-size-3xl:       36px;
+  --font-size-4xl:       52px;
+
+  --font-weight-normal:    400;
+  --font-weight-medium:    500;
+  --font-weight-semibold:  600;
+  --font-weight-bold:      700;
+  --font-weight-extrabold: 800;
+
+  --line-height-tight:   1.2;
+  --line-height-snug:    1.4;
+  --line-height-normal:  1.6;
+  --line-height-relaxed: 1.8;
+}
+
 /* Analyze “Edit” preview: always print-white paper + dark ink (independent of app chrome theme). */
 :root,
-[data-theme="dark"],
-[data-theme="light"] {
+[data-theme=”dark”],
+[data-theme=”light”] {
   --resume-paper-bg:       #ffffff;
   --resume-paper-ink:      #0f172a;
   --resume-paper-muted:    #475569;
