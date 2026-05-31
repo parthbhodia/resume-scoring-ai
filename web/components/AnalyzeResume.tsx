@@ -242,6 +242,10 @@ export default function AnalyzeResume() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   /** Accordion for category-detail flagged bullets (`bulletAnalysis` index, or null = all collapsed). */
   const [expandedFlaggedBulletIdx, setExpandedFlaggedBulletIdx] = useState<number | null>(null);
+  /** When a category switch is triggered by clicking a bullet in the preview,
+   *  remember which bullet to auto-expand so the [activeCategory] effect opens
+   *  *that* card instead of defaulting to the first flagged one. */
+  const pendingExpandIdxRef = useRef<number | null>(null);
   /** Desktop: improvement plan column (scores + category fixes). */
   const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
@@ -605,6 +609,28 @@ export default function AnalyzeResume() {
       );
     },
     [result, activeCategory, categoryAssignmentOpts],
+  );
+
+  // Clicking a bullet in the résumé preview should open that bullet's
+  // suggestion card on the left. If the bullet belongs to a different
+  // category than the one currently shown, switch to its primary category
+  // first (the [activeCategory] effect then expands the pending bullet).
+  const handleBulletSelectFromPreview = useCallback(
+    (index: number) => {
+      handleBulletLinkedSelect(index);
+      // bulletPrimaryCategories is the authoritative per-bullet assignment
+      // (same string[] that builds the rendered flagged list).
+      const primaryCat = bulletPrimaryCategories[index];
+      if (primaryCat && primaryCat !== activeCategory) {
+        // Defer expansion to the [activeCategory] effect via the ref.
+        pendingExpandIdxRef.current = index;
+        setActiveCategory(primaryCat as keyof AnalysisResult["categoryScores"]);
+      } else {
+        // Same category already active (or none) — expand directly.
+        setExpandedFlaggedBulletIdx(index);
+      }
+    },
+    [handleBulletLinkedSelect, bulletPrimaryCategories, activeCategory],
   );
 
   const bulletBlurClearRef = useRef<number | null>(null);
