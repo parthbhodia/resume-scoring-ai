@@ -4,6 +4,7 @@ import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabase";
 import { CONTACT_EMAIL, SITE_URL } from "@/lib/brand";
 import { LogoFull, LogoMark } from "./BrandLogo";
+import { Button } from "@/components/ui/button";
 
 // ── Design tokens ──────────────────────────────────────────────────────────
 // Cool slate palette — professional SaaS, not warm editorial
@@ -287,9 +288,11 @@ export default function LandingPage() {
             }
           </button>
 
-          <button onClick={signIn} disabled={loading} style={primaryBtn}>
+          <Button onClick={signIn} disabled={loading}
+            className="inline-flex items-center gap-2.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold shadow-[0_4px_16px_rgba(37,99,235,0.22)] border-0 px-5 py-2.5 text-[15px]"
+          >
             <GoogleG /> {loading ? "Loading…" : "Sign in"}
-          </button>
+          </Button>
         </nav>
       </header>
 
@@ -335,16 +338,14 @@ export default function LandingPage() {
 
           {/* CTA row */}
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 40 }}>
-            <button onClick={signIn} disabled={loading} style={primaryBtn}
-              onMouseEnter={e => { if (!loading) (e.currentTarget).style.background = T.blueHover; }}
-              onMouseLeave={e => { if (!loading) (e.currentTarget).style.background = T.blue; }}
+            <Button onClick={signIn} disabled={loading}
+              className="inline-flex items-center gap-2.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold shadow-[0_4px_16px_rgba(37,99,235,0.22)] border-0 px-6 py-3 text-[15px] rounded-[10px]"
             >
               <GoogleG /> Get started — it&apos;s free
-            </button>
-            <button onClick={() => scrollTo("how")} style={ghostBtn}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = T.blue; (e.currentTarget as HTMLElement).style.color = T.blue; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = C.border; (e.currentTarget as HTMLElement).style.color = C.muted; }}
-            >See how it works</button>
+            </Button>
+            <Button variant="outline" onClick={() => scrollTo("how")}
+              className="px-6 py-3 text-[15px] rounded-[10px] border-border text-muted hover:border-accent hover:text-accent bg-transparent"
+            >See how it works</Button>
           </div>
 
           {error && <p style={{ fontSize: "var(--font-size-base)", color: "#f85149", marginBottom: 16 }}>{error}</p>}
@@ -540,19 +541,11 @@ export default function LandingPage() {
           <strong style={{ color: "#fff", fontWeight: 600 }}>Completely free</strong>
           {" "}— for students, lifelong learners, and anyone in the job-seeking community. No credit card, no hidden tiers. Tailor in 60 seconds and apply with a résumé built to earn interview callbacks.
         </p>
-        <button onClick={signIn} disabled={loading} style={{
-          display: "inline-flex", alignItems: "center", gap: 10,
-          padding: "16px 36px", background: "#fff", color: T.blue,
-          border: "none", borderRadius: 12, fontSize: "var(--font-size-xl)", fontWeight: 700,
-          cursor: loading ? "wait" : "pointer", fontFamily: "inherit",
-          letterSpacing: -0.3, boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-          transition: "opacity 0.15s",
-        }}
-        onMouseEnter={e => { (e.currentTarget).style.opacity = "0.92"; }}
-        onMouseLeave={e => { (e.currentTarget).style.opacity = "1"; }}
+        <Button onClick={signIn} disabled={loading}
+          className="inline-flex items-center gap-2.5 bg-white text-[#2563eb] hover:opacity-90 border-0 px-9 py-4 text-[18px] font-bold rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.18)] tracking-tight"
         >
           <GoogleG /> {loading ? "Loading…" : "Get started — it's free"}
-        </button>
+        </Button>
       </section>
 
       {/* ───────────── Footer ───────────────────────────────── */}

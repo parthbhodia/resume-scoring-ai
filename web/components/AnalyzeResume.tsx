@@ -29,6 +29,8 @@ import {
   ANALYZE_LOADER_STEPS,
   ANALYZE_COACH_TIPS,
 } from "@/components/AnalyzeExperience";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 // Full strongly-typed shape of the AI analysis response.
@@ -864,10 +866,10 @@ export default function AnalyzeResume() {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {[1, 2, 3].map((i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
-              <div className="skeleton" style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0 }} />
+              <Skeleton className="w-8 h-8 rounded-lg shrink-0" />
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
-                <div className="skeleton" style={{ height: 11, borderRadius: 3, width: "75%" }} />
-                <div className="skeleton" style={{ height: 10, borderRadius: 3, width: "55%" }} />
+                <Skeleton className="h-[11px] rounded w-3/4" />
+                <Skeleton className="h-[10px] rounded w-[55%]" />
               </div>
             </div>
           ))}
@@ -994,12 +996,9 @@ export default function AnalyzeResume() {
                         {label}
                       </span>
                       {affectedCount > 0 && (
-                        <span style={{
-                          fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 10,
-                          background: "rgba(248,113,113,0.12)", color: "var(--red)", flexShrink: 0,
-                        }}>
+                        <Badge className="text-[10px] font-semibold px-1.5 py-0 h-4 bg-red/10 text-red border-0 shrink-0">
                           {affectedCount}
-                        </span>
+                        </Badge>
                       )}
                       <span style={{
                         fontSize: 11, fontWeight: 700, flexShrink: 0,
@@ -1067,12 +1066,9 @@ export default function AnalyzeResume() {
                         {label}
                       </span>
                       {affectedCount > 0 && (
-                        <span style={{
-                          fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 10,
-                          background: "rgba(245,158,11,0.13)", color: "var(--amber)", flexShrink: 0,
-                        }}>
+                        <Badge className="text-[10px] font-semibold px-1.5 py-0 h-4 bg-amber/10 text-amber border-0 shrink-0">
                           {affectedCount}
-                        </span>
+                        </Badge>
                       )}
                       <span style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", flexShrink: 0 }}>
                         {score ?? "–"}
