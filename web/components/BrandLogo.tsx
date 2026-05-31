@@ -10,19 +10,22 @@ import type { CSSProperties } from "react";
 interface LogoMarkProps {
   /** px size of the square mark (default 28) */
   size?: number;
+  /** Brand variant (default "resunova") */
+  variant?: "resunova" | "umbc";
 }
 
-export function LogoMark({ size = 28 }: LogoMarkProps) {
+export function LogoMark({ size = 28, variant = "resunova" }: LogoMarkProps) {
+  const markColor = variant === "umbc" ? "#b8860b" : "#c4793a";
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 28 28"
       fill="none"
-      aria-label="Resunova logo mark"
+      aria-label={`${variant} logo mark`}
     >
-      {/* Amber rounded square */}
-      <rect width="28" height="28" rx="7" fill="#c4793a" />
+      {/* Colored rounded square */}
+      <rect width="28" height="28" rx="7" fill={markColor} />
 
       {/* ── Custom R letterform ───────────────────────────── */}
       {/* Vertical bar */}
@@ -44,6 +47,8 @@ interface LogoFullProps {
   markSize?: number;
   /** Override text color (defaults to currentColor / inherit) */
   textColor?: string;
+  /** Brand variant (default "resunova") */
+  variant?: "resunova" | "umbc";
   className?: string;
   style?: CSSProperties;
 }
@@ -51,10 +56,12 @@ interface LogoFullProps {
 export function LogoFull({
   markSize = 28,
   textColor,
+  variant = "resunova",
   className,
   style,
 }: LogoFullProps) {
   const fontSize = Math.round(markSize * 0.64);
+  const brandText = variant === "umbc" ? "UMBC" : "Resunova";
   return (
     <div
       className={className}
@@ -64,7 +71,7 @@ export function LogoFull({
         ...style,
       }}
     >
-      <LogoMark size={markSize} />
+      <LogoMark size={markSize} variant={variant} />
       <span style={{
         fontSize,
         fontWeight: 700,
@@ -74,7 +81,7 @@ export function LogoFull({
         fontFamily: "'DM Sans', -apple-system, sans-serif",
         userSelect: "none",
       }}>
-        Resunova
+        {brandText}
       </span>
     </div>
   );

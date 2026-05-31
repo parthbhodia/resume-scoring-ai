@@ -27,7 +27,7 @@ export default function ContactPage() {
           <LogoFull markSize={26} textColor="var(--text)" />
         </Link>
         <Link href="/" style={{
-          fontSize: 13, color: "var(--dim)", textDecoration: "none",
+          fontSize: "var(--font-size-base)", color: "var(--dim)", textDecoration: "none",
           display: "flex", alignItems: "center", gap: 6,
         }}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -38,13 +38,13 @@ export default function ContactPage() {
       </header>
 
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "56px 24px 80px" }}>
-        <p style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 14 }}>
+        <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 14 }}>
           Contact
         </p>
         <h1 style={{ fontSize: 36, fontWeight: 800, letterSpacing: -1, lineHeight: 1.12, margin: "0 0 16px" }}>
           We&apos;re here to help
         </h1>
-        <p style={{ fontSize: 15, color: "var(--muted)", lineHeight: 1.75, margin: "0 0 36px" }}>
+        <p style={{ fontSize: "var(--font-size-lg)", color: "var(--muted)", lineHeight: 1.75, margin: "0 0 36px" }}>
           Resunova is <strong style={{ color: "var(--text)", fontWeight: 600 }}>completely free</strong>
           {" "}— built for the greater good of students and the wider job-seeking community. For product questions, partnerships, or anything else, use general support. For privacy and data rights, use the privacy inbox so we can route your message correctly.
         </p>
@@ -62,14 +62,14 @@ export default function ContactPage() {
           />
         </div>
 
-        <p style={{ fontSize: 14, color: "var(--dim)", marginTop: 40, lineHeight: 1.65 }}>
+        <p style={{ fontSize: "var(--font-size-lg)", color: "var(--dim)", marginTop: 40, lineHeight: 1.65 }}>
           Website:{" "}
           <a href={SITE_URL} style={{ color: "var(--accent)", textDecoration: "none" }}>{SITE_URL.replace(/^https:\/\//, "")}</a>
         </p>
 
         <div style={{ marginTop: 32, paddingTop: 28, borderTop: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 16 }}>
-          <Link href="/terms" style={{ fontSize: 13, color: "var(--accent)", textDecoration: "none" }}>Terms of Service</Link>
-          <Link href="/privacy" style={{ fontSize: 13, color: "var(--accent)", textDecoration: "none" }}>Privacy Policy</Link>
+          <Link href="/terms" style={{ fontSize: "var(--font-size-base)", color: "var(--accent)", textDecoration: "none" }}>Terms of Service</Link>
+          <Link href="/privacy" style={{ fontSize: "var(--font-size-base)", color: "var(--accent)", textDecoration: "none" }}>Privacy Policy</Link>
         </div>
       </main>
 
@@ -79,7 +79,7 @@ export default function ContactPage() {
         display: "flex", alignItems: "center", justifyContent: "space-between",
         flexWrap: "wrap", gap: 12,
         background: "var(--bg)",
-        fontSize: 13, color: "var(--dim)",
+        fontSize: "var(--font-size-base)", color: "var(--dim)",
       }}>
         <span>© 2026 Resunova</span>
         <div style={{ display: "flex", gap: 20 }}>
@@ -101,8 +101,8 @@ function ContactBlock({ title, email, hint }: { title: string; email: string; hi
       borderRadius: 12,
     }}>
       <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 10px", color: "var(--text)", letterSpacing: -0.2 }}>{title}</h2>
-      <a href={`mailto:${email}`} style={{ fontSize: 15, fontWeight: 600, color: "var(--accent)", textDecoration: "none", wordBreak: "break-all" }}>{email}</a>
-      <p style={{ fontSize: 13, color: "var(--muted)", margin: "12px 0 0", lineHeight: 1.65 }}>{hint}</p>
+      <a href={`mailto:${email}`} style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, color: "var(--accent)", textDecoration: "none", wordBreak: "break-all" }}>{email}</a>
+      <p style={{ fontSize: "var(--font-size-base)", color: "var(--muted)", margin: "12px 0 0", lineHeight: 1.65 }}>{hint}</p>
     </div>
   );
 }

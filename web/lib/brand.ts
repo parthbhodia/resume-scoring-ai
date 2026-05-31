@@ -3,6 +3,8 @@
  * Use MODEL_NAME / modelDisplayName wherever the product should say how work is done.
  */
 
+export type BrandVariant = "resunova" | "umbc";
+
 /** Public site + legal pages */
 export const SITE_URL       = "https://www.resunova.io";
 export const CONTACT_EMAIL  = "parthbhodia08@gmail.com";
@@ -10,6 +12,15 @@ export const PRIVACY_EMAIL  = "parthbhodia08@gmail.com";
 
 export const MODEL_NAME    = "AI";
 export const MODEL_TAGLINE = "Tailored resume engine";
+
+export const BRAND_DISPLAY_NAME: Record<BrandVariant, string> = {
+  resunova: "Resunova",
+  umbc: "UMBC Resume Scorer",
+};
+
+export function getBrandVariant(userEmail: string | null | undefined): BrandVariant {
+  return userEmail?.toLowerCase().endsWith("@umbc.edu") ? "umbc" : "resunova";
+}
 
 /** Map a backend model id to the label shown in the UI (always generic). */
 export function modelDisplayName(_backendId: string | null | undefined): string {

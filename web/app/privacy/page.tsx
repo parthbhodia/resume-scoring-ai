@@ -31,7 +31,7 @@ export default function PrivacyPage() {
           <LogoFull markSize={26} textColor="var(--text)" />
         </Link>
         <Link href="/" style={{
-          fontSize: 13, color: "var(--dim)", textDecoration: "none",
+          fontSize: "var(--font-size-base)", color: "var(--dim)", textDecoration: "none",
           display: "flex", alignItems: "center", gap: 6,
           transition: "color 0.15s",
         }}>
@@ -47,21 +47,21 @@ export default function PrivacyPage() {
 
         {/* Title block */}
         <div style={{ marginBottom: 52, paddingBottom: 32, borderBottom: "1px solid var(--border)" }}>
-          <p style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 14 }}>
+          <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 14 }}>
             Legal
           </p>
-          <h1 style={{ fontSize: 40, fontWeight: 800, letterSpacing: -1.2, lineHeight: 1.1, margin: "0 0 18px" }}>
+          <h1 style={{ fontSize: "var(--font-size-4xl)", fontWeight: 800, letterSpacing: -1.2, lineHeight: 1.1, margin: "0 0 18px" }}>
             Privacy Policy
           </h1>
-          <p style={{ fontSize: 14, color: "var(--dim)", lineHeight: 1.6 }}>
+          <p style={{ fontSize: "var(--font-size-lg)", color: "var(--dim)", lineHeight: 1.6 }}>
             <b>Effective:</b> {EFFECTIVE} &nbsp;·&nbsp; <b>Last updated:</b> {LAST_UPDATED}
           </p>
-          <p style={{ fontSize: 14, color: "var(--muted)", marginTop: 16, lineHeight: 1.7, maxWidth: 580 }}>
+          <p style={{ fontSize: "var(--font-size-lg)", color: "var(--muted)", marginTop: 16, lineHeight: 1.7, maxWidth: 580 }}>
             We believe privacy is a fundamental right. <b style={{ color: "var(--text)" }}>We do not sell your personal data.</b> We retain and use it only to operate the Service for you, for user and product analytics that help us improve the experience, and for internal training and quality work so we can serve the community better — never for ad resale or data brokerage.
           </p>
         </div>
 
-        <div style={{ fontSize: 15, lineHeight: 1.8, color: "var(--muted)" }}>
+        <div style={{ fontSize: "var(--font-size-lg)", lineHeight: 1.8, color: "var(--muted)" }}>
 
           {/* Quick overview */}
           <Section title="At a Glance">
@@ -267,7 +267,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function SubSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "0 0 8px", letterSpacing: -0.2 }}>{title}</h3>
+      <h3 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, color: "var(--text)", margin: "0 0 8px", letterSpacing: -0.2 }}>{title}</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{children}</div>
     </div>
   );
@@ -281,7 +281,7 @@ function Callout({ children }: { children: React.ReactNode }) {
       border: "1px solid var(--border)",
       borderLeft: "3px solid var(--accent)",
       borderRadius: 8,
-      fontSize: 14,
+      fontSize: "var(--font-size-lg)",
       lineHeight: 1.7,
       color: "var(--muted)",
     }}>
@@ -302,10 +302,10 @@ function DataTable({ rows }: { rows: [string, string][] }) {
           borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none",
           background: i % 2 === 0 ? "var(--surface)" : "var(--surface2)",
         }}>
-          <div style={{ padding: "12px 16px", fontSize: 13, fontWeight: 600, color: "var(--text)", borderRight: "1px solid var(--border)" }}>
+          <div style={{ padding: "12px 16px", fontSize: "var(--font-size-base)", fontWeight: 600, color: "var(--text)", borderRight: "1px solid var(--border)" }}>
             {key}
           </div>
-          <div style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>
+          <div style={{ padding: "12px 16px", fontSize: "var(--font-size-base)", color: "var(--muted)" }}>
             {val}
           </div>
         </div>
@@ -325,12 +325,12 @@ function ThirdPartyTable({ rows }: { rows: { name: string; purpose: string; data
           borderRadius: 10,
         }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{r.name}</span>
-            <a href={r.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "var(--accent)", textDecoration: "none" }}>Privacy policy ↗</a>
+            <span style={{ fontWeight: 700, color: "var(--text)", fontSize: "var(--font-size-lg)" }}>{r.name}</span>
+            <a href={r.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: "var(--font-size-sm)", color: "var(--accent)", textDecoration: "none" }}>Privacy policy ↗</a>
           </div>
-          <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 6px" }}><b style={{ color: "var(--text)" }}>Purpose:</b> {r.purpose}</p>
-          <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 6px" }}><b style={{ color: "var(--text)" }}>Data shared:</b> {r.data}</p>
-          <p style={{ fontSize: 13, color: "var(--muted)", margin: 0 }}><b style={{ color: "var(--text)" }}>Location:</b> {r.location}</p>
+          <p style={{ fontSize: "var(--font-size-base)", color: "var(--muted)", margin: "0 0 6px" }}><b style={{ color: "var(--text)" }}>Purpose:</b> {r.purpose}</p>
+          <p style={{ fontSize: "var(--font-size-base)", color: "var(--muted)", margin: "0 0 6px" }}><b style={{ color: "var(--text)" }}>Data shared:</b> {r.data}</p>
+          <p style={{ fontSize: "var(--font-size-base)", color: "var(--muted)", margin: 0 }}><b style={{ color: "var(--text)" }}>Location:</b> {r.location}</p>
         </div>
       ))}
     </div>
@@ -345,7 +345,7 @@ function ContactCard() {
       background: "var(--surface)",
       border: "1px solid var(--border)",
       borderRadius: 12,
-      fontSize: 14,
+      fontSize: "var(--font-size-lg)",
       marginTop: 8,
     }}>
       <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>Resunova — Privacy Team</div>
@@ -375,7 +375,7 @@ function PageFooter() {
       display: "flex", alignItems: "center", justifyContent: "space-between",
       flexWrap: "wrap", gap: 12,
       background: "var(--bg)",
-      fontSize: 13, color: "var(--dim)",
+      fontSize: "var(--font-size-base)", color: "var(--dim)",
     }}>
       <span>© 2026 Resunova</span>
       <div style={{ display: "flex", gap: 20 }}>

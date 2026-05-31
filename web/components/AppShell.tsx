@@ -13,12 +13,15 @@
 
 import { useEffect, useState, useCallback, useMemo, type ReactNode } from "react";
 import { AppShellSidebarContext } from "@/contexts/AppShellSidebarContext";
+import { UmbcProvider } from "@/contexts/UmbcContext";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
 import { CONTACT_EMAIL } from "@/lib/brand";
+import { isUmbcUser } from "@/lib/userDomainDetection";
 import { LogoFull, LogoMark } from "./BrandLogo";
+import { UmbcWelcomeBanner } from "./UmbcWelcomeBanner";
 import ResumeSidebar from "./ResumeSidebar";
 import { useAppBreakpoints } from "@/hooks/useAppBreakpoints";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
@@ -169,6 +172,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     flowRaw === "template" ? "template" : "tailor";
   const [layoutOnlyForNav, setLayoutOnlyForNav] = useState(readBuilderLayoutOnlyFlag);
   const [user, setUser] = useState<User | null>(null);
+  const [isUmbc, setIsUmbc] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, toggleTheme] = useTheme();
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -208,8 +212,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const supabase = getSupabaseClient();
-    supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_ev, s) => setUser(s?.user ?? null));
+    supabase.auth.getUser().then(({ data }) => {
+      const currentUser = data.user ?? null;
+      setUser(currentUser);
+      setIsUmbc(isUmbcUser(currentUser?.email));
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_ev, s) => {
+      const currentUser = s?.user ?? null;
+      setUser(currentUser);
+      setIsUmbc(isUmbcUser(currentUser?.email));
+    });
     return () => subscription.unsubscribe();
   }, []);
 
@@ -304,11 +316,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppShellSidebarContext.Provider value={sidebarContextValue}>
-    <div
-      className="app-shell-root"
-      data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}
-    >
+    <UmbcProvider isUmbc={isUmbc}>
+      <AppShellSidebarContext.Provider value={sidebarContextValue}>
+      <div
+        className="app-shell-root"
+        data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}
+      >
       {/* ── Persistent sidebar (tablet + desktop) ───────────────── */}
       <aside
         className="app-shell-sidebar"
@@ -345,9 +358,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
               }}
             >
               {isTablet || sidebarCollapsed ? (
-                <LogoMark size={28} />
+                <LogoMark size={28} variant={isUmbc ? "umbc" : "resunova"} />
               ) : (
-                <LogoFull markSize={26} textColor="var(--text)" />
+                <LogoFull markSize={26} textColor="var(--text)" variant={isUmbc ? "umbc" : "resunova"} />
               )}
             </button>
             <button
@@ -539,6 +552,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         >
           <NavMenuIcon open={false} />
         </button>
+        <UmbcWelcomeBanner />
         <main
           key={active}
           className="app-shell-view-pane"
@@ -611,7 +625,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
         />
       </div>
     </div>
-    </AppShellSidebarContext.Provider>
+      </AppShellSidebarContext.Provider>
+    </UmbcProvider>
   );
 }
 
