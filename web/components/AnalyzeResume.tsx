@@ -661,9 +661,9 @@ export default function AnalyzeResume() {
         setExpandedFlaggedBulletIdx(pending);
         return;
       }
-      const firstFlaggedIdx = result.bulletAnalysis.findIndex((b) =>
-        bulletMatchesAnalysisCategory(b, activeCategory, result.bulletAnalysis, result.bulletAnalysis.indexOf(b), categoryAssignmentOpts)
-      );
+      // Use the same per-bullet primary-category assignment that builds the
+      // rendered flagged list, so "first flagged" matches what the user sees.
+      const firstFlaggedIdx = bulletPrimaryCategories.findIndex((c) => c === activeCategory);
       setExpandedFlaggedBulletIdx(firstFlaggedIdx >= 0 ? firstFlaggedIdx : null);
     } else {
       setExpandedFlaggedBulletIdx(null);
@@ -1729,7 +1729,7 @@ export default function AnalyzeResume() {
               patchBulletRewrite={patchBulletRewrite}
               patchPreviewLine={patchPreviewLine}
               selectedBulletIndex={selectedBulletIndex}
-              onBulletLinkedSelect={handleBulletLinkedSelect}
+              onBulletLinkedSelect={handleBulletSelectFromPreview}
               presentationOnly
               restoredResumeNoPdfHint={historyRestoreActive}
               jd={jd}
