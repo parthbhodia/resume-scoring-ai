@@ -4,6 +4,7 @@ import { useTemplateBuilderStore } from "@/store/templateBuilderStore";
 import type { TemplateBuilderStore } from "@/store/templateBuilderStore";
 import ResumePreview from "./ResumePreview";
 import type { TBFont } from "./types";
+import { PAGE_WIDTH_OPTIONS, STYLE_PRESETS } from "./templateStyles";
 import { apiUrl } from "@/lib/utils";
 
 /* ── Shared style helpers ──────────────────────────────────────── */
@@ -396,7 +397,7 @@ export default function TemplateBuilderClient() {
               <SkillsSection store={store} data={data} />
             )}
             {activeTab === "customize" && (
-              <CustomizeSection store={store} data={data} c={c} />
+              <CustomizeSection store={store} c={c} />
             )}
           </div>
         </div>
@@ -734,10 +735,108 @@ function SkillsSection({ store, data }: { store: StoreType; data: StoreType["dat
   );
 }
 
-function CustomizeSection({ store, c, data }: { store: StoreType; c: StoreType["data"]["customization"]; data: StoreType["data"] }) {
+function CustomizeSection({ store, c }: { store: StoreType; c: StoreType["data"]["customization"] }) {
+  const applyStylePreset = (preset: (typeof STYLE_PRESETS)[number]) => {
+    store.setCustomization("stylePreset", preset.id);
+    store.setCustomization("font", preset.font);
+    store.setCustomization("accentColor", preset.accentColor);
+  };
+
   return (
     <>
       <SectionHeading>Style & Customization</SectionHeading>
+
+      {/* Style Presets */}
+      <div style={{ marginBottom: 20 }}>
+        <label style={labelStyle}>Template style</label>
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px", lineHeight: 1.5 }}>
+          Start with a curated default, then adjust font and color below if needed.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {STYLE_PRESETS.map((preset) => {
+            const active = c.stylePreset === preset.id;
+            return (
+              <button
+                key={preset.id}
+                onClick={() => applyStylePreset(preset)}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "44px 1fr auto",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "11px 12px",
+                  borderRadius: 9,
+                  border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
+                  background: active ? "color-mix(in srgb, var(--accent) 8%, var(--bg))" : "var(--bg)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontFamily: "inherit",
+                  transition: "border-color 0.15s, background 0.15s",
+                }}
+              >
+                <div style={{
+                  width: 44,
+                  height: 36,
+                  borderRadius: 7,
+                  border: "1px solid var(--border)",
+                  background: "var(--surface2)",
+                  padding: "6px 7px",
+                  boxSizing: "border-box",
+                }}>
+                  <div style={{ width: "68%", height: 4, borderRadius: 2, background: preset.accentColor, marginBottom: 5 }} />
+                  <div style={{ width: "100%", height: 2, borderRadius: 2, background: "var(--border)", marginBottom: 4 }} />
+                  <div style={{ width: "78%", height: 2, borderRadius: 2, background: "var(--border)" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{preset.label}</div>
+                  <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.35 }}>{preset.description}</div>
+                </div>
+                {active && <span style={{ fontSize: 13, color: "var(--accent)" }}>✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Page Width */}
+      <div style={{ marginBottom: 20 }}>
+        <label style={labelStyle}>PDF width</label>
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px", lineHeight: 1.5 }}>
+          Controls side margins in preview and downloaded PDF.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 7 }}>
+          {PAGE_WIDTH_OPTIONS.map((option) => {
+            const active = c.pageWidth === option.id;
+            return (
+              <button
+                key={option.id}
+                onClick={() => store.setCustomization("pageWidth", option.id)}
+                title={option.description}
+                style={{
+                  borderRadius: 8,
+                  border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
+                  background: active ? "color-mix(in srgb, var(--accent) 8%, var(--bg))" : "var(--bg)",
+                  padding: "9px 7px",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  color: active ? "var(--accent)" : "var(--text)",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{
+                  width: option.id === "narrow" ? 18 : option.id === "standard" ? 26 : 34,
+                  height: 20,
+                  borderRadius: 3,
+                  border: "1px solid currentColor",
+                  margin: "0 auto 6px",
+                  opacity: 0.9,
+                }} />
+                <div style={{ fontSize: 11, fontWeight: 700 }}>{option.label}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Font */}
       <div style={{ marginBottom: 20 }}>

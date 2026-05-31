@@ -1,5 +1,6 @@
 "use client";
 import type { TBResumeData, TBFont } from "./types";
+import { getPageWidth, getStylePreset } from "./templateStyles";
 
 function parseBullets(raw: string): string[] {
   return raw.split("\n").map((l) => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
@@ -13,17 +14,19 @@ const FONT_STACK: Record<TBFont, string> = {
 
 export default function ResumePreview({ data }: { data: TBResumeData }) {
   const { profile, workExperiences, educations, projects, skills, customization } = data;
-  const font = customization?.font ?? "Helvetica";
-  const accent = customization?.accentColor ?? "#1a1a1a";
+  const preset = getStylePreset(customization?.stylePreset);
+  const pageWidth = getPageWidth(customization?.pageWidth);
+  const font = customization?.font ?? preset.font;
+  const accent = customization?.accentColor ?? preset.accentColor;
   const fontStack = FONT_STACK[font] ?? FONT_STACK["Helvetica"];
 
   const PAGE: React.CSSProperties = {
     background: "#ffffff",
     color: "#1a1a1a",
     fontFamily: fontStack,
-    fontSize: 10.5,
-    lineHeight: 1.45,
-    padding: "36px 48px",
+    fontSize: preset.baseFont,
+    lineHeight: preset.lineHeight,
+    padding: `${pageWidth.paddingY}px ${pageWidth.paddingX}px`,
     minHeight: "11in",
     width: "8.5in",
     maxWidth: "100%",
@@ -33,31 +36,31 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
   };
 
   const SECTION_TITLE: React.CSSProperties = {
-    fontSize: 11,
+    fontSize: preset.sectionFont,
     fontWeight: 700,
     textTransform: "uppercase",
-    letterSpacing: 1,
+    letterSpacing: preset.letterSpacing,
     color: accent,
     borderBottom: `0.5px solid ${accent}`,
     paddingBottom: 2,
     marginBottom: 6,
-    marginTop: 12,
+    marginTop: preset.sectionGap,
   };
 
   const JOB_ROW: React.CSSProperties = {
     display: "flex", justifyContent: "space-between", alignItems: "baseline",
   };
   const NAME: React.CSSProperties = {
-    fontSize: 22, fontWeight: 700, letterSpacing: 0.3, marginBottom: 3, color: "#111",
+    fontSize: preset.nameFont, fontWeight: 700, letterSpacing: 0.3, marginBottom: 3, color: "#111",
   };
   const CONTACT: React.CSSProperties = {
-    fontSize: 9.5, color: "#555", marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 4,
+    fontSize: preset.metaFont + 0.5, color: "#555", marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 4,
   };
-  const JOB_TITLE: React.CSSProperties = { fontWeight: 700, fontSize: 10.5 };
-  const META: React.CSSProperties = { fontSize: 9.5, color: "#666" };
-  const BULLET: React.CSSProperties = { fontSize: 9.5, marginLeft: 12, marginBottom: 2, color: "#222" };
-  const SUMMARY: React.CSSProperties = { fontSize: 9.5, color: "#333", lineHeight: 1.55, margin: 0 };
-  const META_SMALL: React.CSSProperties = { fontSize: 9, color: "#666" };
+  const JOB_TITLE: React.CSSProperties = { fontWeight: 700, fontSize: preset.baseFont };
+  const META: React.CSSProperties = { fontSize: preset.metaFont + 0.5, color: "#666" };
+  const BULLET: React.CSSProperties = { fontSize: preset.bodyFont, marginLeft: 12, marginBottom: preset.bulletGap, color: "#222" };
+  const SUMMARY: React.CSSProperties = { fontSize: preset.bodyFont, color: "#333", lineHeight: preset.summaryLineHeight, margin: 0 };
+  const META_SMALL: React.CSSProperties = { fontSize: preset.metaFont, color: "#666" };
 
   const contactParts = [
     profile.email, profile.phone, profile.location,
@@ -92,13 +95,13 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
             const dateStr = [w.startDate, w.current ? "Present" : w.endDate].filter(Boolean).join(" – ");
             const bullets = parseBullets(w.bullets);
             return (
-              <div key={w.id} style={{ marginBottom: 8 }}>
+              <div key={w.id} style={{ marginBottom: preset.entryGap }}>
                 <div style={JOB_ROW}>
                   <span style={JOB_TITLE}>{w.jobTitle || "Job Title"}</span>
                   <span style={META}>{dateStr}</span>
                 </div>
                 <div style={JOB_ROW}>
-                  <span style={{ fontSize: 10, color: "#333" }}>{w.company}</span>
+                  <span style={{ fontSize: preset.baseFont - 0.5, color: "#333" }}>{w.company}</span>
                   {w.location && <span style={META}>{w.location}</span>}
                 </div>
                 {bullets.map((b, i) => <div key={i} style={BULLET}>• {b}</div>)}
@@ -115,13 +118,13 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
           {educations.filter((e) => e.school || e.degree).map((e) => {
             const dateStr = [e.startDate, e.endDate].filter(Boolean).join(" – ");
             return (
-              <div key={e.id} style={{ marginBottom: 6 }}>
+              <div key={e.id} style={{ marginBottom: Math.max(5, preset.entryGap - 2) }}>
                 <div style={JOB_ROW}>
                   <span style={JOB_TITLE}>{e.school || "School"}</span>
                   <span style={META}>{dateStr}</span>
                 </div>
                 <div style={JOB_ROW}>
-                  <span style={{ fontSize: 10, color: "#333" }}>{e.degree}</span>
+                  <span style={{ fontSize: preset.baseFont - 0.5, color: "#333" }}>{e.degree}</span>
                   {e.gpa && <span style={META}>GPA: {e.gpa}</span>}
                 </div>
                 {e.location && <div style={META_SMALL}>{e.location}</div>}
@@ -139,7 +142,7 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
           {projects.filter((p) => p.name).map((p) => {
             const bullets = parseBullets(p.bullets);
             return (
-              <div key={p.id} style={{ marginBottom: 6 }}>
+              <div key={p.id} style={{ marginBottom: Math.max(5, preset.entryGap - 2) }}>
                 <div style={JOB_ROW}>
                   <span style={JOB_TITLE}>
                     {p.name}{p.tech ? <span style={{ fontWeight: 400, color: "#444" }}> | {p.tech}</span> : ""}
@@ -163,7 +166,7 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
           {featuredWithSkill.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px 16px", marginBottom: 6 }}>
               {featuredWithSkill.map((fs, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5, color: "#222" }}>
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: preset.bodyFont, color: "#222" }}>
                   <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {fs.skill}
                   </span>
@@ -183,7 +186,7 @@ export default function ResumePreview({ data }: { data: TBResumeData }) {
 
           {/* Category description lines */}
           {skills.descriptions.trim() && (
-            <div style={{ fontSize: 9.5, color: "#333", lineHeight: 1.6 }}>
+            <div style={{ fontSize: preset.bodyFont, color: "#333", lineHeight: preset.skillsLineHeight }}>
               {skills.descriptions.split("\n").filter(Boolean).map((line, i) => (
                 <div key={i}>{line}</div>
               ))}

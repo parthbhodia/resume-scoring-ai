@@ -1,6 +1,7 @@
 "use client";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { TBResumeData, TBFont } from "./types";
+import { getPageWidth, getStylePreset } from "./templateStyles";
 
 function parseBullets(raw: string): string[] {
   return raw.split("\n").map((l) => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
@@ -12,20 +13,20 @@ function makeBoldFamily(font: TBFont): string {
   return "Helvetica-Bold";
 }
 
-function makeStyles(font: TBFont, accent: string) {
+function makeStyles(font: TBFont, accent: string, stylePreset = getStylePreset(), pageWidth = getPageWidth()) {
   const bold = makeBoldFamily(font);
   return StyleSheet.create({
     page: {
       fontFamily: font,
-      fontSize: 10,
-      paddingTop: 36,
-      paddingBottom: 36,
-      paddingHorizontal: 48,
+      fontSize: stylePreset.baseFont,
+      paddingTop: pageWidth.paddingY,
+      paddingBottom: pageWidth.paddingY,
+      paddingHorizontal: pageWidth.paddingX,
       color: "#1a1a1a",
-      lineHeight: 1.4,
+      lineHeight: stylePreset.lineHeight,
     },
     name: {
-      fontSize: 22,
+      fontSize: stylePreset.nameFont,
       fontFamily: bold,
       letterSpacing: 0.5,
       marginBottom: 4,
@@ -33,7 +34,7 @@ function makeStyles(font: TBFont, accent: string) {
       width: "100%",
     },
     contactLine: {
-      fontSize: 9,
+      fontSize: stylePreset.metaFont,
       color: "#555555",
       flexDirection: "row",
       flexWrap: "wrap",
@@ -41,27 +42,27 @@ function makeStyles(font: TBFont, accent: string) {
     },
     contactItem: { marginRight: 6 },
     sectionTitle: {
-      fontSize: 10.5,
+      fontSize: stylePreset.sectionFont,
       fontFamily: bold,
       textTransform: "uppercase",
-      letterSpacing: 1,
+      letterSpacing: stylePreset.letterSpacing,
       color: accent,
       marginBottom: 5,
       paddingBottom: 2,
       borderBottomWidth: 0.5,
       borderBottomColor: accent,
     },
-    section: { marginBottom: 11 },
+    section: { marginBottom: stylePreset.sectionGap },
     jobRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 1 },
-    jobTitle: { fontSize: 10, fontFamily: bold, color: "#111111" },
-    company: { fontSize: 10, color: "#333333" },
-    dateLocation: { fontSize: 9, color: "#666666" },
-    bullet: { fontSize: 9.5, color: "#222222", marginLeft: 12, marginBottom: 1.5, flexDirection: "row" },
+    jobTitle: { fontSize: stylePreset.baseFont, fontFamily: bold, color: "#111111" },
+    company: { fontSize: stylePreset.baseFont - 0.5, color: "#333333" },
+    dateLocation: { fontSize: stylePreset.metaFont, color: "#666666" },
+    bullet: { fontSize: stylePreset.bodyFont, color: "#222222", marginLeft: 12, marginBottom: stylePreset.bulletGap, flexDirection: "row" },
     bulletDot: { width: 10, color: "#444444" },
     bulletText: { flex: 1 },
-    summaryText: { fontSize: 9.5, color: "#333333", lineHeight: 1.5 },
-    skillsText: { fontSize: 9.5, color: "#333333", lineHeight: 1.6 },
-    metaSmall: { fontSize: 9, color: "#666666" },
+    summaryText: { fontSize: stylePreset.bodyFont, color: "#333333", lineHeight: stylePreset.summaryLineHeight },
+    skillsText: { fontSize: stylePreset.bodyFont, color: "#333333", lineHeight: stylePreset.skillsLineHeight },
+    metaSmall: { fontSize: stylePreset.metaFont, color: "#666666" },
   });
 }
 
@@ -78,9 +79,11 @@ interface Props { data: TBResumeData }
 
 export default function ResumePDFTemplate({ data }: Props) {
   const { profile, workExperiences, educations, projects, skills, customization } = data;
-  const font = customization?.font ?? "Helvetica";
-  const accent = customization?.accentColor ?? "#1a1a1a";
-  const styles = makeStyles(font, accent);
+  const preset = getStylePreset(customization?.stylePreset);
+  const pageWidth = getPageWidth(customization?.pageWidth);
+  const font = customization?.font ?? preset.font;
+  const accent = customization?.accentColor ?? preset.accentColor;
+  const styles = makeStyles(font, accent, preset, pageWidth);
 
   const contactParts = [
     profile.email,
@@ -125,7 +128,7 @@ export default function ResumePDFTemplate({ data }: Props) {
               const dateStr = [w.startDate, w.current ? "Present" : w.endDate].filter(Boolean).join(" – ");
               const bullets = parseBullets(w.bullets);
               return (
-                <View key={w.id} style={{ marginBottom: 8 }}>
+                <View key={w.id} style={{ marginBottom: preset.entryGap }}>
                   <View style={styles.jobRow}>
                     <Text style={styles.jobTitle}>{w.jobTitle || "Job Title"}</Text>
                     <Text style={styles.dateLocation}>{dateStr}</Text>
@@ -148,7 +151,7 @@ export default function ResumePDFTemplate({ data }: Props) {
             {educations.filter((e) => e.school || e.degree).map((e) => {
               const dateStr = [e.startDate, e.endDate].filter(Boolean).join(" – ");
               return (
-                <View key={e.id} style={{ marginBottom: 6 }}>
+                <View key={e.id} style={{ marginBottom: Math.max(5, preset.entryGap - 2) }}>
                   <View style={styles.jobRow}>
                     <Text style={styles.jobTitle}>{e.school || "School"}</Text>
                     <Text style={styles.dateLocation}>{dateStr}</Text>
@@ -174,7 +177,7 @@ export default function ResumePDFTemplate({ data }: Props) {
             {projects.filter((p) => p.name).map((p) => {
               const bullets = parseBullets(p.bullets);
               return (
-                <View key={p.id} style={{ marginBottom: 6 }}>
+                <View key={p.id} style={{ marginBottom: Math.max(5, preset.entryGap - 2) }}>
                   <View style={styles.jobRow}>
                     <Text style={styles.jobTitle}>
                       {p.name}{p.tech ? `  |  ${p.tech}` : ""}
@@ -203,7 +206,7 @@ export default function ResumePDFTemplate({ data }: Props) {
                       .filter(Boolean)
                       .map((fs, i) => (
                         <View key={i} style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
-                          <Text style={{ fontSize: 9, color: "#222", marginRight: 4 }}>{fs.skill}</Text>
+                          <Text style={{ fontSize: preset.metaFont, color: "#222", marginRight: 4 }}>{fs.skill}</Text>
                           {Array.from({ length: 5 }, (_, ci) => (
                             <View key={ci} style={{
                               width: 6, height: 6, borderRadius: 3, marginLeft: 2,

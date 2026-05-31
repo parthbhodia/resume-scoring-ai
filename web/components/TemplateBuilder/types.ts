@@ -41,10 +41,14 @@ export interface TBProject {
 }
 
 export type TBFont = "Helvetica" | "Times-Roman" | "Courier";
+export type TBStylePreset = "executive" | "modern" | "classic";
+export type TBPageWidth = "narrow" | "standard" | "wide";
 
 export interface TBCustomization {
   font: TBFont;
   accentColor: string; // hex — used for section title text/rule
+  stylePreset: TBStylePreset;
+  pageWidth: TBPageWidth;
 }
 
 export interface TBFeaturedSkill {
@@ -68,7 +72,9 @@ export interface TBResumeData {
 
 export const DEFAULT_CUSTOMIZATION: TBCustomization = {
   font: "Helvetica",
-  accentColor: "#1a1a1a",
+  accentColor: "#1e3a5f",
+  stylePreset: "executive",
+  pageWidth: "standard",
 };
 
 export const DEFAULT_PROFILE: TBProfile = {
@@ -105,7 +111,7 @@ export const DEFAULT_RESUME: TBResumeData = {
 
 // Prefilled demo resume — shown to first-time users so the preview is never blank
 export const DEMO_RESUME: TBResumeData = {
-  customization: { font: "Helvetica", accentColor: "#1e3a5f" },
+  customization: DEFAULT_CUSTOMIZATION,
   profile: {
     name: "Alex Johnson",
     email: "alex.johnson@email.com",
