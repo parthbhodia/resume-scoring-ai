@@ -7,7 +7,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "./PdfViewerWithHighlights.css";
 import "./BuilderPdfSuggestionHighlights.css";
-import { normalizeForMatch } from "@/components/AnalyzeLiveResumeBody";
+import { normalizeForMatch } from "@/lib/resumeBulletMatch";
 import {
   normalizeSuggestionPriority,
   PRIORITY_PDF_STRIPE,

@@ -2,16 +2,18 @@
 
 import { useCallback } from "react";
 import AnnotatedResumePanel from "@/components/AnnotatedResumePanel";
+import type { LiveBulletItem } from "@/lib/resumeBulletMatch";
 
 interface Props {
   extractedText: string;
   resumeHeader?: string[];
   company?: string;
   role?: string;
-  /** Bullets targeted by the open gap-fix panel (purple highlight). */
-  gapFixHighlights?: string[];
-  /** Bullets just updated via gap fix (green flash). */
-  appliedHighlights?: string[];
+  /** Analyze-style bullet index map for preview highlights. */
+  bulletAnalysis?: LiveBulletItem[];
+  previewLineOverrides?: Record<number, string>;
+  gapFixTargetBulletIndices?: number[];
+  tailorAppliedBulletIndex?: number | null;
   /** Optional DOCX export when a tailored folder exists. */
   onExportDocx?: () => void;
   exportDocxEnabled?: boolean;
@@ -28,8 +30,10 @@ export default function TailorPreviewPane({
   resumeHeader = [],
   company = "",
   role = "",
-  gapFixHighlights = [],
-  appliedHighlights = [],
+  bulletAnalysis = [],
+  previewLineOverrides = {},
+  gapFixTargetBulletIndices = [],
+  tailorAppliedBulletIndex = null,
   onExportDocx,
   exportDocxEnabled = false,
   docxExportBusy = false,
@@ -40,19 +44,19 @@ export default function TailorPreviewPane({
 
   return (
     <AnnotatedResumePanel
-      bulletAnalysis={[]}
+      bulletAnalysis={bulletAnalysis}
       sectionFeedback={[]}
       activeCategory={null}
       rewriteEdits={{}}
       patchBulletRewrite={noopPatch}
-      previewLineOverrides={{}}
+      previewLineOverrides={previewLineOverrides}
       patchPreviewLine={noopPatch}
       extractedText={extractedText.trim() || null}
       resumeHeader={resumeHeader}
       presentationOnly
       exportPdfEnabled
-      tailorGapFixHighlights={gapFixHighlights}
-      tailorAppliedHighlights={appliedHighlights}
+      gapFixTargetBulletIndices={gapFixTargetBulletIndices}
+      tailorAppliedBulletIndex={tailorAppliedBulletIndex}
       onExportDocx={exportDocxEnabled ? handleExportDocx : undefined}
       exportDocxEnabled={exportDocxEnabled && !docxExportBusy}
       exportingResume={docxExportBusy}

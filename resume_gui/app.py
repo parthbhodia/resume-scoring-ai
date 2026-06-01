@@ -7173,14 +7173,24 @@ async def api_analyze(request: Request):
         return JSONResponse({"error": "job_description is required"}, status_code=400)
 
     model = str(body.get("model") or "").strip() or primary_llm_model_for_resume_workloads()
+    include_bullets = bool(body.get("include_bullet_analysis"))
 
     loop = asyncio.get_event_loop()
     try:
         gemini_client = _optional_gemini_client()
-        llm_ratings = await loop.run_in_executor(
+        ratings_future = loop.run_in_executor(
             None,
             partial(_rate_resume, gemini_client, model, candidate_profile, job_description[:1500]),
         )
+        if include_bullets:
+            analysis_future = loop.run_in_executor(
+                None,
+                partial(_analyze_resume_comprehensive, candidate_profile, job_description),
+            )
+            llm_ratings, analysis_raw = await asyncio.gather(ratings_future, analysis_future)
+        else:
+            llm_ratings = await ratings_future
+            analysis_raw = None
     except Exception as exc:
         logger.exception("api_analyze: _rate_resume failed")
         return JSONResponse({"error": f"analysis failed: {exc}"}, status_code=500)
@@ -7189,7 +7199,22 @@ async def api_analyze(request: Request):
     if ratings is None:
         return JSONResponse({"error": "model returned no usable ratings"}, status_code=502)
 
-    return JSONResponse({"ratings": ratings})
+    payload: dict = {"ratings": ratings}
+    if include_bullets and isinstance(analysis_raw, dict):
+        for key in (
+            "bulletAnalysis",
+            "sectionFeedback",
+            "categoryScores",
+            "overallScore",
+            "summary",
+            "topStrengths",
+            "topIssues",
+            "categoryRationales",
+        ):
+            if key in analysis_raw:
+                payload[key] = analysis_raw[key]
+
+    return JSONResponse(payload)
 
 
 async def api_suggest_changes(request: Request):

@@ -17,13 +17,14 @@ import {
   looksLikeLoneJobTitleLine,
   looksLikeEntryHeader,
 } from "@/lib/resumeEntryLineHeuristics";
+import {
+  findBulletIndexForLine,
+  normalizeForMatch,
+  type LiveBulletItem,
+} from "@/lib/resumeBulletMatch";
 
-export interface LiveBulletItem {
-  originalBullet: string;
-  score: number;
-  issues: string[];
-  improvedBullet: string;
-}
+export type { LiveBulletItem } from "@/lib/resumeBulletMatch";
+export { findBulletIndexForLine, normalizeForMatch } from "@/lib/resumeBulletMatch";
 
 export type Block =
   | { type: "header"; lines: string[] }
@@ -57,14 +58,6 @@ function looksLikeSectionHeading(line: string, strict = false): boolean {
   if (/[0-9%()/–—]/.test(t)) return false;
   if (/[A-Z]/.test(t) && t === t.toUpperCase() && !/^\d/.test(t)) return true;
   return false;
-}
-
-export function normalizeForMatch(s: string): string {
-  return s
-    .replace(/•/g, "•")
-    .replace(/^\s*[•*·\-–—]+\s*/u, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 /**
@@ -103,45 +96,6 @@ export function softenRunOnExtractLine(s: string): string {
     return s.includes(t0) ? s.replace(t0, x) : x;
   }
   return s;
-}
-
-export function findBulletIndexForLine(
-  line: string,
-  bulletAnalysis: LiveBulletItem[],
-): number {
-  const trimmed = normalizeExtractLine(line);
-  if (trimmed.length < 4) return -1;
-  /* Experience metadata must stay in paragraph / EntryHeader rows — not bulletAnalysis rows. */
-  if (looksLikeEntryHeader(trimmed)) return -1;
-  if (looksLikeStructuredEmploymentLine(trimmed)) return -1;
-  if (looksLikeLoneJobTitleLine(trimmed)) return -1;
-
-  const ln = normalizeForMatch(line);
-  if (ln.length < 4) return -1;
-
-  let best = -1;
-  let bestScore = 0;
-  for (let i = 0; i < bulletAnalysis.length; i++) {
-    const b = normalizeForMatch(bulletAnalysis[i].originalBullet);
-    if (!b || b.length < 4) continue;
-    let s = 0;
-    if (ln === b) s = 100;
-    else if (ln.includes(b) || b.includes(ln)) {
-      s = Math.min(80, (Math.min(ln.length, b.length) / Math.max(ln.length, b.length)) * 90);
-      // Short tail fragments score poorly on length ratio — upgrade if the
-      // line is a true suffix of the bullet (wrapped continuation line).
-      if (s < 55 && ln.length >= 6 && b.endsWith(ln)) s = 60;
-    } else {
-      const p = Math.min(24, b.length - 1);
-      if (ln.slice(0, p) === b.slice(0, p) && p >= 12) s = 55;
-      else if (ln.length >= 6 && b.endsWith(ln)) s = 60;
-    }
-    if (s > bestScore) {
-      bestScore = s;
-      best = i;
-    }
-  }
-  return bestScore >= 55 ? best : -1;
 }
 
 export function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): Block[] {
@@ -756,10 +710,14 @@ interface Props {
   pulseBulletIndex?: number | null;
   presentationOnly?: boolean;
   categoryAssignmentOpts?: CategoryAssignmentOptions;
-  /** Tailor gap-fix panel — purple highlight on bullets being edited. */
+  /** Tailor gap-fix panel — purple highlight on targeted bullets. */
   tailorGapFixHighlights?: string[];
   /** Tailor gap-fix just applied — green flash on updated bullets. */
   tailorAppliedHighlights?: string[];
+  /** Index-based gap targets (Analyze-style); preferred over string highlights. */
+  gapFixTargetBulletIndices?: number[];
+  /** Brief green flash on one bullet index after gap apply. */
+  tailorAppliedBulletIndex?: number | null;
 }
 
 export default function AnalyzeLiveResumeBody({
@@ -779,6 +737,8 @@ export default function AnalyzeLiveResumeBody({
   categoryAssignmentOpts,
   tailorGapFixHighlights = [],
   tailorAppliedHighlights = [],
+  gapFixTargetBulletIndices = [],
+  tailorAppliedBulletIndex = null,
 }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   // Tracks which bullets are in "edit textarea" mode (after accepting or choosing to write own)
@@ -1109,13 +1069,24 @@ export default function AnalyzeLiveResumeBody({
               const issues = Array.isArray(bullet.issues) ? bullet.issues : [];
               const hasActionable = !!(bullet.improvedBullet || issues.length);
               const isPulsing = pulseBulletIndex === bulletIdx;
+              const isGapFixTarget =
+                presentationOnly && gapFixTargetBulletIndices.includes(bulletIdx);
+              const isGapFixApplied =
+                presentationOnly && tailorAppliedBulletIndex === bulletIdx;
 
-              const borderColor = scoreBorderColor(bullet.score);
-              const bgTint = scoreBgTint(bullet.score, isHighlighted, presentationOnly);
-              const leftBar =
+              let bgTint = scoreBgTint(bullet.score, isHighlighted, presentationOnly);
+              let leftBar =
                 activeCategory && isHighlighted
                   ? "4px solid rgba(248, 113, 113, 0.95)"
-                  : `3px solid ${borderColor}`;
+                  : `3px solid ${scoreBorderColor(bullet.score)}`;
+
+              if (presentationOnly && isGapFixApplied) {
+                bgTint = "rgba(52,211,153,0.14)";
+                leftBar = "3px solid rgb(34, 197, 94)";
+              } else if (presentationOnly && isGapFixTarget) {
+                bgTint = "rgba(139,92,246,0.12)";
+                leftBar = "3px solid #8b5cf6";
+              }
 
               return (
                 <div

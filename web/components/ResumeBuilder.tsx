@@ -30,9 +30,16 @@ import {
   resumeLineMatchesSuggestionOriginal,
   resumeLineMatchesAcceptedSuggestionHighlight,
   computeCombinedMatchTextByLineIndex,
-  applySuggestionToProfileText,
-  applySuggestionsToProfileText,
 } from "@/lib/suggestionResumeMatch";
+import {
+  gapFixTargetBulletIndices,
+  matchOriginalToBulletIndex,
+  registerGapFixBullet,
+  resolveBulletIndexForGapFix,
+  synthesizeProfileWithBulletOverrides,
+  type LiveBulletItem,
+} from "@/lib/resumeBulletMatch";
+import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { useSuggestionsStore } from "@/store/suggestionsStore";
 import type { StructuredResume } from "@/store/resumeAnalyzeStore";
@@ -448,8 +455,10 @@ export default function ResumeBuilder({
   /** Fast pre-analysis via /api/analyze — shows scoring before PDF compile. */
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
-  /** Texts of bullets that were just applied via gap fix — highlighted green briefly in the paper view. */
-  const [appliedGapTexts, setAppliedGapTexts] = useState<string[]>([]);
+  /** Index-based preview overrides (same model as Analyze). */
+  const [tailorBulletAnalysis, setTailorBulletAnalysis] = useState<LiveBulletItem[]>([]);
+  const [tailorLineOverrides, setTailorLineOverrides] = useState<Record<number, string>>({});
+  const [tailorAppliedBulletIndex, setTailorAppliedBulletIndex] = useState<number | null>(null);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
@@ -1018,7 +1027,11 @@ export default function ResumeBuilder({
       const resp = await fetch(apiUrl("/api/analyze"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidate_profile: candidateProfile, job_description: effJd }),
+        body: JSON.stringify({
+          candidate_profile: candidateProfile,
+          job_description: effJd,
+          include_bullet_analysis: true,
+        }),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
@@ -1026,8 +1039,12 @@ export default function ResumeBuilder({
         try { const j = JSON.parse(body) as { error?: string }; if (j?.error) msg = j.error; } catch { /* */ }
         throw new Error(toUserFriendlyErrorMessage(msg));
       }
-      const data = await resp.json() as { ratings?: RatingsData; error?: string };
+      const raw = await resp.json() as Record<string, unknown>;
+      const data = mergeAnalyzeApiJson(raw) as { ratings?: RatingsData; error?: string; bulletAnalysis?: LiveBulletItem[] };
       if (data.error || !data.ratings) throw new Error(data.error ?? "Analysis returned no ratings");
+      setTailorBulletAnalysis(Array.isArray(data.bulletAnalysis) ? data.bulletAnalysis : []);
+      setTailorLineOverrides({});
+      setTailorAppliedBulletIndex(null);
       setResult({
         ...EMPTY_RESULT,
         ratings: data.ratings,
@@ -1041,7 +1058,14 @@ export default function ResumeBuilder({
 
   /** Re-run JD match ratings on updated plain text (no LaTeX / no ATS folder). */
   const rescoreTailorRatings = useCallback(async (profileOverride?: string) => {
-    const prof = (profileOverride ?? candidateProfile ?? "").trim();
+    const prof = (
+      profileOverride
+      ?? synthesizeProfileWithBulletOverrides(
+        candidateProfile ?? "",
+        tailorBulletAnalysis,
+        tailorLineOverrides,
+      )
+    ).trim();
     if (!prof || !jd.trim()) return false;
     setTailorRescoring(true);
     try {
@@ -1060,7 +1084,38 @@ export default function ResumeBuilder({
     } finally {
       setTailorRescoring(false);
     }
-  }, [candidateProfile, jd]);
+  }, [candidateProfile, jd, tailorBulletAnalysis, tailorLineOverrides]);
+
+  /** Plain text with tailor bullet overrides applied (for gap-fix API + rescoring). */
+  const effectiveCandidateProfile = useMemo(
+    () => synthesizeProfileWithBulletOverrides(
+      candidateProfile ?? "",
+      tailorBulletAnalysis,
+      tailorLineOverrides,
+    ),
+    [candidateProfile, tailorBulletAnalysis, tailorLineOverrides],
+  );
+
+  const tailorPreviewBullets = useMemo(() => {
+    let extended = [...tailorBulletAnalysis];
+    const profile = effectiveCandidateProfile;
+    if (gapFixPanel?.suggestions.length) {
+      for (const s of gapFixPanel.suggestions) {
+        if (matchOriginalToBulletIndex(s.original, extended, profile) >= 0) continue;
+        extended = registerGapFixBullet(extended, s.original, s.suggested, profile).bullets;
+      }
+    }
+    return extended;
+  }, [tailorBulletAnalysis, effectiveCandidateProfile, gapFixPanel]);
+
+  const gapFixTargetIndices = useMemo(() => {
+    if (!gapFixPanel?.suggestions.length) return [];
+    return gapFixTargetBulletIndices(
+      gapFixPanel.suggestions,
+      tailorBulletAnalysis,
+      effectiveCandidateProfile,
+    );
+  }, [gapFixPanel, tailorBulletAnalysis, effectiveCandidateProfile]);
 
   const getSuggestions = useCallback(async (
     focusGaps?: Array<{ name: string; score: number }>,
@@ -1678,7 +1733,7 @@ export default function ResumeBuilder({
         body: JSON.stringify({
           gap_name: gap.name,
           gap_notes: gap.notes,
-          candidate_profile: candidateProfile,
+          candidate_profile: effectiveCandidateProfile,
           job_description: jd.trim(),
         }),
       });
@@ -1693,7 +1748,7 @@ export default function ResumeBuilder({
     } finally {
       setGapFixLoading(null);
     }
-  }, [candidateProfile, jd]);
+  }, [effectiveCandidateProfile, jd]);
 
   /**
    * Apply a gap-fix suggestion to the HTML preview (Chromium export path — no LaTeX).
@@ -1709,17 +1764,29 @@ export default function ResumeBuilder({
 
     setGapApplyBusy(true);
     try {
-      let updatedProfile = candidateProfile ?? "";
+      let bullets = tailorBulletAnalysis;
+      const nextOverrides = { ...tailorLineOverrides };
+      let appliedIdx = -1;
       if (s.original && s.suggested) {
-        const patched = applySuggestionToProfileText(updatedProfile, s.original, s.suggested);
-        updatedProfile = patched.text;
-        if (patched.applied) {
-          setCandidateProfile(updatedProfile);
-          setAppliedGapTexts(prev => [...prev, s.suggested]);
-          window.setTimeout(
-            () => setAppliedGapTexts(prev => prev.filter(t => t !== s.suggested)),
-            3000,
-          );
+        const profileForMatch = synthesizeProfileWithBulletOverrides(
+          candidateProfile ?? "",
+          bullets,
+          nextOverrides,
+        );
+        const resolved = resolveBulletIndexForGapFix(
+          s.original,
+          s.suggested,
+          bullets,
+          profileForMatch,
+        );
+        bullets = resolved.bullets;
+        appliedIdx = resolved.index;
+        if (appliedIdx >= 0) {
+          nextOverrides[appliedIdx] = s.suggested.trim();
+          setTailorBulletAnalysis(bullets);
+          setTailorLineOverrides(nextOverrides);
+          setTailorAppliedBulletIndex(appliedIdx);
+          window.setTimeout(() => setTailorAppliedBulletIndex(null), 3000);
         }
       }
 
@@ -1797,6 +1864,11 @@ export default function ResumeBuilder({
       }
 
       if (jd.trim()) {
+        const updatedProfile = synthesizeProfileWithBulletOverrides(
+          candidateProfile ?? "",
+          bullets,
+          nextOverrides,
+        );
         await rescoreTailorRatings(updatedProfile);
       }
     } catch {
@@ -1804,8 +1876,9 @@ export default function ResumeBuilder({
     } finally {
       setGapApplyBusy(false);
     }
-  }, [candidateProfile, suggestions, suggestSummary, strategicTips, interviewQuestions,
-      hydrateSuggestions, acceptSuggestion, gapFixPanel, jd, rescoreTailorRatings]);
+  }, [candidateProfile, tailorBulletAnalysis, tailorLineOverrides, suggestions, suggestSummary,
+      strategicTips, interviewQuestions, hydrateSuggestions, acceptSuggestion, gapFixPanel, jd,
+      rescoreTailorRatings]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -1915,16 +1988,54 @@ export default function ResumeBuilder({
     setApplyFeedback(null);
     setError(null);
     try {
-      const { text: updatedProfile, applied, failed } = applySuggestionsToProfileText(
-        candidateProfile ?? "",
-        acceptedList,
-      );
-      setCandidateProfile(updatedProfile);
+      let bullets = tailorBulletAnalysis;
+      const nextOverrides = { ...tailorLineOverrides };
+      let applied = 0;
+      let failed = 0;
+      let lastAppliedIdx: number | null = null;
+
+      for (const s of acceptedList) {
+        if (!s.original?.trim() || !s.suggested?.trim()) {
+          failed += 1;
+          continue;
+        }
+        const profileForMatch = synthesizeProfileWithBulletOverrides(
+          candidateProfile ?? "",
+          bullets,
+          nextOverrides,
+        );
+        const resolved = resolveBulletIndexForGapFix(
+          s.original,
+          s.suggested,
+          bullets,
+          profileForMatch,
+        );
+        bullets = resolved.bullets;
+        if (resolved.index < 0) {
+          failed += 1;
+          continue;
+        }
+        nextOverrides[resolved.index] = s.suggested.trim();
+        lastAppliedIdx = resolved.index;
+        applied += 1;
+      }
+
+      setTailorBulletAnalysis(bullets);
+      setTailorLineOverrides(nextOverrides);
+      if (lastAppliedIdx !== null) {
+        setTailorAppliedBulletIndex(lastAppliedIdx);
+        window.setTimeout(() => setTailorAppliedBulletIndex(null), 3000);
+      }
 
       setApplyFeedback({ patchesApplied: applied, patchesFailed: failed, rescoring: true });
 
       if (jd.trim()) {
         try {
+          const updatedProfile = synthesizeProfileWithBulletOverrides(
+            candidateProfile ?? "",
+            bullets,
+            nextOverrides,
+          );
           await rescoreTailorRatings(updatedProfile);
         } catch { /* rescore is best-effort */ }
       }
@@ -1936,7 +2047,8 @@ export default function ResumeBuilder({
     } finally {
       setApplyBusy(false);
     }
-  }, [suggestions, acceptedIds, candidateProfile, jd, rescoreTailorRatings]);
+  }, [suggestions, acceptedIds, candidateProfile, tailorBulletAnalysis, tailorLineOverrides, jd,
+      rescoreTailorRatings]);
 
   const selectedTemplateLabel = useMemo(() => {
     return distinctStyleTemplates().find((t) => t.referenceFolder === styleReferenceFolder)?.label ?? "Template";
@@ -3079,12 +3191,10 @@ export default function ResumeBuilder({
                     resumeHeader={resumeHeaderLines}
                     company={company}
                     role={role}
-                    gapFixHighlights={
-                      gapFixPanel?.suggestions
-                        .map((s) => s.original.trim())
-                        .filter(Boolean) ?? []
-                    }
-                    appliedHighlights={appliedGapTexts}
+                    bulletAnalysis={tailorPreviewBullets}
+                    previewLineOverrides={tailorLineOverrides}
+                    gapFixTargetBulletIndices={gapFixTargetIndices}
+                    tailorAppliedBulletIndex={tailorAppliedBulletIndex}
                   />
                 </div>
               </section>

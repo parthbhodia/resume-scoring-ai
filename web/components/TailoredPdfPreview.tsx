@@ -5,7 +5,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import type { PageProps } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
-import { normalizeForMatch } from "@/components/AnalyzeLiveResumeBody";
+import { normalizeForMatch } from "@/lib/resumeBulletMatch";
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 

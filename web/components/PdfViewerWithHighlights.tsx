@@ -6,7 +6,7 @@ import type { PageProps } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "./PdfViewerWithHighlights.css";
-import { normalizeForMatch } from "@/components/AnalyzeLiveResumeBody";
+import { normalizeForMatch } from "@/lib/resumeBulletMatch";
 
 // Must match pdfjs-dist in package.json (npm overrides dedupe react-pdf's nested copy).
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
