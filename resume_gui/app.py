@@ -6955,6 +6955,115 @@ def _parse_focus_gaps(raw: object) -> List[Dict[str, Any]]:
     return out
 
 
+def _build_ratings_payload(llm_ratings: Optional[dict]) -> Optional[dict]:
+    """Normalise _rate_resume output → the JSON shape the frontend expects.
+
+    Returns None when llm_ratings is missing/unusable so callers can fall back.
+    Schema (detailed): overall_score, job_title, qualifications, responsibilities,
+    keywords, whats_working, gaps, verdict, strategic_tips, interview_questions.
+    """
+    if not llm_ratings or not isinstance(llm_ratings, dict):
+        return None
+
+    has_detailed = "qualifications" in llm_ratings or "responsibilities" in llm_ratings
+    if not has_detailed:
+        return {
+            "match_score": llm_ratings.get("match_score", 0),
+            "criteria": (llm_ratings.get("criteria") or [])[:12],
+            "whats_working": llm_ratings.get("whats_working") or [],
+            "gaps": llm_ratings.get("gaps") or [],
+            "verdict": llm_ratings.get("verdict", ""),
+        }
+
+    kw = llm_ratings.get("keywords") or {}
+    overall = int(llm_ratings.get("overall_score") or llm_ratings.get("match_score") or 0)
+
+    if isinstance(kw, dict) and ("direct_skills" in kw or "contextual" in kw):
+        ds = kw.get("direct_skills") or {}
+        ctx = kw.get("contextual") or {}
+        ds_found  = ds.get("found") or [] if isinstance(ds, dict) else []
+        ds_miss   = ds.get("missing") or [] if isinstance(ds, dict) else []
+        ctx_found = ctx.get("found") or [] if isinstance(ctx, dict) else []
+        ctx_miss  = ctx.get("missing") or [] if isinstance(ctx, dict) else []
+        ctx_found_norm: List[dict] = []
+        for item in ctx_found:
+            if isinstance(item, dict):
+                ctx_found_norm.append({"keyword": str(item.get("keyword", "")), "count": int(item.get("count", 1))})
+            else:
+                ctx_found_norm.append({"keyword": str(item), "count": 1})
+        kw_payload = {
+            "direct_skills": {"found": ds_found, "missing": ds_miss},
+            "contextual": {"found": ctx_found_norm, "missing": ctx_miss},
+            "found_count": len(ds_found) + len(ctx_found_norm),
+            "total_count": len(ds_found) + len(ds_miss) + len(ctx_found_norm) + len(ctx_miss),
+        }
+    else:
+        found_kw   = kw.get("found") or [] if isinstance(kw, dict) else []
+        missing_kw = kw.get("missing") or [] if isinstance(kw, dict) else []
+        kw_payload = {
+            "direct_skills": {"found": found_kw, "missing": missing_kw},
+            "contextual": {"found": [], "missing": []},
+            "found_count": len(found_kw),
+            "total_count": len(found_kw) + len(missing_kw),
+        }
+
+    return {
+        "overall_score": overall,
+        "match_score": overall,
+        "criteria": [],
+        "job_title": llm_ratings.get("job_title") or {},
+        "qualifications": llm_ratings.get("qualifications") or {"score": 0, "covered": [], "missing": []},
+        "responsibilities": llm_ratings.get("responsibilities") or {"score": 0, "covered": [], "missing": []},
+        "keywords": kw_payload,
+        "whats_working": llm_ratings.get("whats_working") or [],
+        "gaps": llm_ratings.get("gaps") or [],
+        "verdict": llm_ratings.get("verdict", ""),
+        "strategic_tips": llm_ratings.get("strategic_tips") or [],
+        "interview_questions": llm_ratings.get("interview_questions") or [],
+    }
+
+
+async def api_analyze(request: Request):
+    """POST /api/analyze — score resume vs JD and return detailed ratings without compiling a PDF.
+
+    Used by the analyze-first tailor flow: user sees match score, gaps, and
+    keywords BEFORE committing to a PDF compile.
+
+    Body:  { candidate_profile: str, job_description: str, model?: str }
+    Returns: { ratings: <_build_ratings_payload output> }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    candidate_profile = str(body.get("candidate_profile") or "").strip()
+    job_description   = str(body.get("job_description") or "").strip()
+    if not candidate_profile:
+        return JSONResponse({"error": "candidate_profile is required"}, status_code=400)
+    if not job_description:
+        return JSONResponse({"error": "job_description is required"}, status_code=400)
+
+    model = str(body.get("model") or "").strip() or primary_llm_model_for_resume_workloads()
+
+    loop = asyncio.get_event_loop()
+    try:
+        gemini_client = _optional_gemini_client()
+        llm_ratings = await loop.run_in_executor(
+            None,
+            partial(_rate_resume, gemini_client, model, candidate_profile, job_description[:1500]),
+        )
+    except Exception as exc:
+        logger.exception("api_analyze: _rate_resume failed")
+        return JSONResponse({"error": f"analysis failed: {exc}"}, status_code=500)
+
+    ratings = _build_ratings_payload(llm_ratings)
+    if ratings is None:
+        return JSONResponse({"error": "model returned no usable ratings"}, status_code=502)
+
+    return JSONResponse({"ratings": ratings})
+
+
 async def api_suggest_changes(request: Request):
     """POST /api/suggest-changes — analyze resume vs JD and return per-bullet suggestions.
 
@@ -8163,6 +8272,7 @@ routes = [
     Route("/api/resumes",                   api_resumes),
     Route("/api/generate-stream",           api_generate_stream, methods=["POST"]),
     Route("/api/upload-resume",             api_upload_resume,   methods=["POST"]),
+    Route("/api/analyze",                 api_analyze,         methods=["POST"]),
     Route("/api/extract-jd",              api_extract_jd,     methods=["POST"]),
     Route("/api/resume/{folder}",          api_resume_parsed,  methods=["GET"]),
     Route("/api/resume/{folder}",          api_resume_save,    methods=["POST"]),
