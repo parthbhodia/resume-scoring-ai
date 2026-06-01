@@ -203,6 +203,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 
 ## Recent changes (running log — newest first; **append after every commit**)
 
+- **`c91c325`** — Backend refactor phase 2: extracted structured-doc parsing (`doc_normalize.py`, `education_parse.py`, `structured_doc.py`) from `app.py`. Builders (`_resume_doc_from_parsed`, `_build_resume_doc_from_llm_raw`), normalization pass, and JSON serialization now live under `extract/`. `app.py` down to ~6,100 lines; still owns routes, LLM orchestration, and suggestion application.
+
 - **`9e719f9`** — Backend refactor phase 1: extracted analyze honesty pipeline (`resume_gui/analysis/`) and PDF extract helpers (`resume_gui/extract/` vision, synthesize, text_utils, education) from the `app.py` monolith. `app.py` re-exports the same `_`-prefixed names for tests and scripts. Added `resume_gui/README.md` as the onboarding map. Invariant: no behavior change — 87 pytest cases stay green.
 
 - **Chromium-only PDF + Template Builder replaces studio (this session)** — JD Tailor no longer calls LaTeX (`apply-suggestions` / `generate-stream`) for gap fixes or download; preview + export use `useHtmlPdfExport` like Analyze. Legacy `?flow=template` / `ResumeTemplateStudio` redirect to `/template-builder/`. Removed LaTeX template picker from tailor upload form and "LaTeX layout" chips from `AnnotatedResumePanel`; Style + accent swatches on the preview panel are the single styling surface.
