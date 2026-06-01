@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { accentCardBorder } from "@/lib/accentCardBorder";
 import type { DetailedCategory, DetailedRatingItem } from "@/lib/types";
 
 type GapFixSuggestion = {
@@ -105,9 +106,11 @@ export function CoveredMissingSection({
                     style={{
                       padding: "16px 18px",
                       borderRadius: 10,
-                      border: isActivePanel ? "1px solid rgba(99,102,241,0.4)" : "1px solid var(--border)",
+                      ...accentCardBorder(
+                        isActivePanel ? "#818cf8" : "#f87171",
+                        isActivePanel ? "rgba(99,102,241,0.4)" : "var(--border)",
+                      ),
                       background: isActivePanel ? "rgba(99,102,241,0.04)" : "var(--surface2)",
-                      borderLeft: "3px solid transparent",
                       transition: "border-color 0.2s, background 0.2s",
                     }}
                   >
@@ -315,7 +318,12 @@ export function CoveredMissingSection({
             {covered.map((item, i) => (
               <div
                 key={i}
-                style={{ padding: "16px 18px", borderRadius: 10, border: "1px solid rgba(52,211,153,0.18)", background: "var(--surface2)", borderLeft: "3px solid var(--green, #34d399)" }}
+                style={{
+                  padding: "16px 18px",
+                  borderRadius: 10,
+                  ...accentCardBorder("var(--green, #34d399)", "rgba(52,211,153,0.18)"),
+                  background: "var(--surface2)",
+                }}
               >
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", lineHeight: 1.45, marginBottom: item.context ? 10 : 0 }}>{item.text}</div>
                 {item.context && (

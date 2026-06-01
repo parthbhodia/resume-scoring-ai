@@ -109,8 +109,10 @@ export function useHtmlPdfExport() {
       });
 
       if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: "Export failed" }));
-        throw new Error(err.error || `HTTP ${resp.status}`);
+        const err = await resp.json().catch(() => ({ error: "Export failed" })) as { error?: string; detail?: string };
+        const msg = err.error || `HTTP ${resp.status}`;
+        const detail = typeof err.detail === "string" ? err.detail.trim() : "";
+        throw new Error(detail && !msg.includes("playwright") ? `${msg} (${detail.slice(0, 120)})` : msg);
       }
 
       const blob = await resp.blob();

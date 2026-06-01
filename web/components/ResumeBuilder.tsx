@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale, ParsedSection } from "@/lib/types";
 import { buildResumeFileStem } from "@/lib/resumeFileName";
+import { accentCardBorder } from "@/lib/accentCardBorder";
 import { getBaseResumeBanner } from "@/lib/libraryFolderLabel";
 import { apiUrl, isResumeUploadFile, parseJsonOrThrow, scoreColor } from "@/lib/utils";
 import { toUserFriendlyErrorMessage, messageForNonJsonApiFailure } from "@/lib/userFriendlyError";
@@ -2381,8 +2382,7 @@ export default function ResumeBuilder({
                       marginTop: 14,
                       padding: "18px 20px 16px",
                       borderRadius: "var(--radius-xl)",
-                      border: "1px solid var(--border)",
-                      borderLeft: "3px solid var(--accent)",
+                      ...accentCardBorder("var(--accent)"),
                       background: "var(--surface)",
                       boxShadow: "var(--shadow-card)",
                       display: "flex",
