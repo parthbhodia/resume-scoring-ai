@@ -116,21 +116,14 @@ Hook: `web/hooks/useHtmlPdfExport.ts`. Wired in `AnnotatedResumePanel`, `TailorP
 
 ## Component map
 
-### Backend (`resume_gui/app.py`)
+### Backend (`resume_gui/`)
 
-- **Endpoints** — search for `Route(` at the bottom of the file.
-  - `/api/analyze-upload` — main entry for Analyze flow
-  - `/api/analyze` — pre-compile analysis (no file upload, takes profile text)
-  - `/api/analyze-export-pdf` — legacy LaTeX export (used by tailor flow only now)
-  - `/api/export-pdf-html` — Chromium HTML → PDF (used by everything WYSIWYG)
-  - `/api/suggest-gap-fix` — per-parameter "Fix-with-AI"
-  - `/api/generate-stream` — tailor flow streaming endpoint
-
-- **Validators / honesty** — `_filter_bullet_rewrites`, `_validate_analysis_against_resume`, `_strip_non_issue_ats_warnings`, `_normalize_analysis`. All in app.py. Search for `_NUMERAL_RE`, `_STRONG_OWNERSHIP_VERBS`, `_NON_ISSUE_ATS_WARNING_RE` to find the regex inventory.
-
-- **Vision extract** — `_llm_extract_pdf_vision`, `_vision_raw_to_resume_doc`, `_render_pdf_pages_to_b64_pngs`. Uses PyMuPDF (`fitz`) for rendering. Default model: `grok-4` (vision tier).
-
-- **Synthesizer** — `_synthesize_text_from_resume_doc`. Produces the clean text the preview renders from. Handles `(Ongoing)/(YYYY)` lift to entry-header date slot. Don't add display logic here that the preview already does — the synthesizer is just text generation.
+- **Entry** — `app.py` (~80 lines): Starlette factory, CORS, test re-exports. Route table from `routes/__init__.py`.
+- **Analyze pipeline** — `analysis/comprehensive.py` (LLM prompt + `_analyze_resume_comprehensive`), `analysis/rewrite_validators.py`, `analysis/evidence_validator.py`, `analysis/normalize.py`.
+- **Extract pipeline** — `extract/vision.py`, `extract/pipeline.py` (`_llm_extract`, `_finalize_structured_doc`), `extract/synthesize.py`, `extract/structured_doc.py`.
+- **Routes** — `routes/analyze.py`, `routes/suggest.py`, `routes/generate.py`, `routes/export.py`, etc. See `resume_gui/README.md`.
+- **LLM** — `llm/client.py` (`_llm_json_call`, model tiers via env vars).
+- **Validators / honesty** — under `analysis/` (same invariants as before).
 
 ### Frontend (`web/components/`)
 
@@ -204,6 +197,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 ## Recent changes (running log — newest first; **append after every commit**)
 
 - **`c91c325`** — Backend refactor phase 2: extracted structured-doc parsing (`doc_normalize.py`, `education_parse.py`, `structured_doc.py`) from `app.py`. Builders (`_resume_doc_from_parsed`, `_build_resume_doc_from_llm_raw`), normalization pass, and JSON serialization now live under `extract/`. `app.py` down to ~6,100 lines; still owns routes, LLM orchestration, and suggestion application.
+
+- **Phase 3 (this session)** — Completed monolith split: `app.py` is now ~80 lines (Starlette factory + test re-exports). Route handlers live in `resume_gui/routes/` by domain; LLM client in `llm/`, comprehensive analysis in `analysis/comprehensive.py`, extract orchestration in `extract/pipeline.py`, suggestions in `suggestions.py`, auth in `auth/supabase.py`. `resume_gui/README.md` documents the full map for onboarding.
 
 - **`9e719f9`** — Backend refactor phase 1: extracted analyze honesty pipeline (`resume_gui/analysis/`) and PDF extract helpers (`resume_gui/extract/` vision, synthesize, text_utils, education) from the `app.py` monolith. `app.py` re-exports the same `_`-prefixed names for tests and scripts. Added `resume_gui/README.md` as the onboarding map. Invariant: no behavior change — 87 pytest cases stay green.
 
