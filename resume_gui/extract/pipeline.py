@@ -15,6 +15,7 @@ from resume_gui.extract.structured_doc import (
     _build_resume_doc_from_llm_raw, _doc_extraction_counts,
     _resume_doc_from_parsed, _resume_doc_to_dict,
 )
+from resume_gui.extract.vision import _llm_extract_pdf_vision
 from resume_gui.llm.client import _analysis_model, _gemini_reasoning_model, _grok_reasoning_model, _llm_json_call
 from resume_gui.renderers.latex_renderer import ResumeDocModel
 from resume_library import grok_preferred_for_throughput, parse_resume_tex
