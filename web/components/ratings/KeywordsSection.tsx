@@ -25,6 +25,7 @@ type Props = {
   gapFixPanel?: GapFixPanel | null;
   gapFixError?: string | null;
   onApplyFix?: (s: GapFixSuggestion) => void | Promise<void>;
+  onApplyAllFixes?: (suggestions: GapFixSuggestion[]) => void | Promise<void>;
   onDismissFix?: () => void;
 };
 
@@ -35,6 +36,7 @@ export function KeywordsSection({
   gapFixPanel,
   gapFixError,
   onApplyFix,
+  onApplyAllFixes,
   onDismissFix,
 }: Props) {
   // Normalise to categorised shape — handles both new and legacy flat schemas
@@ -175,7 +177,12 @@ export function KeywordsSection({
                   type="button"
                   onClick={() => {
                     const toApply = panelSuggestions.filter((s) => effectiveChecked.has(s.id));
-                    toApply.forEach((s) => onApplyFix(s));
+                    if (toApply.length === 0) return;
+                    if (onApplyAllFixes) {
+                      void onApplyAllFixes(toApply);
+                    } else {
+                      toApply.forEach((s) => { void onApplyFix!(s); });
+                    }
                   }}
                   style={{
                     display: "inline-flex", alignItems: "center", gap: 6,

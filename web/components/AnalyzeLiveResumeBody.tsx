@@ -716,8 +716,8 @@ interface Props {
   tailorAppliedHighlights?: string[];
   /** Index-based gap targets (Analyze-style); preferred over string highlights. */
   gapFixTargetBulletIndices?: number[];
-  /** Brief green flash on one bullet index after gap apply. */
-  tailorAppliedBulletIndex?: number | null;
+  /** Brief green flash on applied bullet indices after gap apply. */
+  tailorAppliedBulletIndices?: ReadonlySet<number>;
 }
 
 export default function AnalyzeLiveResumeBody({
@@ -738,7 +738,7 @@ export default function AnalyzeLiveResumeBody({
   tailorGapFixHighlights = [],
   tailorAppliedHighlights = [],
   gapFixTargetBulletIndices = [],
-  tailorAppliedBulletIndex = null,
+  tailorAppliedBulletIndices = new Set<number>(),
 }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   // Tracks which bullets are in "edit textarea" mode (after accepting or choosing to write own)
@@ -1072,7 +1072,7 @@ export default function AnalyzeLiveResumeBody({
               const isGapFixTarget =
                 presentationOnly && gapFixTargetBulletIndices.includes(bulletIdx);
               const isGapFixApplied =
-                presentationOnly && tailorAppliedBulletIndex === bulletIdx;
+                presentationOnly && tailorAppliedBulletIndices.has(bulletIdx);
 
               let bgTint = scoreBgTint(bullet.score, isHighlighted, presentationOnly);
               let leftBar =

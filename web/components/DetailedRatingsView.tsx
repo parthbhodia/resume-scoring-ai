@@ -66,6 +66,7 @@ type SharedProps = {
   gapFixPanel?: GapFixPanel | null;
   gapFixError?: string | null;
   onApplyFix?: (s: GapFixSuggestion) => void | Promise<void>;
+  onApplyAllGapFixes?: (suggestions: GapFixSuggestion[]) => void | Promise<void>;
   onDismissFix?: () => void;
   keyGap?: string;
   strategicTips?: string[];
@@ -331,6 +332,7 @@ export function TailorMatchDetail(props: SharedProps) {
     gapFixPanel,
     gapFixError,
     onApplyFix,
+    onApplyAllGapFixes,
     onDismissFix,
     keyGap,
     strategicTips,
@@ -394,13 +396,13 @@ export function TailorMatchDetail(props: SharedProps) {
         )}
         {activeTab === "job_title" && <JobTitleSection jobTitle={job_title} />}
         {activeTab === "qualifications" && (
-          <CoveredMissingSection category={qualifications} label="Qualifications" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onDismissFix={onDismissFix} />
+          <CoveredMissingSection category={qualifications} label="Qualifications" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} />
         )}
         {activeTab === "responsibilities" && (
-          <CoveredMissingSection category={responsibilities} label="Responsibilities" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onDismissFix={onDismissFix} />
+          <CoveredMissingSection category={responsibilities} label="Responsibilities" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} />
         )}
         {activeTab === "keywords" && (
-          <KeywordsSection keywords={keywords} onFixKeyword={onFixKeyword} fixingKeyword={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onDismissFix={onDismissFix} />
+          <KeywordsSection keywords={keywords} onFixKeyword={onFixKeyword} fixingKeyword={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} />
         )}
         {activeTab === "interview" && (
           <InterviewSection keyGap={keyGap} tips={strategicTips} questions={interviewQuestions} onGetSuggestions={onGetSuggestions} suggestionsLoading={suggestionsLoading} />

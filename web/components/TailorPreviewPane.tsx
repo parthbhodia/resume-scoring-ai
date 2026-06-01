@@ -13,7 +13,7 @@ interface Props {
   bulletAnalysis?: LiveBulletItem[];
   previewLineOverrides?: Record<number, string>;
   gapFixTargetBulletIndices?: number[];
-  tailorAppliedBulletIndex?: number | null;
+  tailorAppliedBulletIndices?: ReadonlySet<number>;
   /** Optional DOCX export when a tailored folder exists. */
   onExportDocx?: () => void;
   exportDocxEnabled?: boolean;
@@ -33,7 +33,7 @@ export default function TailorPreviewPane({
   bulletAnalysis = [],
   previewLineOverrides = {},
   gapFixTargetBulletIndices = [],
-  tailorAppliedBulletIndex = null,
+  tailorAppliedBulletIndices = new Set<number>(),
   onExportDocx,
   exportDocxEnabled = false,
   docxExportBusy = false,
@@ -56,7 +56,7 @@ export default function TailorPreviewPane({
       presentationOnly
       exportPdfEnabled
       gapFixTargetBulletIndices={gapFixTargetBulletIndices}
-      tailorAppliedBulletIndex={tailorAppliedBulletIndex}
+      tailorAppliedBulletIndices={tailorAppliedBulletIndices}
       onExportDocx={exportDocxEnabled ? handleExportDocx : undefined}
       exportDocxEnabled={exportDocxEnabled && !docxExportBusy}
       exportingResume={docxExportBusy}

@@ -84,8 +84,8 @@ interface Props {
   tailorAppliedHighlights?: string[];
   /** Index-based gap targets (Analyze-style); preferred over string highlights. */
   gapFixTargetBulletIndices?: number[];
-  /** Brief green flash on one bullet index after gap apply. */
-  tailorAppliedBulletIndex?: number | null;
+  /** Brief green flash on applied bullet indices after gap apply. */
+  tailorAppliedBulletIndices?: ReadonlySet<number>;
 }
 
 function scoreColor(score: number): string {
@@ -289,7 +289,7 @@ export default function AnnotatedResumePanel({
   tailorGapFixHighlights = [],
   tailorAppliedHighlights = [],
   gapFixTargetBulletIndices = [],
-  tailorAppliedBulletIndex = null,
+  tailorAppliedBulletIndices = new Set<number>(),
 }: Props) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -1016,7 +1016,7 @@ export default function AnnotatedResumePanel({
                 tailorGapFixHighlights={tailorGapFixHighlights}
                 tailorAppliedHighlights={tailorAppliedHighlights}
                 gapFixTargetBulletIndices={gapFixTargetBulletIndices}
-                tailorAppliedBulletIndex={tailorAppliedBulletIndex}
+                tailorAppliedBulletIndices={tailorAppliedBulletIndices}
               />
           ) : (
           <>

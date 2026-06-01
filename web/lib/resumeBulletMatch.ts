@@ -62,6 +62,34 @@ export function findBulletIndexForLine(
   return bestScore >= 55 ? best : -1;
 }
 
+function formatOverrideBullet(raw: string): string {
+  const t = raw.trim();
+  if (!t) return t;
+  return /^[•\-–*]/.test(t) || /^\u2022/.test(t) ? t : `• ${t.replace(/^•\s*/, "")}`;
+}
+
+/** Find a profile line index whose text best matches gap-fix `original`. */
+export function findLineIndexForOriginal(original: string, lines: string[]): number {
+  const origNorm = normalizeForMatch(original);
+  if (origNorm.length < 6) return -1;
+
+  let best = -1;
+  let bestScore = 0;
+  for (let li = 0; li < lines.length; li++) {
+    const ln = normalizeForMatch(lines[li]);
+    if (ln.length < 4) continue;
+    if (ln === origNorm) return li;
+    if (ln.includes(origNorm) || origNorm.includes(ln)) {
+      const s = Math.min(ln.length, origNorm.length) / Math.max(ln.length, origNorm.length);
+      if (s > bestScore) {
+        bestScore = s;
+        best = li;
+      }
+    }
+  }
+  return bestScore >= 0.45 ? best : -1;
+}
+
 /** Merge index-based preview overrides into plain text (Tailor rescore / gap-fix API). */
 export function synthesizeProfileWithBulletOverrides(
   profileText: string,
@@ -72,14 +100,36 @@ export function synthesizeProfileWithBulletOverrides(
   const lines = profileText.split("\n");
   const patched = [...lines];
   const seen = new Set<number>();
+
   for (let li = 0; li < lines.length; li++) {
     const idx = findBulletIndexForLine(lines[li], bullets);
     if (idx < 0 || overrides[idx] === undefined || seen.has(idx)) continue;
     const raw = overrides[idx].trim();
     if (!raw) continue;
-    patched[li] = /^[•\-–*]/.test(raw) || /^\u2022/.test(raw) ? raw : `• ${raw.replace(/^•\s*/, "")}`;
+    patched[li] = formatOverrideBullet(raw);
     seen.add(idx);
   }
+
+  for (const [idxStr, overrideText] of Object.entries(overrides)) {
+    const idx = Number(idxStr);
+    if (seen.has(idx)) continue;
+    const raw = overrideText.trim();
+    if (!raw) continue;
+    const bullet = bullets[idx];
+    const original = bullet?.originalBullet?.trim() ?? "";
+    let lineIdx = original ? findLineIndexForOriginal(original, lines) : -1;
+    if (lineIdx < 0 && original) {
+      lineIdx = findLineIndexForOriginal(original, patched);
+    }
+    if (lineIdx >= 0) {
+      patched[lineIdx] = formatOverrideBullet(raw);
+      seen.add(idx);
+      continue;
+    }
+    patched.push(formatOverrideBullet(raw));
+    seen.add(idx);
+  }
+
   return patched.join("\n");
 }
 

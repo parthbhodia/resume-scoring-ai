@@ -27,6 +27,8 @@ type Props = {
   gapFixPanel?: GapFixPanel | null;
   gapFixError?: string | null;
   onApplyFix?: (s: GapFixSuggestion) => void | Promise<void>;
+  /** Apply all checked suggestions in one batch (preferred over per-item onApplyFix). */
+  onApplyAllFixes?: (suggestions: GapFixSuggestion[]) => void | Promise<void>;
   onDismissFix?: () => void;
 };
 
@@ -38,6 +40,7 @@ export function CoveredMissingSection({
   gapFixPanel,
   gapFixError,
   onApplyFix,
+  onApplyAllFixes,
   onDismissFix,
 }: Props) {
   const [coveredOpen, setCoveredOpen] = useState(true);
@@ -203,7 +206,12 @@ export function CoveredMissingSection({
                             type="button"
                             onClick={() => {
                               const toApply = panelSuggestions.filter((s) => effectiveChecked.has(s.id));
-                              toApply.forEach((s) => onApplyFix(s));
+                              if (toApply.length === 0) return;
+                              if (onApplyAllFixes) {
+                                void onApplyAllFixes(toApply);
+                              } else {
+                                toApply.forEach((s) => { void onApplyFix!(s); });
+                              }
                             }}
                             style={{
                               display: "inline-flex", alignItems: "center", gap: 6,
