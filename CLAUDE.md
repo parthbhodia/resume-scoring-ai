@@ -203,6 +203,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 
 ## Recent changes (running log — newest first; **append after every commit**)
 
+- **`9e719f9`** — Backend refactor phase 1: extracted analyze honesty pipeline (`resume_gui/analysis/`) and PDF extract helpers (`resume_gui/extract/` vision, synthesize, text_utils, education) from the `app.py` monolith. `app.py` re-exports the same `_`-prefixed names for tests and scripts. Added `resume_gui/README.md` as the onboarding map. Invariant: no behavior change — 87 pytest cases stay green.
+
 - **Chromium-only PDF + Template Builder replaces studio (this session)** — JD Tailor no longer calls LaTeX (`apply-suggestions` / `generate-stream`) for gap fixes or download; preview + export use `useHtmlPdfExport` like Analyze. Legacy `?flow=template` / `ResumeTemplateStudio` redirect to `/template-builder/`. Removed LaTeX template picker from tailor upload form and "LaTeX layout" chips from `AnnotatedResumePanel`; Style + accent swatches on the preview panel are the single styling surface.
 
 - **Category score explanations below 95 (this session)** — Any category scored under 95 must show *why*: analysis prompt emits `categoryRationales`; `/api/explain-category-score` backfills saved runs; `AnalyzeResume` auto-fetches on category open when missing. Removed misleading "looks strong" empty state for 70–94 scores and dropped the "no trusted AI rewrite / quality filter" copy on bullet cards. `/api/upload-resume` now vision-synthesizes `extractedText` for PDFs (analyze parity). Tailor results header drops LaTeX "Generate tailored PDF" — download is HTML/Chromium only.

@@ -8,6 +8,9 @@ Starlette app entry point: **`app.py`** (routes + orchestration). Domain logic l
 |------|----------------|
 | `analysis/` | Analyze pipeline honesty layer: rewrite filters, evidence validator, score calibration |
 | `extract/` | PDF/text extraction: vision parse, synthesizer, bullet stitching, education split |
+| `extract/doc_normalize.py` | Fix swapped degree/dates, experience table artifacts, skills noise |
+| `extract/education_parse.py` | Flat education lines → `EducationItem` entries |
+| `extract/structured_doc.py` | Build `ResumeDocModel` from parsed JSON / LLM raw dict |
 | `doc_utils.py` | Shared `_clean_model_text` used across structured-doc normalization |
 | `experience_tenure.py` | Tenure summary for analyze-upload |
 | `renderers/` | LaTeX renderer (legacy tailor path) |
