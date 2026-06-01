@@ -26,6 +26,7 @@ interface Props {
   /** Prefer over store for `extractedText` / `resumeHeader` on the painting pass right after POST /analyze. */
   analyzeSnapshot?: AnalyzePreviewSnapshot | null;
   activeCategory: string | null;
+  activeCategoryLabel?: string;
   rewriteEdits: Record<number, string>;
   patchBulletRewrite: (bulletIndex: number, value: string | null) => void;
   patchPreviewLine: (bulletIndex: number, value: string | null) => void;
@@ -53,6 +54,7 @@ export default function AnalyzePreviewPane({
   analyzeSnapshot = null,
   sectionFeedback,
   activeCategory,
+  activeCategoryLabel = "",
   rewriteEdits,
   patchBulletRewrite,
   patchPreviewLine,
@@ -99,6 +101,7 @@ export default function AnalyzePreviewPane({
       bulletAnalysis={analysisBullets}
       sectionFeedback={sectionFeedback}
       activeCategory={activeCategory}
+      activeCategoryLabel={activeCategoryLabel}
       rewriteEdits={rewriteEdits}
       patchBulletRewrite={patchBulletRewrite}
       previewLineOverrides={lineOverrides}

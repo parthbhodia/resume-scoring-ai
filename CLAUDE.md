@@ -184,11 +184,12 @@ Gemini fallback chain kicks in when Grok hits quota or errors. Slugs: `GEMINI_RE
 7. **Score has a floor of 20.** Anything that parsed and produced category scores deserves at least 20.
 8. **The Analyze "Download PDF" matches the preview.** Goes through Chromium, not LaTeX.
 9. **The backend owns bullet category bucketing.** Each `bulletAnalysis` item carries `primaryCategory` + `issueCategories` (validated by `_normalize_bullet_categories` against `_CATEGORY_SCORE_KEYS`). The frontend trusts them verbatim; it does NOT re-derive categories with regex when they're present. A bullet's `primaryCategory` must be a category it can offer a rewrite for, and "quantification" never appears in either field without a numeral-adding rewrite. The `guessIssueCategory`/`inferBaseCategory` heuristics survive only as a fallback for legacy restored-history payloads.
+10. **Display uses `issueCategories`; rewrites use `primaryCategory` only.** `bulletBelongsToCategory()` (frontend) checks `issueCategories` for filtering, preview highlights, sidebar badge counts, and `categoryHasActionableContent`. `getRewriteForCategory()` still keys off `primaryCategory` so the UI never surfaces a rewrite for the wrong fix target. Preview banner is red only when `flaggedCount > 0` for the active category.
 
-The 66 dimension tests in `resume_gui/tests/test_analyze_dimensions.py` defend invariants 1-9. **Run them after any change to validators / calibration / synthesizer / category normalization**:
+The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_experience_tenure.py` defend invariants 1–10. Full algorithm notes: [`docs/ANALYSIS_ALGORITHM.md`](docs/ANALYSIS_ALGORITHM.md).
 
 ```bash
-.venv/bin/python -m pytest resume_gui/tests/test_analyze_dimensions.py -v
+.venv/bin/python -m pytest resume_gui/tests/test_analyze_dimensions.py resume_gui/tests/test_experience_tenure.py -v
 # (no .venv in this container — `python3 -m pytest …` after the dep-install noted in the changelog)
 ```
 
@@ -204,6 +205,8 @@ The 66 dimension tests in `resume_gui/tests/test_analyze_dimensions.py` defend i
 ---
 
 ## Recent changes (running log — newest first; **append after every commit**)
+
+- **Analyze score/UX alignment (this session)** — Fixed the category-score vs bullet-layer mismatch that made Readability look empty while the preview still warned about highlights. Frontend now uses `bulletBelongsToCategory()` (checks `issueCategories` for display, `primaryCategory` for rewrites only). Preview banner/badge gated on actual matches; low-score categories without bullets get explanatory empty state; stripped-rewrite bullets explain the quality filter. Added `resume_gui/experience_tenure.py` + `experienceSummary` on analyze-upload (merged tenure from structured experience dates; chip in sidebar + overview). Docs: [`docs/ANALYSIS_ALGORITHM.md`](docs/ANALYSIS_ALGORITHM.md). Invariant #10. Tests: +6 tenure cases (74 total with dimensions).
 
 - **Template Builder in app nav (this session)** — `/template-builder/` is now wrapped in the shared `AppShell`, so the standalone builder gets the same left navigation shell as the rest of the app. `AppShell` detects the pathname and treats the Resume Builder drawer as active on that route, with a new `Template Builder` sub-item linking directly to `/template-builder/`; `Tailor to a job` remains the normal `/?view=builder&flow=tailor` path. This keeps the public no-signup tool accessible while making it discoverable from the in-app Resume Builder nav.
 

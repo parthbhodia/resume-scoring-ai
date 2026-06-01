@@ -6334,8 +6334,14 @@ async def api_analyze_upload(request: Request):
             for ei, exp in enumerate(structured.experience):
                 for bi in range(len(exp.bullets)):
                     bullet_map.append({"experienceIdx": ei, "bulletIdx": bi})
-            result["structuredResume"] = _resume_doc_to_dict(structured)
+            structured_dict = _resume_doc_to_dict(structured)
+            result["structuredResume"] = structured_dict
             result["bulletMap"]        = bullet_map
+            try:
+                from resume_gui.experience_tenure import compute_experience_summary_from_structured
+                result["experienceSummary"] = compute_experience_summary_from_structured(structured_dict)
+            except Exception as exc:
+                logger.warning("experience_summary failed: %s", exc)
             _log_structured_doc("analyze_upload_structured_resume", structured)
 
         # Persist analysis result for student history + cohort analytics (best-effort).

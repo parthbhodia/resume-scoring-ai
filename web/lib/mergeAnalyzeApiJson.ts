@@ -40,5 +40,8 @@ export function mergeAnalyzeApiJson(json: Record<string, unknown>): Record<strin
     });
   }
 
+  const es = json.experienceSummary ?? json.experience_summary;
+  if (es && typeof es === "object" && !Array.isArray(es)) out.experienceSummary = es;
+
   return out;
 }

@@ -25,8 +25,11 @@
 ## Highlight semantics (approximate)
 
 - With **no** active category and bullet has issues: score bands tint background (weak / fair / strong).
-- With **active category**: bullets mapped to that category get a blush highlight.
+- With **active category**: bullets where `bulletBelongsToCategory()` is true (checks `issueCategories` then `primaryCategory`) get a blush highlight.
 - **Selected** bullet: blue inset ring; in split preview, optional **thick left bar** tracks geometry on scroll/resize.
+- Preview banner: **red** only when ≥1 bullet matches the active category; **green** neutral copy when the category score is holistic but no sample bullets were flagged.
+
+See [`docs/ANALYSIS_ALGORITHM.md`](ANALYSIS_ALGORITHM.md) for the two-layer scoring model.
 
 ## PDF output
 

@@ -360,15 +360,23 @@ export function inferPrimaryCategoryFromBullet(
   return inferBaseCategory(bullet);
 }
 
-/** Whether this bullet belongs to `category` for highlighting / filtering. */
-export function bulletMatchesAnalysisCategory(
+/**
+ * Whether this bullet belongs to `category` for highlighting / filtering / sidebar counts.
+ * Uses backend `issueCategories` when present (display layer), then falls back to
+ * primaryCategory / heuristics. Rewrites still use primaryCategory only.
+ */
+export function bulletBelongsToCategory(
   bullet: CategoryRewriteBullet,
-  category: string | null,
+  category: string,
   allBullets?: CategoryRewriteBullet[],
   bulletIndex?: number,
   opts?: CategoryAssignmentOptions,
 ): boolean {
-  if (!category) return false;
+  if (!category || !CATEGORY_KEY_SET.has(category)) return false;
+  const issueCats = bullet.issueCategories;
+  if (Array.isArray(issueCats) && issueCats.some((c) => c === category && CATEGORY_KEY_SET.has(c))) {
+    return true;
+  }
   const explicit = explicitPrimaryCategory(bullet);
   if (explicit) return explicit === category;
   if (allBullets?.length) {
@@ -380,11 +388,26 @@ export function bulletMatchesAnalysisCategory(
   return inferBaseCategory(bullet) === category;
 }
 
+/** Whether this bullet belongs to `category` for highlighting / filtering. */
+export function bulletMatchesAnalysisCategory(
+  bullet: CategoryRewriteBullet,
+  category: string | null,
+  allBullets?: CategoryRewriteBullet[],
+  bulletIndex?: number,
+  opts?: CategoryAssignmentOptions,
+): boolean {
+  if (!category) return false;
+  return bulletBelongsToCategory(bullet, category, allBullets, bulletIndex, opts);
+}
+
 export function countBulletsInCategory(
-  primaryCategories: string[],
+  bullets: CategoryRewriteBullet[],
   category: string,
+  opts?: CategoryAssignmentOptions,
 ): number {
-  return primaryCategories.filter((c) => c === category).length;
+  return bullets.filter((b, i) =>
+    bulletBelongsToCategory(b, category, bullets, i, opts),
+  ).length;
 }
 
 /** Issue tags relevant to the active category. */

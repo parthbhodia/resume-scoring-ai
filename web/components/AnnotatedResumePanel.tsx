@@ -8,8 +8,9 @@ import AnalyzeLiveResumeBody, {
 } from "@/components/AnalyzeLiveResumeBody";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
-  buildBulletPrimaryCategories,
+  bulletBelongsToCategory,
   bulletMatchesAnalysisCategory,
+  countBulletsInCategory,
   type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
 import { DEFAULT_REFERENCE_FOLDER, distinctStyleTemplates, hasMultipleStyleTemplates } from "@/lib/resumeTemplates";
@@ -37,6 +38,8 @@ interface Props {
   bulletAnalysis: BulletItem[];
   sectionFeedback: SectionItem[];
   activeCategory: string | null;
+  /** Human label for activeCategory (e.g. "Readability") — used in preview badge copy. */
+  activeCategoryLabel?: string;
   /** Per-bullet edited text for AI suggestions (key = index in bulletAnalysis). */
   rewriteEdits: Record<number, string>;
   /** Set edited text, or pass null to clear and show the model suggestion again. */
@@ -254,6 +257,7 @@ export default function AnnotatedResumePanel({
   bulletAnalysis,
   sectionFeedback,
   activeCategory,
+  activeCategoryLabel = "",
   rewriteEdits,
   patchBulletRewrite,
   previewLineOverrides,
@@ -277,10 +281,6 @@ export default function AnnotatedResumePanel({
   categoryAssignmentOpts,
 }: Props) {
   const styleTemplates = useMemo(() => distinctStyleTemplates(), []);
-  const bulletPrimaryCategories = useMemo(
-    () => buildBulletPrimaryCategories(bulletAnalysis, categoryAssignmentOpts),
-    [bulletAnalysis, categoryAssignmentOpts],
-  );
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [selectedReferenceFolder, setSelectedReferenceFolder] = useState<string>(DEFAULT_REFERENCE_FOLDER);
@@ -394,9 +394,10 @@ export default function AnnotatedResumePanel({
   }, [previewStyleId, previewAccent]);
 
   const flaggedCount = activeCategory
-    ? bulletPrimaryCategories.filter((c) => c === activeCategory).length
+    ? countBulletsInCategory(bulletAnalysis, activeCategory, categoryAssignmentOpts)
     : 0;
   const totalCount = bulletAnalysis.length;
+  const categoryLabel = activeCategoryLabel.trim() || "this category";
 
   /** Maps `data-bullet-idx` on the preview page to a thick, score-colored frame (split / presentation column). */
   const updateMirrorPosition = useCallback(() => {
@@ -457,7 +458,9 @@ export default function AnnotatedResumePanel({
   // Scroll first highlighted bullet when category changes (sidebar drives preview).
   useEffect(() => {
     if (!activeCategory) return;
-    const idx = bulletPrimaryCategories.findIndex((c) => c === activeCategory);
+    const idx = bulletAnalysis.findIndex((b, i) =>
+      bulletBelongsToCategory(b, activeCategory, bulletAnalysis, i, categoryAssignmentOpts),
+    );
     if (idx < 0) return;
     const id = window.setTimeout(() => {
       scrollRef.current
@@ -465,7 +468,7 @@ export default function AnnotatedResumePanel({
         ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 60);
     return () => window.clearTimeout(id);
-  }, [activeCategory, bulletPrimaryCategories]);
+  }, [activeCategory, bulletAnalysis, categoryAssignmentOpts]);
 
   // Scroll selected bullet into view (preview drives sidebar).
   useEffect(() => {
@@ -676,7 +679,9 @@ export default function AnnotatedResumePanel({
               padding: "3px 10px",
               borderRadius: 20,
             }}>
-              {flaggedCount}/{totalCount} need work here
+              {flaggedCount > 0
+                ? `${flaggedCount}/${totalCount} need work here`
+                : `No bullets flagged in ${categoryLabel}`}
             </div>
           ) : (
             <div style={{
@@ -944,7 +949,7 @@ export default function AnnotatedResumePanel({
           ))}
         </div>
 
-      {activeCategory && (
+      {activeCategory && flaggedCount > 0 && (
         <div style={{
           padding: "8px 14px",
           borderBottom: "1px solid var(--border)",
@@ -958,7 +963,20 @@ export default function AnnotatedResumePanel({
             <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/>
             <path d="M8 5v3.5l2 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          Highlighted bullets have issues in the selected category
+          Highlighted bullets have issues in {categoryLabel}
+        </div>
+      )}
+      {activeCategory && flaggedCount === 0 && (
+        <div style={{
+          padding: "8px 14px",
+          borderBottom: "1px solid var(--border)",
+          fontSize: 11,
+          color: "var(--green-ink)",
+          fontWeight: 600,
+          flexShrink: 0,
+          background: "var(--green-bg)",
+        }}>
+          No sample bullets flagged for {categoryLabel} — the category score reflects overall résumé quality.
         </div>
       )}
 

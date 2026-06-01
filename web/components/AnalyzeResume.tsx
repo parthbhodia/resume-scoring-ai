@@ -7,6 +7,7 @@ import ScoreRing from "./ScoreRing";
 import BulletImprovedEditor from "./BulletImprovedEditor";
 import {
   buildBulletPrimaryCategories,
+  bulletBelongsToCategory,
   bulletMatchesAnalysisCategory,
   countBulletsInCategory,
   filterIssuesForCategory,
@@ -89,6 +90,19 @@ interface AnalysisResult {
   finalRecommendations: string[];
   /** When analysis used a library folder (TeX on disk), persisted so history restore can reopen Builder with `base=`. */
   libraryFolder?: string | null;
+  /** Merged professional tenure from structuredResume.experience dates. */
+  experienceSummary?: {
+    totalMonths: number;
+    totalYearsLabel: string;
+    roleCount: number;
+    datedRoleCount: number;
+    roles: Array<{
+      company: string;
+      role: string;
+      dates: string;
+      months: number;
+    }>;
+  };
 }
 
 
@@ -191,9 +205,20 @@ function guessIssueCategory(issueText: string): keyof AnalysisResult["categorySc
 function getBulletsForCategory(
   key: string,
   bulletAnalysis: AnalysisResult["bulletAnalysis"],
-  primaryCategories: string[],
+  opts?: CategoryAssignmentOptions,
 ): AnalysisResult["bulletAnalysis"] {
-  return bulletAnalysis.filter((_, i) => primaryCategories[i] === key);
+  return bulletAnalysis.filter((b, i) =>
+    bulletBelongsToCategory(b, key, bulletAnalysis, i, opts),
+  );
+}
+
+function formatExperienceTenureChip(summary: AnalysisResult["experienceSummary"]): string | null {
+  if (!summary) return null;
+  const { totalYearsLabel, roleCount, datedRoleCount } = summary;
+  if (datedRoleCount === 0 && roleCount === 0) return null;
+  const rolePart = roleCount === 1 ? "1 role" : `${roleCount} roles`;
+  if (datedRoleCount === 0) return `${rolePart} · dates not parsed`;
+  return `${totalYearsLabel} · ${rolePart}`;
 }
 
 // ── Spinner ───────────────────────────────────────────────────────────────────
@@ -711,7 +736,9 @@ export default function AnalyzeResume() {
       }
       // Use the same per-bullet primary-category assignment that builds the
       // rendered flagged list, so "first flagged" matches what the user sees.
-      const firstFlaggedIdx = bulletPrimaryCategories.findIndex((c) => c === activeCategory);
+      const firstFlaggedIdx = result.bulletAnalysis.findIndex((b, i) =>
+        bulletBelongsToCategory(b, activeCategory, result.bulletAnalysis, i, categoryAssignmentOpts),
+      );
       setExpandedFlaggedBulletIdx(firstFlaggedIdx >= 0 ? firstFlaggedIdx : null);
     } else {
       setExpandedFlaggedBulletIdx(null);
@@ -744,7 +771,7 @@ export default function AnalyzeResume() {
     const bullets = getBulletsForCategory(
       key,
       result.bulletAnalysis,
-      bulletPrimaryCategories,
+      categoryAssignmentOpts,
     );
     if (bullets.length > 0) return true;
     const related = result.topIssues.filter((issue) => {
@@ -784,7 +811,7 @@ export default function AnalyzeResume() {
   const activeCategoryLabel = CATEGORY_LABELS.find(c => c.key === activeCategory)?.label ?? "";
   const activeCategoryScore = activeCategory && result ? result.categoryScores[activeCategory as keyof AnalysisResult["categoryScores"]] : null;
   const activeBullets = activeCategory && result
-    ? getBulletsForCategory(activeCategory, result.bulletAnalysis, bulletPrimaryCategories)
+    ? getBulletsForCategory(activeCategory, result.bulletAnalysis, categoryAssignmentOpts)
     : [];
   const relatedTopIssues = activeCategory && result
     ? result.topIssues.filter(issue => {
@@ -874,6 +901,26 @@ export default function AnalyzeResume() {
       <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8, color: scoreColor(result.overallScore) }}>
         {scoreLabel(result.overallScore)}
       </div>
+      {formatExperienceTenureChip(result.experienceSummary) && (
+        <div
+          title="Parsed from experience section date ranges (internships included). Overlapping roles are merged."
+          style={{
+            marginTop: 8,
+            fontSize: 10.5,
+            fontWeight: 600,
+            color: "var(--muted)",
+            textAlign: "center",
+            lineHeight: 1.45,
+            padding: "4px 8px",
+            borderRadius: 8,
+            background: "var(--surface2)",
+            border: "1px solid var(--border)",
+            maxWidth: "100%",
+          }}
+        >
+          {formatExperienceTenureChip(result.experienceSummary)}
+        </div>
+      )}
     </div>
   );
 
@@ -987,7 +1034,7 @@ export default function AnalyzeResume() {
                 {topFixCategories.map(({ key, label }) => {
                   const score = result.categoryScores[key];
                   const isActive = activeCategory === key;
-                  const affectedCount = countBulletsInCategory(bulletPrimaryCategories, key);
+                  const affectedCount = countBulletsInCategory(result.bulletAnalysis, key, categoryAssignmentOpts);
                   return (
                     <button
                       key={key}
@@ -1052,7 +1099,7 @@ export default function AnalyzeResume() {
                   // the user knows there's still work available — softer
                   // amber styling distinguishes it from the red TOP FIXES
                   // badge so the visual hierarchy stays clear.
-                  const affectedCount = countBulletsInCategory(bulletPrimaryCategories, key);
+                  const affectedCount = countBulletsInCategory(result.bulletAnalysis, key, categoryAssignmentOpts);
                   return (
                     <button
                       key={key}
@@ -1793,6 +1840,7 @@ export default function AnalyzeResume() {
               analyzeSnapshot={analyzePreviewSnapshot}
               sectionFeedback={result.sectionFeedback}
               activeCategory={activeCategory}
+              activeCategoryLabel={activeCategoryLabel}
               rewriteEdits={rewriteEdits}
               patchBulletRewrite={patchBulletRewrite}
               patchPreviewLine={patchPreviewLine}
@@ -2093,6 +2141,16 @@ export default function AnalyzeResume() {
                           ))}
                         </div>
                       )}
+                      {!hasTrustedRewrite && activeCategory && categoryIssues.length === 0 && (
+                        <p style={{
+                          fontSize: 11,
+                          color: "var(--muted)",
+                          lineHeight: 1.55,
+                          margin: "0 0 10px",
+                        }}>
+                          Scored {bullet.score}/100 for {activeCategoryLabel}. No AI rewrite passed our quality filter for this category.
+                        </p>
+                      )}
                       {/* Only show the generic category hint when there's an
                           actual rewrite to accompany it — otherwise it reads as
                           a misleading "fix" on a bullet that has none. */}
@@ -2172,7 +2230,7 @@ export default function AnalyzeResume() {
                             background: "var(--surface2)",
                             borderLeft: "3px solid var(--amber)",
                           }}>
-                            No trusted AI rewrite was generated for this bullet. Edit the original below, then replace the preview line when it reads better.
+                            No trusted AI rewrite was generated for this bullet. The model’s suggestion was too similar to your original (or failed our quality filter). Edit manually below, or check categories with bullet badges in the sidebar.
                           </p>
                           <BulletImprovedEditor
                             layout="card"
@@ -2229,13 +2287,28 @@ export default function AnalyzeResume() {
                 border: "1px solid var(--border)", borderRadius: 14,
                 background: "var(--surface)",
               }}>
-                <div style={{ fontSize: 28, marginBottom: 10 }}>✅</div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
-                  No specific issues found
-                </div>
-                <div style={{ fontSize: 13, color: "var(--muted)" }}>
-                  This category looks strong in your resume.
-                </div>
+                {(activeCategoryScore ?? 0) >= 70 ? (
+                  <>
+                    <div style={{ fontSize: 28, marginBottom: 10 }}>✅</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
+                      No specific issues found
+                    </div>
+                    <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                      This category looks strong in your resume.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 28, marginBottom: 10 }}>ℹ️</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
+                      {activeCategoryLabel} scored {activeCategoryScore ?? "–"}/100 overall
+                    </div>
+                    <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
+                      No sample bullets were flagged for this category. The score reflects holistic résumé quality —
+                      check categories with bullet badges (e.g. Achievement) or review Top Issues in the overview.
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -2257,16 +2330,24 @@ export default function AnalyzeResume() {
                 <p style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.7, margin: "0 0 16px" }}>
                   {result.summary}
                 </p>
-                {result.topStrengths.length > 0 && (
+                {(formatExperienceTenureChip(result.experienceSummary) || result.topStrengths.length > 0) && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {formatExperienceTenureChip(result.experienceSummary) && (
+                      <span
+                        title="Merged tenure from experience date ranges (internships included)"
+                        style={{
+                          fontSize: 12, fontWeight: 600, padding: "4px 12px",
+                          borderRadius: 20, background: "rgba(99,102,241,0.12)",
+                          color: "var(--accent)",
+                        }}
+                      >
+                        {formatExperienceTenureChip(result.experienceSummary)}
+                      </span>
+                    )}
                     {result.topStrengths.slice(0, 3).map((s, i) => (
                       <span key={i} style={{
                         fontSize: 12, fontWeight: 600, padding: "4px 12px",
                         borderRadius: 20, background: "rgba(52,211,153,0.12)",
-                        // Use --green-ink (light: #047857, dark: #34d399) so chip
-                        // text stays readable on the faint green tint in BOTH themes.
-                        // The default --green is #34d399 in both modes — fine on
-                        // dark, ~2:1 contrast on white (fails WCAG AA).
                         color: "var(--green-ink)",
                       }}>
                         {s}
@@ -2578,7 +2659,7 @@ export default function AnalyzeResume() {
                                   background: "var(--surface2)",
                                   borderLeft: "3px solid var(--amber)",
                                 }}>
-                                  No trusted AI rewrite for this bullet. Use the draft below for a manual cleanup.
+                                  No trusted AI rewrite for this bullet — the model’s suggestion was too similar to your original. Use the draft below for a manual cleanup.
                                 </p>
                                 <BulletImprovedEditor
                                   layout="plain"
