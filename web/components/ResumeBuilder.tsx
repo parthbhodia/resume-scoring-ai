@@ -447,6 +447,9 @@ export default function ResumeBuilder({
   const [applySeq, setApplySeq] = useState(0);
   /** Active tab in the results-phase DetailedRatingsView — lifted so clicking a resume line can switch tabs. */
   const [resultsActiveTab, setResultsActiveTab] = useState<import("@/components/DetailedRatingsView").Tab>("overall");
+  /** Fast pre-analysis via /api/analyze — shows scoring before PDF compile. */
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   /** Texts of bullets that were just applied via gap fix — highlighted green briefly in the paper view. */
   const [appliedGapTexts, setAppliedGapTexts] = useState<string[]>([]);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
@@ -1011,6 +1014,38 @@ export default function ResumeBuilder({
     atsAutoRanForRef.current = runKey;
     void runAtsCheck(result.folder);
   }, [authReady, user?.id, result?.folder, result?.pdfUrl, atsLoading, studioHandoff, runAtsCheck]);
+
+  const handleAnalyze = useCallback(async () => {
+    const effJd = jd.trim();
+    if (!effJd) { setAnalyzeError("Please paste a job description first."); return; }
+    if (!(candidateProfile ?? "").trim()) { setAnalyzeError("Please upload your résumé first."); return; }
+    setAnalyzing(true);
+    setAnalyzeError(null);
+    setError(null);
+    try {
+      const resp = await fetch(apiUrl("/api/analyze"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidate_profile: candidateProfile, job_description: effJd }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        let msg = `Analysis failed (HTTP ${resp.status})`;
+        try { const j = JSON.parse(body) as { error?: string }; if (j?.error) msg = j.error; } catch { /* */ }
+        throw new Error(toUserFriendlyErrorMessage(msg));
+      }
+      const data = await resp.json() as { ratings?: RatingsData; error?: string };
+      if (data.error || !data.ratings) throw new Error(data.error ?? "Analysis returned no ratings");
+      setResult({
+        ...EMPTY_RESULT,
+        ratings: data.ratings,
+      });
+    } catch (e: unknown) {
+      setAnalyzeError(e instanceof Error ? e.message : "Analysis failed");
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [jd, candidateProfile]);
 
   const getSuggestions = useCallback(async (
     focusGaps?: Array<{ name: string; score: number }>,
@@ -1961,22 +1996,12 @@ export default function ResumeBuilder({
   const customizePaperPadY =
     previewSpacing === "compact" ? 22 : previewSpacing === "spacious" ? 36 : 28;
 
-  /** Full-width suggestions review: hide hero + form so the two-column panel can use the width. */
-  const suggestionsReviewMode =
-    !studioHandoff &&
-    Boolean(
-      suggestions &&
-        suggestions.length > 0 &&
-        (!result || (generating && !result.pdfUrl)),
-    );
+  /** Suggestions review panel removed — analyze-first flow replaces it. */
+  const suggestionsReviewMode = false;
   const showBuilderInputs =
-    !result && !generating && !suggestionsReviewMode && !suggestLoading;
-  /** Research while loading suggestions on the form — not duplicated on the review step. */
-  const showSuggestResearchPanel =
-    !studioHandoff &&
-    suggestLoading &&
-    !suggestionsReviewMode &&
-    (suggestLoading || hasSuggestResearch);
+    !result && !generating && !analyzing && !suggestLoading;
+  /** Live research streaming removed. */
+  const showSuggestResearchPanel = false;
   const showGenerateWebResearchPanel =
     !studioHandoff &&
     !reusingSuggestWebForPdf &&
@@ -1989,7 +2014,7 @@ export default function ResumeBuilder({
     !generating;
   const tailorResultsBuilding = !studioHandoff && Boolean(result) && generating;
   /** Pin loaders at top of the page — form CTAs sit at the bottom and scroll-to-top hid them. */
-  const showSuggestLoaderAtTop = !studioHandoff && suggestLoading;
+  const showSuggestLoaderAtTop = !studioHandoff && (suggestLoading || analyzing);
   /** Show full generate loader at top for all generation paths that have no PDF yet. */
   const showGenerateLoaderAtTop = generating && !result?.pdfUrl;
 
@@ -2118,6 +2143,30 @@ export default function ResumeBuilder({
           `}</style>
 
           {/* Loaders are shown via GenerateOverlay (fixed full-screen blur card) — no duplicate step lists */}
+
+          {/* ── Analyze loader ── */}
+          {analyzing && !studioHandoff && (
+            <div
+              className="fade-in"
+              role="status"
+              aria-live="polite"
+              style={{
+                marginBottom: 24, borderRadius: 16, border: "1px solid var(--border)",
+                background: "var(--surface)", boxShadow: "var(--shadow-card)", padding: "24px 24px 20px",
+                display: "flex", flexDirection: "column", gap: 10,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Spinner size={16} />
+                <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.4, color: "var(--text)" }}>
+                  Analysing your résumé…
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                Scoring your match, extracting gaps, and identifying missing keywords. This takes about 20 seconds.
+              </p>
+            </div>
+          )}
 
           {/* ── Hero (pre-generation) ── */}
           {showBuilderInputs && !showSuggestLoaderAtTop && (
@@ -2590,76 +2639,40 @@ export default function ResumeBuilder({
             </>
           ) : (
             <>
-              {suggestError && (
+              {(analyzeError || suggestError) && (
                 <div role="alert" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 10, color: "var(--red)", fontSize: 12 }}>
-                  {suggestError}
+                  {analyzeError || suggestError}
                 </div>
               )}
               <button
                 type="button"
-                onClick={() => { void getSuggestions(); }}
-                disabled={suggestLoading || generating}
-                aria-busy={suggestLoading}
+                onClick={() => { void handleAnalyze(); }}
+                disabled={analyzing || generating || !(candidateProfile ?? "").trim() || !jd.trim()}
+                aria-busy={analyzing}
                 style={{
                   width: "100%", padding: "14px 20px", marginBottom: 8, minHeight: 48,
-                  background: "var(--accent)",
-                  color: "#fff",
+                  background: "var(--accent)", color: "#fff",
                   border: "none", borderRadius: 12,
                   fontSize: 16, fontWeight: 500, fontFamily: "inherit",
-                  cursor: suggestLoading || generating ? "wait" : "pointer",
+                  cursor: analyzing || generating ? "wait" : (!(candidateProfile ?? "").trim() || !jd.trim() ? "not-allowed" : "pointer"),
                   letterSpacing: -0.4, transition: "background 0.2s",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  opacity: generating && !suggestLoading ? 0.5 : 1,
-                  boxShadow: suggestLoading ? "0 0 0 3px rgba(47,129,247,0.25)" : "none",
+                  opacity: !(candidateProfile ?? "").trim() || !jd.trim() ? 0.5 : 1,
+                  boxShadow: analyzing ? "0 0 0 3px rgba(47,129,247,0.25)" : "none",
                 }}
-                onMouseEnter={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent-h)"; }}
-                onMouseLeave={e => { if (!suggestLoading && !generating) e.currentTarget.style.background = "var(--accent)"; }}
+                onMouseEnter={e => { if (!analyzing && !generating && (candidateProfile ?? "").trim() && jd.trim()) e.currentTarget.style.background = "var(--accent-h)"; }}
+                onMouseLeave={e => { if (!analyzing && !generating) e.currentTarget.style.background = "var(--accent)"; }}
               >
-                {suggestLoading ? (
-                  <><SpinnerWhite size={16} />Comparing your résumé to this job…</>
+                {analyzing ? (
+                  <><SpinnerWhite size={16} />Analysing your résumé…</>
                 ) : (
-                  "Get suggestions for this job →"
+                  "Analyze fit →"
                 )}
               </button>
-              {!suggestLoading && !generating && (
+              {!analyzing && !generating && (
                 <p style={{ textAlign: "center", fontSize: 11, color: "var(--dim)", marginBottom: 12, letterSpacing: -0.1 }}>
-                  Researches the posting, then lists edits. Generate reuses that research.
+                  See your match score, gaps, and keywords before generating a PDF.
                 </p>
-              )}
-              {!suggestLoading && (
-                generating ? (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    style={{
-                      width: "100%", padding: "13px 16px", marginBottom: 24, minHeight: 44,
-                      borderRadius: 12, border: "1px solid var(--border)",
-                      background: "var(--surface)", fontSize: 13, fontWeight: 600,
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                      color: "var(--dim)",
-                    }}
-                  >
-                    <Spinner size={14} />
-                    Building your tailored PDF…
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => { void generate(); }}
-                    disabled={!(candidateProfile ?? "").trim() || !jd.trim()}
-                    style={{
-                      width: "100%", padding: "12px 16px", marginBottom: 24, minHeight: 44,
-                      borderRadius: 12, border: "1px solid var(--border)",
-                      background: "var(--surface)",
-                      color: !(candidateProfile ?? "").trim() || !jd.trim() ? "var(--dim)" : "var(--text)",
-                      fontSize: 13, fontWeight: 600, fontFamily: "inherit",
-                      cursor: !(candidateProfile ?? "").trim() || !jd.trim() ? "not-allowed" : "pointer",
-                      letterSpacing: -0.2,
-                    }}
-                  >
-                    Skip suggestions — generate tailored PDF now →
-                  </button>
-                )
               )}
             </>
           )}
@@ -2817,7 +2830,7 @@ export default function ResumeBuilder({
               >
                 <div style={{ minWidth: 0 }}>
                   <h2 id="rb-results-heading" style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", margin: 0, lineHeight: 1.2 }}>
-                    {generating ? "Building your PDF…" : "Your tailored résumé is ready"}
+                    {generating ? "Building your PDF…" : result?.folder ? "Your tailored résumé is ready" : "Analysis ready — review gaps & generate PDF"}
                   </h2>
                   <p style={{ fontSize: 12.5, color: "var(--muted)", margin: "2px 0 0", letterSpacing: -0.1 }}>
                     {[role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Match results"}
@@ -2825,6 +2838,25 @@ export default function ResumeBuilder({
                 </div>
                 {/* Header action buttons */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+                  {/* Analyze-only state: generate CTA so user can commit to a PDF compile */}
+                  {!result?.folder && !generating && (
+                    <button
+                      type="button"
+                      onClick={() => { void generate(); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        padding: "10px 18px", minHeight: 40, borderRadius: "var(--radius)",
+                        background: "var(--accent)", border: "none",
+                        color: "#fff", fontSize: 13, fontWeight: 700,
+                        cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                        letterSpacing: -0.2,
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "var(--accent-h)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "var(--accent)"; }}
+                    >
+                      Generate tailored PDF →
+                    </button>
+                  )}
                   {/* HTML→PDF download (new Playwright pipeline — WYSIWYG) */}
                   {structuredUploadRef.current && (
                     <button
