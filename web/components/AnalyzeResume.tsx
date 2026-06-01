@@ -13,6 +13,7 @@ import {
   filterIssuesForCategory,
   getRewriteForCategory,
   inferPrimaryCategoryFromBullet,
+  isLanguageQualityMicroRewrite,
   isTrivialRewrite,
   CATEGORY_REWRITE_HINTS,
   type CategoryAssignmentOptions,
@@ -2012,6 +2013,9 @@ export default function AnalyzeResume() {
                         )
                       : (bullet.improvedBullet ?? "");
                     const hasTrustedRewrite = categoryRewriteBase.trim().length > 0;
+                    const isLanguageMicroEdit = hasTrustedRewrite
+                      && activeCategory === "languageQuality"
+                      && isLanguageQualityMicroRewrite(bullet.originalBullet, categoryRewriteBase);
                     const draft = rewriteEdits[safeIdx] ?? categoryRewriteBase;
                     const bulletIssues = Array.isArray(bullet.issues) ? bullet.issues : [];
                     const categoryIssues = activeCategory
@@ -2176,6 +2180,9 @@ export default function AnalyzeResume() {
                           onChange={v => patchBulletRewrite(safeIdx, v)}
                           onReset={() => patchBulletRewrite(safeIdx, null)}
                           canReset={rewriteEdits[safeIdx] !== undefined}
+                          eyebrow={isLanguageMicroEdit ? "Proofreading" : "AI Improved"}
+                          helperText={isLanguageMicroEdit ? "Tense, spelling, or punctuation" : "Edit below"}
+                          accentColor={isLanguageMicroEdit ? "var(--accent)" : "var(--green)"}
                           minHeight={64}
                           previewLineApplied={previewLineAppliedHere}
                           onReplaceInPreview={() => patchPreviewLine(safeIdx, draft.trim())}

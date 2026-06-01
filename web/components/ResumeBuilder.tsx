@@ -52,7 +52,8 @@ import {
 
 import ScoreRing    from "./ScoreRing";
 import MatchBreakdownCards from "./MatchBreakdownCards";
-import DetailedRatingsView from "./DetailedRatingsView";
+import { TailorMatchSidebar, TailorMatchDetail } from "./DetailedRatingsView";
+import TailorPreviewPane from "./TailorPreviewPane";
 import CategoryFixPanel from "./CategoryFixPanel";
 import { isDetailedRatings } from "@/lib/types";
 import type { DetailedRatingItem } from "@/lib/types";
@@ -62,12 +63,6 @@ import AtsPanel, { normalizeAtsResult, type AtsResult } from "./AtsPanel";
 
 import ResumePublicLinkSettings from "./ResumePublicLinkSettings";
 import { useAppShellSidebar } from "@/contexts/AppShellSidebarContext";
-import { useHtmlPdfExport } from "@/hooks/useHtmlPdfExport";
-
-const ResumeDocumentView = dynamic(
-  () => import("@/components/ResumeDocumentView"),
-  { ssr: false, loading: () => null },
-);
 
 const TailoredPdfPreview = dynamic(
   () => import("@/components/TailoredPdfPreview"),
@@ -566,6 +561,8 @@ export default function ResumeBuilder({
   const [candidateProfile,    setCandidateProfile]    = useState<string | null>(
     () => builderSession0?.candidateProfile ?? null,
   );
+  const [resumeHeaderLines, setResumeHeaderLines] = useState<string[]>([]);
+  const [matchSidebarCollapsed, setMatchSidebarCollapsed] = useState(false);
   const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(
     () => builderSession0?.uploadedFileName ?? null,
   );
@@ -577,10 +574,6 @@ export default function ResumeBuilder({
   const structuredUploadRef = useRef<{ profile: string; structured: StructuredResume } | null>(null);
   /** Object URL for the last uploaded PDF — powers true PDF highlights in suggestions (revoked on replace / unmount). */
   const sourcePdfBlobUrlRef = useRef<string | null>(null);
-  /** Ref to the hidden ResumeDocumentView DOM node — used for HTML→PDF export */
-  const htmlResumeRef = useRef<HTMLDivElement>(null);
-  const { exportPdf: exportHtmlPdf, exporting: htmlPdfExporting } = useHtmlPdfExport();
-  /** Base64 data URL of the uploaded PDF — persisted in localStorage so preview survives page refresh. */
   const [uploadedPdfDataUrl, setUploadedPdfDataUrl] = useState<string | null>(
     () => builderSession0?.uploadedPdfDataUrl ?? null,
   );
@@ -1250,11 +1243,13 @@ export default function ResumeBuilder({
     }
     setProfileSyncUpsell(null);
     try {
-      const { text, structuredResume } = await uploadResume(file);
-      setCandidateProfile(text);
+      const { text, extractedText, resumeHeader, structuredResume } = await uploadResume(file);
+      const previewText = (extractedText || text).trim();
+      setCandidateProfile(previewText);
+      setResumeHeaderLines(resumeHeader);
       setUploadedFileName(file.name);
-      lastResumeExtractRef.current = text;
-      structuredUploadRef.current = structuredResume ? { profile: text, structured: structuredResume } : null;
+      lastResumeExtractRef.current = previewText;
+      structuredUploadRef.current = structuredResume ? { profile: previewText, structured: structuredResume } : null;
 
       if (sourcePdfBlobUrlRef.current) {
         URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
@@ -1279,7 +1274,7 @@ export default function ResumeBuilder({
         setUploadedPdfDataUrl(null);
       }
 
-      const hints = extractProfileHintsFromResumeText(text);
+      const hints = extractProfileHintsFromResumeText(previewText);
       const hintedKeys = Object.keys(hints).filter(k => String((hints as Record<string, unknown>)[k] ?? "").trim());
       const hintedCount = hintedKeys.length;
       if (hintedCount === 0) {
@@ -2852,46 +2847,12 @@ export default function ResumeBuilder({
                 </div>
                 {/* Header action buttons */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
-                  {/* Analyze-only state: generate CTA so user can commit to a PDF compile */}
                   {!result?.folder && !generating && (
                     <Button onClick={() => { void generate(); }} size="sm">
                       Generate tailored PDF →
                     </Button>
                   )}
-                  {/* HTML→PDF via Chromium — always available once structured_doc arrives from stream */}
-                  {structuredUploadRef.current && (
-                    <Button
-                      disabled={htmlPdfExporting}
-                      onClick={() => {
-                        if (htmlResumeRef.current) {
-                          void exportHtmlPdf(htmlResumeRef.current, `${resumeDownloadStem}.pdf`);
-                        }
-                      }}
-                      size="sm"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden><path d="M6 1v7M2.5 5l3.5 3.5L9.5 5M1 10h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                      {htmlPdfExporting ? "Generating…" : "Download PDF"}
-                    </Button>
-                  )}
-                  {result.folder && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={docxExportBusy}
-                      onClick={() => { void downloadResultDocx(); }}
-                    >
-                      {docxExportBusy ? "…" : "DOCX"}
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={tryAnotherJob}
-                    style={{ color: "var(--muted)" }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
-                      <path d="M1 6a5 5 0 109.9-1M1 6V2m0 4h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+                  <Button variant="outline" size="sm" onClick={tryAnotherJob} style={{ color: "var(--muted)" }}>
                     Try another job
                   </Button>
                 </div>
@@ -2925,7 +2886,6 @@ export default function ResumeBuilder({
               )}
 
               <style>{`
-                /* Full-bleed 50/50 split — left content scrolls, right PDF is fixed */
                 .rb-results-body {
                   flex: 1;
                   min-height: 0;
@@ -2933,33 +2893,36 @@ export default function ResumeBuilder({
                   flex-direction: column;
                   overflow: hidden;
                 }
-                .rb-results-phase3 {
-                  display: grid;
-                  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                .rb-tailor-workspace {
                   flex: 1;
                   min-height: 0;
+                  display: grid;
+                  grid-template-columns: minmax(52px, 220px) minmax(260px, 2fr) minmax(280px, 3fr);
+                  grid-template-rows: minmax(0, 1fr);
                   overflow: hidden;
                 }
-                .rb-results-phase3-detail {
+                .tb-split-work-slot {
+                  min-height: 0;
                   overflow-y: auto;
-                  min-height: 0;
-                  padding: clamp(16px, 2vw, 28px) clamp(12px, 2vw, 24px) max(80px, 12vh) clamp(64px, 6vw, 80px);
-                  display: flex;
-                  flex-direction: column;
                   border-right: 1px solid var(--border);
-                }
-                .rb-results-phase3-preview {
                   display: flex;
                   flex-direction: column;
+                }
+                .tb-split-preview-slot {
                   min-height: 0;
                   overflow: hidden;
-                  padding: 16px 16px 16px 12px;
-                  background: #f1f5f9;
+                  display: flex;
+                  flex-direction: column;
+                  background: var(--bg);
                 }
                 @media (max-width: 960px) {
-                  .rb-results-phase3 { grid-template-columns: 1fr; overflow: visible; }
-                  .rb-results-phase3-detail { overflow-y: visible; height: auto; border-right: none; }
-                  .rb-results-phase3-preview { height: 60vh; min-height: 320px; }
+                  .rb-tailor-workspace {
+                    grid-template-columns: 1fr;
+                    grid-template-rows: auto auto minmax(42vh, 1fr);
+                    overflow-y: auto;
+                  }
+                  .tb-split-preview-slot { order: 2; min-height: 42vh; max-height: 60vh; }
+                  .tb-split-work-slot { order: 3; border-right: none; }
                 }
               `}</style>
               <div className="rb-results-body">
@@ -3054,43 +3017,61 @@ export default function ResumeBuilder({
                 </div>
               )}
 
-              <section className="rb-results-phase3" aria-labelledby="rb-results-heading">
-                <div className="rb-results-phase3-detail">
-
-              {/* Detailed bifurcated ratings (new schema) */}
-              {ratings && isDetailedRatings(ratings) && (
-                <div style={{ marginBottom: 16 }}>
-                  <DetailedRatingsView
+              <section className="rb-tailor-workspace" aria-labelledby="rb-results-heading">
+              {ratings && isDetailedRatings(ratings) ? (
+                <>
+                  <TailorMatchSidebar
                     ratings={ratings}
-                    onFixGap={(item: DetailedRatingItem) => {
-                      void handleFixGap({ name: item.text, notes: item.analysis ?? "" });
-                    }}
-                    onFixKeyword={(kw) => {
-                      void handleFixGap({
-                        name: kw,
-                        notes: `This keyword is missing from the resume. Rewrite one of the most relevant existing bullets to naturally incorporate "${kw}" without fabricating experience.`,
-                      });
-                    }}
-                    fixingGapName={gapFixLoading}
-                    gapFixPanel={gapFixPanel}
-                    gapFixError={gapFixError}
-                    onApplyFix={applyGapFix}
-                    onDismissFix={() => setGapFixPanel(null)}
-                    keyGap={suggestSummary || undefined}
+                    hasSuggestions={suggestions.length > 0 && !generating}
                     strategicTips={strategicTips.length > 0 ? strategicTips : undefined}
                     interviewQuestions={interviewQuestions.length > 0 ? interviewQuestions : undefined}
-                    onGetSuggestions={() => { void getSuggestions(); }}
-                    suggestionsLoading={generating}
-                    hasSuggestions={suggestions.length > 0 && !generating}
-                    onApplyAllSuggestions={() => { void applySelectedSuggestions(); }}
-                    applyBusy={applyBusy}
                     activeTab={resultsActiveTab}
                     onActiveTabChange={setResultsActiveTab}
+                    collapsed={matchSidebarCollapsed}
+                    onCollapsedChange={setMatchSidebarCollapsed}
                   />
-                </div>
-              )}
-
-              {/* AI Suggestions Panel lives inside DetailedRatingsView → ✨ Fixes tab */}
+                  <div className="tb-split-work-slot">
+                    <TailorMatchDetail
+                      ratings={ratings}
+                      onFixGap={(item: DetailedRatingItem) => {
+                        void handleFixGap({ name: item.text, notes: item.analysis ?? "" });
+                      }}
+                      onFixKeyword={(kw) => {
+                        void handleFixGap({
+                          name: kw,
+                          notes: `This keyword is missing from the resume. Rewrite one of the most relevant existing bullets to naturally incorporate "${kw}" without fabricating experience.`,
+                        });
+                      }}
+                      fixingGapName={gapFixLoading}
+                      gapFixPanel={gapFixPanel}
+                      gapFixError={gapFixError}
+                      onApplyFix={applyGapFix}
+                      onDismissFix={() => setGapFixPanel(null)}
+                      keyGap={suggestSummary || undefined}
+                      strategicTips={strategicTips.length > 0 ? strategicTips : undefined}
+                      interviewQuestions={interviewQuestions.length > 0 ? interviewQuestions : undefined}
+                      onGetSuggestions={() => { void getSuggestions(); }}
+                      suggestionsLoading={generating}
+                      hasSuggestions={suggestions.length > 0 && !generating}
+                      onApplyAllSuggestions={() => { void applySelectedSuggestions(); }}
+                      applyBusy={applyBusy}
+                      activeTab={resultsActiveTab}
+                      onActiveTabChange={setResultsActiveTab}
+                    />
+                    {result.diff.length > 0 && (
+                      <div id="rb-results-diff" style={{ margin: "16px 20px", borderRadius: "var(--radius-xl)", border: "1px solid var(--border)", background: "var(--surface)", padding: "18px 20px" }}>
+                        <DiffView key={result.folder ?? "diff"} diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={result.baseFolder} baseLoaded={result.baseLoaded} jdKeywords={jdKeywords} />
+                      </div>
+                    )}
+                    {result.sources.length > 0 && (
+                      <div style={{ margin: "0 20px 16px", borderRadius: "var(--radius-xl)", border: "1px solid var(--border)", background: "var(--surface)", padding: "18px 20px" }}>
+                        <SourcesPanel sources={result.sources} embedded />
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="tb-split-work-slot" style={{ gridColumn: "1 / 3" }}>
 
               {/* Legacy flat criteria breakdown (old schema fallback) */}
               {ratings && !isDetailedRatings(ratings) && ratings.criteria.length > 0 && (
@@ -3153,180 +3134,33 @@ export default function ResumeBuilder({
                 </div>
               )}
 
-              {/* Inline diff — line-by-line edits below analysis */}
               {result.diff.length > 0 && (
-                <div
-                  id="rb-results-diff"
-                  style={{
-                    marginBottom: 16,
-                    borderRadius: "var(--radius-xl)",
-                    border: "1px solid var(--border)",
-                    background: "var(--surface)",
-                    boxShadow: "var(--shadow-card)",
-                    padding: "18px 20px 20px",
-                    scrollMarginTop: 24,
-                  }}
-                >
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.35, textTransform: "uppercase", marginBottom: 8 }}>
-                    Changes to your résumé{" "}
-                    <span style={{ color: "var(--green)", fontWeight: 600 }}>+{result.adds}</span>
-                    <span style={{ color: "var(--dim)" }}> / </span>
-                    <span style={{ color: "var(--red)", fontWeight: 600 }}>−{result.removes}</span>
-                  </div>
-                  <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--muted)", lineHeight: 1.55 }}>
-                    Read-only summary of edits in your PDF. Use <strong style={{ color: "var(--text)" }}>Improve this résumé</strong> to change the next version.
-                  </p>
-                  <DiffView
-                    key={result.folder ?? "diff"}
-                    diff={result.diff}
-                    adds={result.adds}
-                    removes={result.removes}
-                    rationales={result.rationales}
-                    baseFolder={result.baseFolder}
-                    baseLoaded={result.baseLoaded}
-                    jdKeywords={jdKeywords}
-                  />
+                <div id="rb-results-diff" style={{ margin: "16px 20px", borderRadius: "var(--radius-xl)", border: "1px solid var(--border)", background: "var(--surface)", padding: "18px 20px" }}>
+                  <DiffView key={result.folder ?? "diff"} diff={result.diff} adds={result.adds} removes={result.removes} rationales={result.rationales} baseFolder={result.baseFolder} baseLoaded={result.baseLoaded} jdKeywords={jdKeywords} />
                 </div>
               )}
 
-              {/* Sources */}
               {result.sources.length > 0 && (
-                <div
-                  style={{
-                    marginBottom: 16,
-                    borderRadius: "var(--radius-xl)",
-                    border: "1px solid var(--border)",
-                    background: "var(--surface)",
-                    boxShadow: "var(--shadow-card)",
-                    padding: "18px 20px 20px",
-                  }}
-                >
+                <div style={{ margin: "0 20px 16px", borderRadius: "var(--radius-xl)", border: "1px solid var(--border)", background: "var(--surface)", padding: "18px 20px" }}>
                   <SourcesPanel sources={result.sources} embedded />
                 </div>
               )}
 
-              {/* Storage failure banner — surfaces silent upload errors so the
-                  user knows this resume can't be used as a base for diff/edit
-                  later. */}
-              {storageFailures.length > 0 && (
-                <div style={{
-                  marginBottom: 16, padding: "14px 18px",
-                  background: "rgba(251,191,36,0.08)",
-                  border: "1px solid rgba(251,191,36,0.35)",
-                  borderRadius: "var(--radius-xl)", fontSize: 12, color: "var(--text)",
-                  letterSpacing: -0.1, lineHeight: 1.5,
-                  boxShadow: "var(--shadow-card)",
-                }}>
-                  <div style={{ fontWeight: 600, color: "var(--orange)", marginBottom: 4, fontSize: 11, letterSpacing: 0.3, textTransform: "uppercase" }}>
-                    ⚠ Cloud backup incomplete
-                  </div>
-                  {storageFailures.map((f, i) => (
-                    <div key={i} style={{ color: "var(--muted)" }}>
-                      <strong style={{ color: "var(--text)" }}>{f.artifact === "tex" ? ".tex source" : "PDF"}</strong> didn&apos;t upload to Supabase: <span style={{ color: "var(--dim)" }}>{f.reason}</span>
-                    </div>
-                  ))}
-                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--dim)" }}>
-                    The resume is saved locally and you can still edit it now, but it may
-                    not be selectable as a base for future runs. Re-generating usually fixes this.
-                  </div>
-                </div>
+              </div>
               )}
 
-              {/* Start over nudge */}
-              <div
-                style={{
-                  marginTop: 28,
-                  padding: "16px 20px",
-                  borderRadius: "var(--radius-xl)",
-                  border: "1px solid var(--border)",
-                  background: "var(--surface2)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <span style={{ fontSize: 13, color: "var(--muted)", letterSpacing: -0.15, lineHeight: 1.45 }}>
-                  Tailor another job?
-                </span>
-                <button
-                  type="button"
-                  onClick={tryAnotherJob}
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    padding: "12px 18px",
-                    minHeight: 44,
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius)",
-                    color: "var(--text)",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    boxShadow: "var(--shadow-sm)",
-                  }}
-                >
-                  Start over
-                </button>
-              </div>
-                </div>
-
-                <aside
-                  className="rb-results-phase3-preview"
-                  aria-label="Résumé preview and export"
-                  style={{ display: "flex", flexDirection: "column", minHeight: 0 }}
-                >
-                  {/* Header row: label + Download PDF button */}
-                  <div style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "8px 4px 10px",
-                    flexShrink: 0,
-                    gap: 8,
-                  }}>
-                    <span style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.4 }}>
-                      Line tints follow fix severity — click a line to focus the card.
-                    </span>
-                    {/* PDF downloaded from header button — no duplicate link here */}
-                  </div>
-
-                  {/* Scrollable paper preview — same ResumePaperView as the Suggestions phase */}
-                  <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-                    <ResumePaperView
-                      text={(candidateProfile ?? "").trim() || "—"}
-                      highlightOriginals={suggestions.filter(s => !rejectedIds.has(s.id)).map(s => s.original)}
-                      templateFolder={styleReferenceFolder}
-                      gapFixHighlights={gapFixPanel?.suggestions.map(s => s.original) ?? []}
-                      appliedHighlights={appliedGapTexts}
-                      interactiveSuggestions={{
-                        suggestions,
-                        acceptedIds,
-                        rejectedIds,
-                        selectedSuggestionId,
-                        onLineSelectSuggestion: (id) => {
-                          selectSuggestion(id);
-                          // Switch the left panel to the Fixes tab so the card is visible
-                          setResultsActiveTab("fixes");
-                        },
-                      }}
-                    />
-                  </div>
-                </aside>
-              </section>
-
-              {/* Hidden ResumeDocumentView — rendered off-screen so htmlResumeRef is populated for HTML→PDF export.
-                  Populated from structuredUploadRef, which is set either on upload OR from the "structured_doc"
-                  stream event after generate — so this always exists once a result is available. */}
-              {structuredUploadRef.current && (
-                <div style={{ position: "absolute", left: -9999, top: -9999, width: 816, pointerEvents: "none", opacity: 0, zIndex: -1 }} aria-hidden>
-                  <ResumeDocumentView
-                    doc={structuredUploadRef.current.structured as unknown as import("@/components/ResumeDocumentView").ResumeDocData}
-                    containerRef={htmlResumeRef as React.RefObject<HTMLDivElement>}
+                <div className="tb-split-preview-slot">
+                  <TailorPreviewPane
+                    extractedText={(candidateProfile ?? "").trim()}
+                    resumeHeader={resumeHeaderLines}
+                    company={company}
+                    role={role}
+                    onExportDocx={result.folder ? () => { void downloadResultDocx(); } : undefined}
+                    exportDocxEnabled={!!result.folder}
+                    docxExportBusy={docxExportBusy}
                   />
                 </div>
-              )}
+              </section>
 
               </div>{/* rb-results-body */}
             </div>

@@ -354,19 +354,27 @@ class TestLanguageQualityDimension:
         kept_imp, _, _ = _filter_bullet_rewrites(orig, improved, {}, [])
         assert kept_imp == ""
 
-    def test_tense_only_rewrite_dropped(self):
+    def test_tense_only_rewrite_salvaged_to_language_quality(self):
         orig = "Conduct price verification using Bloomberg and market data, enhancing valuation accuracy and improving NAV precision."
         improved = "Conducted price verification using Bloomberg and market data, enhancing valuation accuracy and improving NAV precision."
-        kept_imp, _, _ = _filter_bullet_rewrites(orig, improved, {}, ["duty phrasing"])
+        kept_imp, kept_cr, _ = _filter_bullet_rewrites(orig, improved, {}, ["duty phrasing"])
         assert kept_imp == ""
+        assert kept_cr.get("languageQuality") == improved
 
-    def test_tense_only_category_rewrite_dropped(self):
+    def test_tense_only_category_rewrite_kept_for_language_quality(self):
         orig = "Conduct price verification using Bloomberg and market data."
         category_rewrites = {
             "languageQuality": "Conducted price verification using Bloomberg and market data."
         }
-        _, kept_cr, _ = _filter_bullet_rewrites(orig, "", category_rewrites, ["duty phrasing"])
-        assert kept_cr == {}
+        _, kept_cr, _ = _filter_bullet_rewrites(orig, "", category_rewrites, ["grammar"])
+        assert kept_cr.get("languageQuality") == category_rewrites["languageQuality"]
+
+    def test_semicolon_tweak_salvaged_to_language_quality(self):
+        orig = "Built APIs for internal tools; improved latency for dashboard queries."
+        improved = "Built APIs for internal tools and improved latency for dashboard queries."
+        kept_imp, kept_cr, _ = _filter_bullet_rewrites(orig, improved, {}, [])
+        assert kept_imp == ""
+        assert kept_cr.get("languageQuality") == improved
 
     def test_real_rewrite_kept(self):
         orig = "Designed the system."

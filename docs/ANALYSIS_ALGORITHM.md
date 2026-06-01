@@ -34,7 +34,7 @@ Entry points: `resume_gui/app.py` → `_analyze_resume_comprehensive`, `api_anal
 
 ### Layer B: bulletAnalysis (sampled weakest lines)
 
-- **Source:** Same LLM call; prompt limits to **8 weakest bullets** (`_ANALYSIS_PROMPT` ~L4979).
+- **Source:** Same LLM call; prompt limits to **15 weakest bullets** (`_BULLET_ANALYSIS_MAX` in `_ANALYSIS_PROMPT`).
 - **Per bullet:** originalBullet, score, issues[], improvedBullet, categoryRewrites{}, primaryCategory, issueCategories[].
 - **Coverage:** Most résumé lines never appear in bulletAnalysis.
 
@@ -62,12 +62,11 @@ Drops claims contradicting résumé evidence; floors some category scores when e
 
 ### _filter_bullet_rewrites
 
-Drops improvedBullet / categoryRewrites when:
+Drops improvedBullet / categoryRewrites when non-substantive for primary fix categories. Proofreading tweaks (tense, `;`→`and`, spelling) are **salvaged** into `categoryRewrites.languageQuality` instead of being discarded:
 
 1. Fails `_validate_rewrite_against_original` (dropped numerals, proper nouns, tech)
-2. Normalized rewrite == original (true no-op)
-3. Word Jaccard ≥ 0.88 (near-no-op)
-4. Morphology-only (tense/plural tweak)
+2. Normalized rewrite == original (true no-op — discarded entirely)
+3. Word Jaccard ≥ 0.88, morphology-only, or 1–2 token spelling fix → salvaged under **Language**
 
 Strips lying `quantification` issue tags when no rewrite adds numerals.
 

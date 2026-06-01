@@ -217,6 +217,34 @@ export function isTrivialRewrite(original: string, rewrite?: string | null): boo
   return isMorphologyOnlyRewrite(original, text);
 }
 
+/** Proofreading-level tweak (tense, punctuation, spelling) — shown under Language only. */
+export function isLanguageQualityMicroRewrite(original: string, rewrite?: string | null): boolean {
+  const text = rewrite?.trim() ?? "";
+  if (!text) return false;
+  if (normalizeForRewriteDiff(original) === normalizeForRewriteDiff(text)) return false;
+  if (wordJaccard(original, text) >= 0.88) return true;
+  if (isMorphologyOnlyRewrite(original, text)) return true;
+  const origWords = original.toLowerCase().match(/\b[a-zA-Z]+\b/g) ?? [];
+  const rewriteWords = text.toLowerCase().match(/\b[a-zA-Z]+\b/g) ?? [];
+  if (origWords.length > 0 && origWords.length === rewriteWords.length) {
+    let diffs = 0;
+    for (let i = 0; i < origWords.length; i += 1) {
+      if (origWords[i] !== rewriteWords[i]) diffs += 1;
+    }
+    if (diffs > 0 && diffs <= 2) return true;
+  }
+  return false;
+}
+
+function rewriteVisibleForCategory(original: string, rewrite: string, category: string): boolean {
+  const text = rewrite.trim();
+  if (!text) return false;
+  if (category === "languageQuality") {
+    return isLanguageQualityMicroRewrite(original, text) || !isTrivialRewrite(original, text);
+  }
+  return !isTrivialRewrite(original, text);
+}
+
 /** Priority score for adding metrics (higher = flag under Quantification first). */
 export function quantificationImpactScore(
   bullet: CategoryRewriteBullet,
@@ -433,7 +461,7 @@ export function getRewriteForCategory(
 ): string {
   if (userDraft != null && userDraft.trim() !== "") return userDraft.trim();
   const focused = bullet.categoryRewrites?.[category]?.trim();
-  if (focused && !isTrivialRewrite(bullet.originalBullet, focused)) return focused;
+  if (focused && rewriteVisibleForCategory(bullet.originalBullet, focused, category)) return focused;
 
   const primary = explicitPrimaryCategory(bullet)
     ?? (allBullets?.length
@@ -443,7 +471,7 @@ export function getRewriteForCategory(
   if (
     primary === category
     && bullet.improvedBullet?.trim()
-    && !isTrivialRewrite(bullet.originalBullet, bullet.improvedBullet)
+    && rewriteVisibleForCategory(bullet.originalBullet, bullet.improvedBullet, category)
   ) {
     return bullet.improvedBullet.trim();
   }
@@ -454,4 +482,5 @@ export const CATEGORY_REWRITE_HINTS: Record<string, string> = {
   quantification:
     "Add a number where it helps—%, $, scale, or time saved. Not every bullet needs one; use [X%] if unknown.",
   achievementQuality: "Start with a strong verb and what you delivered—not duties.",
+  languageQuality: "Proofreading tweak—tense, spelling, or punctuation. Won't fix a weak achievement on its own.",
 };

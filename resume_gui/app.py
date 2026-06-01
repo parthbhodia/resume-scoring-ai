@@ -4877,6 +4877,8 @@ def _latex_to_plain(tex: str) -> str:
 
 # ── Comprehensive AI-powered resume analysis ──────────────────────────────────
 
+_BULLET_ANALYSIS_MAX = 15
+
 _ANALYSIS_PROMPT = """\
 You are an expert resume reviewer and career coach. Analyze the following resume \
 using the principles below and return ONLY a valid JSON object — no markdown, no \
@@ -4976,7 +4978,7 @@ Infer the field from the résumé text and score against that field's expectatio
 - Be SPECIFIC, not generic. Tell exactly WHERE and HOW to fix each issue.
 - When rewriting bullets, PRESERVE TRUTHFULNESS. Mark invented metrics \
   as "[X%]", "[$Y]", or "[~N]".
-- For bulletAnalysis: analyze ONLY the 8 WEAKEST bullets (lowest-quality ones). \
+- For bulletAnalysis: analyze ONLY the {bullet_analysis_max} WEAKEST bullets (lowest-quality ones). \
   Skip good bullets.
 - For each weak bullet, label issues clearly (quantification vs achievement vs language). \
   improvedBullet must match the primary weakness. Only ~half of weak bullets should carry a \
@@ -5344,6 +5346,53 @@ def _is_morphology_only_rewrite(original: str, rewrite: str) -> bool:
     return 0 < changed <= 2
 
 
+def _is_language_micro_edit(original: str, rewrite: str, orig_norm: str) -> bool:
+    """True when a rewrite is non-substantive but still a valid proofreading tweak.
+
+    These are salvaged into categoryRewrites.languageQuality instead of being
+    shown as a primary achievement/quant rewrite — tense, punctuation, spelling.
+    """
+    text = (rewrite or "").strip()
+    if not text:
+        return False
+    if _normalize_for_rewrite_diff(text) == orig_norm:
+        return False
+    ok, _ = _validate_rewrite_against_original(original, text)
+    if not ok:
+        return False
+    if _word_jaccard(original, text) >= 0.88:
+        return True
+    if _is_morphology_only_rewrite(original, text):
+        return True
+    orig_words = re.findall(r"\b[a-zA-Z]+\b", original.lower())
+    rewrite_words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
+    if orig_words and len(orig_words) == len(rewrite_words):
+        diffs = sum(1 for ow, rw in zip(orig_words, rewrite_words) if ow != rw)
+        if 0 < diffs <= 2:
+            return True
+    return False
+
+
+def _salvage_language_quality_rewrite(
+    original: str,
+    rewrite: str,
+    kept_cr: dict,
+    orig_norm: str,
+    *,
+    source: str,
+) -> None:
+    """Route a non-substantive rewrite to languageQuality when appropriate."""
+    if kept_cr.get("languageQuality", "").strip():
+        return
+    if not _is_language_micro_edit(original, rewrite, orig_norm):
+        return
+    kept_cr["languageQuality"] = rewrite.strip()
+    logger.info(
+        "rewrite-validator salvaged languageQuality micro-edit from %s: orig=%r rewrite=%r",
+        source, original[:80], rewrite[:80],
+    )
+
+
 def _filter_bullet_rewrites(
     original: str,
     improved: str,
@@ -5361,6 +5410,7 @@ def _filter_bullet_rewrites(
     """
     kept_improved = improved or ""
     orig_norm = _normalize_for_rewrite_diff(original)
+    pending_lq_salvage: Optional[str] = None
 
     if kept_improved:
         ok, why = _validate_rewrite_against_original(original, kept_improved)
@@ -5371,29 +5421,24 @@ def _filter_bullet_rewrites(
             )
             kept_improved = ""
         elif _normalize_for_rewrite_diff(kept_improved) == orig_norm:
-            # The "rewrite" is identical to the original after whitespace /
-            # punctuation normalization. A no-op rewrite shown as "AI IMPROVED"
-            # is dishonest — better to surface nothing.
             logger.info(
                 "rewrite-validator dropped no-op improvedBullet (identical to original): %r",
                 original[:80],
             )
             kept_improved = ""
         elif _word_jaccard(original, kept_improved) >= 0.88:
-            # Near-identical rewrite — only punctuation/connectors changed
-            # (e.g. ";" → "and"). Not worth surfacing as an AI improvement.
             logger.info(
                 "rewrite-validator dropped near-no-op improvedBullet (jaccard=%.2f): orig=%r rewrite=%r",
                 _word_jaccard(original, kept_improved), original[:80], kept_improved[:80],
             )
+            pending_lq_salvage = kept_improved
             kept_improved = ""
         elif _is_morphology_only_rewrite(original, kept_improved):
-            # Tense/plural-only edits look like progress in the UI but do not
-            # materially improve the bullet (e.g. "Conduct" → "Conducted").
             logger.info(
                 "rewrite-validator dropped morphology-only improvedBullet: orig=%r rewrite=%r",
                 original[:80], kept_improved[:80],
             )
+            pending_lq_salvage = kept_improved
             kept_improved = ""
 
     kept_cr: dict = {}
@@ -5408,6 +5453,12 @@ def _filter_bullet_rewrites(
                     cat, why, original[:80], txt[:80],
                 )
                 continue
+            if str(cat) == "languageQuality":
+                # Language category keeps proofreading-level edits (tense, spelling, ;).
+                if _normalize_for_rewrite_diff(txt) == orig_norm:
+                    continue
+                kept_cr[str(cat)] = txt
+                continue
             if _normalize_for_rewrite_diff(txt) == orig_norm:
                 logger.info(
                     "rewrite-validator dropped no-op categoryRewrites.%s (identical to original): %r",
@@ -5419,14 +5470,25 @@ def _filter_bullet_rewrites(
                     "rewrite-validator dropped near-no-op categoryRewrites.%s (jaccard=%.2f): %r",
                     cat, _word_jaccard(original, txt), original[:80],
                 )
+                _salvage_language_quality_rewrite(
+                    original, txt, kept_cr, orig_norm, source=f"categoryRewrites.{cat}/jaccard",
+                )
                 continue
             if _is_morphology_only_rewrite(original, txt):
                 logger.info(
                     "rewrite-validator dropped morphology-only categoryRewrites.%s: %r",
                     cat, original[:80],
                 )
+                _salvage_language_quality_rewrite(
+                    original, txt, kept_cr, orig_norm, source=f"categoryRewrites.{cat}/morphology",
+                )
                 continue
             kept_cr[str(cat)] = txt
+
+    if pending_lq_salvage:
+        _salvage_language_quality_rewrite(
+            original, pending_lq_salvage, kept_cr, orig_norm, source="improvedBullet",
+        )
 
     # ── Strip lying "quantification" tag ──────────────────────────────────
     # The LLM regularly stamps a bullet with `issues: ["quantification", ...]`
@@ -6205,6 +6267,7 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
         else "\n(No job description provided. Set jobMatch and keywordScore to null.)"
     )
     prompt = _ANALYSIS_PROMPT.format(
+        bullet_analysis_max=_BULLET_ANALYSIS_MAX,
         jd_section=jd_section,
         structural_signals=struct_summary,
         resume_text=text[:6000],
