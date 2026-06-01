@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Clock, Moon, Sun } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import { NAV_ICONS } from "./nav-icons";
 import { LogoFull, LogoMark } from "@/components/BrandLogo";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
   Sidebar,
@@ -31,6 +31,7 @@ import { AppSidebarUser } from "./AppSidebarUser";
 import {
   BUILDER_SUBFLOWS,
   NAV_ACTIVE_CLASS,
+  NAV_MENU_BTN_CLASS,
   VIEW_BADGES,
   VIEW_ICONS,
   VIEW_LABELS,
@@ -60,27 +61,30 @@ function NavItem({
   view,
   isActive,
   onClick,
+  showLabels,
 }: {
   view: AppView;
   isActive: boolean;
   onClick?: () => void;
+  showLabels: boolean;
 }) {
-  const Icon = VIEW_ICONS[view];
   const badge = VIEW_BADGES[view];
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
         isActive={isActive}
         tooltip={VIEW_LABELS[view]}
-        className={NAV_ACTIVE_CLASS}
+        className={cn(NAV_MENU_BTN_CLASS, NAV_ACTIVE_CLASS)}
         onClick={onClick}
       >
-        <Icon aria-hidden />
-        <span>{VIEW_LABELS[view]}</span>
-        {badge ? (
+        <span className="app-nav-icon" aria-hidden>
+          {VIEW_ICONS[view]}
+        </span>
+        {showLabels ? <span className="app-nav-label">{VIEW_LABELS[view]}</span> : null}
+        {showLabels && badge ? (
           <Badge
             variant="secondary"
-            className="ml-auto px-1.5 py-0 text-[9px] font-bold tracking-wide uppercase group-data-[collapsible=icon]:hidden"
+            className="ml-auto px-1.5 py-0 text-[9px] font-bold tracking-wide uppercase"
           >
             {badge}
           </Badge>
@@ -110,8 +114,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const router = useRouter();
   const { state, setOpen } = useSidebar();
-  const BuilderIcon = VIEW_ICONS.builder;
-
+  const showLabels = state === "expanded";
   const handleBuilderClick = () => {
     if (state === "collapsed") {
       setOpen(true);
@@ -123,70 +126,89 @@ export function AppSidebar({
 
   return (
     <Sidebar collapsible="icon" variant="sidebar">
-      <SidebarHeader className="gap-3 p-3">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              size="lg"
-              className="h-auto px-0 hover:bg-transparent active:bg-transparent"
-              onClick={() => onSwitchView("analyze")}
-              tooltip="Resunova"
-            >
-              <span className="flex min-w-0 flex-1 items-center gap-2.5 group-data-[collapsible=icon]:justify-center">
-                <LogoMark size={28} variant={isUmbc ? "umbc" : "resunova"} />
-                <span className="min-w-0 group-data-[collapsible=icon]:hidden">
-                  <LogoFull
-                    markSize={26}
-                    textColor="var(--text)"
-                    variant={isUmbc ? "umbc" : "resunova"}
-                  />
-                </span>
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-        <div className="flex items-center justify-end gap-1 px-0.5 group-data-[collapsible=icon]:justify-center">
-          <SidebarTrigger className="size-9 shrink-0" />
+      <SidebarHeader className="gap-0">
+        <div
+          className={cn(
+            "flex w-full items-center gap-2",
+            state === "collapsed"
+              ? "flex-col justify-center gap-2.5"
+              : "flex-row justify-between",
+          )}
+        >
+          <button
+            type="button"
+            className={cn(
+              "flex cursor-pointer items-center border-0 bg-transparent p-0 font-inherit",
+              state === "collapsed" ? "justify-center" : "min-w-0 flex-1 justify-start",
+            )}
+            onClick={() => onSwitchView("analyze")}
+            aria-label="Resunova — go to Analyze"
+          >
+            {state === "collapsed" ? (
+              <LogoMark size={32} variant={isUmbc ? "umbc" : "resunova"} />
+            ) : (
+              <LogoFull
+                markSize={26}
+                textColor="var(--text)"
+                variant={isUmbc ? "umbc" : "resunova"}
+              />
+            )}
+          </button>
+          {state === "expanded" ? (
+            <SidebarTrigger className="size-10 shrink-0 border border-border bg-[var(--surface2)]" />
+          ) : null}
         </div>
+        {state === "collapsed" ? (
+          <SidebarTrigger
+            className="mx-auto size-10 shrink-0 border border-border bg-[var(--surface2)]"
+            title="Expand navigation"
+          />
+        ) : null}
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
+        <SidebarGroup className="p-0">
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="group-data-[collapsible=icon]:items-center">
               <NavItem
                 view="analyze"
                 isActive={!onTemplateBuilderPage && active === "analyze"}
                 onClick={() => onSwitchView("analyze")}
+                showLabels={showLabels}
               />
 
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={builderActive}
                   tooltip={VIEW_LABELS.builder}
-                  className={cn(NAV_ACTIVE_CLASS, "w-full")}
+                  className={cn(NAV_MENU_BTN_CLASS, NAV_ACTIVE_CLASS, "w-full")}
                   onClick={handleBuilderClick}
                 >
-                  <BuilderIcon aria-hidden />
-                  <span>{VIEW_LABELS.builder}</span>
-                  <ChevronDown
-                    className={cn(
-                      "ml-auto size-4 opacity-60 transition-transform group-data-[collapsible=icon]:hidden",
-                      builderOpen && "rotate-180",
-                    )}
-                    aria-hidden
-                  />
+                  <span className="app-nav-icon" aria-hidden>
+                    {VIEW_ICONS.builder}
+                  </span>
+                  {showLabels ? <span className="app-nav-label">{VIEW_LABELS.builder}</span> : null}
+                  {showLabels ? (
+                    <ChevronDown
+                      className={cn(
+                        "ml-auto size-4 opacity-60 transition-transform",
+                        builderOpen && "rotate-180",
+                      )}
+                      aria-hidden
+                    />
+                  ) : null}
                 </SidebarMenuButton>
+                {showLabels ? (
                 <Collapsible open={builderOpen} onOpenChange={onBuilderOpenChange}>
                   <CollapsibleContent>
                     <SidebarMenuSub>
-                      {BUILDER_SUBFLOWS.map(({ key, label, icon: SubIcon }) => {
+                      {BUILDER_SUBFLOWS.map(({ key, label, icon }) => {
                         const subActive = builderActive && navBuilderSubflow === key;
                         return (
                           <SidebarMenuSubItem key={key}>
                             <SidebarMenuSubButton
                               isActive={subActive}
-                              className={NAV_ACTIVE_CLASS}
+                              className={cn(NAV_MENU_BTN_CLASS, NAV_ACTIVE_CLASS, "[&_svg]:!size-auto")}
                               render={<button type="button" />}
                               onClick={() => {
                                 if (key === "template") {
@@ -198,8 +220,10 @@ export function AppSidebar({
                                 onGoBuilderFlow(key);
                               }}
                             >
-                              <SubIcon aria-hidden />
-                              <span>{label}</span>
+                              <span className="app-nav-icon" aria-hidden>
+                                {icon}
+                              </span>
+                              <span className="app-nav-label">{label}</span>
                             </SidebarMenuSubButton>
                           </SidebarMenuSubItem>
                         );
@@ -207,33 +231,39 @@ export function AppSidebar({
                     </SidebarMenuSub>
                   </CollapsibleContent>
                 </Collapsible>
+                ) : null}
               </SidebarMenuItem>
 
               <NavItem
                 view="library"
                 isActive={!onTemplateBuilderPage && active === "library"}
                 onClick={() => onSwitchView("library")}
+                showLabels={showLabels}
               />
               <NavItem
                 view="cover-letter"
                 isActive={!onTemplateBuilderPage && active === "cover-letter"}
                 onClick={() => onSwitchView("cover-letter")}
+                showLabels={showLabels}
               />
               <NavItem
                 view="jobs"
                 isActive={!onTemplateBuilderPage && active === "jobs"}
                 onClick={() => onSwitchView("jobs")}
+                showLabels={showLabels}
               />
               <NavItem
                 view="profile"
                 isActive={!onTemplateBuilderPage && active === "profile"}
                 onClick={() => onSwitchView("profile")}
+                showLabels={showLabels}
               />
               {advisorAllowed ? (
                 <NavItem
                   view="advisor"
                   isActive={!onTemplateBuilderPage && active === "advisor"}
                   onClick={() => onSwitchView("advisor")}
+                  showLabels={showLabels}
                 />
               ) : null}
             </SidebarMenu>
@@ -241,40 +271,43 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="gap-2 border-t border-sidebar-border p-2">
-        <SidebarMenu>
+      <SidebarFooter className="gap-2 border-t border-sidebar-border">
+        <SidebarMenu className="group-data-[collapsible=icon]:items-center">
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={historyOpen}
               tooltip="History"
-              className={NAV_ACTIVE_CLASS}
+              className={cn(NAV_MENU_BTN_CLASS, NAV_ACTIVE_CLASS)}
               onClick={() => onHistoryOpenChange(!historyOpen)}
             >
-              <Clock aria-hidden />
-              <span>History</span>
+              <span className="app-nav-icon" aria-hidden>
+                {NAV_ICONS.history}
+              </span>
+              {showLabels ? <span className="app-nav-label">History</span> : null}
             </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip={theme === "dark" ? "Light mode" : "Dark mode"}
+              className={NAV_MENU_BTN_CLASS}
+              onClick={onToggleTheme}
+            >
+              <span className="app-nav-icon" aria-hidden>
+                {theme === "dark" ? NAV_ICONS.themeDark : NAV_ICONS.themeLight}
+              </span>
+              {showLabels ? <span className="app-nav-label">Theme</span> : null}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem className="group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">
+            <AppSidebarUser
+              initial={userInitial}
+              onProfile={() => onSwitchView("profile")}
+              onSignOut={onSignOut}
+            />
           </SidebarMenuItem>
         </SidebarMenu>
 
-        <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-center">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="size-10 shrink-0"
-            onClick={onToggleTheme}
-            title={theme === "dark" ? "Light mode" : "Dark mode"}
-          >
-            {theme === "dark" ? <Sun aria-hidden /> : <Moon aria-hidden />}
-          </Button>
-          <AppSidebarUser
-            initial={userInitial}
-            onProfile={() => onSwitchView("profile")}
-            onSignOut={onSignOut}
-          />
-        </div>
-
-        <SidebarSeparator className="mx-0" />
+        <SidebarSeparator className="mx-0 group-data-[collapsible=icon]:hidden" />
         <nav className="flex flex-wrap gap-2.5 px-2 text-[11px] group-data-[collapsible=icon]:hidden">
           <Link
             href="/terms"

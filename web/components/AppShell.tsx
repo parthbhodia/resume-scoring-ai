@@ -206,8 +206,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
           className="app-shell-root min-h-dvh max-h-dvh overflow-hidden bg-background"
           style={
             {
-              "--sidebar-width": "13.75rem",
-              "--sidebar-width-icon": "4.5rem",
+              "--sidebar-width": "14.5rem",
+              "--sidebar-width-icon": "5.25rem",
             } as CSSProperties
           }
         >

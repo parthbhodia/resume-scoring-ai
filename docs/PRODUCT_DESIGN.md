@@ -59,31 +59,36 @@ Professional but approachable. Smart, not corporate. Built for people serious ab
 
 ## App shell
 
+Implemented with **shadcn/ui `Sidebar`** (`collapsible="icon"`) in `web/components/app-shell/` — see [`web/README.md`](../web/README.md).
+
 ### Desktop (≥1024px)
 
-- **Persistent left sidebar** (~`220px`): logo + wordmark, primary nav, **History** (opens right drawer), **theme** toggle, **user** block, compact legal links.
-- **Main:** Flex column, fills viewport height; **each view owns its scroll** (no document-level scroll in the shell).
+- **Persistent left sidebar** (220px expanded): logo + wordmark, primary nav, **Resume Builder** collapsible sub-nav (Tailor / Template Builder), **History** (right `Sheet`), theme toggle, account `DropdownMenu`, legal links.
+- **Collapse:** `SidebarTrigger` shrinks to a **72px icon rail**; labels hide via shadcn `group-data-[collapsible=icon]`; tooltips on icon-only items.
+- **Main:** `SidebarInset` flex column; **each view owns its scroll** (no document-level scroll in the shell).
 
 ### Tablet (768–1023px)
 
-- Sidebar **collapses to icon-first** rail (`--sidebar-w-compact`: 72px); labels hidden via `[data-compact="true"]` utilities in `globals.css`.
+- Same sidebar component; **starts collapsed** to the 72px icon rail (matches prior “compact” behavior).
 
 ### Mobile (&lt;768px)
 
-- Sidebar **hidden**; **bottom tab bar** (`--app-bottom-nav-h`) for Analyze, Resume Builder (default tailor flow), Library, Jobs, Profile.
-- Main column gets **bottom padding** so content is not obscured by the tab bar.
+- Sidebar **not rendered** (no mobile sidebar sheet); **bottom tab bar** for Analyze, Resume Builder (default tailor flow), Library, Jobs, Profile.
+- Main column **bottom padding** so content clears the tab bar.
 
 ### Navigation labels (product copy)
 
 | Key | Label |
 |-----|--------|
 | `analyze` | Analyze |
-| `builder` | Resume Builder (sub: Tailor / Template gallery / From scratch) |
+| `builder` | Resume Builder (sub: **Tailor to a job** / **Template Builder**) |
 | `library` | Library |
 | `jobs` | Jobs (badge: Soon) |
+| `cover-letter` | Cover letter (badge: Soon) |
 | `profile` | Profile |
+| `advisor` | Advisor (only if `/api/advisor-access` allows) |
 
-**Active nav item:** Inset **accent left bar** + soft tinted background (`.app-nav-row[data-active="true"]`).
+**Active nav item:** Inset **accent left bar** + soft tinted background (`NAV_ACTIVE_CLASS` on `SidebarMenuButton` / sub-buttons in `nav-config.ts`).
 
 ---
 

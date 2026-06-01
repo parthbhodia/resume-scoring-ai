@@ -197,6 +197,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 
 ## Recent changes (running log — newest first; **append after every commit**)
 
+- **`b034ae8`** — App shell nav polish: custom SVG icons in `nav-icons.tsx` replace Lucide for primary nav items; collapsed sidebar shows icons-only with tooltips while expanded state shows labels/badges. Shared `NAV_MENU_BTN_CLASS` + `globals.css` nav icon sizing. `AppSidebarUser` and bottom nav aligned to the same pattern.
+
 - **`e1c8772`** — Onboarding docs: root `README.md` is now Resunova-focused (local dev, repo layout, link to backend README). `resume_gui/README.md` expanded with directory map, env var table, pipeline diagrams, common tasks, and deploy notes. `web/AGENTS.md` links to backend README for API work.
 
 - **`c91c325`** — Backend refactor phase 2: extracted structured-doc parsing (`doc_normalize.py`, `education_parse.py`, `structured_doc.py`) from `app.py`. Builders (`_resume_doc_from_parsed`, `_build_resume_doc_from_llm_raw`), normalization pass, and JSON serialization now live under `extract/`. `app.py` down to ~6,100 lines; still owns routes, LLM orchestration, and suggestion application.

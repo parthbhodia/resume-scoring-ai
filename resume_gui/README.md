@@ -4,7 +4,8 @@ Starlette + uvicorn API for **Resunova** (resunova.io): résumé analyze, tailor
 
 **Entry point:** `app.py` (~80 lines) — logging, CORS, route table, test re-exports. All domain logic lives in subpackages below.
 
-For project-wide context (honesty pipeline, PDF paths, frontend map), read [`../CLAUDE.md`](../CLAUDE.md) first.
+For project-wide context (honesty pipeline, PDF paths, frontend map), read [`../CLAUDE.md`](../CLAUDE.md) first.  
+Signed-in UI shell (shadcn Sidebar, mobile tabs): [`../web/README.md`](../web/README.md#app-shell-signed-in-layout).
 
 ---
 

@@ -1,15 +1,5 @@
-import type { LucideIcon } from "lucide-react";
-import {
-  Briefcase,
-  FileSearch,
-  FileText,
-  FolderKanban,
-  LayoutTemplate,
-  Mail,
-  Sparkles,
-  User,
-  UserCheck,
-} from "lucide-react";
+import type { ReactNode } from "react";
+import { BUILDER_SUBFLOW_ICONS, NAV_ICONS } from "./nav-icons";
 
 export type AppView =
   | "builder"
@@ -30,14 +20,14 @@ export const VIEW_LABELS: Record<AppView, string> = {
   advisor: "Advisor",
 };
 
-export const VIEW_ICONS: Record<AppView, LucideIcon> = {
-  analyze: FileSearch,
-  builder: FileText,
-  library: FolderKanban,
-  profile: User,
-  jobs: Briefcase,
-  "cover-letter": Mail,
-  advisor: UserCheck,
+export const VIEW_ICONS: Record<AppView, ReactNode> = {
+  analyze: NAV_ICONS.analyze,
+  builder: NAV_ICONS.builder,
+  library: NAV_ICONS.library,
+  profile: NAV_ICONS.profile,
+  jobs: NAV_ICONS.jobs,
+  "cover-letter": NAV_ICONS["cover-letter"],
+  advisor: NAV_ICONS.advisor,
 };
 
 export const VIEW_BADGES: Partial<Record<AppView, string>> = {
@@ -46,8 +36,8 @@ export const VIEW_BADGES: Partial<Record<AppView, string>> = {
 };
 
 export const BUILDER_SUBFLOWS = [
-  { key: "tailor" as const, label: "Tailor to a job", icon: Sparkles },
-  { key: "template" as const, label: "Template Builder", icon: LayoutTemplate },
+  { key: "tailor" as const, label: "Tailor to a job", icon: BUILDER_SUBFLOW_ICONS.tailor },
+  { key: "template" as const, label: "Template Builder", icon: BUILDER_SUBFLOW_ICONS.template },
 ];
 
 export const MOBILE_TAB_VIEWS: AppView[] = [
@@ -58,9 +48,12 @@ export const MOBILE_TAB_VIEWS: AppView[] = [
   "profile",
 ];
 
-/** Product active state: inset accent bar + tinted background */
+/** Wrapper + menu button: original muted icons, accent when active. */
+export const NAV_MENU_BTN_CLASS =
+  "!gap-2.5 !px-3 !py-2.5 text-[var(--muted)] hover:bg-[var(--surface2)] hover:text-[var(--text)] [&_.app-nav-icon_svg]:!size-5";
+
 export const NAV_ACTIVE_CLASS =
-  "data-active:border data-active:border-accent/22 data-active:bg-[var(--accent-bg)] data-active:text-accent data-active:shadow-[inset_3px_0_0_0_var(--accent)] data-active:hover:bg-[var(--accent-bg)] data-active:hover:text-accent";
+  "data-active:!border-accent/22 data-active:!bg-[var(--accent-bg)] data-active:!text-accent data-active:shadow-[inset_3px_0_0_0_var(--accent)] data-active:hover:!bg-[var(--accent-bg)] data-active:hover:!text-accent data-active:[&_.app-nav-icon]:opacity-100";
 
 export const SIDEBAR_COLLAPSED_KEY = "rn-app-sidebar-collapsed";
 
