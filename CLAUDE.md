@@ -16,7 +16,7 @@ The point of this file is to keep `git log`-able history out of your context win
 ## Quick orientation
 
 - **Frontend**: Next.js 16-ish (see `web/AGENTS.md` — heads-up that the framework version has breaking changes vs training data). React, TypeScript, Zustand for state. Lives in `web/`.
-- **Backend**: Starlette + uvicorn, Python 3.11+. Lives in `resume_gui/` + shared modules in `linkedin_agent/`. Main routes file: `resume_gui/app.py` (~7600 lines — yes it's a monolith, the size is mostly prompts and Jinja templates inline as strings).
+- **Backend**: Starlette + uvicorn, Python 3.11+. Lives in `resume_gui/` (modular packages + thin `app.py`) + shared modules in `linkedin_agent/`. Onboarding map: [`resume_gui/README.md`](resume_gui/README.md).
 - **LLMs**: Grok-4 (xAI) is the default for everything heavy. Gemini 2.5 Flash/Pro as fallback. No Anthropic API path in production.
 - **PDF generation**: TWO active pipelines — see "Current download path" below.
 - **Tests**: pytest for backend (`resume_gui/tests/` + `linkedin_agent/tests/`). Frontend has no unit tests yet — the dimension tests at `resume_gui/tests/test_analyze_dimensions.py` are the closest thing to integration tests. Run with `.venv/bin/python -m pytest`.
