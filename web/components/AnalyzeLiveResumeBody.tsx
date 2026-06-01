@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
   bulletMatchesAnalysisCategory,
   type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
+import { resumeLineMatchesSuggestionOriginal } from "@/lib/suggestionResumeMatch";
 import { looksLikeStructuredEmploymentLine } from "@/lib/profileFromResumeText";
 import {
   normalizeResumeExtractLine as normalizeExtractLine,
@@ -690,6 +691,36 @@ function scoreBorderColor(score: number): string {
   return "rgba(248,113,113,0.85)";
 }
 
+const TAILOR_GAP_HIGHLIGHT: CSSProperties = {
+  background: "rgba(139,92,246,0.12)",
+  borderLeft: "3px solid #8b5cf6",
+  paddingLeft: 6,
+  marginLeft: -9,
+  borderRadius: "0 3px 3px 0",
+  transition: "background 0.3s, border-color 0.3s",
+};
+
+const TAILOR_APPLIED_HIGHLIGHT: CSSProperties = {
+  background: "rgba(52,211,153,0.14)",
+  borderLeft: "3px solid rgb(34, 197, 94)",
+  paddingLeft: 6,
+  marginLeft: -9,
+  borderRadius: "0 3px 3px 0",
+  transition: "background 0.3s, border-color 0.3s",
+};
+
+function tailorHighlightKind(
+  line: string,
+  gapFixHighlights: string[],
+  appliedHighlights: string[],
+): "applied" | "gap" | null {
+  const block = line.trim();
+  if (!block) return null;
+  if (appliedHighlights.some((o) => resumeLineMatchesSuggestionOriginal(block, o))) return "applied";
+  if (gapFixHighlights.some((o) => resumeLineMatchesSuggestionOriginal(block, o))) return "gap";
+  return null;
+}
+
 function scoreBgTint(score: number, highlighted: boolean, presentationOnly: boolean): string {
   if (presentationOnly) {
     if (highlighted) return "rgba(239,68,68,0.16)";
@@ -725,6 +756,10 @@ interface Props {
   pulseBulletIndex?: number | null;
   presentationOnly?: boolean;
   categoryAssignmentOpts?: CategoryAssignmentOptions;
+  /** Tailor gap-fix panel — purple highlight on bullets being edited. */
+  tailorGapFixHighlights?: string[];
+  /** Tailor gap-fix just applied — green flash on updated bullets. */
+  tailorAppliedHighlights?: string[];
 }
 
 export default function AnalyzeLiveResumeBody({
@@ -742,6 +777,8 @@ export default function AnalyzeLiveResumeBody({
   presentationOnly = false,
   pulseBulletIndex = null,
   categoryAssignmentOpts,
+  tailorGapFixHighlights = [],
+  tailorAppliedHighlights = [],
 }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   // Tracks which bullets are in "edit textarea" mode (after accepting or choosing to write own)
@@ -1016,6 +1053,16 @@ export default function AnalyzeLiveResumeBody({
                   );
                 }
                 // Plain paragraph text (summary, skills list, location, etc.)
+                const tailorHl =
+                  presentationOnly && bulletAnalysis.length === 0
+                    ? tailorHighlightKind(ln, tailorGapFixHighlights, tailorAppliedHighlights)
+                    : null;
+                const tailorHlStyle =
+                  tailorHl === "applied"
+                    ? TAILOR_APPLIED_HIGHLIGHT
+                    : tailorHl === "gap"
+                      ? TAILOR_GAP_HIGHLIGHT
+                      : undefined;
                 return (
                   <div key={li} style={{
                     fontSize: inEducationSection ? 10.25 : 10.4,
@@ -1025,6 +1072,7 @@ export default function AnalyzeLiveResumeBody({
                     fontFamily: inSkillsSection || inEducationSection ? RESUME_UI_FONT : li === 0 ? RESUME_BODY_FONT : RESUME_UI_FONT,
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
+                    ...tailorHlStyle,
                   }}>
                     {inSkillsSection
                       ? renderSkillsLine(normalizeSkillsLineSpacing(t))

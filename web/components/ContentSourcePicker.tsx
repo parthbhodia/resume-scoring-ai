@@ -7,7 +7,6 @@ import { apiErrorFromUnknown } from "@/lib/userFriendlyError";
 import { apiUrl, isResumeUploadFile, parseJsonOrThrow } from "@/lib/utils";
 import { fetchResumes } from "@/lib/supabase";
 import type { ResumeRecord } from "@/lib/types";
-import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 
 const PROFILE_KEY = "rn_builder_profile_prefill";
 const STYLE_REF_KEY = "rn_builder_style_ref";
@@ -285,15 +284,8 @@ export default function ContentSourcePicker() {
     if (profileText !== undefined) {
       try { sessionStorage.setItem(PROFILE_KEY, profileText.trim()); } catch { /* quota */ }
     }
-    try {
-      sessionStorage.setItem(RN_BUILDER_LAYOUT_ONLY_KEY, "1");
-    } catch { /* quota */ }
-    const q = new URLSearchParams();
-    q.set("view", "builder");
-    q.set("flow", "tailor");
-    q.set("fromTemplateStudio", "1");
-    if (baseFolder) q.set("base", baseFolder);
-    router.push(`/?${q.toString()}`);
+    void baseFolder;
+    router.push("/template-builder/");
   }, [router]);
 
   const handleSelectFolder = useCallback((folder: string) => {

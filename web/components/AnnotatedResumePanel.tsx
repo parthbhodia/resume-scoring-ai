@@ -13,7 +13,6 @@ import {
   countBulletsInCategory,
   type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
-import { DEFAULT_REFERENCE_FOLDER, distinctStyleTemplates, hasMultipleStyleTemplates } from "@/lib/resumeTemplates";
 import { useHtmlPdfExport } from "@/hooks/useHtmlPdfExport";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import { ownerSlugFromProfile } from "@/lib/resumeFileName";
@@ -79,6 +78,10 @@ interface Props {
   exportError?: string | null;
   /** JD keywords + quant targeting for category highlights. */
   categoryAssignmentOpts?: CategoryAssignmentOptions;
+  /** Tailor gap-fix panel — purple highlight on targeted bullets. */
+  tailorGapFixHighlights?: string[];
+  /** Tailor gap-fix just applied — green flash on updated bullets. */
+  tailorAppliedHighlights?: string[];
 }
 
 function scoreColor(score: number): string {
@@ -279,11 +282,11 @@ export default function AnnotatedResumePanel({
   exportingResume = false,
   exportError = null,
   categoryAssignmentOpts,
+  tailorGapFixHighlights = [],
+  tailorAppliedHighlights = [],
 }: Props) {
-  const styleTemplates = useMemo(() => distinctStyleTemplates(), []);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-  const [selectedReferenceFolder, setSelectedReferenceFolder] = useState<string>(DEFAULT_REFERENCE_FOLDER);
   const [previewStyleId, setPreviewStyleId] = useState<PreviewStyleId>("classic");
   const [previewAccent, setPreviewAccent] = useState(PREVIEW_ACCENTS[0].value);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -568,46 +571,6 @@ export default function AnnotatedResumePanel({
             Magic write
           </button>
           </div>
-          {builderReady && onOpenBuilder && hasMultipleStyleTemplates() ? (
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-              <span style={{
-                fontSize: 9.5,
-                fontWeight: 800,
-                color: "var(--muted)",
-                textTransform: "uppercase",
-                letterSpacing: 0.06,
-                marginRight: 2,
-              }}>
-                LaTeX layout
-              </span>
-              {styleTemplates.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  disabled={builderOpening}
-                  title={t.description}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setSelectedReferenceFolder(t.referenceFolder);
-                    onOpenBuilder({ referenceFolder: t.referenceFolder });
-                  }}
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    border: "1px solid var(--border-h)",
-                    background: "var(--surface)",
-                    color: "var(--text)",
-                    cursor: builderOpening ? "wait" : "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
         <button
           type="button"
@@ -1044,6 +1007,8 @@ export default function AnnotatedResumePanel({
                 presentationOnly={presentationOnly}
                 pulseBulletIndex={pulseBulletIndex}
                 categoryAssignmentOpts={categoryAssignmentOpts}
+                tailorGapFixHighlights={tailorGapFixHighlights}
+                tailorAppliedHighlights={tailorAppliedHighlights}
               />
           ) : (
           <>

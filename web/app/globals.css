@@ -405,7 +405,7 @@ select option { background: var(--surface); }
     align-items: center;
     gap: 6px;
   }
-  .app-shell-sidebar[data-collapsed="true"] .app-sidebar-footer-row > * {
+  .app-shell-sidebar[data-collapsed="true"] .app-sidebar-footer-row > button {
     width: 40px !important;
     flex: none !important;
   }

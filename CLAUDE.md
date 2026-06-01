@@ -98,22 +98,19 @@ Tests at `resume_gui/tests/test_analyze_dimensions.py` defend all of these — 5
 
 ## Current download path
 
-**For the Analyze flow** (after `af79efc`): the "Download PDF" button captures `paperRef.current.outerHTML`, POSTs to `/api/export-pdf-html`, which runs Playwright + headless Chromium and streams a PDF back. Preview === download, byte-for-byte. No LaTeX in this path.
+**Single WYSIWYG pipeline** for Analyze, Tailor-to-job, and Template Builder: preview HTML → `useHtmlPdfExport` → POST `/api/export-pdf-html` → Playwright Chromium → PDF. Preview === download.
 
-Hook: `web/hooks/useHtmlPdfExport.ts`. Wired in `web/components/AnnotatedResumePanel.tsx`.
+Hook: `web/hooks/useHtmlPdfExport.ts`. Wired in `AnnotatedResumePanel`, `TailorPreviewPane`, and `TemplateBuilderClient`.
 
-**For the Tailor flow** (ResumeBuilder.tsx, unchanged): still uses `/api/analyze-export-pdf` → Jinja LaTeX template (`resume_gui/templates/latex/harshibar_resume.tex.j2`) → pdflatex. Has its own "Download PDF from HTML" button alongside the LaTeX one.
+**Preview styling** (font preset + accent swatch) lives in `AnnotatedResumePanel` — client-side CSS vars only; no LaTeX template picker.
 
-**LaTeX is on borrowed time.** It stays because:
-- ResumeBuilder still uses it for the Harshibar tailored output
-- Removing it requires migrating the tailor flow to a Chromium-rendered HTML template
+**Tailor gap fixes** patch synthesized plain text in the browser and rescore via `/api/analyze` — no `/api/apply-suggestions` / pdflatex on the JD tailor path.
 
-Cleanup candidates if/when LaTeX gets fully retired:
-- `/api/analyze-export-pdf` endpoint
-- `_doc_from_structured_dict`, `_latex_escape`, `recompile_resume_from_tex`
-- `resume_gui/renderers/latex_renderer.py`
-- `resume_gui/templates/latex/`
-- pdflatex / TeX Live from Docker image
+**Template Builder** is `/template-builder/` (replaces legacy `ResumeTemplateStudio` / `?flow=template`).
+
+**LaTeX cleanup candidates** (backend still has dead paths used only if something calls `generate-stream` / `apply-suggestions`):
+- `/api/generate-stream`, `/api/apply-suggestions`, `/api/analyze-export-pdf`
+- `resume_gui/renderers/latex_renderer.py`, `resume_gui/templates/latex/`, pdflatex in Docker
 
 ---
 
@@ -205,6 +202,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 ---
 
 ## Recent changes (running log — newest first; **append after every commit**)
+
+- **Chromium-only PDF + Template Builder replaces studio (this session)** — JD Tailor no longer calls LaTeX (`apply-suggestions` / `generate-stream`) for gap fixes or download; preview + export use `useHtmlPdfExport` like Analyze. Legacy `?flow=template` / `ResumeTemplateStudio` redirect to `/template-builder/`. Removed LaTeX template picker from tailor upload form and "LaTeX layout" chips from `AnnotatedResumePanel`; Style + accent swatches on the preview panel are the single styling surface.
 
 - **Category score explanations below 95 (this session)** — Any category scored under 95 must show *why*: analysis prompt emits `categoryRationales`; `/api/explain-category-score` backfills saved runs; `AnalyzeResume` auto-fetches on category open when missing. Removed misleading "looks strong" empty state for 70–94 scores and dropped the "no trusted AI rewrite / quality filter" copy on bullet cards. `/api/upload-resume` now vision-synthesizes `extractedText` for PDFs (analyze parity). Tailor results header drops LaTeX "Generate tailored PDF" — download is HTML/Chromium only.
 

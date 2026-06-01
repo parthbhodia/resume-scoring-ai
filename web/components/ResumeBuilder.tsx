@@ -30,6 +30,8 @@ import {
   resumeLineMatchesSuggestionOriginal,
   resumeLineMatchesAcceptedSuggestionHighlight,
   computeCombinedMatchTextByLineIndex,
+  applySuggestionToProfileText,
+  applySuggestionsToProfileText,
 } from "@/lib/suggestionResumeMatch";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { useSuggestionsStore } from "@/store/suggestionsStore";
@@ -553,6 +555,7 @@ export default function ResumeBuilder({
 
   // Phase 3 — Gap status tracking: which gap names have been addressed
   const [addressedGaps, setAddressedGaps] = useState<Set<string>>(new Set());
+  const [tailorRescoring, setTailorRescoring] = useState(false);
 
   // Phase 2 — Inline bullet editor state
   const [bulletEditorOpen, setBulletEditorOpen] = useState(false);
@@ -786,15 +789,10 @@ export default function ResumeBuilder({
       if (styleRef) next += `&styleRef=${encodeURIComponent(styleRef)}`;
       router.replace(next);
     } else if (fromTemplateStudio) {
-      setStudioHandoff(true);
-      setResult(null);
-      setPreview("");
       try {
-        sessionStorage.setItem(RN_BUILDER_LAYOUT_ONLY_KEY, "1");
+        sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
       } catch { /* ignore */ }
-      sp.delete("fromTemplateStudio");
-      const qs = sp.toString();
-      router.replace(qs ? `/?${qs}` : "/?view=builder&flow=tailor");
+      router.replace("/template-builder/");
     }
   }, [router, searchParams]);
 
@@ -1040,6 +1038,29 @@ export default function ResumeBuilder({
       setAnalyzing(false);
     }
   }, [jd, candidateProfile]);
+
+  /** Re-run JD match ratings on updated plain text (no LaTeX / no ATS folder). */
+  const rescoreTailorRatings = useCallback(async (profileOverride?: string) => {
+    const prof = (profileOverride ?? candidateProfile ?? "").trim();
+    if (!prof || !jd.trim()) return false;
+    setTailorRescoring(true);
+    try {
+      const resp = await fetch(apiUrl("/api/analyze"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidate_profile: prof, job_description: jd.trim() }),
+      });
+      if (!resp.ok) return false;
+      const data = await resp.json() as { ratings?: RatingsData; error?: string };
+      if (data.error || !data.ratings) return false;
+      setResult((prev) => (prev ? { ...prev, ratings: data.ratings! } : prev));
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setTailorRescoring(false);
+    }
+  }, [candidateProfile, jd]);
 
   const getSuggestions = useCallback(async (
     focusGaps?: Array<{ name: string; score: number }>,
@@ -1675,74 +1696,41 @@ export default function ResumeBuilder({
   }, [candidateProfile, jd]);
 
   /**
-   * Apply a gap-fix suggestion immediately:
-   *  1. Patch the resume via /api/apply-suggestions (safe fuzzy matching, no raw LaTeX writes)
-   *  2. Update PDF preview URL
-   *  3. Optimistically remove the gap from the ratings missing list
-   *  4. Rescore via /api/ats-check so the match score reflects the change
-   *
-   * Falls back to queuing (no API call) when no folder exists yet.
+   * Apply a gap-fix suggestion to the HTML preview (Chromium export path — no LaTeX).
+   * Patches synthesized plain text, updates the Fixes tab queue, rescoring via /api/analyze.
    */
   const applyGapFix = useCallback(async (s: { id: string; section: string; original: string; suggested: string; reason: string; priority: string }) => {
     const fixId = `gf_${Date.now()}_${s.id}`;
     const asSuggestion = { ...s, id: fixId, priority: (s.priority ?? "high") as "high" | "medium" | "low", category: "strengthen_impact" as const };
     const gapName = gapFixPanel?.gapName ?? "";
 
-    // Mark gap addressed and close panel immediately for responsive feel
     if (gapName) setAddressedGaps(prev => new Set([...prev, gapName]));
     setGapFixPanel(null);
 
-    const folder = result?.folder;
-    if (!folder) {
-      // No compiled resume yet — just queue for later apply
-      const existing = suggestions ?? [];
-      hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips, interviewQuestions);
-      acceptSuggestion(fixId);
-      return;
-    }
-
-    // Immediately apply + compile + rescore
     setGapApplyBusy(true);
     try {
-      const resp = await fetch(apiUrl("/api/apply-suggestions"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          folder,
-          accepted_suggestions: [{
-            id: fixId,
-            section: s.section,
-            original: s.original,
-            suggested: s.suggested,
-            reason: s.reason,
-            category: "strengthen_impact",
-          }],
-          user_id: user?.id ?? null,
-        }),
-      });
-
-      if (resp.ok) {
-        const data = await resp.json() as { pdf_url?: string | null };
-        if (data.pdf_url) {
-          setResult(prev => prev ? { ...prev, pdfUrl: data.pdf_url! } : prev);
-        }
-        setApplySeq((n) => n + 1);
-
-        // Patch the preview text immediately so ResumePaperView reflects the change
-        if (s.original && s.suggested) {
-          setCandidateProfile((prev) => (prev ?? "").replace(s.original, s.suggested));
-          // Flash the new suggested text in green for 3 s so the user sees the change
+      let updatedProfile = candidateProfile ?? "";
+      if (s.original && s.suggested) {
+        const patched = applySuggestionToProfileText(updatedProfile, s.original, s.suggested);
+        updatedProfile = patched.text;
+        if (patched.applied) {
+          setCandidateProfile(updatedProfile);
           setAppliedGapTexts(prev => [...prev, s.suggested]);
-          setTimeout(() => setAppliedGapTexts(prev => prev.filter(t => t !== s.suggested)), 3000);
+          window.setTimeout(
+            () => setAppliedGapTexts(prev => prev.filter(t => t !== s.suggested)),
+            3000,
+          );
         }
       }
 
-      // Optimistic ratings update — move the gap out of its missing list
+      const existing = suggestions ?? [];
+      hydrateSuggestions([asSuggestion, ...existing], suggestSummary, strategicTips, interviewQuestions);
+      acceptSuggestion(fixId);
+
       if (gapName) {
         setResult(prev => {
           if (!prev?.ratings || !isDetailedRatings(prev.ratings)) return prev;
           const r = prev.ratings;
-          // Try qualifications
           if (r.qualifications.missing.some(i => i.text === gapName)) {
             const item = r.qualifications.missing.find(i => i.text === gapName)!;
             return {
@@ -1757,7 +1745,6 @@ export default function ResumeBuilder({
               },
             };
           }
-          // Try responsibilities
           if (r.responsibilities.missing.some(i => i.text === gapName)) {
             const item = r.responsibilities.missing.find(i => i.text === gapName)!;
             return {
@@ -1772,7 +1759,6 @@ export default function ResumeBuilder({
               },
             };
           }
-          // Try direct skill keyword
           const kw = r.keywords;
           if (kw.direct_skills?.missing?.includes(gapName)) {
             return {
@@ -1790,7 +1776,6 @@ export default function ResumeBuilder({
               },
             };
           }
-          // Try contextual keyword
           if (kw.contextual?.missing?.includes(gapName)) {
             return {
               ...prev,
@@ -1811,17 +1796,16 @@ export default function ResumeBuilder({
         });
       }
 
-      // Rescore to update the match score circle
       if (jd.trim()) {
-        await runAtsCheck(folder, true);
+        await rescoreTailorRatings(updatedProfile);
       }
     } catch {
-      // Best effort — don't surface apply errors to avoid interrupting flow
+      /* best effort */
     } finally {
       setGapApplyBusy(false);
     }
-  }, [result, suggestions, suggestSummary, strategicTips, interviewQuestions,
-      hydrateSuggestions, acceptSuggestion, gapFixPanel, user?.id, jd, runAtsCheck]);
+  }, [candidateProfile, suggestions, suggestSummary, strategicTips, interviewQuestions,
+      hydrateSuggestions, acceptSuggestion, gapFixPanel, jd, rescoreTailorRatings]);
 
   const ratings = result?.ratings;
   const score   = ratings?.match_score ?? 0;
@@ -1848,8 +1832,8 @@ export default function ResumeBuilder({
     setCandidateProfile(newProfile);
     setBulletEdits(new Map());
     setBulletEditorOpen(false);
-    void generate();
-  }, [candidateProfile, bulletEdits, generate]);
+    if (jd.trim()) void rescoreTailorRatings(newProfile);
+  }, [candidateProfile, bulletEdits, jd, rescoreTailorRatings]);
 
   // Download filename should ALWAYS be built from the user's actual data
   // (candidate name + company + role) — not from result.folder, which is the
@@ -1908,12 +1892,9 @@ export default function ResumeBuilder({
   }, [result?.folder, suggestions, acceptedIds, user?.id, resumeDownloadStem]);
 
   /**
-   * Apply accepted suggestions via /api/apply-suggestions (no LLM rewrite).
-   * Patches resume_doc directly → re-renders Jinja → compiles PDF → updates Supabase.
-   * Then auto-rescores with /api/ats-check to refresh the match score.
+   * Apply accepted suggestions to the HTML preview (Chromium export path — no LaTeX).
    */
   const applySelectedSuggestions = useCallback(async () => {
-    const folder = result?.folder;
     const acceptedList = suggestions
       .filter((s) => acceptedIds.has(s.id))
       .map((s) => ({
@@ -1929,59 +1910,22 @@ export default function ResumeBuilder({
       setError("No suggestions selected — tick at least one checkbox in the Fixes tab to apply changes.");
       return;
     }
-    if (!folder) {
-      void generate();
-      return;
-    }
 
     setApplyBusy(true);
     setApplyFeedback(null);
     setError(null);
     try {
-      const resp = await fetch(apiUrl("/api/apply-suggestions"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          folder,
-          accepted_suggestions: acceptedList,
-          user_id: user?.id ?? null,
-        }),
-      });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: "Apply failed" }));
-        throw new Error(err.error || `HTTP ${resp.status}`);
-      }
-      const data = await resp.json() as {
-        pdf_url: string | null;
-        patches_applied: number;
-        patches_failed: number;
-        folder: string;
-      };
+      const { text: updatedProfile, applied, failed } = applySuggestionsToProfileText(
+        candidateProfile ?? "",
+        acceptedList,
+      );
+      setCandidateProfile(updatedProfile);
 
-      // Update PDF URL
-      if (data.pdf_url) {
-        setResult((prev) => prev ? { ...prev, pdfUrl: data.pdf_url! } : prev);
-      }
-      setApplySeq((n) => n + 1);
+      setApplyFeedback({ patchesApplied: applied, patchesFailed: failed, rescoring: true });
 
-      // Immediately patch candidateProfile text so the ResumePaperView preview updates in place
-      setCandidateProfile((prev) => {
-        let updated = prev ?? "";
-        for (const s of acceptedList) {
-          if (s.original && s.suggested) {
-            updated = updated.replace(s.original, s.suggested);
-          }
-        }
-        return updated;
-      });
-
-      // Show success feedback + kick off rescore
-      setApplyFeedback({ patchesApplied: data.patches_applied, patchesFailed: data.patches_failed, rescoring: true });
-
-      // Auto-rescore against the JD so match score updates (pass true to also update the big score circle)
-      if (jd.trim() && folder) {
+      if (jd.trim()) {
         try {
-          await runAtsCheck(folder, true);
+          await rescoreTailorRatings(updatedProfile);
         } catch { /* rescore is best-effort */ }
       }
       setApplyFeedback((prev) => prev ? { ...prev, rescoring: false } : null);
@@ -1992,7 +1936,7 @@ export default function ResumeBuilder({
     } finally {
       setApplyBusy(false);
     }
-  }, [result, suggestions, acceptedIds, user?.id, generate, jd, runAtsCheck]);
+  }, [suggestions, acceptedIds, candidateProfile, jd, rescoreTailorRatings]);
 
   const selectedTemplateLabel = useMemo(() => {
     return distinctStyleTemplates().find((t) => t.referenceFolder === styleReferenceFolder)?.label ?? "Template";
@@ -2513,20 +2457,6 @@ export default function ResumeBuilder({
               </div>
             )}
 
-            {!studioHandoff && hasMultipleStyleTemplates() && (
-              <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", letterSpacing: -0.2, marginBottom: 4 }}>
-                  Template style
-                </div>
-                <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
-                  Layout for your tailored PDF.
-                </p>
-                <ResumeStyleTemplateGrid
-                  styleReferenceFolder={styleReferenceFolder}
-                  setStyleReferenceFolder={setStyleReferenceFolder}
-                />
-              </div>
-            )}
           </StepCard>
 
           {/* ── Target job (JD tailor flow only) ── */}
@@ -2928,7 +2858,7 @@ export default function ResumeBuilder({
                     <circle cx="9" cy="9" r="7" stroke="rgba(99,102,241,0.3)" strokeWidth="2.5"/>
                     <path d="M9 2a7 7 0 017 7" stroke="#818cf8" strokeWidth="2.5" strokeLinecap="round"/>
                   </svg>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#818cf8" }}>Applying fix — updating PDF and rescoring…</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#818cf8" }}>Applying fix — updating preview…</span>
                 </div>
               )}
 
@@ -2982,12 +2912,11 @@ export default function ResumeBuilder({
                           <circle cx="9" cy="9" r="7" stroke="rgba(52,211,153,0.3)" strokeWidth="2.5"/>
                           <path d="M9 2a7 7 0 017 7" stroke="var(--green,#34d399)" strokeWidth="2.5" strokeLinecap="round"/>
                         </svg>
-                      ) : result?.folder && (
+                      ) : (
                         <button
                           type="button"
-                          disabled={atsLoading || generating}
-                          onClick={() => { setApplyFeedback(null); void runAtsCheck(result.folder!, true); }}
-                          title="Re-run full analysis to refresh Qualifications, Keywords, and Responsibilities counts"
+                          onClick={() => { setApplyFeedback(null); void rescoreTailorRatings(); }}
+                          title="Re-run match analysis on your updated preview text"
                           style={{
                             display: "inline-flex", alignItems: "center", gap: 5,
                             padding: "5px 12px", borderRadius: 7,
@@ -2995,7 +2924,7 @@ export default function ResumeBuilder({
                             background: "rgba(52,211,153,0.08)",
                             color: "var(--green, #34d399)",
                             fontSize: 11.5, fontWeight: 600, fontFamily: "inherit",
-                            cursor: atsLoading || generating ? "not-allowed" : "pointer",
+                            cursor: "pointer",
                             whiteSpace: "nowrap", flexShrink: 0,
                           }}
                         >
@@ -3099,15 +3028,15 @@ export default function ResumeBuilder({
                     generating={generating}
                   />
                   {/* Phase 3 — Re-score button when gaps have been addressed */}
-                  {addressedGaps.size > 0 && result?.folder && (
+                  {addressedGaps.size > 0 && (
                     <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 12, color: "var(--green, #34d399)", fontWeight: 600 }}>
                         ✓ {addressedGaps.size} gap{addressedGaps.size > 1 ? "s" : ""} addressed
                       </span>
                       <button
                         type="button"
-                        disabled={atsLoading || generating}
-                        onClick={() => void runAtsCheck(result.folder!)}
+                        disabled={tailorRescoring}
+                        onClick={() => { void rescoreTailorRatings(); }}
                         style={{
                           padding: "5px 12px",
                           borderRadius: 7,
@@ -3117,11 +3046,11 @@ export default function ResumeBuilder({
                           fontSize: 12,
                           fontWeight: 600,
                           fontFamily: "inherit",
-                          cursor: atsLoading || generating ? "not-allowed" : "pointer",
-                          opacity: atsLoading || generating ? 0.6 : 1,
+                          cursor: tailorRescoring ? "not-allowed" : "pointer",
+                          opacity: tailorRescoring ? 0.6 : 1,
                         }}
                       >
-                        {atsLoading ? "Scoring…" : "Re-score résumé →"}
+                        {tailorRescoring ? "Scoring…" : "Re-score match →"}
                       </button>
                     </div>
                   )}
@@ -3150,9 +3079,12 @@ export default function ResumeBuilder({
                     resumeHeader={resumeHeaderLines}
                     company={company}
                     role={role}
-                    onExportDocx={result.folder ? () => { void downloadResultDocx(); } : undefined}
-                    exportDocxEnabled={!!result.folder}
-                    docxExportBusy={docxExportBusy}
+                    gapFixHighlights={
+                      gapFixPanel?.suggestions
+                        .map((s) => s.original.trim())
+                        .filter(Boolean) ?? []
+                    }
+                    appliedHighlights={appliedGapTexts}
                   />
                 </div>
               </section>
@@ -3404,7 +3336,7 @@ function TemplateCustomizePostResult({
           Resume Builder
         </Link>
         <span style={{ margin: "0 8px", opacity: 0.45 }} aria-hidden>›</span>
-        <Link href="/?view=builder&flow=template" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
+        <Link href="/template-builder/" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
           Templates
         </Link>
         <span style={{ margin: "0 8px", opacity: 0.45 }} aria-hidden>›</span>
@@ -3464,7 +3396,7 @@ function TemplateCustomizePostResult({
               onClick={() => {
                 setResult(null);
                 setPreview("");
-                router.push("/?view=builder&flow=template");
+                router.push("/template-builder/");
               }}
               style={{
                 padding: "10px 18px",
@@ -3870,7 +3802,7 @@ function TemplateCustomizePostResult({
               </p>
               <button
                 type="button"
-                onClick={() => router.push("/?view=builder&flow=template")}
+                onClick={() => router.push("/template-builder/")}
                 style={{
                   padding: "10px 16px",
                   borderRadius: 10,

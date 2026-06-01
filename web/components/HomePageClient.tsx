@@ -4,7 +4,7 @@
  * Root page — routes between top-level views via query params.
  *
  *   /                            -> analyze (default)
- *   /?view=builder&flow=tailor|template -> résumé builder workflows
+ *   /?view=builder&flow=tailor -> JD tailor workflow (legacy flow=template redirects to /template-builder)
  *   /?view=library               -> library grid (+ optional right detail panel when resume=<f>)
  *   /?view=profile&prefill=1     -> Profile page + optional session prefill from Analyze / template flow
  *   /?view=jobs                  -> jobs (placeholder for now)
@@ -19,7 +19,6 @@ import { Suspense, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import AppShell, { useAppView } from "@/components/AppShell";
 import ResumeBuilder from "@/components/ResumeBuilder";
-import ResumeTemplateStudio from "@/components/ResumeTemplateStudio";
 import ContentSourcePicker from "@/components/ContentSourcePicker";
 import ManualResumeForm from "@/components/ManualResumeForm";
 import ResumeLibrary from "@/components/ResumeLibrary";
@@ -77,8 +76,6 @@ function RouterView() {
   const view = useAppView();
   const base = (params?.get("base") || "").trim();
   const flow = (params?.get("flow") || "tailor").toLowerCase();
-  const templateResumeStart = view === "builder" && flow === "template";
-
   /** Legacy `flow=scratch` matched tailor; normalize URL so bookmarks still work. */
   const scratchNormalizedRef = useRef(false);
   useEffect(() => {
@@ -89,6 +86,15 @@ function RouterView() {
     q.set("flow", "tailor");
     router.replace(`/?${q.toString()}`);
   }, [view, flow, router, params]);
+
+  /** Legacy gallery `flow=template` — Template Builder replaced ResumeTemplateStudio. */
+  const templateRedirectRef = useRef(false);
+  useEffect(() => {
+    if (view !== "builder" || flow !== "template") return;
+    if (templateRedirectRef.current) return;
+    templateRedirectRef.current = true;
+    router.replace("/template-builder/");
+  }, [view, flow, router]);
 
   if (view === "library") {
     return (
@@ -160,13 +166,8 @@ function RouterView() {
       </ViewFill>
     );
   }
-  /** Dedicated layout gallery — not the JD "tailor" wizard (see Continue → compact compile step). */
-  if (templateResumeStart) {
-    return (
-      <ViewFill>
-        <ResumeTemplateStudio initialBaseFolder={base || null} />
-      </ViewFill>
-    );
+  if (view === "builder" && flow === "template") {
+    return null;
   }
   // key ensures remount when base folder or builder workflow changes
   const builderKeyFlow = flow === "scratch" ? "tailor" : flow;

@@ -203,3 +203,51 @@ export function resumeLineMatchesAcceptedSuggestionHighlight(line: string, origi
 
   return resumeLineMatchesSuggestionOriginal(line, original);
 }
+
+/** Apply one suggestion rewrite to plain synthesized profile text (line-aware, no LaTeX). */
+export function applySuggestionToProfileText(
+  profile: string,
+  original: string,
+  suggested: string,
+): { text: string; applied: boolean } {
+  const orig = original.trim();
+  const next = suggested.trim();
+  if (!orig || !next) return { text: profile, applied: false };
+
+  const lines = profile.split("\n");
+  let applied = false;
+  const patched = lines.map((line) => {
+    if (resumeLineMatchesSuggestionOriginal(line, orig)) {
+      applied = true;
+      return next;
+    }
+    return line;
+  });
+  if (applied) return { text: patched.join("\n"), applied: true };
+
+  const idx = profile.indexOf(orig);
+  if (idx >= 0) {
+    return {
+      text: profile.slice(0, idx) + next + profile.slice(idx + orig.length),
+      applied: true,
+    };
+  }
+  return { text: profile, applied: false };
+}
+
+/** Apply multiple suggestion rewrites in order (Analyze/Tailor HTML preview path). */
+export function applySuggestionsToProfileText(
+  profile: string,
+  items: Array<{ original: string; suggested: string }>,
+): { text: string; applied: number; failed: number } {
+  let text = profile;
+  let applied = 0;
+  let failed = 0;
+  for (const item of items) {
+    const result = applySuggestionToProfileText(text, item.original, item.suggested);
+    text = result.text;
+    if (result.applied) applied += 1;
+    else failed += 1;
+  }
+  return { text, applied, failed };
+}

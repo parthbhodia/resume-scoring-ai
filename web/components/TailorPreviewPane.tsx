@@ -8,6 +8,10 @@ interface Props {
   resumeHeader?: string[];
   company?: string;
   role?: string;
+  /** Bullets targeted by the open gap-fix panel (purple highlight). */
+  gapFixHighlights?: string[];
+  /** Bullets just updated via gap fix (green flash). */
+  appliedHighlights?: string[];
   /** Optional DOCX export when a tailored folder exists. */
   onExportDocx?: () => void;
   exportDocxEnabled?: boolean;
@@ -24,6 +28,8 @@ export default function TailorPreviewPane({
   resumeHeader = [],
   company = "",
   role = "",
+  gapFixHighlights = [],
+  appliedHighlights = [],
   onExportDocx,
   exportDocxEnabled = false,
   docxExportBusy = false,
@@ -45,6 +51,8 @@ export default function TailorPreviewPane({
       resumeHeader={resumeHeader}
       presentationOnly
       exportPdfEnabled
+      tailorGapFixHighlights={gapFixHighlights}
+      tailorAppliedHighlights={appliedHighlights}
       onExportDocx={exportDocxEnabled ? handleExportDocx : undefined}
       exportDocxEnabled={exportDocxEnabled && !docxExportBusy}
       exportingResume={docxExportBusy}

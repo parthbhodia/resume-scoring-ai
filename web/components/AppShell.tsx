@@ -18,13 +18,27 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "@/lib/supabase";
-import { apiUrl } from "@/lib/utils";
+import { apiUrl, cn } from "@/lib/utils";
 import { isUmbcUser } from "@/lib/userDomainDetection";
 import { LogoFull, LogoMark } from "./BrandLogo";
 import { UmbcWelcomeBanner } from "./UmbcWelcomeBanner";
 import ResumeSidebar from "./ResumeSidebar";
 import { useAppBreakpoints } from "@/hooks/useAppBreakpoints";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@/components/ui/sheet";
 
 export type AppView = "builder" | "library" | "analyze" | "profile" | "jobs" | "cover-letter" | "advisor";
 
@@ -192,7 +206,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [layoutOnlyForNav, setLayoutOnlyForNav] = useState(readBuilderLayoutOnlyFlag);
   const [user, setUser] = useState<User | null>(null);
   const [isUmbc, setIsUmbc] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [theme, toggleTheme] = useTheme();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -276,15 +289,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest("[data-user-menu]")) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [menuOpen]);
-
-  useEffect(() => {
     setBuilderOpen(active === "builder" || onTemplateBuilderPage);
   }, [active, onTemplateBuilderPage]);
 
@@ -312,7 +316,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   const onSignOut = async () => {
     await getSupabaseClient().auth.signOut();
-    setMenuOpen(false);
   };
 
   const initial = (user?.email || "?").charAt(0).toUpperCase();
@@ -342,25 +345,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
         onClick={onClick ?? (() => switchView(view))}
       >
         <span className="app-nav-icon" aria-hidden>{VIEW_ICONS[view]}</span>
-        <span className="app-sidebar-label" style={{ flex: 1, minWidth: 0 }}>
+        <span className="app-sidebar-label min-w-0 flex-1">
           {VIEW_LABELS[view]}
           {BADGES[view] && (
-            <span
-              style={{
-                marginLeft: 8,
-                fontSize: 9,
-                padding: "2px 7px",
-                borderRadius: "var(--radius-pill)",
-                background: "var(--surface3)",
-                color: "var(--dim)",
-                letterSpacing: 0.04,
-                textTransform: "uppercase",
-                fontWeight: 700,
-                verticalAlign: "middle",
-              }}
+            <Badge
+              variant="secondary"
+              className="ml-2 align-middle px-1.5 py-0 text-[9px] font-bold tracking-wide uppercase"
             >
               {BADGES[view]}
-            </span>
+            </Badge>
           )}
         </span>
       </button>
@@ -381,53 +374,44 @@ export default function AppShell({ children }: { children: ReactNode }) {
         data-collapsed={sidebarCollapsed ? "true" : "false"}
         aria-label="Primary navigation"
       >
-        <div style={{ padding: "18px 14px 14px", flexShrink: 0 }}>
+        <div className="shrink-0 px-3.5 pb-3.5 pt-[18px]">
           <div
-            style={{
-              display: "flex",
-              flexDirection: isTablet || sidebarCollapsed ? "column" : "row",
-              alignItems: "center",
-              gap: 8,
-              justifyContent: isTablet || sidebarCollapsed ? "center" : "space-between",
-            }}
+            className={cn(
+              "flex items-center gap-2",
+              isTablet || sidebarCollapsed ? "flex-col justify-center" : "flex-row justify-between",
+            )}
           >
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => switchView("analyze")}
               aria-label="Resunova — go to Analyze"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                background: "none",
-                border: "none",
-                padding: 0,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                flex: isTablet || sidebarCollapsed ? undefined : 1,
-                minWidth: 0,
-                justifyContent: isTablet || sidebarCollapsed ? "center" : "flex-start",
-              }}
+              className={cn(
+                "h-auto px-0 font-inherit hover:bg-transparent",
+                isTablet || sidebarCollapsed ? "justify-center" : "min-w-0 flex-1 justify-start",
+              )}
             >
               {isTablet || sidebarCollapsed ? (
                 <LogoMark size={28} variant={isUmbc ? "umbc" : "resunova"} />
               ) : (
                 <LogoFull markSize={26} textColor="var(--text)" variant={isUmbc ? "umbc" : "resunova"} />
               )}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="app-shell-sidebar-toggle"
+              variant="outline"
+              size="icon"
+              className="app-shell-sidebar-toggle size-9 shrink-0"
               onClick={toggleSidebarCollapsed}
               aria-label="Hide navigation"
               title="Hide navigation"
             >
               <NavMenuIcon open={!sidebarCollapsed} />
-            </button>
+            </Button>
           </div>
         </div>
 
-        <nav style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+        <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2.5 pb-3 pt-1">
           <NavRow view="analyze" />
 
           <div style={{ marginTop: 4 }}>
@@ -499,14 +483,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
           {advisorAllowed ? <NavRow view="advisor" /> : null}
         </nav>
 
-        <div style={{ borderTop: "1px solid var(--border)", padding: "10px 10px 12px", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className="flex shrink-0 flex-col gap-2 border-t border-border px-2.5 pb-3 pt-2.5">
           <button
             type="button"
-            className="app-nav-row"
+            className="app-nav-row mb-0"
             data-active={historyOpen}
             onClick={() => setHistoryOpen(o => !o)}
             title="Resume history"
-            style={{ marginBottom: 0 }}
           >
             <span className="app-nav-icon" aria-hidden>
               <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -514,27 +497,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </span>
-            <span className="app-sidebar-label" style={{ flex: 1 }}>History</span>
+            <span className="app-sidebar-label flex-1">History</span>
           </button>
 
-          <div className="app-sidebar-footer-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
+          <div className="app-sidebar-footer-row flex items-center gap-2">
+            <Button
               type="button"
+              variant="outline"
+              size="icon"
+              className="size-10 shrink-0"
               onClick={toggleTheme}
               title={theme === "dark" ? "Light mode" : "Dark mode"}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: "var(--radius)",
-                border: "1px solid var(--border)",
-                background: "var(--surface2)",
-                color: "var(--text)",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}
             >
               {theme === "dark" ? (
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -546,61 +519,40 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <path d="M13.5 10.5A6 6 0 015.5 2.5a6 6 0 000 11 6 6 0 008-3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
                 </svg>
               )}
-            </button>
+            </Button>
 
-            <div data-user-menu style={{ position: "relative", flexShrink: 0 }}>
-              <button
-                type="button"
-                onClick={() => setMenuOpen(o => !o)}
-                title="Account menu"
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50 data-popup-open:ring-3 data-popup-open:ring-accent/30"
                 aria-label="Account menu"
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: "50%",
-                  border: "none",
-                  background: "var(--accent)",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontWeight: 600,
-                  fontSize: 12,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: 0,
-                  boxShadow: menuOpen ? "0 0 0 3px var(--accent-bg)" : "none",
-                }}
+                title="Account menu"
               >
-                {initial}
-              </button>
-              {menuOpen && (
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: "calc(100% + 8px)",
-                    right: 0,
-                    minWidth: 160,
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-lg)",
-                    boxShadow: "var(--shadow-sm)",
-                    padding: 6,
-                    zIndex: 80,
-                  }}
-                >
-                  <MenuBtn onClick={() => { switchView("profile"); setMenuOpen(false); }}>Profile settings</MenuBtn>
-                  <MenuBtn onClick={onSignOut} danger>Sign out</MenuBtn>
-                </div>
-              )}
-            </div>
+                <Avatar className="size-8 bg-primary after:border-none">
+                  <AvatarFallback className="bg-primary text-xs font-semibold text-primary-foreground">
+                    {initial}
+                  </AvatarFallback>
+                </Avatar>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="end" sideOffset={8} className="min-w-40">
+                <DropdownMenuItem onClick={() => switchView("profile")}>
+                  Profile settings
+                </DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onClick={() => void onSignOut()}>
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
-          <nav className="app-sidebar-legal" style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11, paddingTop: 4 }}>
-            <Link href="/terms" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Terms</Link>
-            <Link href="/privacy" prefetch={false} style={{ color: "var(--dim)", textDecoration: "none" }}>Privacy</Link>
+          <nav className="app-sidebar-legal flex flex-wrap gap-2.5 pt-1 text-[11px]">
+            <Link href="/terms" prefetch={false} className="text-muted-foreground no-underline hover:text-foreground">
+              Terms
+            </Link>
+            <Link href="/privacy" prefetch={false} className="text-muted-foreground no-underline hover:text-foreground">
+              Privacy
+            </Link>
           </nav>
-          <div className="app-sidebar-legal" style={{ fontSize: 10, color: "var(--dim)", letterSpacing: 0.02 }}>
+          <div className="app-sidebar-legal text-[10px] tracking-wide text-muted-foreground">
             © 2026 Resunova
           </div>
         </div>
@@ -608,20 +560,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* ── Main column ───────────────────────────────────────── */}
       <div className="app-shell-main">
-        <button
+        <Button
           type="button"
-          className="app-shell-sidebar-reopen"
+          variant="outline"
+          size="icon"
+          className="app-shell-sidebar-reopen size-10"
           onClick={toggleSidebarCollapsed}
           aria-label="Show navigation"
           title="Show navigation"
         >
           <NavMenuIcon open={false} />
-        </button>
+        </Button>
         <UmbcWelcomeBanner />
         <main
           key={active}
-          className="app-shell-view-pane"
-          style={{ flex: "1 1 0%", minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}
+          className="app-shell-view-pane flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           {children}
         </main>
@@ -642,91 +595,34 @@ export default function AppShell({ children }: { children: ReactNode }) {
               }}
             >
               {VIEW_ICONS[v]}
-              <span style={{ maxWidth: 72, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {VIEW_LABELS[v]}
-              </span>
+              <span className="max-w-[72px] truncate">{VIEW_LABELS[v]}</span>
             </button>
           );
         })}
       </nav>
 
       {/* ── History drawer (right) ───────────────────────────── */}
-      <div
-        onClick={() => setHistoryOpen(false)}
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 45,
-          background: "rgba(15,23,42,0.32)",
-          opacity: historyOpen ? 1 : 0,
-          pointerEvents: historyOpen ? "auto" : "none",
-          transition: "opacity 0.2s",
-        }}
-        aria-hidden={!historyOpen}
-      />
-      <div
-        style={{
-          position: "fixed",
-          top: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: 50,
-          width: "min(300px, 92vw)",
-          transform: historyOpen ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 0.24s cubic-bezier(0.4,0,0.2,1)",
-          boxShadow: historyOpen ? "-8px 0 32px rgba(0,0,0,0.18)" : "none",
-          pointerEvents: historyOpen ? "auto" : "none",
-        }}
-      >
-        <ResumeSidebar
-          activeFolder={null}
-          onSelect={folder => {
-            try {
-              sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
-            } catch { /* ignore */ }
-            router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}&intent=job`);
-            setHistoryOpen(false);
-          }}
-        />
-      </div>
+      <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className="w-[min(300px,92vw)] gap-0 p-0 sm:max-w-[300px]"
+        >
+          <SheetTitle className="sr-only">Resume history</SheetTitle>
+          <ResumeSidebar
+            activeFolder={null}
+            onSelect={folder => {
+              try {
+                sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+              } catch { /* ignore */ }
+              router.push(`/?view=builder&flow=tailor&base=${encodeURIComponent(folder)}&intent=job`);
+              setHistoryOpen(false);
+            }}
+          />
+        </SheetContent>
+      </Sheet>
     </div>
       </AppShellSidebarContext.Provider>
     </UmbcProvider>
-  );
-}
-
-function MenuBtn({
-  children,
-  onClick,
-  danger = false,
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  const [hover, setHover] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        width: "100%",
-        padding: "8px 10px",
-        textAlign: "left",
-        fontSize: 12.5,
-        color: danger ? "var(--red)" : "var(--text)",
-        letterSpacing: -0.1,
-        background: hover ? "var(--surface2)" : "transparent",
-        border: "none",
-        borderRadius: "var(--radius)",
-        cursor: "pointer",
-        fontFamily: "inherit",
-        transition: "background 0.1s",
-      }}
-    >
-      {children}
-    </button>
   );
 }
