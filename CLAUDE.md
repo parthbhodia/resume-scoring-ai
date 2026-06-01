@@ -198,7 +198,7 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 
 - **`c91c325`** — Backend refactor phase 2: extracted structured-doc parsing (`doc_normalize.py`, `education_parse.py`, `structured_doc.py`) from `app.py`. Builders (`_resume_doc_from_parsed`, `_build_resume_doc_from_llm_raw`), normalization pass, and JSON serialization now live under `extract/`. `app.py` down to ~6,100 lines; still owns routes, LLM orchestration, and suggestion application.
 
-- **Phase 3 (this session)** — Completed monolith split: `app.py` is now ~80 lines (Starlette factory + test re-exports). Route handlers live in `resume_gui/routes/` by domain; LLM client in `llm/`, comprehensive analysis in `analysis/comprehensive.py`, extract orchestration in `extract/pipeline.py`, suggestions in `suggestions.py`, auth in `auth/supabase.py`. `resume_gui/README.md` documents the full map for onboarding.
+- **`0d90f5b`** — Backend refactor phase 3: completed monolith split. `app.py` is ~80 lines (Starlette factory + test re-exports). Route handlers in `resume_gui/routes/` by domain; LLM in `llm/`, comprehensive analysis in `analysis/comprehensive.py`, extract orchestration in `extract/pipeline.py`, suggestions in `suggestions.py`, auth in `auth/supabase.py`. Onboarding map in `resume_gui/README.md`.
 
 - **`9e719f9`** — Backend refactor phase 1: extracted analyze honesty pipeline (`resume_gui/analysis/`) and PDF extract helpers (`resume_gui/extract/` vision, synthesize, text_utils, education) from the `app.py` monolith. `app.py` re-exports the same `_`-prefixed names for tests and scripts. Added `resume_gui/README.md` as the onboarding map. Invariant: no behavior change — 87 pytest cases stay green.
 
