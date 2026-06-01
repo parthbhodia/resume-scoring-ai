@@ -2709,6 +2709,13 @@ async def api_generate_stream(request: Request):
                     }), loop).result()
                 _apply_accepted_edits_to_doc(doc, accepted_suggestions if isinstance(accepted_suggestions, list) else None)
 
+                # Emit the tailored structured doc so the frontend can render
+                # it via ResumeDocumentView and export via HTML→Chromium.
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "event": "structured_doc",
+                    "data": _resume_doc_to_dict(doc),
+                }), loop).result()
+
                 asyncio.run_coroutine_threadsafe(queue.put({
                     "event": "status",
                     "msg": "Structured renderer: generating deterministic LaTeX…",

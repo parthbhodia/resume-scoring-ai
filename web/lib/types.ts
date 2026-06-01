@@ -218,6 +218,7 @@ export type SSEEvent =
   | { event: "diff";    data: DiffLine[]; adds: number; removes: number }
   | { event: "rationales"; data: ChangeRationale[] }
   | { event: "ratings"; data: RatingsData }
+  | { event: "structured_doc"; data: Record<string, unknown> }
   | { event: "saved";   folder: string; tex_path: string }
   | { event: "pdf";     url: string }
   | { event: "storage"; artifact: "pdf" | "tex"; stored: boolean; url?: string; reason?: string }

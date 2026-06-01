@@ -8,6 +8,7 @@ import { buildResumeFileStem } from "@/lib/resumeFileName";
 import { getBaseResumeBanner } from "@/lib/libraryFolderLabel";
 import { apiUrl, isResumeUploadFile, parseJsonOrThrow, scoreColor } from "@/lib/utils";
 import { toUserFriendlyErrorMessage, messageForNonJsonApiFailure } from "@/lib/userFriendlyError";
+import { Button } from "@/components/ui/button";
 import { upsertResume, getSupabaseClient, upsertUserProfile } from "@/lib/supabase";
 import { TAILOR_PREFILL_JD, TAILOR_PREFILL_COMPANY, TAILOR_PREFILL_ROLE } from "@/lib/tailorPrefill";
 import type { User } from "@supabase/supabase-js";
@@ -1471,6 +1472,14 @@ export default function ResumeBuilder({
           switch (ev.event) {
             case "status":  setStatusMsg(ev.msg); break;
             case "chunk":   acc.latexPreview += ev.text; setPreview(p => p + ev.text); break;
+            case "structured_doc":
+              if (ev.data && typeof ev.data === "object") {
+                structuredUploadRef.current = {
+                  profile: candidateProfile ?? "",
+                  structured: ev.data as unknown as StructuredResume,
+                };
+              }
+              break;
             case "sources": {
               const urls = ev.urls as Source[];
               acc.sources = urls;
@@ -2840,102 +2849,46 @@ export default function ResumeBuilder({
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
                   {/* Analyze-only state: generate CTA so user can commit to a PDF compile */}
                   {!result?.folder && !generating && (
-                    <button
-                      type="button"
-                      onClick={() => { void generate(); }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 6,
-                        padding: "10px 18px", minHeight: 40, borderRadius: "var(--radius)",
-                        background: "var(--accent)", border: "none",
-                        color: "#fff", fontSize: 13, fontWeight: 700,
-                        cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
-                        letterSpacing: -0.2,
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "var(--accent-h)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "var(--accent)"; }}
-                    >
+                    <Button onClick={() => { void generate(); }} size="sm">
                       Generate tailored PDF →
-                    </button>
+                    </Button>
                   )}
-                  {/* HTML→PDF download (new Playwright pipeline — WYSIWYG) */}
+                  {/* HTML→PDF via Chromium — always available once structured_doc arrives from stream */}
                   {structuredUploadRef.current && (
-                    <button
-                      type="button"
+                    <Button
                       disabled={htmlPdfExporting}
                       onClick={() => {
                         if (htmlResumeRef.current) {
                           void exportHtmlPdf(htmlResumeRef.current, `${resumeDownloadStem}.pdf`);
                         }
                       }}
-                      title="Download PDF rendered from HTML — WYSIWYG, no LaTeX"
-                      style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: "8px 14px", minHeight: 36, borderRadius: "var(--radius)",
-                        background: "var(--accent)", border: "none",
-                        color: "#fff", fontSize: 12, fontWeight: 600,
-                        cursor: htmlPdfExporting ? "wait" : "pointer",
-                        fontFamily: "inherit", whiteSpace: "nowrap",
-                        opacity: htmlPdfExporting ? 0.7 : 1,
-                      }}
+                      size="sm"
                     >
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden><path d="M6 1v7M2.5 5l3.5 3.5L9.5 5M1 10h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                      {htmlPdfExporting ? "Generating…" : "⬇ PDF"}
-                    </button>
-                  )}
-                  {/* Legacy LaTeX PDF — kept as fallback while testing new pipeline */}
-                  {result.pdfUrl && !structuredUploadRef.current && (
-                    <button
-                      type="button"
-                      onClick={() => { void downloadResultPdf(); }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: "8px 14px", minHeight: 36, borderRadius: "var(--radius)",
-                        background: "var(--accent)", border: "none",
-                        color: "#fff", fontSize: 12, fontWeight: 600,
-                        cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
-                      }}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden><path d="M6 1v7M2.5 5l3.5 3.5L9.5 5M1 10h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                      PDF
-                    </button>
+                      {htmlPdfExporting ? "Generating…" : "Download PDF"}
+                    </Button>
                   )}
                   {result.folder && (
-                    <button
-                      type="button"
+                    <Button
+                      variant="outline"
+                      size="sm"
                       disabled={docxExportBusy}
                       onClick={() => { void downloadResultDocx(); }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: "8px 14px", minHeight: 36, borderRadius: "var(--radius)",
-                        background: "var(--surface)", border: "1px solid var(--border)",
-                        color: "var(--text)", fontSize: 12, fontWeight: 600,
-                        cursor: docxExportBusy ? "wait" : "pointer", fontFamily: "inherit",
-                        whiteSpace: "nowrap", opacity: docxExportBusy ? 0.7 : 1,
-                        boxShadow: "var(--shadow-sm)",
-                      }}
                     >
                       {docxExportBusy ? "…" : "DOCX"}
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={tryAnotherJob}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 6,
-                      padding: "8px 14px", minHeight: 36, borderRadius: "var(--radius)",
-                      background: "var(--surface)", border: "1px solid var(--border)",
-                      color: "var(--muted)", fontSize: 12, fontWeight: 600,
-                      cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
-                      boxShadow: "var(--shadow-sm)",
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.color = "var(--muted)"; }}
+                    style={{ color: "var(--muted)" }}
                   >
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
                       <path d="M1 6a5 5 0 109.9-1M1 6V2m0 4h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                     Try another job
-                  </button>
+                  </Button>
                 </div>
               </header>
 
@@ -3331,23 +3284,7 @@ export default function ResumeBuilder({
                     <span style={{ fontSize: 11, color: "var(--dim)", lineHeight: 1.4 }}>
                       Line tints follow fix severity — click a line to focus the card.
                     </span>
-                    {result.pdfUrl && (
-                      <a
-                        href={result.pdfUrl}
-                        download={`${resumeDownloadStem}.pdf`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          display: "inline-flex", alignItems: "center", gap: 5,
-                          padding: "5px 12px", borderRadius: 8,
-                          background: "var(--accent)", color: "#fff",
-                          fontSize: 11, fontWeight: 600, textDecoration: "none",
-                          flexShrink: 0, whiteSpace: "nowrap",
-                        }}
-                      >
-                        ⬇ PDF
-                      </a>
-                    )}
+                    {/* PDF downloaded from header button — no duplicate link here */}
                   </div>
 
                   {/* Scrollable paper preview — same ResumePaperView as the Suggestions phase */}
@@ -3374,7 +3311,9 @@ export default function ResumeBuilder({
                 </aside>
               </section>
 
-              {/* Hidden ResumeDocumentView — rendered off-screen so htmlResumeRef is populated for HTML→PDF export */}
+              {/* Hidden ResumeDocumentView — rendered off-screen so htmlResumeRef is populated for HTML→PDF export.
+                  Populated from structuredUploadRef, which is set either on upload OR from the "structured_doc"
+                  stream event after generate — so this always exists once a result is available. */}
               {structuredUploadRef.current && (
                 <div style={{ position: "absolute", left: -9999, top: -9999, width: 816, pointerEvents: "none", opacity: 0, zIndex: -1 }} aria-hidden>
                   <ResumeDocumentView
