@@ -851,3 +851,25 @@ class TestBulletCategoryNormalization:
         assert ba["primaryCategory"] != "quantification"
         assert "quantification" not in ba["issueCategories"]
         assert "quantification" not in [str(i).lower() for i in ba["issues"]]
+
+
+class TestCategoryRationales:
+    def test_normalize_analysis_keeps_category_rationales(self):
+        raw = {
+            "overallScore": 75,
+            "categoryScores": _category_scores(quantification=75),
+            "categoryRationales": {
+                "quantification": "Only 1 of 4 experience bullets includes a metric.",
+                "readability": "Bullets are concise and skimmable.",
+                "bogus": "should be dropped",
+            },
+        }
+        result = _normalize_analysis(raw)
+        cr = result["categoryRationales"]
+        assert cr["quantification"] == "Only 1 of 4 experience bullets includes a metric."
+        assert cr["readability"] == "Bullets are concise and skimmable."
+        assert "bogus" not in cr
+
+    def test_normalize_analysis_defaults_empty_rationales(self):
+        result = _normalize_analysis({"overallScore": 70, "categoryScores": _category_scores()})
+        assert result["categoryRationales"] == {}

@@ -2839,7 +2839,7 @@ export default function ResumeBuilder({
               >
                 <div style={{ minWidth: 0 }}>
                   <h2 id="rb-results-heading" style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", margin: 0, lineHeight: 1.2 }}>
-                    {generating ? "Building your PDF…" : result?.folder ? "Your tailored résumé is ready" : "Analysis ready — review gaps & generate PDF"}
+                    {generating ? "Building your PDF…" : result?.folder ? "Your tailored résumé is ready" : "Analysis ready — review gaps & download PDF"}
                   </h2>
                   <p style={{ fontSize: 12.5, color: "var(--muted)", margin: "2px 0 0", letterSpacing: -0.1 }}>
                     {[role, company].map((s) => s.trim()).filter(Boolean).join(" · ") || "Match results"}
@@ -2847,11 +2847,6 @@ export default function ResumeBuilder({
                 </div>
                 {/* Header action buttons */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
-                  {!result?.folder && !generating && (
-                    <Button onClick={() => { void generate(); }} size="sm">
-                      Generate tailored PDF →
-                    </Button>
-                  )}
                   <Button variant="outline" size="sm" onClick={tryAnotherJob} style={{ color: "var(--muted)" }}>
                     Try another job
                   </Button>

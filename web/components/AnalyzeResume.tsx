@@ -19,7 +19,7 @@ import {
   type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
 import { apiUrl } from "@/lib/utils";
-import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
+import { apiErrorFromUnknown, toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
 import { stripResumeBulletPrefix } from "@/lib/stripResumeBulletPrefix";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
@@ -53,6 +53,8 @@ interface AnalysisResult {
     languageQuality: number;
     technicalBranding: number;
   };
+  /** Per-category 1–2 sentence explanation of why that score was assigned. */
+  categoryRationales?: Partial<Record<keyof AnalysisResult["categoryScores"], string>>;
   summary: string;
   topStrengths: string[];
   topIssues: Array<{
@@ -108,6 +110,8 @@ interface AnalysisResult {
 
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+const SCORE_NEEDS_EXPLANATION = 95;
 
 function scoreColor(score: number | null): string {
   if (score === null) return "var(--border)";
@@ -825,6 +829,21 @@ export default function AnalyzeResume() {
 
   // Inline copy + editable AI-suggestion drafts (keyed by bulletAnalysis index)
   const [copiedBullet, setCopiedBullet] = useState<number | null>(null);
+  const [fetchedCategoryRationales, setFetchedCategoryRationales] = useState<Record<string, string>>({});
+  const [explainingCategory, setExplainingCategory] = useState<string | null>(null);
+  const explainInflightRef = useRef<Set<string>>(new Set());
+  const explainAttemptedRef = useRef<Set<string>>(new Set());
+
+  const activeCategoryRationale = activeCategory && result
+    ? (
+        result.categoryRationales?.[activeCategory as keyof AnalysisResult["categoryScores"]]
+        || fetchedCategoryRationales[activeCategory]
+        || ""
+      ).trim()
+    : "";
+  const activeCategoryNeedsExplanation =
+    typeof activeCategoryScore === "number"
+    && activeCategoryScore < SCORE_NEEDS_EXPLANATION;
 
   const patchBulletRewrite = useCallback((index: number, value: string | null) => {
     patchRewrite(index, value);
@@ -844,6 +863,61 @@ export default function AnalyzeResume() {
     setCopiedBullet(idx);
     setTimeout(() => setCopiedBullet(null), 2000);
   }, []);
+
+  const explainCategoryScore = useCallback(async (category: string) => {
+    if (!result) return;
+    if (explainInflightRef.current.has(category)) return;
+    const score = result.categoryScores[category as keyof AnalysisResult["categoryScores"]];
+    if (score === null || score === undefined) return;
+    const resumeText = (result.extractedText || "").trim();
+    if (!resumeText) return;
+
+    explainInflightRef.current.add(category);
+    setExplainingCategory(category);
+    try {
+      const resp = await fetch(apiUrl("/api/explain-category-score"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          category_score: score,
+          resume_text: resumeText,
+          jd,
+        }),
+      });
+      const json = await resp.json() as { rationale?: string; error?: string };
+      if (!resp.ok) throw new Error(json.error ?? "Could not explain this score.");
+      const rationale = (json.rationale ?? "").trim();
+      if (rationale) {
+        setFetchedCategoryRationales(prev => ({ ...prev, [category]: rationale }));
+      }
+    } catch (e: unknown) {
+      setError(apiErrorFromUnknown(e));
+    } finally {
+      explainInflightRef.current.delete(category);
+      setExplainingCategory(null);
+    }
+  }, [result, jd]);
+
+  useEffect(() => {
+    explainAttemptedRef.current = new Set();
+    setFetchedCategoryRationales({});
+  }, [result]);
+
+  useEffect(() => {
+    if (!activeCategory || !result || !activeCategoryNeedsExplanation) return;
+    if (activeCategoryRationale) return;
+    if (explainAttemptedRef.current.has(activeCategory)) return;
+    if (!(result.extractedText || "").trim()) return;
+    explainAttemptedRef.current.add(activeCategory);
+    void explainCategoryScore(activeCategory);
+  }, [
+    activeCategory,
+    result,
+    activeCategoryNeedsExplanation,
+    activeCategoryRationale,
+    explainCategoryScore,
+  ]);
 
   const startOverAnalyze = useCallback(() => {
     setResult(null);
@@ -1903,12 +1977,20 @@ export default function AnalyzeResume() {
               display: "flex", alignItems: "flex-start", gap: 16,
               padding: "22px 24px",
               background: "var(--surface)",
-              border: `1px solid ${(activeCategoryScore ?? 0) < 70 ? "rgba(248,113,113,0.3)" : "rgba(52,211,153,0.3)"}`,
+              border: `1px solid ${(activeCategoryScore ?? 0) >= 80
+                ? "rgba(52,211,153,0.3)"
+                : (activeCategoryScore ?? 0) >= 60
+                  ? "rgba(251,191,36,0.35)"
+                  : "rgba(248,113,113,0.3)"}`,
               borderRadius: 16,
             }}>
               <div style={{
                 width: 72, height: 72, borderRadius: 16, flexShrink: 0,
-                background: (activeCategoryScore ?? 0) < 70 ? "rgba(248,113,113,0.10)" : "rgba(52,211,153,0.10)",
+                background: (activeCategoryScore ?? 0) >= 80
+                  ? "rgba(52,211,153,0.10)"
+                  : (activeCategoryScore ?? 0) >= 60
+                    ? "rgba(251,191,36,0.12)"
+                    : "rgba(248,113,113,0.10)",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 flexDirection: "column", gap: 2,
               }}>
@@ -1927,6 +2009,53 @@ export default function AnalyzeResume() {
                 <p style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.7, margin: 0 }}>
                   {CATEGORY_DESCRIPTIONS[activeCategory] ?? ""}
                 </p>
+                {activeCategoryNeedsExplanation && (
+                  <div style={{
+                    marginTop: 12,
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    background: "var(--surface2)",
+                    borderLeft: "3px solid var(--accent)",
+                  }}>
+                    <div style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.45,
+                      color: "var(--muted)",
+                      marginBottom: 6,
+                    }}>
+                      Why this score
+                    </div>
+                    {explainingCategory === activeCategory ? (
+                      <p style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.65, margin: 0, fontStyle: "italic" }}>
+                        Generating explanation…
+                      </p>
+                    ) : activeCategoryRationale ? (
+                      <p style={{ fontSize: 13.5, color: "var(--text)", lineHeight: 1.65, margin: 0 }}>
+                        {activeCategoryRationale}
+                      </p>
+                    ) : activeCategory ? (
+                      <button
+                        type="button"
+                        onClick={() => explainCategoryScore(activeCategory)}
+                        disabled={!(result.extractedText || "").trim()}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                          padding: "6px 12px", borderRadius: 7,
+                          border: "1px solid var(--accent)",
+                          background: "rgba(99,102,241,0.10)",
+                          color: "var(--accent)",
+                          fontSize: 12.5, fontWeight: 600,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        Ask AI why
+                      </button>
+                    ) : null}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2145,16 +2274,6 @@ export default function AnalyzeResume() {
                           ))}
                         </div>
                       )}
-                      {!hasTrustedRewrite && activeCategory && categoryIssues.length === 0 && (
-                        <p style={{
-                          fontSize: 11,
-                          color: "var(--muted)",
-                          lineHeight: 1.55,
-                          margin: "0 0 10px",
-                        }}>
-                          Scored {bullet.score}/100 for {activeCategoryLabel}. No AI rewrite passed our quality filter for this category.
-                        </p>
-                      )}
                       {/* Only show the generic category hint when there's an
                           actual rewrite to accompany it — otherwise it reads as
                           a misleading "fix" on a bullet that has none. */}
@@ -2226,57 +2345,43 @@ export default function AnalyzeResume() {
                           )}
                         />
                       ) : (
-                        <>
-                          <p style={{
-                            fontSize: 12,
-                            color: "var(--muted)",
-                            lineHeight: 1.55,
-                            margin: "2px 0 0",
-                            padding: "8px 10px",
-                            borderRadius: 8,
-                            background: "var(--surface2)",
-                            borderLeft: "3px solid var(--amber)",
-                          }}>
-                            No trusted AI rewrite was generated for this bullet. The model’s suggestion was too similar to your original (or failed our quality filter). Edit manually below, or check categories with bullet badges in the sidebar.
-                          </p>
-                          <BulletImprovedEditor
-                            layout="card"
-                            value={editorDraft}
-                            onChange={v => patchBulletRewrite(safeIdx, v)}
-                            onReset={() => patchBulletRewrite(safeIdx, null)}
-                            canReset={rewriteEdits[safeIdx] !== undefined}
-                            eyebrow="Manual edit"
-                            helperText="Start from the original"
-                            resetLabel="Reset to original"
-                            accentColor="var(--amber)"
-                            minHeight={64}
-                            previewLineApplied={previewLineAppliedHere}
-                            onReplaceInPreview={() => patchPreviewLine(safeIdx, editorDraft.trim())}
-                            onRevertPreviewLine={() => patchPreviewLine(safeIdx, null)}
-                            onTextareaFocus={() => onBulletWorkspaceTextareaFocus(safeIdx)}
-                            onTextareaBlur={e => onBulletWorkspaceTextareaBlur(safeIdx, e)}
-                            toolbarRight={(
-                              <button
-                                type="button"
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  copyBullet(editorDraft, safeIdx);
-                                }}
-                                style={{
-                                  display: "inline-flex", alignItems: "center", gap: 5,
-                                  padding: "4px 11px", borderRadius: 7,
-                                  border: `1px solid ${copiedBullet === safeIdx ? "rgba(251,191,36,0.55)" : "rgba(251,191,36,0.34)"}`,
-                                  background: copiedBullet === safeIdx ? "rgba(251,191,36,0.16)" : "rgba(251,191,36,0.08)",
-                                  color: "var(--amber)", fontSize: 11, fontWeight: 600,
-                                  cursor: "pointer", fontFamily: "inherit",
-                                  transition: "all 0.15s",
-                                }}
-                              >
-                                {copiedBullet === safeIdx ? "Copied!" : "Copy draft"}
-                              </button>
-                            )}
-                          />
-                        </>
+                        <BulletImprovedEditor
+                          layout="card"
+                          value={editorDraft}
+                          onChange={v => patchBulletRewrite(safeIdx, v)}
+                          onReset={() => patchBulletRewrite(safeIdx, null)}
+                          canReset={rewriteEdits[safeIdx] !== undefined}
+                          eyebrow="Manual edit"
+                          helperText="Start from the original"
+                          resetLabel="Reset to original"
+                          accentColor="var(--amber)"
+                          minHeight={64}
+                          previewLineApplied={previewLineAppliedHere}
+                          onReplaceInPreview={() => patchPreviewLine(safeIdx, editorDraft.trim())}
+                          onRevertPreviewLine={() => patchPreviewLine(safeIdx, null)}
+                          onTextareaFocus={() => onBulletWorkspaceTextareaFocus(safeIdx)}
+                          onTextareaBlur={e => onBulletWorkspaceTextareaBlur(safeIdx, e)}
+                          toolbarRight={(
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                copyBullet(editorDraft, safeIdx);
+                              }}
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: 5,
+                                padding: "4px 11px", borderRadius: 7,
+                                border: `1px solid ${copiedBullet === safeIdx ? "rgba(251,191,36,0.55)" : "rgba(251,191,36,0.34)"}`,
+                                background: copiedBullet === safeIdx ? "rgba(251,191,36,0.16)" : "rgba(251,191,36,0.08)",
+                                color: "var(--amber)", fontSize: 11, fontWeight: 600,
+                                cursor: "pointer", fontFamily: "inherit",
+                                transition: "all 0.15s",
+                              }}
+                            >
+                              {copiedBullet === safeIdx ? "Copied!" : "Copy draft"}
+                            </button>
+                          )}
+                        />
                       )}
                         </div>
                       )}
@@ -2294,7 +2399,7 @@ export default function AnalyzeResume() {
                 border: "1px solid var(--border)", borderRadius: 14,
                 background: "var(--surface)",
               }}>
-                {(activeCategoryScore ?? 0) >= 70 ? (
+                {(activeCategoryScore ?? 0) >= SCORE_NEEDS_EXPLANATION ? (
                   <>
                     <div style={{ fontSize: 28, marginBottom: 10 }}>✅</div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
@@ -2306,13 +2411,13 @@ export default function AnalyzeResume() {
                   </>
                 ) : (
                   <>
-                    <div style={{ fontSize: 28, marginBottom: 10 }}>ℹ️</div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
-                      {activeCategoryLabel} scored {activeCategoryScore ?? "–"}/100 overall
+                      No flagged bullets in {activeCategoryLabel}
                     </div>
                     <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
-                      No sample bullets were flagged for this category. The score reflects holistic résumé quality —
-                      check categories with bullet badges (e.g. Achievement) or review Top Issues in the overview.
+                      {activeCategoryRationale || explainingCategory === activeCategory
+                        ? `The ${activeCategoryScore}/100 score is explained above.`
+                        : `Scored ${activeCategoryScore ?? "–"}/100 — generating an explanation above.`}
                     </div>
                   </>
                 )}
@@ -2655,55 +2760,41 @@ export default function AnalyzeResume() {
                                 )}
                               />
                             ) : (
-                              <>
-                                <p style={{
-                                  fontSize: 12,
-                                  color: "var(--muted)",
-                                  lineHeight: 1.55,
-                                  margin: 0,
-                                  padding: "8px 10px",
-                                  borderRadius: 8,
-                                  background: "var(--surface2)",
-                                  borderLeft: "3px solid var(--amber)",
-                                }}>
-                                  No trusted AI rewrite for this bullet — the model’s suggestion was too similar to your original. Use the draft below for a manual cleanup.
-                                </p>
-                                <BulletImprovedEditor
-                                  layout="plain"
-                                  value={draftAcc}
-                                  onChange={v => patchBulletRewrite(i, v)}
-                                  onReset={() => patchBulletRewrite(i, null)}
-                                  canReset={rewriteEdits[i] !== undefined}
-                                  eyebrow="Manual edit"
-                                  helperText="Start from the original"
-                                  resetLabel="Reset to original"
-                                  accentColor="var(--amber)"
-                                  previewLineApplied={previewLineAppliedAcc}
-                                  onReplaceInPreview={() => patchPreviewLine(i, draftAcc.trim())}
-                                  onRevertPreviewLine={() => patchPreviewLine(i, null)}
-                                  onTextareaFocus={() => onBulletWorkspaceTextareaFocus(i)}
-                                  onTextareaBlur={e => onBulletWorkspaceTextareaBlur(i, e)}
-                                  toolbarRight={(
-                                    <button
-                                      type="button"
-                                      onClick={e => {
-                                        e.stopPropagation();
-                                        copyBullet(draftAcc, i);
-                                      }}
-                                      style={{
-                                        display: "inline-flex", alignItems: "center", gap: 4,
-                                        padding: "3px 9px", borderRadius: 6,
-                                        border: `1px solid ${copiedBullet === i ? "rgba(251,191,36,0.55)" : "rgba(251,191,36,0.34)"}`,
-                                        background: copiedBullet === i ? "rgba(251,191,36,0.16)" : "rgba(251,191,36,0.08)",
-                                        color: "var(--amber)", fontSize: 10.5, fontWeight: 600,
-                                        cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
-                                      }}
-                                    >
-                                      {copiedBullet === i ? "✓ Copied" : "Copy draft"}
-                                    </button>
-                                  )}
-                                />
-                              </>
+                              <BulletImprovedEditor
+                                layout="plain"
+                                value={draftAcc}
+                                onChange={v => patchBulletRewrite(i, v)}
+                                onReset={() => patchBulletRewrite(i, null)}
+                                canReset={rewriteEdits[i] !== undefined}
+                                eyebrow="Manual edit"
+                                helperText="Start from the original"
+                                resetLabel="Reset to original"
+                                accentColor="var(--amber)"
+                                previewLineApplied={previewLineAppliedAcc}
+                                onReplaceInPreview={() => patchPreviewLine(i, draftAcc.trim())}
+                                onRevertPreviewLine={() => patchPreviewLine(i, null)}
+                                onTextareaFocus={() => onBulletWorkspaceTextareaFocus(i)}
+                                onTextareaBlur={e => onBulletWorkspaceTextareaBlur(i, e)}
+                                toolbarRight={(
+                                  <button
+                                    type="button"
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      copyBullet(draftAcc, i);
+                                    }}
+                                    style={{
+                                      display: "inline-flex", alignItems: "center", gap: 4,
+                                      padding: "3px 9px", borderRadius: 6,
+                                      border: `1px solid ${copiedBullet === i ? "rgba(251,191,36,0.55)" : "rgba(251,191,36,0.34)"}`,
+                                      background: copiedBullet === i ? "rgba(251,191,36,0.16)" : "rgba(251,191,36,0.08)",
+                                      color: "var(--amber)", fontSize: 10.5, fontWeight: 600,
+                                      cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+                                    }}
+                                  >
+                                    {copiedBullet === i ? "✓ Copied" : "Copy draft"}
+                                  </button>
+                                )}
+                              />
                             )}
                           </div>
                         )}

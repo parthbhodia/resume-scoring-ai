@@ -3069,27 +3069,51 @@ async def api_upload_resume(request: Request):
 
         structured, plain_text, parse_status, hints = await loop.run_in_executor(None, _pipeline_sync)
 
+        preview_text = (plain_text or "").strip()
+        structured_payload: Optional[dict] = None
+        if parse_status in ("ready", "ready_deterministic") and structured:
+            structured_payload = structured
+
+        pdf_bytes_for_vision = content if filename.lower().endswith(".pdf") else None
+        if pdf_bytes_for_vision:
+            vision_doc = await loop.run_in_executor(
+                None, _llm_extract, markdown_content, pdf_bytes_for_vision,
+            )
+            if vision_doc is not None:
+                synthesized = _synthesize_text_from_resume_doc(vision_doc)
+                if synthesized.strip():
+                    preview_text = synthesized.strip()
+                    logger.info(
+                        "upload_resume: vision-synthesized preview text (%d → %d chars)",
+                        len(plain_text or ""), len(preview_text),
+                    )
+                structured_payload = _resume_doc_to_dict(vision_doc)
+
         logger.info(
-            "Resume upload  |  %s  |  md_chars=%s  plain_chars=%s  parse_status=%s",
+            "Resume upload  |  %s  |  md_chars=%s  plain_chars=%s  preview_chars=%s  parse_status=%s",
             filename,
             len(markdown_content),
             len(plain_text or ""),
+            len(preview_text),
             parse_status,
         )
 
         payload: Dict[str, Any] = {
-            "text": plain_text,
+            "text": preview_text or plain_text,
             "markdown": markdown_content,
             "parse_status": parse_status,
+            "extractedText": preview_text[:25000],
+            "resumeHeader": _extract_resume_header(preview_text),
         }
-        if parse_status in ("ready", "ready_deterministic") and structured:
-            payload["structured"] = structured
+        if structured_payload:
+            payload["structured"] = structured_payload
+            payload["structuredResume"] = structured_payload
             log_extraction_debug(
                 "upload_pipeline_final_structured",
                 {
-                    "education_rows": len(structured.get("education") or []),
-                    "experience_rows": len(structured.get("experience") or []),
-                    "structured": structured,
+                    "education_rows": len(structured_payload.get("education") or []),
+                    "experience_rows": len(structured_payload.get("experience") or []),
+                    "structured": structured_payload,
                 },
             )
         if hints:
@@ -5029,6 +5053,12 @@ Infer the field from the résumé text and score against that field's expectatio
 - If no JD is provided: set jobMatch in categoryScores to null, set \
   keywordScore to null, leave matchedKeywords/missingKeywords empty.
 - Prioritize improvements that increase interview chances most.
+- categoryRationales: for EVERY categoryScores key where the score is below 95, write 1-2 \
+  sentences explaining WHY you assigned that score for THIS résumé — cite specific evidence \
+  (counts, sections, patterns). Required even when bulletAnalysis has no entries for that \
+  category; holistic scores must be justified. For scores 95-100 you may use a brief \
+  one-sentence positive note or omit. Do not repeat generic rubric text — explain what you \
+  actually saw.
 {jd_section}
 
 STRUCTURAL SIGNALS (deterministic pre-scan — verify against RESUME TEXT; do not invent problems):
@@ -5049,6 +5079,16 @@ Return ONLY this JSON (no markdown fences, no explanation):
     "sectionStructure": <0-100>,
     "languageQuality": <0-100>,
     "technicalBranding": <0-100>
+  }},
+  "categoryRationales": {{
+    "readability": "<why this score for this résumé>",
+    "atsCompatibility": "<why>",
+    "jobMatch": "<why, or null when no JD>",
+    "achievementQuality": "<why>",
+    "quantification": "<why>",
+    "sectionStructure": "<why>",
+    "languageQuality": "<why>",
+    "technicalBranding": "<why>"
   }},
   "summary": "<2-3 sentence specific overall assessment>",
   "topStrengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
@@ -5530,6 +5570,17 @@ _CATEGORY_SCORE_KEYS = (
     "readability", "atsCompatibility", "jobMatch", "achievementQuality",
     "quantification", "sectionStructure", "languageQuality", "technicalBranding",
 )
+
+_CATEGORY_DISPLAY_NAMES = {
+    "readability": "Readability",
+    "atsCompatibility": "ATS Safety",
+    "jobMatch": "Job Match",
+    "achievementQuality": "Achievement",
+    "quantification": "Quantification",
+    "sectionStructure": "Structure",
+    "languageQuality": "Language",
+    "technicalBranding": "Field & depth",
+}
 
 # Light text → category map. Backend-only backfill for when the LLM omits
 # primaryCategory (or emits an invalid one). This is intentionally small and is
@@ -6013,6 +6064,14 @@ def _normalize_analysis(raw: dict) -> dict:
     raw.setdefault("sectionFeedback", [])
     raw.setdefault("rewriteSuggestions", [])
     raw.setdefault("finalRecommendations", [])
+    cr_raw = raw.get("categoryRationales") or raw.get("category_rationales")
+    normalized_cr: Dict[str, str] = {}
+    if isinstance(cr_raw, dict):
+        for k in _CATEGORY_SCORE_KEYS:
+            v = cr_raw.get(k)
+            if isinstance(v, str) and v.strip():
+                normalized_cr[k] = v.strip()[:600]
+    raw["categoryRationales"] = normalized_cr
     raw["categoryScores"] = cs
     bullets = raw.get("bulletAnalysis") or []
     if isinstance(bullets, list):
@@ -7197,6 +7256,72 @@ async def api_suggest_changes(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+async def api_explain_category_score(request: Request):
+    """POST /api/explain-category-score — short AI rationale for a category score.
+
+    Used when a category scored below "excellent" but no bullets were flagged
+    in that bucket — explains the holistic score with résumé-specific evidence.
+
+    Body: {
+        "category": str,           # categoryScores key
+        "category_score": int,
+        "resume_text": str,
+        "jd": str (optional),
+    }
+    Returns: { "rationale": str }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+    category = (body.get("category") or "").strip()
+    resume_text = (body.get("resume_text") or "").strip()
+    jd = (body.get("jd") or "").strip()
+    try:
+        category_score = int(body.get("category_score"))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "category_score required"}, status_code=400)
+
+    if category not in _CATEGORY_SCORE_KEYS:
+        return JSONResponse({"error": "invalid category"}, status_code=400)
+    if not resume_text:
+        return JSONResponse({"error": "resume_text required"}, status_code=400)
+
+    label = _CATEGORY_DISPLAY_NAMES.get(category, category)
+    jd_section = (
+        f"\nJOB DESCRIPTION:\n{jd[:2000]}"
+        if jd.strip()
+        else "\n(No job description was provided.)"
+    )
+    prompt = (
+        f"You are an expert resume coach. A résumé received {category_score}/100 on "
+        f'"{label}" ({category}) but no individual bullets were flagged in that category.\n\n'
+        "Explain in 2-4 sentences WHY this holistic score makes sense for THIS résumé — "
+        "cite specific evidence (counts, sections, missing patterns). Be honest and concrete. "
+        "Do not invent employers, metrics, or sections that are not in the text.\n\n"
+        f'Return ONLY JSON: {{"rationale": "<explanation>"}}\n\n'
+        f"RESUME:\n{resume_text[:6000]}{jd_section}"
+    )
+
+    loop = asyncio.get_event_loop()
+
+    def _call():
+        return _llm_json_call(prompt)
+
+    try:
+        data = await loop.run_in_executor(None, _call)
+        rationale = ""
+        if isinstance(data, dict):
+            rationale = str(data.get("rationale") or "").strip()
+        if not rationale:
+            return JSONResponse({"error": "Could not generate an explanation."}, status_code=500)
+        return JSONResponse({"rationale": rationale[:600]})
+    except Exception as exc:
+        logger.exception("explain-category-score failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 async def api_suggest_gap_fix(request: Request):
     """POST /api/suggest-gap-fix — return 2-3 targeted bullet rewrites for a single gap criterion.
 
@@ -8374,6 +8499,7 @@ routes = [
     Route("/api/suggest-changes",         api_suggest_changes, methods=["POST"]),
     Route("/api/suggest-changes-stream",  api_suggest_changes_stream, methods=["POST"]),
     Route("/api/suggest-gap-fix",         api_suggest_gap_fix, methods=["POST"]),
+    Route("/api/explain-category-score",  api_explain_category_score, methods=["POST"]),
     Route("/api/export-pdf-html",         api_export_pdf_html,     methods=["POST"]),
     Route("/pdf/{folder}/{filename}",      serve_pdf),
 ]
