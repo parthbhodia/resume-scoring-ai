@@ -4,7 +4,17 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from resume_gui.renderers.latex_renderer import ResumeDocModel
+from resume_gui.doc_utils import _clean_model_text
+from resume_gui.extract.education_parse import _education_item_from_dict
+from resume_gui.extract.structured_doc import _project_items_from_llm_projects
+from resume_gui.llm.client import _llm_json_call
+from resume_gui.renderers.latex_renderer import (
+    EducationItem,
+    ExperienceItem,
+    ResumeDocModel,
+    normalize_skill_items,
+)
+from resume_gui.suggestions import _resume_doc_with_updates
 
 logger = logging.getLogger("resume_gui")
 

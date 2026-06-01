@@ -23,7 +23,7 @@ from resume_gui.analysis.comprehensive import (
     _analyze_resume_comprehensive,
 )
 from resume_gui.analysis.constants import _CATEGORY_SCORE_KEYS
-from resume_gui.analysis.normalize import _normalize_analysis
+from resume_gui.analysis.rewrite_validators import _validate_rewrite_against_original
 from resume_gui.auth.supabase import (
     _advisor_scope_for_request,
     _authenticated_supabase_user,
@@ -53,7 +53,7 @@ from resume_gui.extract.pipeline import (
     _structured_doc_for_generate,
 )
 from resume_gui.extract.profile import _resume_doc_from_profile_text
-from resume_gui.extract.structured_doc import _resume_doc_to_dict
+from resume_gui.extract.structured_doc import _resume_doc_from_parsed, _resume_doc_to_dict
 from resume_gui.extract.synthesize import _synthesize_text_from_resume_doc
 from resume_gui.extract.text_utils import _stitch_wrapped_bullets
 from resume_gui.llm.client import _analysis_model, _llm_json_call

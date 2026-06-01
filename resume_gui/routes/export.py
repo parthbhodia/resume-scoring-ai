@@ -53,7 +53,7 @@ from resume_gui.extract.pipeline import (
     _structured_doc_for_generate,
 )
 from resume_gui.extract.profile import _resume_doc_from_profile_text
-from resume_gui.extract.structured_doc import _resume_doc_to_dict
+from resume_gui.extract.structured_doc import _resume_doc_from_parsed, _resume_doc_to_dict
 from resume_gui.extract.synthesize import _synthesize_text_from_resume_doc
 from resume_gui.extract.text_utils import _stitch_wrapped_bullets
 from resume_gui.llm.client import _analysis_model, _llm_json_call

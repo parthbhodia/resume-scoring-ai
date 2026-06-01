@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 
+from resume_gui.auth.supabase import _supabase_table
+
 logger = logging.getLogger("resume_gui")
 
 def _persist_analysis(result: dict, user_id: str, user_email: str, has_jd: bool) -> None:
