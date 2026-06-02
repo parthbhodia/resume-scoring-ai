@@ -2,9 +2,16 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { getSupabaseClient } from "@/lib/supabase";
-import { CONTACT_EMAIL, SITE_URL } from "@/lib/brand";
+import { SITE_URL } from "@/lib/brand";
 import { LogoFull, LogoMark } from "./BrandLogo";
 import { Button } from "@/components/ui/button";
+import {
+  LandingPreviewStyles,
+  VariantA,
+  VariantB,
+  VariantD,
+  VariantE,
+} from "@/components/LandingFeatureShowcase";
 
 // ── Design tokens ──────────────────────────────────────────────────────────
 // Cool slate palette — professional SaaS, not warm editorial
@@ -61,19 +68,42 @@ function useLandingTheme(): [Theme, () => void] {
 }
 
 // ── Data ────────────────────────────────────────────────────────────────────
+/** Toggle "Three steps…" / How it works block on the landing page. */
+const SHOW_HOW_SECTION = false;
+/** Text card grids (features, platform, research pillars) — previews carry the story. */
+const SHOW_LANDING_CARDS = false;
+
 const FEATURES = [
-  { num: "01", title: "Match Score",           desc: "0–100 breakdown across eight dimensions — readability, ATS safety, achievement quality, keyword fit, and more — tuned for any major or career path." },
-  { num: "02", title: "Keyword Intelligence",  desc: "Extract every keyword the JD demands. See which ones you're missing and get precise suggestions on where to add them without fabricating experience." },
-  { num: "03", title: "AI Bullet Rewrites",    desc: "Turn vague duty-lists into achievement narratives with metrics. Your voice, amplified. Every rewrite is verified against your original — no invented facts." },
-  { num: "04", title: "ATS Compatibility",     desc: "Detect tables, columns, and formatting that breaks applicant tracking systems before they reject you silently — with a clear pass/fail checklist." },
-  { num: "05", title: "Language Quality",      desc: "Passive voice, weak verbs, pronouns, tense drift — flagged and fixed. Precise, confident, recruiter-ready language in every line." },
-  { num: "06", title: "Instant PDF Export",    desc: "Every tailored version exported as a clean, ATS-safe PDF via Chromium. What you see in the preview is exactly what the recruiter receives." },
-  { num: "07", title: "Section Structure",     desc: "Smart section detection flags missing segments — contact, summary, education, projects — and ensures recruiters find what they expect, where they expect it." },
-  { num: "08", title: "Achievement Quality",   desc: "Identifies bullets that describe duties instead of results. See exactly which lines need the achievement treatment — and get a rewrite that shows impact." },
-  { num: "09", title: "Career Trajectory",     desc: "Timeline analysis catches gaps, overlaps, and tenure signals so your experience reads the way recruiters interpret progression, not just chronology." },
-  { num: "10", title: "Resume Library",        desc: "Store and version multiple tailored résumés. Pick up any saved run, open the full improvement plan, or re-export as a WYSIWYG PDF at any time." },
-  { num: "11", title: "Template Builder",      desc: "Design a clean, ATS-safe résumé from scratch with a live preview. Choose fonts, accent colors, fill in your details — download as a formatted PDF instantly." },
-  { num: "12", title: "JD Gap Fixer",          desc: "After analyzing against a job description, Resunova surfaces the exact keyword and content gaps — and lets you apply fixes directly to your live résumé preview." },
+  {
+    num: "01",
+    title: "Achievement",
+    desc: "Flags duty-list bullets and surfaces rewrites that show outcomes, ownership, and impact — not just what you were assigned.",
+  },
+  {
+    num: "02",
+    title: "Quantification",
+    desc: "Spots missing metrics and nudges you to add numbers where they strengthen credibility — without inventing data.",
+  },
+  {
+    num: "03",
+    title: "Job Match",
+    desc: "Scores keyword and requirement fit against the posting so you know what’s covered, what’s missing, and what to add.",
+  },
+  {
+    num: "04",
+    title: "ATS Safety",
+    desc: "Checks parsing risk — tables, columns, odd headings — before an ATS silently drops your application.",
+  },
+  {
+    num: "05",
+    title: "Readability",
+    desc: "Rates skim-ability: bullet length, density, and layout so a recruiter grasps your story in a six-second pass.",
+  },
+  {
+    num: "06",
+    title: "Language",
+    desc: "Catches weak verbs, passive voice, and tense drift — with proofreading-level fixes where the meaning stays yours.",
+  },
 ];
 
 const STEPS = [
@@ -205,7 +235,13 @@ export default function LandingPage() {
 
         {/* Nav */}
         <nav className="lp-nav" style={{ display: "flex", alignItems: "center", gap: 28 }}>
-          {[["Features","features"],["Platform","platform"],["Approach","approach"],["How it works","how"],["Reviews","reviews"]].map(([lbl,id]) => (
+          {[
+            ...(SHOW_LANDING_CARDS ? [["Features", "features"]] as const : []),
+            ...(SHOW_LANDING_CARDS ? [["Platform", "platform"]] as const : []),
+            ["Approach", "approach"],
+            ...(SHOW_HOW_SECTION ? [["How it works", "how"]] as const : []),
+            ["Reviews", "reviews"],
+          ].map(([lbl, id]) => (
             <button
               key={id}
               type="button"
@@ -290,9 +326,11 @@ export default function LandingPage() {
             >
               <GoogleG /> Get started — it&apos;s free
             </Button>
-            <Button variant="outline" onClick={() => scrollTo("how")}
-              className="px-6 py-3 text-[15px] rounded-[10px] border-border text-[color:var(--muted)] hover:border-accent hover:text-accent bg-transparent"
-            >See how it works</Button>
+            {SHOW_HOW_SECTION && (
+              <Button variant="outline" onClick={() => scrollTo("how")}
+                className="px-6 py-3 text-[15px] rounded-[10px] border-border text-[color:var(--muted)] hover:border-accent hover:text-accent bg-transparent"
+              >See how it works</Button>
+            )}
           </div>
 
           {error && <p style={{ fontSize: "var(--font-size-base)", color: "#f85149", marginBottom: 16 }}>{error}</p>}
@@ -316,9 +354,28 @@ export default function LandingPage() {
           </div>
         </div>
 
-        {/* Right: animated demo card */}
-        <DemoCard dark={dark} C={C} />
+        {/* Right: animated score preview */}
+        <div
+          className="lp-hero-preview"
+          style={{
+            transform: "rotate(1.5deg)",
+            animation: "cardSlide 0.8s cubic-bezier(0.34,1.36,0.64,1) 0.3s both",
+            transformOrigin: "center top",
+            position: "relative",
+          }}
+        >
+          <div style={{
+            position: "absolute", top: -12, right: 20, zIndex: 2,
+            background: T.blue, color: "#fff",
+            fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
+            padding: "4px 10px", borderRadius: 20, textTransform: "uppercase",
+            boxShadow: `0 2px 8px ${T.blueGlow}`,
+          }}>Live Preview</div>
+          <VariantA embedded />
+        </div>
       </section>
+
+      <LandingPreviewStyles />
 
       {/* ───────────── Stats ticker ─────────────────────────── */}
       <div style={{ borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, background: C.bg2, overflow: "hidden", padding: "18px 0" }}>
@@ -329,7 +386,6 @@ export default function LandingPage() {
             ["60s",     "Typical tailoring time"],
             ["4.7 ★",   "Early user rating"],
             ["ATS",     "Best-practices checklist"],
-            ["India",   "Students & early community"],
             ["Callbacks", "Recruiter & phone screens"],
             ["FERPA",   "FERPA-informed student privacy"],
           ]).map(([stat, lbl], i) => (
@@ -342,7 +398,21 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* ───────────── Features ─────────────────────────────── */}
+      {/* ───────────── AI rewrite preview (B) ─────────────── */}
+      <LandingPreviewSection
+        id="product-rewrite"
+        eyebrow="Bullet rewrites"
+        title="Vague lines become interview-ready achievements."
+        desc="Resunova flags duty-list bullets and suggests rewrites with stronger verbs and real metrics — using only facts already on your résumé."
+        dark
+        C={C}
+        wide
+        animationOnly={!SHOW_LANDING_CARDS}
+      >
+        <VariantB embedded />
+      </LandingPreviewSection>
+
+      {SHOW_LANDING_CARDS && (
       <section id="features" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto", scrollMarginTop: 76 }}>
         <div style={{ marginBottom: 64 }}>
           <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
@@ -351,6 +421,9 @@ export default function LandingPage() {
           <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0, maxWidth: 540 }}>
             Every dimension of<br />a recruiter&apos;s decision.
           </h2>
+          <p style={{ fontSize: "var(--font-size-lg)", color: C.muted, lineHeight: 1.65, maxWidth: 520, margin: "16px 0 0" }}>
+            Six scores from the Analyze flow — the ones that matter most in a first-pass screen.
+          </p>
         </div>
 
         {/* Grid */}
@@ -358,8 +431,21 @@ export default function LandingPage() {
           {FEATURES.map((f, i) => <FeatureCell key={i} f={f} dark={dark} C={C} />)}
         </div>
       </section>
+      )}
 
-      {/* ───────────── Platform highlights ──────────────────── */}
+      <LandingPreviewSection
+        id="product-scan"
+        eyebrow="Line-by-line analysis"
+        title="See what a recruiter would flag — before you apply."
+        desc="Upload a PDF and get flagged weaknesses, strong bullets, and a first fix you can accept in one click."
+        C={C}
+        wide
+        animationOnly={!SHOW_LANDING_CARDS}
+      >
+        <VariantE embedded />
+      </LandingPreviewSection>
+
+      {SHOW_LANDING_CARDS && (
       <section id="platform" style={{ background: C.bg2, borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, scrollMarginTop: 76 }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "100px 40px" }}>
           <div style={{ textAlign: "center", marginBottom: 56 }}>
@@ -380,10 +466,24 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+      )}
+
+      <LandingPreviewSection
+        id="product-tour"
+        eyebrow="Tailor to the role"
+        title="Match the job, close keyword gaps, export."
+        desc="Paste a posting, score your fit, apply fixes across bullets and keywords, then download a PDF that matches the preview."
+        C={C}
+        bg={C.surface}
+        wide
+        animationOnly={!SHOW_LANDING_CARDS}
+      >
+        <VariantD embedded />
+      </LandingPreviewSection>
 
       {/* ───────────── Research & data approach ─────────────── */}
       <section id="approach" style={{ padding: "100px 40px", maxWidth: 1200, margin: "0 auto", scrollMarginTop: 76 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 56, alignItems: "start" }} className="lp-approach-grid">
+        <div style={{ display: "grid", gridTemplateColumns: SHOW_LANDING_CARDS ? "1fr 1fr" : "1fr", gap: 56, alignItems: "start", maxWidth: SHOW_LANDING_CARDS ? undefined : 640 }} className="lp-approach-grid">
           <div>
             <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>
               How we build
@@ -401,15 +501,18 @@ export default function LandingPage() {
               {" "}allows: operating the service, analytics, and internal model improvement for the community.
             </p>
           </div>
+          {SHOW_LANDING_CARDS && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {RESEARCH_PILLARS.map((p, i) => (
               <PlatformHighlightCard key={i} h={p} dark={dark} C={C} compact />
             ))}
           </div>
+          )}
         </div>
       </section>
 
-      {/* ───────────── How it works ─────────────────────────── */}
+      {/* How it works — hidden via SHOW_HOW_SECTION */}
+      {SHOW_HOW_SECTION && (
       <section id="how" style={{ borderBottom: `1px solid ${C.border}`, scrollMarginTop: 76 }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "100px 40px" }}>
           <div style={{ textAlign: "center", marginBottom: 72 }}>
@@ -432,6 +535,7 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+      )}
 
       {/* ───────────── Company logos ────────────────────────── */}
       <section id="reviews" style={{ borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, background: C.bg2, padding: "72px 40px", scrollMarginTop: 76 }}>
@@ -492,58 +596,71 @@ export default function LandingPage() {
 
       {/* ───────────── Footer ───────────────────────────────── */}
       <footer className="lp-footer" style={{
-        padding: "32px 40px 36px",
         borderTop: `1px solid ${C.border}`,
-        background: C.bg,
-        display: "grid",
-        gridTemplateColumns: "1fr auto",
-        gap: 24,
-        alignItems: "start",
+        background: C.bg2,
       }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <LogoMark size={22} />
-            <span style={{ fontSize: "var(--font-size-lg)", fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>Resunova</span>
+        <div className="lp-footer-inner" style={{ maxWidth: 1200, margin: "0 auto", padding: "48px 40px 28px" }}>
+          <div className="lp-footer-top" style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 40,
+            flexWrap: "wrap",
+            marginBottom: 32,
+          }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, maxWidth: 320 }}>
+              <Link href="/" prefetch={false} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit", width: "fit-content" }}>
+                <LogoMark size={24} />
+                <span style={{ fontSize: "var(--font-size-lg)", fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>Resunova</span>
+              </Link>
+              <p style={{ fontSize: "var(--font-size-sm)", color: C.muted, margin: 0, lineHeight: 1.55 }}>
+                Résumé scoring and tailoring — free for students and job seekers.
+              </p>
+            </div>
+
+            <nav className="lp-footer-nav" aria-label="Footer">
+              {[
+                ["Blog", "/blog"],
+                ["Contact", "/contact"],
+                ["Privacy", "/privacy"],
+                ["Terms", "/terms"],
+              ].map(([label, href]) => (
+                <Link
+                  key={href}
+                  href={href}
+                  prefetch={false}
+                  className="lp-footer-link"
+                  style={{ fontSize: "var(--font-size-sm)", color: C.muted, textDecoration: "none", fontWeight: 500, transition: "color 0.15s" }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.ink; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.muted; }}
+                >
+                  {label}
+                </Link>
+              ))}
+            </nav>
           </div>
-          <p style={{ fontSize: "var(--font-size-base)", color: C.muted, margin: 0, lineHeight: 1.65, maxWidth: 440 }}>
-            Offered <strong style={{ color: C.ink, fontWeight: 600 }}>completely free</strong> for students and the wider community — because strong tools should help everyone, not only those who can pay.
-            {" "}
-            We <strong style={{ color: C.ink, fontWeight: 600 }}>never sell your data</strong>
-            {" "}and apply <strong style={{ color: C.ink, fontWeight: 600 }}>FERPA-informed practices</strong> for student users — we keep information only to run the product, understand usage through analytics, and improve quality (
-            <Link href="/privacy" prefetch={false} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>Privacy Policy</Link>
-            ).
-            {" "}
-            Questions or feedback? Reach us at{" "}
-            <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>{CONTACT_EMAIL}</a>
-            {" "}— we typically reply within two business days.
-          </p>
-          <span style={{ fontSize: "var(--font-size-sm)", color: C.muted }}>© 2026 Resunova. All rights reserved.</span>
-        </div>
-        <nav className="lp-footer-nav" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }} aria-label="Legal">
-          {[
-            ["Blog", "/blog"],
-            ["Contact", "/contact"],
-            ["Privacy Policy", "/privacy"],
-            ["Terms of Service", "/terms"],
-          ].map(([label, href]) => (
-            <Link
-              key={href}
-              href={href}
-              prefetch={false}
-              style={{ fontSize: "var(--font-size-base)", color: C.muted, textDecoration: "none", fontWeight: 500, transition: "color 0.15s" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.ink; }}
+
+          <div className="lp-footer-bottom" style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 16,
+            flexWrap: "wrap",
+            paddingTop: 24,
+            borderTop: `1px solid ${C.border}`,
+          }}>
+            <span style={{ fontSize: "var(--font-size-xs)", color: C.muted }}>© 2026 Resunova. All rights reserved.</span>
+            <a
+              href={SITE_URL}
+              className="lp-footer-link"
+              style={{ fontSize: "var(--font-size-xs)", color: C.muted, textDecoration: "none", fontWeight: 500, transition: "color 0.15s" }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.blue; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.muted; }}
             >
-              {label}
-            </Link>
-          ))}
-          <a
-            href={SITE_URL}
-            style={{ fontSize: "var(--font-size-sm)", color: C.muted, textDecoration: "none", marginTop: 4 }}
-          >
-            {SITE_URL.replace(/^https:\/\//, "")}
-          </a>
-        </nav>
+              {SITE_URL.replace(/^https:\/\//, "")}
+            </a>
+          </div>
+        </div>
       </footer>
 
       {/* ── Global keyframes ────────────────────────────────── */}
@@ -555,7 +672,7 @@ export default function LandingPage() {
         @keyframes cardSlide { from { opacity: 0; transform: translateY(32px) rotate(1.5deg); } to { opacity: 1; transform: rotate(1.5deg); } }
         @media (max-width: 860px) {
           .lp-hero-grid { grid-template-columns: 1fr !important; }
-          .lp-demo-card { display: none !important; }
+          .lp-hero-preview { transform: none !important; max-width: 420px; margin: 0 auto; }
           .lp-feat-grid { grid-template-columns: 1fr 1fr !important; }
           .lp-step-grid { grid-template-columns: 1fr !important; }
           .lp-rev-grid  { grid-template-columns: 1fr !important; }
@@ -564,12 +681,22 @@ export default function LandingPage() {
           .lp-hero-h1   { font-size: 48px !important; }
         }
         @media (max-width: 640px) {
-          .lp-footer { grid-template-columns: 1fr !important; }
-          .lp-footer-nav { align-items: flex-start !important; }
+          .lp-footer-top { flex-direction: column !important; gap: 24px !important; }
+          .lp-footer-nav { width: 100%; }
+          .lp-footer-bottom { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
         }
         @media (max-width: 540px) {
           .lp-feat-grid { grid-template-columns: 1fr !important; }
           .lp-hero-h1   { font-size: 38px !important; }
+        }
+        .lp-preview-e-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          align-items: start;
+        }
+        @media (max-width: 720px) {
+          .lp-preview-e-grid { grid-template-columns: 1fr; }
         }
       `}</style>
       </div>
@@ -577,101 +704,70 @@ export default function LandingPage() {
   );
 }
 
-// ── Demo Card ───────────────────────────────────────────────────────────────
-function DemoCard({ dark, C }: { dark: boolean; C: Record<string,string> }) {
-  const [filled, setFilled] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setFilled(true), 700);
-    return () => clearTimeout(t);
-  }, []);
-
-  const BARS = [
-    { label: "Job Match",           val: 78, col: T.blue },
-    { label: "Keywords",            val: 91, col: T.green },
-    { label: "Achievement Quality", val: 64, col: T.amber },
-    { label: "ATS Compatibility",   val: 96, col: T.teal },
-  ];
-
-  const r = 30, circ = 2 * Math.PI * r;
-
+// ── Product preview section wrapper ─────────────────────────────────────────
+function LandingPreviewSection({
+  id,
+  eyebrow,
+  title,
+  desc,
+  dark = false,
+  wide = false,
+  bg,
+  animationOnly = false,
+  C,
+  children,
+}: {
+  id?: string;
+  eyebrow: string;
+  title: string;
+  desc?: string;
+  dark?: boolean;
+  wide?: boolean;
+  bg?: string;
+  animationOnly?: boolean;
+  C: Record<string, string>;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="lp-demo-card" style={{
-      background:    C.surface,
-      border:        `1px solid ${C.border}`,
-      borderRadius:  20,
-      padding:       28,
-      boxShadow:     dark ? "0 32px 80px rgba(0,0,0,0.60)" : "0 32px 80px rgba(13,17,23,0.12)",
-      transform:     "rotate(1.5deg)",
-      animation:     "cardSlide 0.8s cubic-bezier(0.34,1.36,0.64,1) 0.3s both",
-      transformOrigin: "center top",
-      position:      "relative",
-    }}>
-      {/* Header row */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: C.muted, textTransform: "uppercase", marginBottom: 4 }}>Overall Match</div>
-          {/* Score number — DM Sans bold, blue */}
-          <div style={{ fontSize: "var(--font-size-4xl)", fontWeight: 800, lineHeight: 1, letterSpacing: -2, color: T.blue }}>
-            78<span style={{ fontSize: "var(--font-size-2xl)", color: C.muted, fontWeight: 400, letterSpacing: 0 }}>/100</span>
-          </div>
-        </div>
-        {/* Mini ring */}
-        <svg width={76} height={76} viewBox="0 0 76 76" style={{ flexShrink: 0 }}>
-          <circle cx={38} cy={38} r={r} fill="none" stroke={dark ? T.dBg : T.bg2} strokeWidth={6.5} />
-          <circle cx={38} cy={38} r={r} fill="none"
-            stroke={T.blue} strokeWidth={6.5} strokeLinecap="round"
-            strokeDasharray={circ}
-            strokeDashoffset={filled ? circ * (1 - 0.78) : circ}
-            transform="rotate(-90 38 38)"
-            style={{ transition: "stroke-dashoffset 1.2s cubic-bezier(0.4,0,0.2,1) 0.5s" }}
-          />
-          <text x={38} y={43} textAnchor="middle" fill={C.muted} fontSize={11} fontFamily="DM Sans, sans-serif" fontWeight="600">STRONG</text>
-        </svg>
+    <section
+      id={id}
+      style={{
+        padding: animationOnly ? "80px 40px" : "100px 40px",
+        background: bg ?? (dark ? "#0f172a" : C.bg2),
+        borderTop: dark ? undefined : `1px solid ${C.border}`,
+        scrollMarginTop: 76,
+      }}
+    >
+      <div style={{ maxWidth: wide ? 960 : 800, margin: "0 auto", textAlign: animationOnly ? "center" : undefined }}>
+        <p style={{
+          fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.15em",
+          color: T.blue, textTransform: "uppercase", margin: "0 0 12px",
+        }}>{eyebrow}</p>
+        <h2 className="lp-h2" style={{
+          fontSize: animationOnly ? "clamp(24px, 3vw, 36px)" : "clamp(28px, 3.5vw, 44px)",
+          fontWeight: 800, lineHeight: 1.12,
+          letterSpacing: "-0.03em", color: dark ? "#f8fafc" : C.ink,
+          margin: "0 0 10px",
+          maxWidth: animationOnly ? 640 : undefined,
+          marginLeft: animationOnly ? "auto" : undefined,
+          marginRight: animationOnly ? "auto" : undefined,
+        }}>{title}</h2>
+        {desc ? (
+          <p style={{
+            fontSize: animationOnly ? "var(--font-size-base)" : "var(--font-size-lg)",
+            color: dark ? "#94a3b8" : C.muted,
+            lineHeight: 1.6,
+            margin: animationOnly ? "0 auto 32px" : "0 0 40px",
+            maxWidth: animationOnly ? 520 : 560,
+          }}>{desc}</p>
+        ) : null}
+        {children}
       </div>
-
-      {/* Category bars */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 11, marginBottom: 20 }}>
-        {BARS.map((b, i) => (
-          <div key={i}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-              <span style={{ fontSize: "var(--font-size-sm)", color: C.muted }}>{b.label}</span>
-              <span style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: b.col }}>{b.val}%</span>
-            </div>
-            <div style={{ height: 5, borderRadius: 3, background: dark ? T.dBg : T.bg2, overflow: "hidden" }}>
-              <div style={{
-                height: "100%", borderRadius: 3, background: b.col,
-                width: filled ? `${b.val}%` : "0%",
-                transition: `width 0.95s cubic-bezier(0.4,0,0.2,1) ${0.6 + i * 0.1}s`,
-              }} />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Divider */}
-      <div style={{ height: 1, background: C.border, margin: "18px 0" }} />
-
-      {/* Bullet rewrite */}
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: C.muted, textTransform: "uppercase", marginBottom: 10 }}>AI Rewrite</div>
-      <div style={{ padding: "10px 12px", borderRadius: 8, background: dark ? "rgba(248,81,73,0.09)" : "rgba(207,34,46,0.07)", borderLeft: "3px solid #f85149", fontSize: "var(--font-size-sm)", color: C.muted, lineHeight: 1.6, marginBottom: 8, textDecoration: "line-through", opacity: 0.65 }}>
-        &ldquo;Worked on backend API features&rdquo;
-      </div>
-      <div style={{ padding: "10px 12px", borderRadius: 8, background: dark ? "rgba(63,185,80,0.08)" : "rgba(26,127,55,0.08)", borderLeft: `3px solid ${T.green}`, fontSize: "var(--font-size-sm)", color: C.ink, lineHeight: 1.6 }}>
-        &ldquo;Architected REST API serving 2M+ daily requests, cutting P95 latency 40%&rdquo;
-      </div>
-
-      {/* Badge */}
-      <div style={{
-        position: "absolute", top: -12, right: 20,
-        background: T.blue, color: "#fff",
-        fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
-        padding: "4px 10px", borderRadius: 20, textTransform: "uppercase",
-        boxShadow: `0 2px 8px ${T.blueGlow}`,
-      }}>Live Preview</div>
-    </div>
+    </section>
   );
 }
 
+// ── Feature cell ────────────────────────────────────────────────────────────
 type HighlightCardContent = {
   title: string;
   desc: string;

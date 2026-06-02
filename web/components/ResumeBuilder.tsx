@@ -77,6 +77,10 @@ import SourcesPanel from "./SourcesPanel";
 import AtsPanel, { normalizeAtsResult, type AtsResult } from "./AtsPanel";
 
 import ResumePublicLinkSettings from "./ResumePublicLinkSettings";
+import {
+  LandingPreviewStyles,
+  VariantC,
+} from "@/components/LandingFeatureShowcase";
 import { useAppShellSidebar } from "@/contexts/AppShellSidebarContext";
 
 const TailoredPdfPreview = dynamic(
@@ -2333,6 +2337,22 @@ export default function ResumeBuilder({
                       </div>
                     ))}
                   </div>
+                  {!studioHandoff && (
+                    <div className="rb-tailor-keyword-preview" style={{ marginTop: 36 }}>
+                      <LandingPreviewStyles />
+                      <div style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: "0.12em",
+                        textTransform: "uppercase",
+                        color: "var(--dim)",
+                        marginBottom: 12,
+                      }}>
+                        Keyword gap preview
+                      </div>
+                      <VariantC embedded />
+                    </div>
+                  )}
                 </div>
               )}
             </>

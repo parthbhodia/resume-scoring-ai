@@ -1,2 +1,3 @@
-import LandingPage from "@/components/LandingPage";
-export default function LandingPreview() { return <LandingPage />; }
+"use client";
+import { LandingFeatureShowcase } from "@/components/LandingFeatureShowcase";
+export default function LandingPreview() { return <LandingFeatureShowcase />; }

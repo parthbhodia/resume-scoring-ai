@@ -2,6 +2,11 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+@source "../components/**/*.{ts,tsx}";
+@source "../app/**/*.{ts,tsx}";
+@source "../hooks/**/*.{ts,tsx}";
+@source "../lib/**/*.{ts,tsx}";
+
 @custom-variant dark (&:is(.dark *));
 
 /* ── Tailwind v4: expose CSS variables as utility classes ─────── */
@@ -213,7 +218,26 @@
   --color-rb-text:  var(--text);
 }
 
-*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; }
+
+@layer base {
+  * {
+    margin: 0;
+  }
+}
+
+/* shadcn slots — padding fallback when height/px utilities are absent */
+@layer components {
+  [data-slot="button"]:not([class*="px-"]):not([class*="size-"]) {
+    padding-inline: 0.875rem;
+    padding-block: 0.4375rem;
+  }
+
+  [data-slot="badge"]:not([class*="px-"]) {
+    padding-inline: 0.625rem;
+    padding-block: 0.25rem;
+  }
+}
 
 html, body {
   height: 100%;
@@ -326,7 +350,14 @@ select option { background: var(--surface); }
   .rb-page       { padding: 18px 12px 50px !important; }
 }
 
-/* Landing page mobile — hide in-page section links only; keep theme + Sign in */
+/* Landing page footer */
+.lp-footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 28px;
+}
+
 @media (max-width: 768px) {
   .lp-header   { padding: 0 16px !important; }
   .lp-nav      { gap: 14px !important; }
@@ -337,7 +368,10 @@ select option { background: var(--surface); }
   .lp-grid-2,
   .lp-grid-3,
   .lp-grid-4   { grid-template-columns: 1fr !important; }
-  .lp-footer   { flex-direction: column !important; gap: 10px; padding: 24px 16px !important; text-align: center; }
+  .lp-footer-inner { padding: 40px 16px 24px !important; }
+  .lp-footer-top   { flex-direction: column !important; gap: 24px !important; }
+  .lp-footer-nav   { width: 100%; }
+  .lp-footer-bottom { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
 }
 
 @media (max-width: 480px) {
@@ -464,10 +498,13 @@ select option { background: var(--surface); }
   justify-content: center;
 }
 
-/* Icon rail: clip any label overflow (Analyze panel sits flush beside the rail) */
-.group[data-collapsible="icon"] [data-slot="sidebar-inner"],
-.group[data-collapsible="icon"] [data-sidebar="sidebar"] {
+/* Icon rail: clip nav label bleed in scroll area only — not footer (account menu popover). */
+.group[data-collapsible="icon"] [data-sidebar="content"] {
   overflow: hidden;
+}
+
+.group[data-collapsible="icon"] [data-sidebar="footer"] {
+  overflow: visible;
 }
 
 /* Hide text labels in icon rail only — keep .app-nav-icon visible */

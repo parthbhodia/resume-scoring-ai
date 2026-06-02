@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback, type CSSProperties, type ReactNode } 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { UmbcProvider } from "@/contexts/UmbcContext";
+import { signOutAndReturnHome } from "@/lib/authSignOut";
 import { getSupabaseClient } from "@/lib/supabase";
 import { apiUrl } from "@/lib/utils";
 import { isUmbcUser } from "@/lib/userDomainDetection";
@@ -184,8 +185,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
     setBuilderOpen(false);
   };
 
-  const onSignOut = async () => {
-    await getSupabaseClient().auth.signOut();
+  const onSignOut = () => {
+    void signOutAndReturnHome();
   };
 
   const initial = (user?.email || "?").charAt(0).toUpperCase();
