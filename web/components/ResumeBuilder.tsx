@@ -1063,14 +1063,24 @@ export default function ResumeBuilder({
     }
   }, [jd, candidateProfile]);
 
-  /** Re-run JD match ratings on updated plain text (no LaTeX / no ATS folder). */
-  const rescoreTailorRatings = useCallback(async (profileOverride?: string) => {
+  /** Re-run JD match ratings on updated plain text (no LaTeX / no ATS folder).
+   * Pass bulletsAtApply/overridesAtApply/appliedAtApply when calling from applyGapFixes
+   * to avoid stale-closure clobbering the just-applied overrides. */
+  const rescoreTailorRatings = useCallback(async (
+    profileOverride?: string,
+    bulletsAtApply?: LiveBulletItem[],
+    overridesAtApply?: Record<number, string>,
+    appliedAtApply?: ReadonlySet<number>,
+  ) => {
+    const effectiveBullets  = bulletsAtApply   ?? tailorBulletAnalysis;
+    const effectiveOverrides = overridesAtApply ?? tailorLineOverrides;
+    const effectiveApplied   = appliedAtApply   ?? tailorAppliedBulletIndices;
     const prof = (
       profileOverride
       ?? synthesizeProfileWithBulletOverrides(
         candidateProfile ?? "",
-        tailorBulletAnalysis,
-        tailorLineOverrides,
+        effectiveBullets,
+        effectiveOverrides,
       )
     ).trim();
     if (!prof || !jd.trim()) return false;
@@ -1100,14 +1110,14 @@ export default function ResumeBuilder({
       if (Array.isArray(data.bulletAnalysis) && data.bulletAnalysis.length > 0) {
         const newBullets = data.bulletAnalysis;
         const remappedOverrides = remapLineOverrides(
-          tailorLineOverrides,
-          tailorBulletAnalysis,
+          effectiveOverrides,
+          effectiveBullets,
           newBullets,
         );
         const remappedApplied = new Set<number>();
-        for (const oldIdx of tailorAppliedBulletIndices) {
-          const oldOrig = tailorBulletAnalysis[oldIdx]?.originalBullet ?? "";
-          const overrideText = tailorLineOverrides[oldIdx] ?? "";
+        for (const oldIdx of effectiveApplied) {
+          const oldOrig = effectiveBullets[oldIdx]?.originalBullet ?? "";
+          const overrideText = effectiveOverrides[oldIdx] ?? "";
           let newIdx = oldOrig
             ? matchOriginalToBulletIndex(oldOrig, newBullets, prof)
             : -1;
@@ -1853,7 +1863,6 @@ export default function ResumeBuilder({
       setTailorLineOverrides(nextOverrides);
       if (appliedIndices.size > 0) {
         setTailorAppliedBulletIndices(appliedIndices);
-        window.setTimeout(() => setTailorAppliedBulletIndices(new Set()), 3000);
       }
 
       if (newSuggestions.length > 0) {
@@ -1880,7 +1889,12 @@ export default function ResumeBuilder({
           bullets,
           nextOverrides,
         );
-        await rescoreTailorRatings(updatedProfile);
+        await rescoreTailorRatings(updatedProfile, bullets, nextOverrides, appliedIndices);
+      }
+
+      // Clear the green flash after rescore finishes (so remap runs first).
+      if (appliedIndices.size > 0) {
+        window.setTimeout(() => setTailorAppliedBulletIndices(new Set()), 3000);
       }
     } catch {
       /* best effort */

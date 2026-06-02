@@ -547,17 +547,17 @@ function EntryHeaderLine({ line }: { line: string }) {
     return (
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "0 8px", lineHeight: 1.22 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: RESUME_UI_FONT }}>
+          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: RESUME_BODY_FONT }}>
             {mains[0]}
           </span>
           {mains.slice(1).map((p, i) => (
-            <span key={i} style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: RESUME_UI_FONT }}>
+            <span key={i} style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: RESUME_BODY_FONT }}>
               {"·"} {p}
             </span>
           ))}
         </div>
         {datePart && (
-          <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: RESUME_UI_FONT, flexShrink: 0 }}>
+          <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: RESUME_BODY_FONT, flexShrink: 0 }}>
             {datePart}
           </span>
         )}
@@ -583,17 +583,17 @@ function EntryHeaderLine({ line }: { line: string }) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 1, lineHeight: 1.22 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: RESUME_UI_FONT }}>
+          <span style={{ fontWeight: 700, color: "var(--resume-paper-ink)", fontSize: 10.8, fontFamily: RESUME_BODY_FONT }}>
             {title}
           </span>
           {metaParts.length > 0 && (
-            <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: RESUME_UI_FONT, flexShrink: 0, whiteSpace: "nowrap" }}>
+            <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontFamily: RESUME_BODY_FONT, flexShrink: 0, whiteSpace: "nowrap" }}>
               {metaParts.join(" · ")}
             </span>
           )}
         </div>
         {institutionParts.length > 0 && (
-          <span style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: RESUME_UI_FONT }}>
+          <span style={{ color: "var(--resume-paper-muted)", fontSize: 10, fontStyle: "italic", fontFamily: RESUME_BODY_FONT }}>
             {institutionParts.join(" · ")}
           </span>
         )}
@@ -604,7 +604,7 @@ function EntryHeaderLine({ line }: { line: string }) {
   // Year-range line without pipe — treat as date/location
   return (
     <div style={{ display: "flex", justifyContent: "flex-end" }}>
-      <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontStyle: "italic", fontFamily: RESUME_UI_FONT, lineHeight: 1.22 }}>
+      <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontStyle: "italic", fontFamily: RESUME_BODY_FONT, lineHeight: 1.22 }}>
         {renderInline(t)}
       </span>
     </div>
@@ -850,9 +850,9 @@ export default function AnalyzeLiveResumeBody({
         }
         .az-resume-bullet {
           position: relative;
-          padding: 4px 8px 4px 12px;
+          padding: 3px 8px 3px 12px;
           border-radius: 3px;
-          margin-bottom: 3px;
+          margin-bottom: 2px;
           cursor: default;
           transition: background 0.12s;
         }
@@ -911,14 +911,14 @@ export default function AnalyzeLiveResumeBody({
           }
 
           return (
-            <div key={bi} style={{ textAlign: "center", marginBottom: 18, paddingBottom: 14, borderBottom: "1.5px solid var(--resume-paper-accent)" }}>
+            <div key={bi} style={{ textAlign: "center", marginBottom: 12, paddingBottom: 10, borderBottom: "1.5px solid var(--resume-paper-accent)" }}>
               {nameLine && (
                 <div style={{
                   fontSize: 22,
                   fontWeight: 700,
                   letterSpacing: 0.4,
                   color: "var(--resume-paper-ink)",
-                  marginBottom: 7,
+                  marginBottom: 5,
                   fontFamily: RESUME_HEADING_FONT,
                 }}>
                   {renderInline(nameLine)}
@@ -933,8 +933,8 @@ export default function AnalyzeLiveResumeBody({
                   gap: "0 4px",
                   fontSize: 9.4,
                   color: "var(--resume-paper-muted)",
-                  fontFamily: RESUME_UI_FONT,
-                  lineHeight: 1.7,
+                  fontFamily: RESUME_BODY_FONT,
+                  lineHeight: 1.5,
                 }}>
                   {contactItems.map((item, ci) => (
                     <span key={ci} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -953,8 +953,8 @@ export default function AnalyzeLiveResumeBody({
           const isPrimarySection = Boolean(roleForKnownSection(blk.text));
           return (
             <div key={bi} style={{
-              marginTop: isPrimarySection ? "var(--az-resume-section-margin-top, 17px)" : 11,
-              marginBottom: isPrimarySection ? 7 : 5,
+              marginTop: isPrimarySection ? "var(--az-resume-section-margin-top, 13px)" : 8,
+              marginBottom: isPrimarySection ? 5 : 4,
               paddingBottom: isPrimarySection ? 3 : 2,
               borderBottom: isPrimarySection
                 ? "1.5px solid var(--resume-paper-accent)"
@@ -964,7 +964,7 @@ export default function AnalyzeLiveResumeBody({
               letterSpacing: isPrimarySection ? 1.6 : 1.25,
               color: "var(--resume-paper-accent)",
               textTransform: "uppercase",
-              fontFamily: RESUME_UI_FONT,
+              fontFamily: RESUME_HEADING_FONT,
             }}>
               {blk.text}
             </div>
@@ -984,7 +984,7 @@ export default function AnalyzeLiveResumeBody({
               : blk.lines;
 
           return (
-            <div key={bi} style={{ marginBottom: inEducationSection ? (presentationOnly ? 3 : 4) : presentationOnly ? 5 : 6 }}>
+            <div key={bi} style={{ marginBottom: inEducationSection ? (presentationOnly ? 2 : 3) : presentationOnly ? 4 : 5 }}>
               {paragraphLines.map((ln, li) => {
                 const t = ln.trim();
                 if (!t || isPlaceholderIdentityLine(ln)) return null;
@@ -1002,9 +1002,9 @@ export default function AnalyzeLiveResumeBody({
                       fontWeight: 700,
                       color: "var(--resume-paper-ink)",
                       lineHeight: 1.22,
-                      marginTop: li > 0 ? 4 : 0,
+                      marginTop: li > 0 ? 3 : 0,
                       marginBottom: 0,
-                      fontFamily: RESUME_UI_FONT,
+                      fontFamily: RESUME_BODY_FONT,
                       overflowWrap: "anywhere",
                       wordBreak: "break-word",
                     }}>
@@ -1027,9 +1027,9 @@ export default function AnalyzeLiveResumeBody({
                   <div key={li} style={{
                     fontSize: inEducationSection ? 10.25 : 10.4,
                     color: "var(--resume-paper-ink)",
-                    lineHeight: inEducationSection ? 1.28 : 1.55,
+                    lineHeight: inEducationSection ? 1.28 : 1.48,
                     marginBottom: inEducationSection ? 0 : 2,
-                    fontFamily: inSkillsSection || inEducationSection ? RESUME_UI_FONT : li === 0 ? RESUME_BODY_FONT : RESUME_UI_FONT,
+                    fontFamily: RESUME_BODY_FONT,
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
                     ...tailorHlStyle,
