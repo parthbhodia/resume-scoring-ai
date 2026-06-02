@@ -900,6 +900,132 @@ select option { background: var(--surface); }
 }
 
 /* ── Analyze upload landing & coach loader ─────────────────────────────────── */
+
+/* Vertically center the upload landing on large screens */
+.az-upload-landing {
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Combined score + resume preview mockup */
+.az-preview-mockup {
+  margin-bottom: 20px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.az-preview-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+.az-preview-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.az-preview-chrome-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 6px;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.az-preview-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.az-preview-tag--red   { background: rgba(248,113,113,0.12); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+.az-preview-tag--amber { background: rgba(245,158,11,0.12);  color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+
+.az-preview-body {
+  display: grid;
+  grid-template-columns: 220px 1px 1fr;
+}
+
+.az-preview-score-col {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.az-preview-divider {
+  background: var(--border);
+  width: 1px;
+}
+
+.az-preview-right-col {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.az-preview-resume-paper {
+  background: white;
+  border-radius: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  flex: 1;
+}
+
+.az-preview-apply-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+.az-preview-footer {
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* Mobile: stack score above resume */
+@media (max-width: 640px) {
+  .az-preview-body {
+    grid-template-columns: 1fr;
+  }
+  .az-preview-divider {
+    width: auto;
+    height: 1px;
+  }
+  .az-preview-score-col {
+    border-bottom: 1px solid var(--border);
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+  }
+  .az-preview-chrome-label,
+  .az-preview-tag--amber {
+    display: none;
+  }
+}
+
 .az-analyze-feature-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1070,6 +1196,14 @@ select option { background: var(--surface); }
   color: #fff;
   font-size: 13px;
   font-weight: 600;
+  position: relative;
+  z-index: 1;
+}
+
+.az-analyze-dropzone-privacy {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
   position: relative;
   z-index: 1;
 }

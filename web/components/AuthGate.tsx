@@ -18,6 +18,8 @@ const PUBLIC_ROUTES = new Set<string>([
 // Path prefixes that bypass auth — recipient share pages live at /r/<shortid>.
 const PUBLIC_PREFIXES = ["/r/", "/blog/"];
 
+const DEV_BYPASS = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === "true";
+
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   if (pathname) {
@@ -25,6 +27,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     if (PUBLIC_ROUTES.has(trimmed)) return <>{children}</>;
     if (PUBLIC_PREFIXES.some(p => pathname.startsWith(p))) return <>{children}</>;
   }
+  if (DEV_BYPASS) return <>{children}</>;
   // IMPORTANT: initial state is `null` (signed-out) so the static HTML contains
   // the full landing page — crawlable by Google. The effect below swaps in the
   // dashboard once we confirm the user is signed in on the client.
