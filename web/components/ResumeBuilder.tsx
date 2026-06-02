@@ -589,6 +589,7 @@ export default function ResumeBuilder({
     () => builderSession0?.uploadedFileName ?? null,
   );
   const { upload: uploadResume, loading: uploadingPdf, error: uploadError, clearError: clearUploadError } = useUploadResume();
+  const [uploadTypeError, setUploadTypeError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Latest PDF extract text — used to merge into saved Profile */
   const lastResumeExtractRef = useRef<string>("");
@@ -1370,9 +1371,13 @@ export default function ResumeBuilder({
   const handlePdfUpload = useCallback(async (file: File) => {
     if (!isResumeUploadFile(file)) {
       clearUploadError();
-      // useUploadResume surfaces the error; show inline via uploadError
+      const ext = (file.name || "").split(".").pop()?.toLowerCase() ?? "";
+      setUploadTypeError(ext
+        ? `"${ext.toUpperCase()}" files aren't supported — please upload a PDF or Word document.`
+        : "Please upload a PDF or Word document (.pdf, .docx).");
       return;
     }
+    setUploadTypeError(null);
     setProfileSyncUpsell(null);
     try {
       const { text, extractedText, resumeHeader, structuredResume } = await uploadResume(file);
@@ -2387,12 +2392,16 @@ export default function ResumeBuilder({
 
             {candidateProfile ? (
               <>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 12,
-                  padding: "14px 16px",
-                  background: "var(--green-bg)", border: "1px solid rgba(52,211,153,0.2)",
-                  borderRadius: 10,
-                }}>
+                <div
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handlePdfUpload(f); }}
+                  title="Drop a new resume to replace"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: "14px 16px",
+                    background: "var(--green-bg)", border: "1px solid rgba(52,211,153,0.2)",
+                    borderRadius: 10,
+                  }}>
                   <div style={{
                     width: 34, height: 34, borderRadius: 8,
                     background: "rgba(52,211,153,0.15)",
@@ -2615,8 +2624,10 @@ export default function ResumeBuilder({
               </div>
             )}
 
-            {uploadError && (
-              <div style={{ marginTop: 8, color: "var(--red)", fontSize: 12 }}>{uploadError}</div>
+            {(uploadError || uploadTypeError) && (
+              <div style={{ marginTop: 8, color: "var(--red)", fontSize: 12 }}>
+                {uploadTypeError || uploadError}
+              </div>
             )}
 
             {!candidateProfile && (
