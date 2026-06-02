@@ -129,7 +129,7 @@ from resume_gui.storage import (
     upload_pdf,
     upload_tex,
 )
-from resume_gui.resume_extraction import inject_section_line_breaks
+from resume_gui.resume_extraction import inject_section_line_breaks, log_extraction_debug
 from ats_service import ats_check, structured_ratings_from_ats
 
 logger = logging.getLogger("resume_gui")
@@ -232,6 +232,7 @@ __all__ = [
     "get_resume_tex",
     "grok_preferred_for_throughput",
     "inject_section_line_breaks",
+    "log_extraction_debug",
     "json",
     "list_resumes",
     "list_versions",
