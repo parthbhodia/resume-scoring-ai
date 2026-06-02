@@ -197,7 +197,6 @@ export function AnalyzeUploadLanding({
     <div className="az-upload-landing">
       {/* Hero */}
       <div className="fade-in" style={{ textAlign: "center", marginBottom: 24 }}>
-        <div className="az-analyze-hero-badge">Free résumé audit</div>
         <h1 className="az-analyze-hero-title">See your résumé the way recruiters do</h1>
         <p className="az-analyze-hero-sub">
           Upload a PDF — get a score, 8-dimension breakdown, and bullet-by-bullet rewrites you can apply in one click.
