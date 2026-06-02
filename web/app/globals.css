@@ -378,47 +378,55 @@ select option { background: var(--surface); }
   min-height: 40px;
 }
 
-/* Collapsed rail: wider column, 44px hit targets, 20px icons */
+/* Collapsed rail */
 .app-shell-root .group[data-collapsible="icon"] [data-slot="sidebar-header"] {
-  padding: 14px 10px 12px !important;
+  padding: 14px 10px 10px !important;
 }
 
 .app-shell-root .group[data-collapsible="icon"] [data-sidebar="content"] {
-  padding: 6px 10px 12px !important;
+  padding: 4px 10px 12px !important;
 }
 
 .app-shell-root .group[data-collapsible="icon"] [data-sidebar="footer"] {
   padding: 10px 10px 12px !important;
 }
 
+/* Every button in the icon rail: same 36×36 pill hit target, centered */
+.app-shell-root .group[data-collapsible="icon"] [data-sidebar="menu-item"] {
+  display: flex;
+  justify-content: center;
+}
+
 .app-shell-root .group[data-collapsible="icon"] [data-sidebar="menu-button"] {
-  width: 44px !important;
-  min-width: 44px !important;
-  height: 44px !important;
-  padding: 10px !important;
-  margin-inline: auto;
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 8px !important;
+  border-radius: 9px !important;
+  flex-shrink: 0;
 }
 
 .app-shell-root .group[data-collapsible="icon"] [data-sidebar="menu"] {
-  gap: 6px;
-  align-items: center;
+  gap: 2px;
+  align-items: stretch;
 }
 
 .app-shell-root .group[data-collapsible="icon"] .app-nav-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
 }
 
-/* App shell nav icons — original 18px strokes, muted until active */
+/* App shell nav icons — muted until active */
 .app-nav-icon {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  opacity: 0.78;
+  opacity: 0.65;
   transition:
-    opacity 0.24s cubic-bezier(0.32, 0.72, 0, 1),
-    color 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+    opacity 0.2s cubic-bezier(0.32, 0.72, 0, 1),
+    color 0.2s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 [data-sidebar="menu-button"] .app-nav-icon svg,
@@ -432,12 +440,24 @@ select option { background: var(--surface); }
   height: 15px;
 }
 
-/* shadcn icon rail — inset bar clips on 32px squares; use even tint instead */
+/* Icon rail active: pill highlight (not a full square tile) */
 .group[data-collapsible="icon"] [data-sidebar="menu-button"][data-active="true"] {
   box-shadow: none !important;
-  border: 1px solid rgba(47, 129, 247, 0.22) !important;
+  border: 1px solid rgba(47, 129, 247, 0.25) !important;
   background: var(--accent-bg) !important;
   color: var(--accent) !important;
+  border-radius: 9px !important;
+}
+
+/* Active icon fully opaque */
+.group[data-collapsible="icon"] [data-sidebar="menu-button"][data-active="true"] .app-nav-icon {
+  opacity: 1;
+}
+
+/* Hover: subtle tint on inactive items */
+.group[data-collapsible="icon"] [data-sidebar="menu-button"]:not([data-active="true"]):hover {
+  background: var(--surface2) !important;
+  border-radius: 9px !important;
 }
 
 .group[data-collapsible="icon"] [data-sidebar="menu-button"] {

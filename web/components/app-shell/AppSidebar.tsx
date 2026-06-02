@@ -127,43 +127,35 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon" variant="sidebar">
       <SidebarHeader className="gap-0">
-        <div
-          className={cn(
-            "flex w-full items-center gap-2",
-            state === "collapsed"
-              ? "flex-col justify-center gap-2.5"
-              : "flex-row justify-between",
+        <div className={cn(
+          "flex w-full items-center gap-2",
+          state === "collapsed" ? "justify-center" : "flex-row justify-between",
+        )}>
+          {state === "collapsed" ? (
+            /* In icon rail: logo click expands sidebar — no separate trigger square */
+            <button
+              type="button"
+              className="flex cursor-pointer items-center justify-center border-0 bg-transparent p-0 font-inherit"
+              onClick={() => setOpen(true)}
+              title="Expand navigation"
+              aria-label="Expand navigation"
+            >
+              <LogoMark size={30} variant={isUmbc ? "umbc" : "resunova"} />
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 cursor-pointer items-center justify-start border-0 bg-transparent p-0 font-inherit"
+                onClick={() => onSwitchView("analyze")}
+                aria-label="Resunova — go to Analyze"
+              >
+                <LogoFull markSize={26} textColor="var(--text)" variant={isUmbc ? "umbc" : "resunova"} />
+              </button>
+              <SidebarTrigger className="size-10 shrink-0 border border-border bg-[var(--surface2)]" />
+            </>
           )}
-        >
-          <button
-            type="button"
-            className={cn(
-              "flex cursor-pointer items-center border-0 bg-transparent p-0 font-inherit",
-              state === "collapsed" ? "justify-center" : "min-w-0 flex-1 justify-start",
-            )}
-            onClick={() => onSwitchView("analyze")}
-            aria-label="Resunova — go to Analyze"
-          >
-            {state === "collapsed" ? (
-              <LogoMark size={32} variant={isUmbc ? "umbc" : "resunova"} />
-            ) : (
-              <LogoFull
-                markSize={26}
-                textColor="var(--text)"
-                variant={isUmbc ? "umbc" : "resunova"}
-              />
-            )}
-          </button>
-          {state === "expanded" ? (
-            <SidebarTrigger className="size-10 shrink-0 border border-border bg-[var(--surface2)]" />
-          ) : null}
         </div>
-        {state === "collapsed" ? (
-          <SidebarTrigger
-            className="mx-auto size-10 shrink-0 border border-border bg-[var(--surface2)]"
-            title="Expand navigation"
-          />
-        ) : null}
       </SidebarHeader>
 
       <SidebarContent>
