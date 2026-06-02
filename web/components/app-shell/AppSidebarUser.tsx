@@ -42,7 +42,7 @@ export function AppSidebarUser({ initial, onProfile, onSignOut }: Props) {
         </Avatar>
         {showLabels ? <span className="app-nav-label">Account</span> : null}
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="end" sideOffset={8} className="min-w-40">
+      <DropdownMenuContent side="right" align="end" sideOffset={12} className="min-w-44">
         <DropdownMenuItem onClick={onProfile}>Profile settings</DropdownMenuItem>
         <DropdownMenuItem variant="destructive" onClick={() => void onSignOut()}>
           Sign out

@@ -285,8 +285,8 @@ export default function AnalyzeResume() {
    *  *that* card instead of defaulting to the first flagged one. */
   const pendingExpandIdxRef = useRef<number | null>(null);
   const restoredFromUrlRef = useRef(false);
-  /** Desktop: improvement plan column (scores + category fixes). */
-  const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
+  /** Desktop: improvement plan column — hidden on upload page, auto-shows when analysis completes. */
+  const [improvementPlanVisible, setImprovementPlanVisible] = useState(false);
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
   /** User picked a row from Recent Analyses — original upload file is not available until they upload again. */
   const [historyRestoreActive, setHistoryRestoreActive] = useState(false);
