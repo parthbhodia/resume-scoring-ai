@@ -62,12 +62,18 @@ function useLandingTheme(): [Theme, () => void] {
 
 // ── Data ────────────────────────────────────────────────────────────────────
 const FEATURES = [
-  { num: "01", title: "Match Score",          desc: "0–100 breakdown across eight dimensions—readability, ATS safety, achievement quality, keyword fit, field signals, and more—tuned for any major or career path." },
-  { num: "02", title: "Keyword Intelligence", desc: "Extract every keyword the JD demands. See which ones you're missing — and get precise suggestions on where to add them." },
-  { num: "03", title: "AI Bullet Rewrites",   desc: "Turn vague duty-lists into achievement narratives with metrics. Your voice, amplified. Truthfulness preserved." },
-  { num: "04", title: "ATS Compatibility",    desc: "Detect tables, columns, and formatting that breaks applicant tracking systems before they reject you silently." },
-  { num: "05", title: "Language Quality",     desc: "Passive voice, weak verbs, pronouns, tense drift — flagged and fixed. Precise, confident, recruiter-ready." },
-  { num: "06", title: "Instant PDF Export",   desc: "Every tailored version compiled to a clean, ATS-safe PDF in seconds. No templates. No design work." },
+  { num: "01", title: "Match Score",           desc: "0–100 breakdown across eight dimensions — readability, ATS safety, achievement quality, keyword fit, and more — tuned for any major or career path." },
+  { num: "02", title: "Keyword Intelligence",  desc: "Extract every keyword the JD demands. See which ones you're missing and get precise suggestions on where to add them without fabricating experience." },
+  { num: "03", title: "AI Bullet Rewrites",    desc: "Turn vague duty-lists into achievement narratives with metrics. Your voice, amplified. Every rewrite is verified against your original — no invented facts." },
+  { num: "04", title: "ATS Compatibility",     desc: "Detect tables, columns, and formatting that breaks applicant tracking systems before they reject you silently — with a clear pass/fail checklist." },
+  { num: "05", title: "Language Quality",      desc: "Passive voice, weak verbs, pronouns, tense drift — flagged and fixed. Precise, confident, recruiter-ready language in every line." },
+  { num: "06", title: "Instant PDF Export",    desc: "Every tailored version exported as a clean, ATS-safe PDF via Chromium. What you see in the preview is exactly what the recruiter receives." },
+  { num: "07", title: "Section Structure",     desc: "Smart section detection flags missing segments — contact, summary, education, projects — and ensures recruiters find what they expect, where they expect it." },
+  { num: "08", title: "Achievement Quality",   desc: "Identifies bullets that describe duties instead of results. See exactly which lines need the achievement treatment — and get a rewrite that shows impact." },
+  { num: "09", title: "Career Trajectory",     desc: "Timeline analysis catches gaps, overlaps, and tenure signals so your experience reads the way recruiters interpret progression, not just chronology." },
+  { num: "10", title: "Resume Library",        desc: "Store and version multiple tailored résumés. Pick up any saved run, open the full improvement plan, or re-export as a WYSIWYG PDF at any time." },
+  { num: "11", title: "Template Builder",      desc: "Design a clean, ATS-safe résumé from scratch with a live preview. Choose fonts, accent colors, fill in your details — download as a formatted PDF instantly." },
+  { num: "12", title: "JD Gap Fixer",          desc: "After analyzing against a job description, Resunova surfaces the exact keyword and content gaps — and lets you apply fixes directly to your live résumé preview." },
 ];
 
 const STEPS = [
@@ -116,65 +122,6 @@ const RESEARCH_PILLARS = [
   },
 ];
 
-type Review = {
-  quote: string;
-  name: string;
-  role: string;
-  company?: string;
-  avatar: string;
-  col: string;
-};
-
-const REVIEWS: Review[] = [
-  {
-    quote: "Months of applying to Google with no reply. After tailoring here, I got my first recruiter screen in two weeks — that callback was the win.",
-    name: "Priya S.",
-    role: "SWE applicant",
-    company: "Google",
-    avatar: "P",
-    col: "#4285f4",
-  },
-  {
-    quote: "Amazon’s JD was keyword-heavy. Resunova showed gaps I could honestly fix — I submitted on a Friday and had a phone screen invite the next week.",
-    name: "Rohan K.",
-    role: "SDE applicant",
-    company: "Amazon",
-    avatar: "R",
-    col: "#ff9900",
-  },
-  {
-    quote: "Uber roles were going quiet for me. Cleaner bullets and a stronger ATS score — then two interview requests in the same month.",
-    name: "Vikram M.",
-    role: "Ops applicant",
-    company: "Uber",
-    avatar: "V",
-    col: "#276ef1",
-  },
-  {
-    quote: "Campus hiring — I tailored one base résumé to five JDs in an afternoon. Three companies scheduled interviews; before that it was mostly automated rejections.",
-    name: "Ananya R.",
-    role: "New grad · CS",
-    company: "Hyderabad",
-    avatar: "A",
-    col: "#7c3aed",
-  },
-  {
-    quote: "Weeks of silence on applications. The ATS checklist fixed date formats and section headers — interview requests picked up again within a few applies.",
-    name: "Meera N.",
-    role: "Data analyst",
-    company: "Bengaluru",
-    avatar: "M",
-    col: "#0d9488",
-  },
-  {
-    quote: "Free, no card upfront. Our batch uses it before every apply — we compare notes on who got recruiter screens and phone interviews.",
-    name: "Arjun D.",
-    role: "Backend dev",
-    company: "Pune",
-    avatar: "J",
-    col: "#2563eb",
-  },
-];
 
 // ── Root ────────────────────────────────────────────────────────────────────
 export default function LandingPage() {
@@ -486,49 +433,44 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ───────────── Reviews ──────────────────────────────── */}
-      <section id="reviews" style={{ padding: "120px 40px", maxWidth: 1200, margin: "0 auto", scrollMarginTop: 76 }}>
-        <div style={{ textAlign: "center", marginBottom: 64 }}>
-          <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 700, letterSpacing: "0.15em", color: T.blue, textTransform: "uppercase", margin: "0 0 16px" }}>Testimonials</p>
-          <h2 className="lp-h2" style={{ fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.03em", color: C.ink, margin: 0 }}>
-            More interview callbacks.
-          </h2>
-          <p style={{ fontSize: "var(--font-size-lg)", color: C.muted, lineHeight: 1.65, maxWidth: 560, margin: "20px auto 0" }}>
-            About 400 people have used Resunova so far. What we hear most: recruiter screens and phone interviews. Paraphrased early-user notes, not paid endorsements.
+      {/* ───────────── Company logos ────────────────────────── */}
+      <section id="reviews" style={{ borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, background: C.bg2, padding: "72px 40px", scrollMarginTop: 76 }}>
+        <div style={{ maxWidth: 960, margin: "0 auto" }}>
+          <p style={{ textAlign: "center", fontSize: "var(--font-size-sm)", fontWeight: 600, color: C.muted, letterSpacing: "0.12em", textTransform: "uppercase", margin: "0 0 48px" }}>
+            Where our users are interviewing
           </p>
-        </div>
-        <div className="lp-rev-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24 }}>
-          {REVIEWS.map((r, i) => (
-            <div key={i} style={{
-              padding: "30px 28px", background: C.surface,
-              border: `1px solid ${C.border}`, borderRadius: 16,
-              transition: "box-shadow 0.2s, border-color 0.2s",
-            }}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.boxShadow = `0 8px 32px ${dark ? "rgba(0,0,0,0.4)" : "rgba(13,17,23,0.10)"}`;
-              (e.currentTarget as HTMLElement).style.borderColor = dark ? T.dBorder : "#c8d1da";
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.boxShadow = "none";
-              (e.currentTarget as HTMLElement).style.borderColor = C.border;
-            }}
-            >
-              <div style={{ fontSize: "var(--font-size-lg)", color: "#f59e0b", marginBottom: 16, letterSpacing: 2 }}>★★★★★</div>
-              <p style={{ fontSize: "var(--font-size-lg)", fontStyle: "italic", color: C.ink, lineHeight: 1.68, margin: "0 0 22px", fontWeight: 400, letterSpacing: -0.1 }}>
-                &ldquo;{r.quote}&rdquo;
-              </p>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 32, height: 32, borderRadius: "50%", background: r.col, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 12 }}>{r.avatar}</div>
-                <div>
-                  <div style={{ fontSize: "var(--font-size-base)", fontWeight: 600, color: C.ink }}>{r.name}</div>
-                  <div style={{ fontSize: "var(--font-size-sm)", color: C.muted }}>
-                    {r.role}
-                    {r.company ? ` · ${r.company}` : ""}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 56, flexWrap: "wrap" }}>
+            {/* Google */}
+            <svg height="24" viewBox="0 0 74 24" fill="none" aria-label="Google" style={{ opacity: dark ? 0.3 : 0.22 }}>
+              <path d="M9.24 8.19v2.46h5.88c-.26 1.57-1.67 4.22-5.88 4.22-3.54 0-6.43-2.93-6.43-6.54S5.7 1.79 9.24 1.79c2.03 0 3.39.86 4.16 1.61l2.84-2.73C14.45.5 12.03-.5 9.24-.5 4.13-.5.01 3.63.01 8.73s4.12 9.23 9.23 9.23c5.33 0 8.86-3.75 8.86-9.03 0-.6-.07-1.07-.16-1.53L9.24 8.19z" fill="currentColor" transform="translate(0,6)" style={{ color: dark ? "#e6edf3" : "#57606a" }} />
+              <text x="22" y="19" fontFamily="-apple-system,sans-serif" fontSize="18" fontWeight="500" fill={dark ? "#8b949e" : "#57606a"}>Google</text>
+            </svg>
+            {/* Meta */}
+            <svg height="22" viewBox="0 0 80 22" aria-label="Meta" style={{ opacity: dark ? 0.3 : 0.22 }}>
+              <text x="0" y="17" fontFamily="-apple-system,sans-serif" fontSize="20" fontWeight="700" letterSpacing="-0.5" fill={dark ? "#8b949e" : "#57606a"}>Meta</text>
+            </svg>
+            {/* Amazon */}
+            <svg height="26" viewBox="0 0 90 26" aria-label="Amazon" style={{ opacity: dark ? 0.3 : 0.22 }}>
+              <text x="0" y="18" fontFamily="-apple-system,sans-serif" fontSize="18" fontWeight="500" fill={dark ? "#8b949e" : "#57606a"}>amazon</text>
+              <path d="M2 23 Q22 29 46 23" stroke={dark ? "#8b949e" : "#57606a"} strokeWidth="2" fill="none" strokeLinecap="round"/>
+            </svg>
+            {/* Microsoft */}
+            <svg height="22" viewBox="0 0 110 22" aria-label="Microsoft" style={{ opacity: dark ? 0.3 : 0.22 }}>
+              <rect x="0" y="1" width="9" height="9" fill={dark ? "#8b949e" : "#57606a"} />
+              <rect x="10" y="1" width="9" height="9" fill={dark ? "#8b949e" : "#57606a"} />
+              <rect x="0" y="11" width="9" height="9" fill={dark ? "#8b949e" : "#57606a"} />
+              <rect x="10" y="11" width="9" height="9" fill={dark ? "#8b949e" : "#57606a"} />
+              <text x="24" y="16" fontFamily="-apple-system,sans-serif" fontSize="15" fontWeight="400" fill={dark ? "#8b949e" : "#57606a"}>Microsoft</text>
+            </svg>
+            {/* Apple */}
+            <svg height="24" viewBox="0 0 60 24" aria-label="Apple" style={{ opacity: dark ? 0.3 : 0.22 }}>
+              <path d="M11.5 0C10.2 0 8.7.8 7.9 1.9 7.2 2.9 6.6 4.4 6.8 5.9c1.4.1 2.9-.7 3.7-1.8C11.3 3 11.9 1.5 11.5 0zm3.4 6c-1.9 0-3.5 1.1-4.4 1.1-.9 0-2.4-1-4-1-2 0-4 1.2-5 3-2.2 3.8-.6 9.4 1.6 12.5 1 1.5 2.3 3.1 3.9 3.1 1.6 0 2.2-1 4.1-1 1.9 0 2.4 1 4.1 1 1.7 0 2.8-1.5 3.9-3 1.2-1.7 1.7-3.4 1.7-3.5-.1 0-3.2-1.2-3.2-4.7 0-3 2.4-4.4 2.5-4.5C18.7 6.5 16.6 6 14.9 6z" fill={dark ? "#8b949e" : "#57606a"} />
+            </svg>
+            {/* Stripe */}
+            <svg height="22" viewBox="0 0 52 22" aria-label="Stripe" style={{ opacity: dark ? 0.3 : 0.22 }}>
+              <text x="0" y="17" fontFamily="-apple-system,sans-serif" fontSize="20" fontWeight="600" fill={dark ? "#8b949e" : "#57606a"}>Stripe</text>
+            </svg>
+          </div>
         </div>
       </section>
 
