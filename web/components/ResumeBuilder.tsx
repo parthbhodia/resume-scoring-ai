@@ -584,7 +584,9 @@ export default function ResumeBuilder({
     () => builderSession0?.candidateProfile ?? null,
   );
   const [resumeHeaderLines, setResumeHeaderLines] = useState<string[]>([]);
-  const [matchSidebarCollapsed, setMatchSidebarCollapsed] = useState(false);
+  const [matchSidebarCollapsed, setMatchSidebarCollapsed] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 900,
+  );
   const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(
     () => builderSession0?.uploadedFileName ?? null,
   );

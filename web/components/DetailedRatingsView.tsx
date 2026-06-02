@@ -209,13 +209,12 @@ export function TailorMatchSidebar({
         overflow: "hidden",
       }}
     >
-      <div
-        style={{
-          flexShrink: 0,
-          padding: sidebarCollapsed ? "12px 8px" : "16px 16px 12px",
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
+      {/* Header — collapse toggle + score (expanded) */}
+      <div style={{
+        flexShrink: 0,
+        padding: sidebarCollapsed ? "10px 8px 8px" : "16px 16px 12px",
+        borderBottom: "1px solid var(--border)",
+      }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: sidebarCollapsed ? "center" : "space-between", gap: 8 }}>
           {!sidebarCollapsed && (
             <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: 0.6 }}>
@@ -244,52 +243,96 @@ export function TailorMatchSidebar({
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Overall match</div>
           </div>
         )}
-        {sidebarCollapsed && (
-          <div style={{ marginTop: 8, textAlign: "center", fontSize: 14, fontWeight: 900, color: scoreColor(overall_score) }}>
-            {overall_score}
-          </div>
-        )}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: sidebarCollapsed ? "8px 0" : "8px 0 16px" }}>
-        {navTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            title={tab.label}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: sidebarCollapsed ? "center" : "space-between",
-              padding: sidebarCollapsed ? "8px 0" : "10px 16px",
-              border: "none",
-              background: activeTab === tab.id ? "var(--surface2)" : "transparent",
-              borderLeft: sidebarCollapsed ? "none" : (activeTab === tab.id ? "3px solid var(--accent)" : "3px solid transparent"),
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            {sidebarCollapsed ? (
-              <span style={{ fontSize: 15 }}>{SECTION_ICON[tab.id]}</span>
-            ) : (
-              <>
+      {/* Nav tabs */}
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: "auto",
+        padding: sidebarCollapsed ? "6px 0" : "8px 0 16px",
+        display: sidebarCollapsed ? "flex" : "block",
+        flexDirection: sidebarCollapsed ? "column" : undefined,
+        alignItems: sidebarCollapsed ? "center" : undefined,
+        gap: sidebarCollapsed ? 2 : undefined,
+      }}>
+        {navTabs.map((tab) => {
+          const isActive = activeTab === tab.id;
+          const isLow = tab.color === "#ef4444" || tab.color === "#f59e0b";
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              title={sidebarCollapsed ? `${tab.label} · ${tab.score}` : tab.label}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                width: sidebarCollapsed ? 40 : "100%",
+                height: sidebarCollapsed ? 40 : "auto",
+                flexShrink: 0,
+                display: "flex",
+                flexDirection: sidebarCollapsed ? "column" : "row",
+                alignItems: "center",
+                justifyContent: sidebarCollapsed ? "center" : "space-between",
+                padding: sidebarCollapsed ? "0" : "10px 16px",
+                gap: sidebarCollapsed ? 1 : 0,
+                border: sidebarCollapsed
+                  ? `1px solid ${isActive ? "rgba(47,129,247,0.3)" : "transparent"}`
+                  : "none",
+                borderLeft: !sidebarCollapsed ? (isActive ? "3px solid var(--accent)" : "3px solid transparent") : undefined,
+                borderRadius: sidebarCollapsed ? 10 : 0,
+                background: isActive ? "var(--accent-bg)" : "transparent",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                color: isActive ? "var(--accent)" : "var(--muted)",
+                transition: "background 0.15s, color 0.15s",
+                position: "relative",
+              }}
+            >
+              {sidebarCollapsed ? (
+                /* Collapsed: score replaces Overall icon; other tabs show emoji + tiny score */
+                tab.id === "overall" ? (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
+                    <span style={{ fontSize: 15, fontWeight: 900, color: scoreColor(overall_score), letterSpacing: -0.5, lineHeight: 1 }}>
+                      {overall_score}
+                    </span>
+                    <span style={{ fontSize: 8, color: "var(--muted)", letterSpacing: 0.3 }}>score</span>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+                    <span style={{ fontSize: 14 }}>{SECTION_ICON[tab.id]}</span>
+                    {/* Score badge under icon */}
+                    <span style={{
+                      fontSize: 8, fontWeight: 700, lineHeight: 1,
+                      color: isLow ? tab.color : "var(--muted)",
+                    }}>
+                      {tab.score}
+                    </span>
+                  </div>
+                )
+              ) : (
+                <>
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: isActive ? 600 : 500,
+                    color: tab.id === "fixes" ? "#818cf8" : (isActive ? "var(--text)" : "var(--muted)"),
+                    textAlign: "left",
+                  }}>
+                    {tab.label}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: tab.color, flexShrink: 0, marginLeft: 8 }}>
+                    {tab.score}
+                  </span>
+                </>
+              )}
+              {/* Red dot badge for low-scoring tabs in collapsed mode */}
+              {sidebarCollapsed && isLow && tab.id !== "overall" && (
                 <span style={{
-                  fontSize: 13,
-                  fontWeight: activeTab === tab.id ? 600 : 500,
-                  color: tab.id === "fixes" ? "#818cf8" : (activeTab === tab.id ? "var(--text)" : "var(--muted)"),
-                  textAlign: "left",
-                }}>
-                  {tab.label}
-                </span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: tab.color, flexShrink: 0, marginLeft: 8 }}>
-                  {tab.score}
-                </span>
-              </>
-            )}
-          </button>
-        ))}
+                  position: "absolute", top: 4, right: 4,
+                  width: 6, height: 6, borderRadius: "50%",
+                  background: tab.color,
+                }} />
+              )}
+            </button>
+          );
+        })}
       </div>
     </aside>
   );

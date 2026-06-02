@@ -652,7 +652,7 @@ export default function AnnotatedResumePanel({
                 ? `${flaggedCount}/${totalCount} need work here`
                 : `No bullets flagged in ${categoryLabel}`}
             </div>
-          ) : (
+          ) : totalCount > 0 ? (
             <div style={{
               fontSize: 11,
               fontWeight: 500,
@@ -660,7 +660,7 @@ export default function AnnotatedResumePanel({
             }}>
               {totalCount} lines scored
             </div>
-          )}
+          ) : null}
           {useLiveDoc ? (
             <div
               className="az-pdf-ignore"
