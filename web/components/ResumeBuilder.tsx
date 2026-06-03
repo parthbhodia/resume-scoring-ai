@@ -276,6 +276,10 @@ type BuilderSessionV1 = {
   suggestResearchDigest: string;
   suggestResearchQueries: string[];
   suggestResearchSources: { title: string | null; url: string }[];
+  /** Structured resume from the upload step — persisted so the Tailor preview
+   *  renders from typed fields after a reload (refs reset; candidateProfile is
+   *  restored, so without this the preview falls back to text-parsing). */
+  structuredUpload?: { profile: string; structured: StructuredResume } | null;
 };
 
 function parseStrategicTips(raw: unknown): string[] {
@@ -378,6 +382,13 @@ function parseBuilderSessionFromDraft(d: Record<string, unknown>): BuilderSessio
       ? o.suggestResearchQueries.filter((x): x is string => typeof x === "string")
       : [],
     suggestResearchSources: suggestResearchSourcesParsed,
+    structuredUpload:
+      o.structuredUpload
+      && typeof o.structuredUpload === "object"
+      && typeof (o.structuredUpload as { profile?: unknown }).profile === "string"
+      && (o.structuredUpload as { structured?: unknown }).structured
+        ? (o.structuredUpload as { profile: string; structured: StructuredResume })
+        : null,
   };
 }
 
@@ -596,8 +607,12 @@ export default function ResumeBuilder({
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Latest PDF extract text — used to merge into saved Profile */
   const lastResumeExtractRef = useRef<string>("");
-  /** Structured resume from the upload pipeline — paired with the profile text to avoid re-parsing on generate. */
-  const structuredUploadRef = useRef<{ profile: string; structured: StructuredResume } | null>(null);
+  /** Structured resume from the upload pipeline — paired with the profile text to avoid re-parsing on generate.
+   *  Initialized from the persisted draft so the Tailor preview keeps rendering from
+   *  typed fields after a reload (otherwise candidateProfile is restored but this ref is null). */
+  const structuredUploadRef = useRef<{ profile: string; structured: StructuredResume } | null>(
+    builderSession0?.structuredUpload ?? null,
+  );
   /** Object URL for the last uploaded PDF — powers true PDF highlights in suggestions (revoked on replace / unmount). */
   const sourcePdfBlobUrlRef = useRef<string | null>(null);
   const [uploadedPdfDataUrl, setUploadedPdfDataUrl] = useState<string | null>(
@@ -655,6 +670,10 @@ export default function ResumeBuilder({
       suggestResearchDigest,
       suggestResearchQueries,
       suggestResearchSources,
+      // Ref, not state — persisted opportunistically whenever another field
+      // changes. On upload, candidateProfile changes in the same tick the ref is
+      // set, so this captures it; restored into the ref on next mount.
+      structuredUpload: structuredUploadRef.current,
     });
   }, [
     candidateProfile,
