@@ -7,8 +7,8 @@ export type BrandVariant = "resunova" | "umbc";
 
 /** Public site + legal pages */
 export const SITE_URL       = "https://www.resunova.io";
-export const CONTACT_EMAIL  = "parthbhodia08@gmail.com";
-export const PRIVACY_EMAIL  = "parthbhodia08@gmail.com";
+export const CONTACT_EMAIL  = "contact@resunova.io";
+export const PRIVACY_EMAIL  = "contact@resunova.io";
 
 export const MODEL_NAME    = "AI";
 export const MODEL_TAGLINE = "Tailored resume engine";
