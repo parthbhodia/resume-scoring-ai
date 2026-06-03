@@ -1,7 +1,7 @@
 "use client";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { TBResumeData, TBFont } from "./types";
-import { getPageWidth, getStylePreset } from "./templateStyles";
+import { getResumePageWidth, getResumeStylePreset } from "@/lib/resumeLayout";
 
 function parseBullets(raw: string): string[] {
   return raw.split("\n").map((l) => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
@@ -13,7 +13,7 @@ function makeBoldFamily(font: TBFont): string {
   return "Helvetica-Bold";
 }
 
-function makeStyles(font: TBFont, accent: string, stylePreset = getStylePreset(), pageWidth = getPageWidth()) {
+function makeStyles(font: TBFont, accent: string, stylePreset = getResumeStylePreset(), pageWidth = getResumePageWidth()) {
   const bold = makeBoldFamily(font);
   return StyleSheet.create({
     page: {
@@ -79,8 +79,8 @@ interface Props { data: TBResumeData }
 
 export default function ResumePDFTemplate({ data }: Props) {
   const { profile, workExperiences, educations, projects, skills, customization } = data;
-  const preset = getStylePreset(customization?.stylePreset);
-  const pageWidth = getPageWidth(customization?.pageWidth);
+  const preset = getResumeStylePreset(customization?.stylePreset);
+  const pageWidth = getResumePageWidth(customization?.pageWidth);
   const font = customization?.font ?? preset.font;
   const accent = customization?.accentColor ?? preset.accentColor;
   const styles = makeStyles(font, accent, preset, pageWidth);

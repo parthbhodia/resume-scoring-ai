@@ -22,6 +22,14 @@ import {
   normalizeForMatch,
   type LiveBulletItem,
 } from "@/lib/resumeBulletMatch";
+import {
+  RESUME_BULLET_STYLESHEET,
+  RESUME_PAGE_WIDTH,
+  bulletsBlockStyle,
+  isTechnologiesLine,
+  paragraphBlockStyle,
+  type ResumeSectionRole,
+} from "@/lib/resumeLayout";
 
 export type { LiveBulletItem } from "@/lib/resumeBulletMatch";
 export { findBulletIndexForLine, normalizeForMatch } from "@/lib/resumeBulletMatch";
@@ -707,15 +715,6 @@ function renderSkillsLine(text: string): ReactNode {
   );
 }
 
-type ResumeSectionRole =
-  | "education"
-  | "experience"
-  | "skills"
-  | "projects"
-  | "summary"
-  | "activities"
-  | "other";
-
 const RESUME_HEADING_FONT = "var(--az-resume-heading-font, 'Georgia', 'Times New Roman', serif)";
 const RESUME_BODY_FONT = "var(--az-resume-body-font, 'Georgia', 'Times New Roman', serif)";
 const RESUME_UI_FONT = "var(--az-resume-ui-font, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)";
@@ -1027,12 +1026,19 @@ export default function AnalyzeLiveResumeBody({
   const popupRef = useRef<HTMLDivElement>(null);
   const popupDragOffsetRef = useRef<{ dx: number; dy: number } | null>(null);
 
+  const structuredPreviewActive = isStructuredUsable(structuredResume);
+
   const blocks = useMemo(() => {
-    // Structured path: render directly from typed fields — no text-parse heuristics.
-    if (isStructuredUsable(structuredResume)) {
+    // Primary path: typed structuredResume (vision extract) — no line-parse heuristics.
+    if (structuredPreviewActive) {
       return buildBlocksFromStructured(structuredResume!, bulletAnalysis);
     }
-    // Fallback: legacy/restored-history or Word-doc payloads without structured data.
+    // Tailor marks structured authoritative: never silently re-parse flat text (that
+    // bypasses section order, per-company tech, and WYSIWYG parity with synthesize.py).
+    if (structuredResumeAuthoritative) {
+      return [];
+    }
+    // Analyze only: legacy saved runs / payloads without structuredResume in storage.
     const lines = extractedText.split(/\r?\n/).map(normalizeExtractLine);
     const result = buildBlocks(lines, bulletAnalysis);
     const inferBasis = (headerInferenceText ?? "").trim() || extractedText.trim();
@@ -1041,7 +1047,15 @@ export default function AnalyzeLiveResumeBody({
       result.unshift({ type: "header", lines: [...headerLines] });
     }
     return result;
-  }, [structuredResume, extractedText, bulletAnalysis, resumeHeader, headerInferenceText]);
+  }, [
+    structuredPreviewActive,
+    structuredResume,
+    structuredResumeAuthoritative,
+    extractedText,
+    bulletAnalysis,
+    resumeHeader,
+    headerInferenceText,
+  ]);
 
   useEffect(() => {
     if (popup == null) return;
@@ -1103,9 +1117,12 @@ export default function AnalyzeLiveResumeBody({
     <div style={{
       background: "var(--resume-paper-bg)",
       color: "var(--resume-paper-ink)",
-      padding: "var(--az-resume-paper-padding, 32px 36px 52px)",
+      boxSizing: "border-box",
+      width: RESUME_PAGE_WIDTH,
+      maxWidth: "100%",
+      padding: "var(--az-resume-paper-padding, 36px 48px)",
       fontFamily: RESUME_BODY_FONT,
-      fontSize: "var(--az-resume-base-font-size, 10.8px)",
+      fontSize: "var(--az-resume-base-font-size, 10.5px)",
       lineHeight: "var(--az-resume-line-height, 1.45)",
       minHeight: 120,
       overflowWrap: "anywhere",
@@ -1116,40 +1133,14 @@ export default function AnalyzeLiveResumeBody({
           0%   { outline: 2px solid rgba(234,179,8,0.95); outline-offset: 1px; }
           100% { outline: 2px solid transparent; outline-offset: 8px; }
         }
-        .az-resume-bullet {
-          position: relative;
-          padding: 3px 8px 3px 12px;
-          border-radius: 3px;
-          margin-bottom: 2px;
-          cursor: default;
-          transition: background 0.12s;
-        }
-        .az-resume-bullet::before {
-          content: "•";
-          position: absolute;
-          left: 1px;
-          top: 4px;
-          color: var(--resume-paper-dim);
-          font-size: 10px;
-          line-height: 1.45;
-        }
-        /* Clean PDF export — strip all annotation chrome */
-        .az-clean-export .az-resume-bullet {
-          border-left-color: transparent !important;
-          background: transparent !important;
-          box-shadow: none !important;
-          animation: none !important;
-          cursor: default !important;
-        }
-        .az-clean-export .az-score-badge,
-        .az-clean-export .az-preview-applied-mark {
-          display: none !important;
-        }
+        ${RESUME_BULLET_STYLESHEET}
       `}</style>
 
       {blocks.length === 0 && (
-        <div style={{ color: "var(--resume-paper-muted)", fontStyle: "italic", textAlign: "center", padding: "32px 0" }}>
-          No extractable résumé text.
+        <div style={{ color: "var(--resume-paper-muted)", fontStyle: "italic", textAlign: "center", padding: "32px 0", lineHeight: 1.5, fontSize: 11 }}>
+          {structuredResumeAuthoritative && !structuredPreviewActive
+            ? "Structured preview unavailable. Re-upload your PDF on this flow so we can render from the extracted résumé model (not plain-text guessing)."
+            : "No extractable résumé text."}
         </div>
       )}
 
@@ -1179,14 +1170,14 @@ export default function AnalyzeLiveResumeBody({
           }
 
           return (
-            <div key={bi} style={{ textAlign: "left", marginBottom: 14 }}>
+            <div key={bi} style={{ textAlign: "left", marginBottom: "var(--az-resume-contact-margin-bottom, 16px)" }}>
               {nameLine && (
                 <div style={{
                   fontSize: "var(--az-resume-name-size, 22px)",
                   fontWeight: 700,
                   letterSpacing: 0.3,
                   color: "var(--resume-paper-ink)",
-                  marginBottom: 3,
+                  marginBottom: "var(--az-resume-header-name-margin-bottom, 3px)",
                   fontFamily: RESUME_HEADING_FONT,
                 }}>
                   {renderInline(nameLine)}
@@ -1198,11 +1189,11 @@ export default function AnalyzeLiveResumeBody({
                   flexWrap: "wrap",
                   justifyContent: "flex-start",
                   alignItems: "center",
-                  gap: "0 6px",
-                  fontSize: 9.6,
+                  gap: 4,
+                  fontSize: "calc(var(--az-resume-body-font-size, 10px) + 0.3px)",
                   color: "var(--resume-paper-muted)",
                   fontFamily: RESUME_BODY_FONT,
-                  lineHeight: 1.5,
+                  lineHeight: 1.4,
                 }}>
                   {contactItems.map((item, ci) => (
                     <span key={ci} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -1221,7 +1212,7 @@ export default function AnalyzeLiveResumeBody({
           return (
             <div key={bi} style={{
               marginTop: "var(--az-resume-section-margin-top, 11px)",
-              marginBottom: 6,
+              marginBottom: "var(--az-resume-section-title-margin-bottom, 6px)",
               paddingBottom: 2,
               borderBottom: "0.5px solid var(--resume-paper-accent)",
               fontSize: "var(--az-resume-section-size, 10.5px)",
@@ -1249,13 +1240,13 @@ export default function AnalyzeLiveResumeBody({
               : blk.lines;
 
           return (
-            <div key={bi} style={{ marginBottom: inEducationSection ? (presentationOnly ? 2 : 3) : presentationOnly ? 4 : 5 }}>
+            <div key={bi} style={paragraphBlockStyle(sectionRole, paragraphLines)}>
               {paragraphLines.map((ln, li) => {
                 const t = ln.trim();
                 if (!t || isPlaceholderIdentityLine(ln)) return null;
                 if (looksLikeEntryHeader(t)) {
                   return (
-                    <div key={li} style={{ marginBottom: inEducationSection ? 0 : li === 0 ? 2 : 1 }}>
+                    <div key={li} style={{ marginBottom: inEducationSection ? 0 : 1 }}>
                       <EntryHeaderLine line={t} />
                     </div>
                   );
@@ -1288,12 +1279,17 @@ export default function AnalyzeLiveResumeBody({
                     : tailorHl === "gap"
                       ? TAILOR_GAP_HIGHLIGHT
                       : undefined;
+                const summaryLine = sectionRole === "summary";
                 return (
                   <div key={li} style={{
-                    fontSize: inEducationSection ? 10.25 : 10.4,
+                    fontSize: summaryLine
+                      ? "var(--az-resume-body-font-size, 10px)"
+                      : inEducationSection ? 10.25 : "var(--az-resume-body-font-size, 10px)",
                     color: "var(--resume-paper-ink)",
-                    lineHeight: inEducationSection ? 1.28 : 1.48,
-                    marginBottom: inEducationSection ? 0 : 2,
+                    lineHeight: summaryLine
+                      ? "var(--az-resume-summary-line-height, 1.5)"
+                      : inEducationSection ? 1.28 : "var(--az-resume-line-height, 1.45)",
+                    marginBottom: isTechnologiesLine(t) ? 0 : summaryLine ? 0 : inEducationSection ? 0 : 0,
                     fontFamily: RESUME_BODY_FONT,
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
@@ -1311,8 +1307,9 @@ export default function AnalyzeLiveResumeBody({
 
         /* ── Bullet rows ── */
         const bulletRows = collapseAdjacentSameBulletRows(blk.items, bulletAnalysis);
+        const bulletSectionRole = currentSectionRole(blocks, bi);
         return (
-          <div key={bi} style={{ marginBottom: presentationOnly ? 7 : 10, marginTop: presentationOnly ? 2 : 4 }}>
+          <div key={bi} style={bulletsBlockStyle(bulletSectionRole)}>
             {bulletRows.map(({ rawLine, bulletIdx }, ii) => {
               const bullet = bulletAnalysis[bulletIdx];
 
@@ -1331,16 +1328,13 @@ export default function AnalyzeLiveResumeBody({
                   <div
                     key={`neutral-${bi}-${ii}`}
                     data-bullet-idx={-1}
-                    className="az-resume-bullet"
+                    className={`az-resume-bullet${presentationOnly ? " az-resume-bullet--tailor" : ""}`}
                     style={{
-                      marginBottom: 4,
-                      marginLeft: 2,
-                      lineHeight: 1.42,
-                      padding: presentationOnly ? "5px 7px 6px 14px" : "6px 8px 8px 14px",
-                      borderRadius: 4,
+                      marginLeft: 0,
+                      lineHeight: "var(--az-resume-line-height, 1.45)",
                     }}
                   >
-                    <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+                    <span style={{ flex: 1, fontSize: "var(--az-resume-body-font-size, 10px)", lineHeight: "inherit", color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                       {renderMetricLineWithLabel(neutralText)}
                     </span>
                   </div>
@@ -1391,7 +1385,7 @@ export default function AnalyzeLiveResumeBody({
                 <div
                   key={`${bulletIdx}-${bi}-${ii}`}
                   data-bullet-idx={bulletIdx}
-                  className="az-resume-bullet"
+                  className={`az-resume-bullet${presentationOnly ? " az-resume-bullet--tailor" : ""}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     // Only open the "AI Suggestion" popup when there's an
@@ -1417,11 +1411,8 @@ export default function AnalyzeLiveResumeBody({
                     onBulletLinkedSelect?.(bulletIdx);
                   }}
                   style={{
-                    marginBottom: 4,
-                    marginLeft: 2,
-                    lineHeight: 1.42,
-                    padding: presentationOnly ? "5px 7px 6px 14px" : "6px 8px 8px 14px",
-                    borderRadius: 4,
+                    marginLeft: 0,
+                    lineHeight: "var(--az-resume-line-height, 1.45)",
                     background: bgTint,
                     borderLeft: leftBar,
                     boxShadow: isSelected ? "inset 0 0 0 1.5px var(--resume-paper-accent)" : undefined,
@@ -1437,7 +1428,7 @@ export default function AnalyzeLiveResumeBody({
                       </span>
                     )}
 
-                    <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+                    <span style={{ flex: 1, fontSize: "var(--az-resume-body-font-size, 10px)", lineHeight: "inherit", color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                       {renderMetricLineWithLabel(showText)}
                       {previewLineApplied && (
                         <span className="az-pdf-ignore az-preview-applied-mark"
