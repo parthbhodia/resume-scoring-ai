@@ -6,6 +6,46 @@ from typing import List
 
 from resume_gui.renderers.latex_renderer import ResumeDocModel
 
+_ACTION_VERB_PREFIXES = (
+    "Built ", "Designed ", "Engineered ", "Architected ", "Developed ", "Delivered ",
+    "Implemented ", "Led ", "Created ", "Launched ", "Managed ", "Drove ", "Optimized ",
+    "Integrated ", "Automated ", "Reduced ", "Improved ", "Won ", "Achieved ", "Spearheaded ",
+)
+
+
+def _strip_leading_markers(text: str) -> str:
+    """Remove any leading bullet / list markers a vision extract may have kept
+    (``*``, ``-``, ``•``, ``·``, ``▪``, ``◦``, ``>``) so the synthesizer adds
+    exactly one ``• `` and the frontend's CSS bullet never doubles up."""
+    return re.sub(r"^[\s•\-–—*·◦▪▸→>]+", "", text or "").strip()
+
+
+def _looks_like_tech_stack_line(text: str) -> bool:
+    """A project's first 'bullet' is often the tech stack, not an achievement.
+
+    Tech-stack lines look like ``Vue Js, REST API, Mongo DB`` or
+    ``React · Node · PostgreSQL`` — short, separator-delimited token lists with no
+    leading action verb and no sentence punctuation. Achievement bullets ("Won 2nd
+    place at...", "Built a progressive web app...") must NOT match.
+    """
+    s = (text or "").strip()
+    if not s or len(s) > 90:
+        return False
+    if s.startswith(_ACTION_VERB_PREFIXES):
+        return False
+    # Sentence-like content disqualifies it (period mid-line, or ends with a period).
+    if ". " in s or s.endswith("."):
+        return False
+    # Must be a delimited list of a few short tokens.
+    parts = re.split(r"\s*[,·|]\s*", s)
+    parts = [p for p in parts if p]
+    if len(parts) < 2:
+        return False
+    # Every token short (tech names, not clauses) and the whole line is few words.
+    if any(len(p.split()) > 4 for p in parts):
+        return False
+    return len(s.split()) <= 14
+
 def _synthesize_text_from_resume_doc(doc: ResumeDocModel) -> str:
     """Produce a clean text representation of a ResumeDocModel for the preview
     + analysis prompt.
@@ -76,7 +116,7 @@ def _synthesize_text_from_resume_doc(doc: ResumeDocModel) -> str:
             if cleaned_degree:
                 out.append(cleaned_degree)
             for b in (e.bullets or []):
-                bs = (b or "").strip()
+                bs = _strip_leading_markers(b)
                 if bs:
                     out.append(f"• {bs}")
             out.append("")
@@ -94,7 +134,7 @@ def _synthesize_text_from_resume_doc(doc: ResumeDocModel) -> str:
             if header_pieces:
                 out.append(" | ".join(header_pieces))
             for b in (w.bullets or []):
-                bs = (b or "").strip()
+                bs = _strip_leading_markers(b)
                 if bs:
                     out.append(f"• {bs}")
             out.append("")
@@ -105,12 +145,13 @@ def _synthesize_text_from_resume_doc(doc: ResumeDocModel) -> str:
         out.extend(["", "PROJECTS"])
         for p in doc.projects:
             name_p = (p.name or "").strip()
-            bullets = [b.strip() for b in (p.bullets or []) if b and b.strip()]
+            bullets = [m for b in (p.bullets or []) if (m := _strip_leading_markers(b))]
             # First bullet may be the tech stack (synthesized that way by
-            # _vision_raw_to_resume_doc). Promote it onto the project header
-            # line for nicer rendering.
-            tech = ""
-            if bullets and " · " in bullets[0] and not bullets[0].startswith(("Built ", "Designed ", "Engineered ", "Architected ", "Developed ", "Delivered ", "Implemented ")):
+            # _vision_raw_to_resume_doc, or mis-classified by vision extract).
+            # Promote it onto the project header line for nicer rendering so it
+            # doesn't render as a stray achievement bullet.
+            tech = (p.tech or "").strip()
+            if not tech and bullets and _looks_like_tech_stack_line(bullets[0]):
                 tech = bullets[0]
                 bullets = bullets[1:]
             if name_p and tech:

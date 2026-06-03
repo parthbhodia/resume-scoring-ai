@@ -205,3 +205,39 @@ SQL, Python
     block = extraction_guard_prompt_block(inv)
     assert "education[]" in block.lower()
     assert "MUST" in block
+
+
+# ── Project tech-stack + bullet-marker synthesis ──────────────────────────
+
+from resume_gui.extract.synthesize import (
+    _looks_like_tech_stack_line,
+    _strip_leading_markers,
+)
+
+
+def test_tech_stack_line_detection():
+    # Tech-stack lines (comma/mid-dot separated short token lists)
+    assert _looks_like_tech_stack_line("Vue Js, REST API, Mongo DB")
+    assert _looks_like_tech_stack_line("React · Node · PostgreSQL")
+    assert _looks_like_tech_stack_line("Python, Docker, AWS Lambda, gRPC")
+    # Achievement bullets must NOT be mistaken for tech stacks
+    assert not _looks_like_tech_stack_line(
+        "Won 2nd place at the CBIC Entrepreneurship at UMBC out of 25+ teams. "
+        "I developed a progressive web app using OCR."
+    )
+    assert not _looks_like_tech_stack_line(
+        "Built a progressive web app using OCR to identify allergens"
+    )
+    assert not _looks_like_tech_stack_line(
+        "Designed a PostgreSQL schema supporting a high-traffic CMS"
+    )
+    # A single token is not a delimited list
+    assert not _looks_like_tech_stack_line("Python")
+
+
+def test_strip_leading_markers():
+    assert _strip_leading_markers("* Won 2nd place") == "Won 2nd place"
+    assert _strip_leading_markers("• • Built X") == "Built X"
+    assert _strip_leading_markers("- Designed Y") == "Designed Y"
+    assert _strip_leading_markers("Plain text") == "Plain text"
+    assert _strip_leading_markers("  ◦ Indented") == "Indented"
