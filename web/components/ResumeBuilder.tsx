@@ -2304,65 +2304,7 @@ export default function ResumeBuilder({
                     Upload or confirm your content, then compile. For fonts/header fine-tuning beyond these presets, use the gallery editor, then return here.
                   </p>
                 </div>
-              ) : (
-                <div style={{ marginBottom: 40 }} className="rb-hero">
-                  <div className="fade-in rb-hero-title" style={{
-                    fontSize: 52, fontWeight: 800, lineHeight: 1.05,
-                    letterSpacing: -2, marginBottom: 14, color: "var(--text)",
-                  }}>
-                    Tailor your résumé to{" "}
-                    <span style={{ color: "var(--accent)" }}>any</span>
-                    <br />job description.
-                  </div>
-                  <p className="fade-in stagger-1" style={{
-                    fontSize: 15, color: "var(--muted)", lineHeight: 1.65,
-                    marginBottom: 28, maxWidth: 520, letterSpacing: -0.1,
-                  }}>
-                    Upload, paste the job, review suggestions, download a tailored ATS PDF.
-                    Uses your chosen template — not a copy of your original file.
-                  </p>
-                  <div className="fade-in stagger-2" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {[
-                      { n: 1, label: "Upload résumé" },
-                      { n: 2, label: "Paste job posting" },
-                      { n: 3, label: "Review suggestions" },
-                      { n: 4, label: "Generate PDF" },
-                    ].map(({ n, label }) => (
-                      <div key={n} style={{
-                        display: "flex", alignItems: "center", gap: 8,
-                        padding: "6px 12px 6px 8px",
-                        background: "var(--surface)", border: "1px solid var(--border)",
-                        borderRadius: 24, fontSize: 12.5, color: "var(--muted)",
-                        letterSpacing: -0.1,
-                      }}>
-                        <span style={{
-                          width: 20, height: 20, borderRadius: "50%",
-                          background: "var(--accent)",
-                          display: "inline-flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0,
-                        }}>{n}</span>
-                        {label}
-                      </div>
-                    ))}
-                  </div>
-                  {!studioHandoff && (
-                    <div className="rb-tailor-keyword-preview" style={{ marginTop: 36 }}>
-                      <LandingPreviewStyles />
-                      <div style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        letterSpacing: "0.12em",
-                        textTransform: "uppercase",
-                        color: "var(--dim)",
-                        marginBottom: 12,
-                      }}>
-                        Keyword gap preview
-                      </div>
-                      <VariantC embedded />
-                    </div>
-                  )}
-                </div>
-              )}
+              ) : null}
             </>
           )}
 
