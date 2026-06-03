@@ -1,6 +1,7 @@
 """Role-neutral prompt builder for suggest-gap-fix."""
 from __future__ import annotations
 
+from resume_gui.tailor.gap_fix_schema import SUGGEST_GAP_FIX_SCHEMA
 from resume_gui.tailor.requirement_match.role_family import classify_role_family
 
 _GENERAL_EXAMPLES = """\
