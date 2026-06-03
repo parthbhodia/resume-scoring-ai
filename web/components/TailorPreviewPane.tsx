@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import AnnotatedResumePanel from "@/components/AnnotatedResumePanel";
 import type { LiveBulletItem } from "@/lib/resumeBulletMatch";
+import type { StructuredResume } from "@/store/resumeAnalyzeStore";
 
 interface Props {
   extractedText: string;
@@ -11,6 +12,8 @@ interface Props {
   role?: string;
   /** Analyze-style bullet index map for preview highlights. */
   bulletAnalysis?: LiveBulletItem[];
+  /** Structured resume (from /api/upload-resume) — renders the preview from typed fields. */
+  structuredResume?: StructuredResume | null;
   previewLineOverrides?: Record<number, string>;
   gapFixTargetBulletIndices?: number[];
   tailorAppliedBulletIndices?: ReadonlySet<number>;
@@ -31,6 +34,7 @@ export default function TailorPreviewPane({
   company = "",
   role = "",
   bulletAnalysis = [],
+  structuredResume = null,
   previewLineOverrides = {},
   gapFixTargetBulletIndices = [],
   tailorAppliedBulletIndices = new Set<number>(),
@@ -52,6 +56,8 @@ export default function TailorPreviewPane({
       previewLineOverrides={previewLineOverrides}
       patchPreviewLine={noopPatch}
       extractedText={extractedText.trim() || null}
+      structuredResume={structuredResume}
+      structuredResumeAuthoritative
       resumeHeader={resumeHeader}
       presentationOnly
       exportPdfEnabled

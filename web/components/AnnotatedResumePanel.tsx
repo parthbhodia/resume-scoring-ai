@@ -14,7 +14,7 @@ import {
   type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
 import { useHtmlPdfExport } from "@/hooks/useHtmlPdfExport";
-import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
+import { useResumeAnalyzeStore, type StructuredResume } from "@/store/resumeAnalyzeStore";
 import { ownerSlugFromProfile } from "@/lib/resumeFileName";
 
 // Re-export for legacy imports from this file path
@@ -56,6 +56,12 @@ interface Props {
   builderOpening?: boolean;
   /** Full plain text from the PDF / TeX — same extract the analyzer used. */
   extractedText?: string | null;
+  /** Structured resume for the Tailor flow — renders the preview from typed fields
+   *  (Analyze reads this from the Zustand store instead). */
+  structuredResume?: StructuredResume | null;
+  /** Tailor sets this so its (possibly null) structuredResume prop is authoritative
+   *  and a stale Analyze-store value can't leak into the Tailor preview. */
+  structuredResumeAuthoritative?: boolean;
   /** Name + contact lines from backend — guaranteed header fallback. */
   resumeHeader?: string[];
   /** Right column: résumé tint only; edits and rewrites stay in the work column. */
@@ -272,6 +278,8 @@ export default function AnnotatedResumePanel({
   selectedBulletIndex = null,
   onBulletLinkedSelect,
   extractedText,
+  structuredResume = null,
+  structuredResumeAuthoritative = false,
   resumeHeader,
   onOpenBuilder,
   builderReady = false,
@@ -1002,6 +1010,8 @@ export default function AnnotatedResumePanel({
                 extractedText={effectiveExtracted}
                 headerInferenceText={fullExtract}
                 resumeHeader={resumeHeader}
+                structuredResume={structuredResume}
+                structuredResumeAuthoritative={structuredResumeAuthoritative}
                 bulletAnalysis={bulletAnalysis}
                 activeCategory={activeCategory}
                 rewriteEdits={rewriteEdits}

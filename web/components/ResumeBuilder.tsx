@@ -1177,6 +1177,16 @@ export default function ResumeBuilder({
     );
   }, [gapFixPanel, tailorBulletAnalysis, effectiveCandidateProfile]);
 
+  // Render the Tailor preview from the structured upload doc only while the
+  // current profile text is still the uploaded one (gap-fix edits live in
+  // tailorLineOverrides, not candidateProfile, so this holds through fixes).
+  // If the user edited the profile text directly, fall back to text parsing.
+  const tailorStructuredResume = useMemo<StructuredResume | null>(() => {
+    const up = structuredUploadRef.current;
+    if (!up) return null;
+    return up.profile === (candidateProfile ?? "").trim() ? up.structured : null;
+  }, [candidateProfile, tailorBulletAnalysis]);
+
   const getSuggestions = useCallback(async (
     focusGaps?: Array<{ name: string; score: number }>,
   ) => {
@@ -3206,6 +3216,7 @@ export default function ResumeBuilder({
                     company={company}
                     role={role}
                     bulletAnalysis={tailorPreviewBullets}
+                    structuredResume={tailorStructuredResume}
                     previewLineOverrides={tailorLineOverrides}
                     gapFixTargetBulletIndices={gapFixTargetIndices}
                     tailorAppliedBulletIndices={tailorAppliedBulletIndices}

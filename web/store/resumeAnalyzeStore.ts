@@ -23,6 +23,20 @@ export interface StructuredResumeExperience {
   bullets: string[];
 }
 
+export interface StructuredResumeEducation {
+  institution: string;
+  degree: string;
+  dates: string;
+  location: string;
+  bullets: string[];
+}
+
+export interface StructuredResumeProject {
+  name: string;
+  tech: string;
+  bullets: string[];
+}
+
 export interface StructuredResumeSkill {
   category: string;
   items: string[];
@@ -44,13 +58,41 @@ export interface StructuredResume {
   summary: string;
   skills: StructuredResumeSkill[];
   experience: StructuredResumeExperience[];
+  education: StructuredResumeEducation[];
+  projects: StructuredResumeProject[];
   extra_sections: StructuredResumeExtraSection[];
+  section_order?: string[];
 }
 
 /** Maps flat bulletAnalysis[flatIdx] → position in structuredResume.experience. */
 export interface BulletMapEntry {
   experienceIdx: number;
   bulletIdx: number;
+}
+
+/** Coerce a backend structured payload into a fully-populated StructuredResume.
+ *  Legacy / partial payloads may omit education/projects/section_order — default
+ *  them to [] so consumers never have to null-check those arrays. */
+export function normalizeStructuredResume(
+  s: StructuredResume | null | undefined,
+): StructuredResume | null {
+  if (!s) return null;
+  return {
+    full_name: s.full_name ?? "",
+    headline: s.headline ?? "",
+    location: s.location ?? "",
+    email: s.email ?? "",
+    phone: s.phone ?? "",
+    linkedin: s.linkedin ?? "",
+    github: s.github ?? "",
+    summary: s.summary ?? "",
+    skills: Array.isArray(s.skills) ? s.skills : [],
+    experience: Array.isArray(s.experience) ? s.experience : [],
+    education: Array.isArray(s.education) ? s.education : [],
+    projects: Array.isArray(s.projects) ? s.projects : [],
+    extra_sections: Array.isArray(s.extra_sections) ? s.extra_sections : [],
+    section_order: Array.isArray(s.section_order) ? s.section_order : undefined,
+  };
 }
 
 export interface ResumeAnalyzeHydratePayload {
@@ -218,7 +260,7 @@ export const useResumeAnalyzeStore = create<ResumeAnalyzeStore>((set, get) => ({
       resumeHeader: payload.resumeHeader ?? [],
       analysisBullets: bullets,
       annotationByIndex,
-      structuredResume: payload.structuredResume ?? null,
+      structuredResume: normalizeStructuredResume(payload.structuredResume),
       bulletMap: payload.bulletMap ?? [],
       ...emptyEdits(),
       pulseBulletIndex: null,

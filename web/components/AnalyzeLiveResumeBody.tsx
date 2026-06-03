@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
+import { useResumeAnalyzeStore, type StructuredResume } from "@/store/resumeAnalyzeStore";
 import type { CSSProperties, ReactNode } from "react";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
@@ -171,6 +171,191 @@ export function buildBlocks(lines: string[], bulletAnalysis: LiveBulletItem[]): 
   return blocks;
 }
 
+// ── Structured-data block builder ──────────────────────────────────────────
+// Builds the SAME Block[] shape as buildBlocks() but directly from the typed
+// structuredResume fields — no text-parsing heuristics. This kills the whole
+// class of parse bugs (double bullets, tech-stack-as-bullet, stray markers)
+// because section boundaries, entry headers, project tech, and the
+// "exactly-one-bullet-marker" rule come from typed fields, not guesses.
+// Bullet→analysis identity still uses the fuzzy matcher (findBulletIndexForLine)
+// because bulletAnalysis is a sparse weakest-only subset — see plan.
+
+/** Leading list markers a vision/LLM extract may keep on a bullet. */
+const _LEADING_MARKER_RE = /^[\s•\-–—*·◦▪▸→>]+/u;
+
+function _cleanBullet(raw: string): string {
+  return (raw || "").replace(_LEADING_MARKER_RE, "").trim();
+}
+
+/** Join non-empty pieces with " | " for an entry-header line. */
+function _entryHeaderLine(...pieces: Array<string | undefined>): string {
+  return pieces.map((p) => (p || "").trim()).filter(Boolean).join(" | ");
+}
+
+const _ACTION_VERB_RE =
+  /^(Built|Designed|Engineered|Architected|Developed|Delivered|Implemented|Led|Created|Launched|Managed|Drove|Optimized|Integrated|Automated|Reduced|Improved|Won|Achieved|Spearheaded)\b/i;
+
+/** A project's first "bullet" is often the tech stack, not an achievement
+ *  (e.g. "Vue Js, REST API, Mongo DB"). Mirrors backend
+ *  `_looks_like_tech_stack_line` in resume_gui/extract/synthesize.py so the
+ *  structured path promotes it onto the `name | tech` header instead of
+ *  rendering it as a stray bullet. */
+function _looksLikeTechStackLine(text: string): boolean {
+  const s = (text || "").trim();
+  if (!s || s.length > 90) return false;
+  if (_ACTION_VERB_RE.test(s)) return false;
+  if (s.includes(". ") || s.endsWith(".")) return false;
+  const parts = s.split(/\s*[,·|]\s*/).filter(Boolean);
+  if (parts.length < 2) return false;
+  if (parts.some((p) => p.split(/\s+/).length > 4)) return false;
+  return s.split(/\s+/).length <= 14;
+}
+
+/** True when the structured payload has enough real content to render from. */
+export function isStructuredUsable(s: StructuredResume | null | undefined): boolean {
+  if (!s) return false;
+  const hasIdentity = Boolean((s.full_name || "").trim() || (s.summary || "").trim()
+    || (s.email || "").trim() || (s.phone || "").trim());
+  const hasBody =
+    (s.experience?.some((e) => (e.role || e.company || "").trim() || (e.bullets?.length ?? 0) > 0) ?? false)
+    || (s.education?.some((e) => (e.institution || e.degree || "").trim()) ?? false)
+    || (s.projects?.some((p) => (p.name || "").trim() || (p.bullets?.length ?? 0) > 0) ?? false)
+    || (s.skills?.some((sk) => (sk.items?.length ?? 0) > 0) ?? false);
+  return hasIdentity && hasBody;
+}
+
+const _DEFAULT_SECTION_ORDER = ["summary", "experience", "education", "projects", "skills"];
+
+export function buildBlocksFromStructured(
+  s: StructuredResume,
+  bulletAnalysis: LiveBulletItem[],
+): Block[] {
+  const blocks: Block[] = [];
+
+  // ── Header ──
+  const headerLines: string[] = [];
+  if ((s.full_name || "").trim()) headerLines.push(s.full_name.trim());
+  const contact = [s.email, s.phone, s.linkedin, s.github]
+    .map((c) => (c || "").trim())
+    .filter(Boolean)
+    .join(" | ");
+  if (contact) headerLines.push(contact);
+  if ((s.location || "").trim() && !contact.includes(s.location.trim())) {
+    headerLines.push(s.location.trim());
+  }
+  if (headerLines.length) blocks.push({ type: "header", lines: headerLines });
+
+  // Bullets block builder — fuzzy-match each bullet to its (sparse) analysis entry.
+  const pushBullets = (rawBullets: string[]) => {
+    const items = rawBullets
+      .map((b) => _cleanBullet(b))
+      .filter(Boolean)
+      .map((clean) => ({
+        rawLine: `• ${clean}`,
+        bulletIdx: findBulletIndexForLine(clean, bulletAnalysis),
+      }));
+    if (items.length) blocks.push({ type: "bullets", items });
+  };
+
+  const emitSection = (key: string) => {
+    switch (key) {
+      case "summary": {
+        const sum = (s.summary || "").trim();
+        if (!sum) return;
+        blocks.push({ type: "section", text: "SUMMARY" });
+        blocks.push({ type: "paragraph", lines: [sum] });
+        return;
+      }
+      case "experience": {
+        const rows = (s.experience || []).filter(
+          (e) => (e.role || e.company || "").trim() || (e.bullets?.length ?? 0) > 0,
+        );
+        if (!rows.length) return;
+        blocks.push({ type: "section", text: "EXPERIENCE" });
+        for (const e of rows) {
+          const head = _entryHeaderLine(e.role, e.company, e.location, e.dates);
+          if (head) blocks.push({ type: "paragraph", lines: [head] });
+          pushBullets(e.bullets || []);
+        }
+        return;
+      }
+      case "education": {
+        const rows = (s.education || []).filter((e) => (e.institution || e.degree || "").trim());
+        if (!rows.length) return;
+        blocks.push({ type: "section", text: "EDUCATION" });
+        for (const e of rows) {
+          const head = _entryHeaderLine(e.institution, e.location, e.dates);
+          const para: string[] = [];
+          if (head) para.push(head);
+          if ((e.degree || "").trim()) para.push(e.degree.trim());
+          for (const b of e.bullets || []) {
+            const c = _cleanBullet(b);
+            if (c) para.push(`• ${c}`);
+          }
+          if (para.length) blocks.push({ type: "paragraph", lines: para });
+        }
+        return;
+      }
+      case "projects": {
+        const rows = (s.projects || []).filter(
+          (p) => (p.name || "").trim() || (p.bullets?.length ?? 0) > 0,
+        );
+        if (!rows.length) return;
+        blocks.push({ type: "section", text: "PROJECTS" });
+        for (const p of rows) {
+          let tech = (p.tech || "").trim();
+          let bullets = (p.bullets || []).map((b) => _cleanBullet(b)).filter(Boolean);
+          // Promote a tech-stack first bullet onto the header when tech is empty.
+          if (!tech && bullets.length && _looksLikeTechStackLine(bullets[0])) {
+            tech = bullets[0];
+            bullets = bullets.slice(1);
+          }
+          const head = _entryHeaderLine(p.name, tech);
+          if (head) blocks.push({ type: "paragraph", lines: [head] });
+          pushBullets(bullets);
+        }
+        return;
+      }
+      case "skills": {
+        const rows = (s.skills || []).filter((sk) => (sk.items?.length ?? 0) > 0);
+        if (!rows.length) return;
+        blocks.push({ type: "section", text: "SKILLS" });
+        const lines = rows.map((sk) => {
+          const label = (sk.category || "").trim();
+          const items = (sk.items || []).map((i) => i.trim()).filter(Boolean).join(", ");
+          return label ? `${label}: ${items}` : items;
+        });
+        if (lines.length) blocks.push({ type: "paragraph", lines });
+        return;
+      }
+    }
+  };
+
+  const order = (s.section_order && s.section_order.length ? s.section_order : _DEFAULT_SECTION_ORDER)
+    .map((k) => k.toLowerCase());
+  const seen = new Set<string>();
+  for (const key of order) {
+    if (seen.has(key)) continue;
+    seen.add(key);
+    emitSection(key);
+  }
+  // Any known section not named in section_order still renders (defensive).
+  for (const key of _DEFAULT_SECTION_ORDER) {
+    if (!seen.has(key)) { seen.add(key); emitSection(key); }
+  }
+
+  // Extra sections (activities, certifications, etc.) appended last.
+  for (const extra of s.extra_sections || []) {
+    const title = (extra.title || "").trim();
+    const lines = (extra.lines || []).map((l) => (l || "").trim()).filter(Boolean);
+    if (!title || !lines.length) continue;
+    blocks.push({ type: "section", text: title.toUpperCase() });
+    blocks.push({ type: "paragraph", lines });
+  }
+
+  return blocks;
+}
+
 /** Mirrors backend `_CONTACT_ANCHOR` — find identity block when PDF line order is wrong. */
 const HEADER_CONTACT_ANCHOR =
   /@|linkedin\.com\/|www\.linkedin\.com\/|github\.com\/|www\.github\.com\/|\bportfolio\b|\bsite\b|\bmobile\b|\bphone\b|[\[(]?\d{3}[\])]?[\s.-]?\d{3}[\s.-]?\d{4}/i;
@@ -269,7 +454,11 @@ function collapseAdjacentSameBulletRows(
 
   for (const it of items) {
     const prev = out[out.length - 1];
-    if (prev && prev.bulletIdx === it.bulletIdx) {
+    // Only collapse wrapped lines that mapped to the SAME real analysis bullet.
+    // bulletIdx === -1 means "no analysis entry" (the common case for the
+    // structured builder) — those are distinct complete bullets and must NOT
+    // merge with each other.
+    if (prev && prev.bulletIdx === it.bulletIdx && it.bulletIdx >= 0) {
       const canon = bullets[it.bulletIdx]?.originalBullet?.trim();
       prev.rawLine = canon && canon.length > 0 ? canon : `${prev.rawLine} ${it.rawLine}`.replace(/\s+/g, " ").trim();
       continue;
@@ -700,6 +889,13 @@ interface Props {
   headerInferenceText?: string | null;
   resumeHeader?: string[];
   bulletAnalysis: LiveBulletItem[];
+  /** Structured resume for the Tailor flow (from /api/upload-resume). Takes precedence
+   *  over the Analyze Zustand store when provided; falls back to the store for Analyze. */
+  structuredResume?: StructuredResume | null;
+  /** When true, `structuredResume` (prop) is authoritative — never fall back to the
+   *  Analyze Zustand store. Set by the Tailor flow so a stale Analyze-store structured
+   *  doc can't leak into the Tailor preview. */
+  structuredResumeAuthoritative?: boolean;
   activeCategory: string | null;
   rewriteEdits: Record<number, string>;
   patchBulletRewrite: (bulletIndex: number, value: string | null) => void;
@@ -725,6 +921,8 @@ export default function AnalyzeLiveResumeBody({
   headerInferenceText = null,
   resumeHeader,
   bulletAnalysis,
+  structuredResume: structuredResumeProp = null,
+  structuredResumeAuthoritative = false,
   activeCategory,
   rewriteEdits,
   patchBulletRewrite,
@@ -749,12 +947,24 @@ export default function AnalyzeLiveResumeBody({
   const acceptedBullets = useResumeAnalyzeStore((s) => s.acceptedBullets);
   const acceptBullet = useResumeAnalyzeStore((s) => s.acceptBullet);
   const unacceptBullet = useResumeAnalyzeStore((s) => s.unacceptBullet);
+  const structuredFromStore = useResumeAnalyzeStore((s) => s.structuredResume);
+  // Tailor passes the structured doc as a prop (it lives in component state, not the
+  // Analyze store) and marks it authoritative so a stale store value can't leak in.
+  // Analyze leaves the prop null and reads the hydrated store.
+  const structuredResume = structuredResumeAuthoritative
+    ? structuredResumeProp
+    : (structuredResumeProp ?? structuredFromStore);
   const [popup, setPopup] = useState<PopupState | null>(null);
   const [popupDraft, setPopupDraft] = useState<string>("");
   const popupRef = useRef<HTMLDivElement>(null);
   const popupDragOffsetRef = useRef<{ dx: number; dy: number } | null>(null);
 
   const blocks = useMemo(() => {
+    // Structured path: render directly from typed fields — no text-parse heuristics.
+    if (isStructuredUsable(structuredResume)) {
+      return buildBlocksFromStructured(structuredResume!, bulletAnalysis);
+    }
+    // Fallback: legacy/restored-history or Word-doc payloads without structured data.
     const lines = extractedText.split(/\r?\n/).map(normalizeExtractLine);
     const result = buildBlocks(lines, bulletAnalysis);
     const inferBasis = (headerInferenceText ?? "").trim() || extractedText.trim();
@@ -762,18 +972,8 @@ export default function AnalyzeLiveResumeBody({
     if (shouldPrependIdentityHeader(result, headerLines)) {
       result.unshift({ type: "header", lines: [...headerLines] });
     }
-    if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
-      const trimmed8 = lines.slice(0, 8).map((l) => l.trim());
-      const firstNonEmpty = lines.map((l) => l.trim()).find((t) => t.length > 0) ?? "";
-      const firstLineBulletIdx = firstNonEmpty
-        ? findBulletIndexForLine(firstNonEmpty, bulletAnalysis)
-        : -1;
-      console.log("[ResumePreview] first 8 lines (trimmed):", trimmed8);
-      console.log("[ResumePreview] first non-empty line bullet match index:", firstLineBulletIdx);
-      console.log("[ResumePreview] blocks[0] (after header fallback):", result[0] ?? null);
-    }
     return result;
-  }, [extractedText, bulletAnalysis, resumeHeader, headerInferenceText]);
+  }, [structuredResume, extractedText, bulletAnalysis, resumeHeader, headerInferenceText]);
 
   useEffect(() => {
     if (popup == null) return;
@@ -1050,7 +1250,37 @@ export default function AnalyzeLiveResumeBody({
           <div key={bi} style={{ marginBottom: presentationOnly ? 7 : 10, marginTop: presentationOnly ? 2 : 4 }}>
             {bulletRows.map(({ rawLine, bulletIdx }, ii) => {
               const bullet = bulletAnalysis[bulletIdx];
-              if (!bullet) return null;
+
+              // Neutral render for bullets with no analysis entry (bulletIdx < 0 /
+              // not in the sparse weakest-only bulletAnalysis). These are the
+              // majority of bullets on the structured path; they must still
+              // render — just without score badge, popup, ✦, or category
+              // highlight. Keep `.az-resume-bullet` so the CSS marker + indent
+              // and the PDF clean-export path still apply.
+              if (!bullet) {
+                const neutralText = softenRunOnExtractLine(
+                  rawLine.replace(/^[\s•\-–—*·◦▪▸→>]+/, "").trimStart(),
+                );
+                if (!neutralText) return null;
+                return (
+                  <div
+                    key={`neutral-${bi}-${ii}`}
+                    data-bullet-idx={-1}
+                    className="az-resume-bullet"
+                    style={{
+                      marginBottom: 4,
+                      marginLeft: 2,
+                      lineHeight: 1.42,
+                      padding: presentationOnly ? "5px 7px 6px 14px" : "6px 8px 8px 14px",
+                      borderRadius: 4,
+                    }}
+                  >
+                    <span style={{ flex: 1, fontSize: 10.65, lineHeight: 1.45, color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+                      {renderMetricLineWithLabel(neutralText)}
+                    </span>
+                  </div>
+                );
+              }
 
               const nm = normalizeForMatch(rawLine);
               const showTextRaw = previewLineOverrides[bulletIdx] ?? (nm.length >= 8 ? nm : bullet.originalBullet);
