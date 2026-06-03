@@ -211,6 +211,68 @@ function _looksLikeTechStackLine(text: string): boolean {
   return s.split(/\s+/).length <= 14;
 }
 
+/** Vision extract often puts per-employer stacks in extra_sections as
+ *  "Technologies (Adobe)", "TECHNOLOGIES - COMPANY", etc. Bare "Technologies"
+ *  (no company) stays a global extra section. Mirrors synthesize.py. */
+function _companyFromTechnologiesExtraTitle(title: string): string | null {
+  const m = (title || "")
+    .trim()
+    .match(/^technologies\s*(?:\(\s*(.+?)\s*\)|[-–—:|]\s*(.+))\s*$/i);
+  if (!m) return null;
+  return (m[1] || m[2] || "").trim() || null;
+}
+
+function _normalizeCompanyKey(company: string): string {
+  return normalizeForMatch(company)
+    .replace(/\b(incorporated|inc|llc|ltd|limited|corp|corporation|co|company)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _partitionCompanyTechExtras(
+  extras: StructuredResume["extra_sections"],
+): { techByCompany: Map<string, string[]>; otherExtras: StructuredResume["extra_sections"] } {
+  const techByCompany = new Map<string, string[]>();
+  const otherExtras: StructuredResume["extra_sections"] = [];
+  for (const extra of extras || []) {
+    const company = _companyFromTechnologiesExtraTitle(extra.title || "");
+    const lines = (extra.lines || []).map((l) => (l || "").trim()).filter(Boolean);
+    if (company && lines.length) {
+      const key = _normalizeCompanyKey(company);
+      if (key) {
+        const prev = techByCompany.get(key) || [];
+        techByCompany.set(key, [...prev, ...lines]);
+        continue;
+      }
+    }
+    otherExtras.push(extra);
+  }
+  return { techByCompany, otherExtras };
+}
+
+function _techLinesForExperience(
+  exp: { company?: string },
+  techByCompany: Map<string, string[]>,
+): string[] {
+  const expKey = _normalizeCompanyKey(exp.company || "");
+  if (!expKey) return [];
+  if (techByCompany.has(expKey)) return techByCompany.get(expKey)!;
+  for (const [parsedKey, lines] of techByCompany) {
+    if (parsedKey.includes(expKey) || expKey.includes(parsedKey)) return lines;
+  }
+  return [];
+}
+
+/** Paragraph line(s) for tech under a job — uses "Technologies:" so renderLabeledLine styles it. */
+function _companyTechParagraphLines(rawLines: string[]): string[] {
+  const cleaned = rawLines
+    .map((l) => l.replace(/^technologies\s*:\s*/i, "").trim())
+    .filter(Boolean);
+  if (!cleaned.length) return [];
+  if (cleaned.some((l) => /^[^:]+:\s*.+/.test(l))) return cleaned;
+  return [`Technologies: ${cleaned.join(", ")}`];
+}
+
 /** True when the structured payload has enough real content to render from. */
 export function isStructuredUsable(s: StructuredResume | null | undefined): boolean {
   if (!s) return false;
@@ -234,6 +296,7 @@ export function buildBlocksFromStructured(
   bulletAnalysis: LiveBulletItem[],
 ): Block[] {
   const blocks: Block[] = [];
+  const { techByCompany, otherExtras } = _partitionCompanyTechExtras(s.extra_sections);
 
   // ── Header ──
   const headerLines: string[] = [];
@@ -279,6 +342,8 @@ export function buildBlocksFromStructured(
           const head = _entryHeaderLine(e.role, e.company, e.location, e.dates);
           if (head) blocks.push({ type: "paragraph", lines: [head] });
           pushBullets(e.bullets || []);
+          const techLines = _companyTechParagraphLines(_techLinesForExperience(e, techByCompany));
+          if (techLines.length) blocks.push({ type: "paragraph", lines: techLines });
         }
         return;
       }
@@ -347,7 +412,8 @@ export function buildBlocksFromStructured(
   }
 
   // Extra sections (activities, certifications, etc.) appended last.
-  for (const extra of s.extra_sections || []) {
+  // Per-company "Technologies (…)" blocks are merged under experience above.
+  for (const extra of otherExtras) {
     const title = (extra.title || "").trim();
     const lines = (extra.lines || []).map((l) => (l || "").trim()).filter(Boolean);
     if (!title || !lines.length) continue;

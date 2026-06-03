@@ -6,6 +6,16 @@ from typing import List
 
 from resume_gui.renderers.latex_renderer import ResumeDocModel
 
+# Per-employer tech blocks: "Technologies (Adobe)", "TECHNOLOGIES - COMPANY", …
+_TECH_EXTRA_TITLE_RE = re.compile(
+    r"^technologies\s*(?:\(\s*(.+?)\s*\)|[-–—:|]\s*(.+))\s*$",
+    re.IGNORECASE,
+)
+_COMPANY_SUFFIX_RE = re.compile(
+    r"\b(incorporated|inc|llc|ltd|limited|corp|corporation|co|company)\b",
+    re.IGNORECASE,
+)
+
 _ACTION_VERB_PREFIXES = (
     "Built ", "Designed ", "Engineered ", "Architected ", "Developed ", "Delivered ",
     "Implemented ", "Led ", "Created ", "Launched ", "Managed ", "Drove ", "Optimized ",
@@ -45,6 +55,63 @@ def _looks_like_tech_stack_line(text: str) -> bool:
     if any(len(p.split()) > 4 for p in parts):
         return False
     return len(s.split()) <= 14
+
+
+def _company_from_technologies_extra_title(title: str) -> str | None:
+    m = _TECH_EXTRA_TITLE_RE.match((title or "").strip())
+    if not m:
+        return None
+    company = (m.group(1) or m.group(2) or "").strip()
+    return company or None
+
+
+def _normalize_company_key(company: str) -> str:
+    s = re.sub(r"[^\w\s]", " ", (company or "").lower())
+    s = _COMPANY_SUFFIX_RE.sub("", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _partition_company_tech_extras(
+    extra_sections: list[tuple[str, list[str]]] | None,
+) -> tuple[dict[str, list[str]], list[tuple[str, list[str]]]]:
+    tech_by_company: dict[str, list[str]] = {}
+    other_extras: list[tuple[str, list[str]]] = []
+    for title, lines in extra_sections or []:
+        company = _company_from_technologies_extra_title(title)
+        clean_lines = [(ln or "").strip() for ln in lines if (ln or "").strip()]
+        if company and clean_lines:
+            key = _normalize_company_key(company)
+            if key:
+                tech_by_company.setdefault(key, []).extend(clean_lines)
+                continue
+        other_extras.append((title, lines))
+    return tech_by_company, other_extras
+
+
+def _tech_lines_for_experience(company: str, tech_by_company: dict[str, list[str]]) -> list[str]:
+    exp_key = _normalize_company_key(company)
+    if not exp_key:
+        return []
+    if exp_key in tech_by_company:
+        return tech_by_company[exp_key]
+    for parsed_key, lines in tech_by_company.items():
+        if parsed_key in exp_key or exp_key in parsed_key:
+            return lines
+    return []
+
+
+def _company_tech_paragraph_lines(raw_lines: list[str]) -> list[str]:
+    cleaned = [
+        re.sub(r"^technologies\s*:\s*", "", ln, flags=re.IGNORECASE).strip()
+        for ln in raw_lines
+        if (ln or "").strip()
+    ]
+    if not cleaned:
+        return []
+    if any(re.match(r"^[^:]+:\s*.+", ln) for ln in cleaned):
+        return cleaned
+    return [f"Technologies: {', '.join(cleaned)}"]
+
 
 def _synthesize_text_from_resume_doc(doc: ResumeDocModel) -> str:
     """Produce a clean text representation of a ResumeDocModel for the preview
@@ -123,6 +190,8 @@ def _synthesize_text_from_resume_doc(doc: ResumeDocModel) -> str:
         if out and out[-1] == "":
             out.pop()
 
+    tech_by_company, other_extras = _partition_company_tech_extras(doc.extra_sections)
+
     if doc.experience:
         out.extend(["", "EXPERIENCE"])
         for w in doc.experience:
@@ -137,6 +206,8 @@ def _synthesize_text_from_resume_doc(doc: ResumeDocModel) -> str:
                 bs = _strip_leading_markers(b)
                 if bs:
                     out.append(f"• {bs}")
+            for line in _company_tech_paragraph_lines(_tech_lines_for_experience(company, tech_by_company)):
+                out.append(line)
             out.append("")
         if out and out[-1] == "":
             out.pop()
@@ -173,7 +244,7 @@ def _synthesize_text_from_resume_doc(doc: ResumeDocModel) -> str:
             label = (cat or "Skills").strip() or "Skills"
             out.append(f"{label}: {', '.join(items_clean)}")
 
-    for title, lines in (doc.extra_sections or []):
+    for title, lines in other_extras:
         title_clean = (title or "").strip()
         if not title_clean or not lines:
             continue

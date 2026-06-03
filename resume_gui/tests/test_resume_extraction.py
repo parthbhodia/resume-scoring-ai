@@ -210,9 +210,12 @@ SQL, Python
 # ── Project tech-stack + bullet-marker synthesis ──────────────────────────
 
 from resume_gui.extract.synthesize import (
+    _company_from_technologies_extra_title,
     _looks_like_tech_stack_line,
     _strip_leading_markers,
+    _synthesize_text_from_resume_doc,
 )
+from resume_gui.renderers.latex_renderer import ExperienceItem, ResumeDocModel
 
 
 def test_tech_stack_line_detection():
@@ -241,3 +244,28 @@ def test_strip_leading_markers():
     assert _strip_leading_markers("- Designed Y") == "Designed Y"
     assert _strip_leading_markers("Plain text") == "Plain text"
     assert _strip_leading_markers("  ◦ Indented") == "Indented"
+
+
+def test_company_from_technologies_extra_title():
+    assert _company_from_technologies_extra_title("Technologies (Adobe)") == "Adobe"
+    assert _company_from_technologies_extra_title("TECHNOLOGIES - Google") == "Google"
+    assert _company_from_technologies_extra_title("Technologies: Meta") == "Meta"
+    assert _company_from_technologies_extra_title("Technologies") is None
+    assert _company_from_technologies_extra_title("Skills") is None
+
+
+def test_synthesize_inlines_company_tech_under_experience():
+    doc = ResumeDocModel(
+        full_name="Test User",
+        experience=[
+            ExperienceItem(company="Adobe Inc", role="Engineer", bullets=["Shipped features"]),
+        ],
+        extra_sections=[("Technologies (Adobe)", ["Python, AWS, Spark"])],
+    )
+    text = _synthesize_text_from_resume_doc(doc)
+    lines = text.splitlines()
+    exp_idx = lines.index("EXPERIENCE")
+    tech_idx = next(i for i, ln in enumerate(lines) if ln.startswith("Technologies:"))
+    assert tech_idx > exp_idx
+    assert "Python, AWS, Spark" in lines[tech_idx]
+    assert not any(ln.strip().upper() == "TECHNOLOGIES (ADOBE)" for ln in lines)
