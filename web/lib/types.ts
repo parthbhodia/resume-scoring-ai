@@ -7,11 +7,16 @@ export interface Criterion {
 
 // ── Detailed ratings (new bifurcated schema) ──────────────────────────────
 
+export type GapStatus = "missing" | "resolved_by_user" | "verified_covered";
+
 export interface DetailedRatingItem {
+  id?: string;
   text: string;
-  context?: string;    // for covered items — evidence from resume
+  context?: string;    // for covered / resolved items — evidence or applied note
   analysis?: string;   // for missing items — gap + bridge suggestion
   locations?: number;  // for covered items — how many places in resume it appears
+  status?: GapStatus;
+  verification?: "deterministic" | "llm" | "user_applied";
 }
 
 export interface JobTitleReference {
@@ -24,6 +29,16 @@ export interface DetailedCategory {
   score: number;
   covered: DetailedRatingItem[];
   missing: DetailedRatingItem[];
+  /** User applied a fix; not yet verified by scorer / deterministic check */
+  resolved_by_user?: DetailedRatingItem[];
+}
+
+/** Gap the user acted on — sent to POST /api/analyze on rescore */
+export interface AddressedGapAction {
+  id: string;
+  label: string;
+  type: "qualification" | "responsibility" | "keyword";
+  appliedText?: string;
 }
 
 export interface JobTitleRating {

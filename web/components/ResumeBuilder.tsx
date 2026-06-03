@@ -41,10 +41,15 @@ import {
   type LiveBulletItem,
 } from "@/lib/resumeBulletMatch";
 import {
+  applyAddressedGapsToRatings,
   applyOptimisticGapAddressed,
+  isGapAddressed,
+  makeStableGapId,
   mergeRescorePreservingAddressedGaps,
   remapLineOverrides,
+  suggestionsWithDrafts,
 } from "@/lib/tailorGapFix";
+import type { AddressedGapAction } from "@/lib/types";
 import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { useSuggestionsStore } from "@/store/suggestionsStore";
@@ -581,14 +586,25 @@ export default function ResumeBuilder({
   // Gap-fix micro-suggestion panel state (Phase 1)
   const [gapFixLoading, setGapFixLoading] = useState<string | null>(null); // gap name being fetched
   type GapFixSuggestion = { id: string; section: string; original: string; suggested: string; reason: string; priority: string };
-  const [gapFixPanel, setGapFixPanel] = useState<{ gapName: string; gapNotes: string; suggestions: GapFixSuggestion[] } | null>(null);
+  const [gapFixPanel, setGapFixPanel] = useState<{
+    gapName: string;
+    gapNotes: string;
+    suggestions: GapFixSuggestion[];
+    gapType: AddressedGapAction["type"];
+  } | null>(null);
   const [gapFixError, setGapFixError] = useState<string | null>(null);
   /** True while a gap-fix suggestion is being applied + PDF compiled + rescored. */
   const [gapApplyBusy, setGapApplyBusy] = useState(false);
 
   // Phase 3 — Gap status tracking: which gap names have been addressed
   const [addressedGaps, setAddressedGaps] = useState<Set<string>>(new Set());
+  const [addressedGapActions, setAddressedGapActions] = useState<AddressedGapAction[]>([]);
+  const [gapFixDrafts, setGapFixDrafts] = useState<Record<string, string>>({});
   const [tailorRescoring, setTailorRescoring] = useState(false);
+
+  useEffect(() => {
+    setGapFixDrafts({});
+  }, [gapFixPanel?.gapName]);
 
   // Phase 2 — Inline bullet editor state
   const [bulletEditorOpen, setBulletEditorOpen] = useState(false);
@@ -1081,6 +1097,7 @@ export default function ResumeBuilder({
       setTailorLineOverrides({});
       setTailorAppliedBulletIndices(new Set());
       setAddressedGaps(new Set());
+      setAddressedGapActions([]);
       setResult({
         ...EMPTY_RESULT,
         ratings: data.ratings,
@@ -1122,6 +1139,7 @@ export default function ResumeBuilder({
           candidate_profile: prof,
           job_description: jd.trim(),
           include_bullet_analysis: true,
+          addressed_gaps: addressedGapActions,
         }),
       });
       if (!resp.ok) return false;
@@ -1133,7 +1151,11 @@ export default function ResumeBuilder({
       };
       if (data.error || !data.ratings) return false;
 
-      const mergedRatings = mergeRescorePreservingAddressedGaps(data.ratings, addressedGaps);
+      const mergedRatings = mergeRescorePreservingAddressedGaps(
+        data.ratings,
+        addressedGaps,
+        addressedGapActions,
+      );
       setResult((prev) => (prev ? { ...prev, ratings: mergedRatings } : prev));
 
       if (Array.isArray(data.bulletAnalysis) && data.bulletAnalysis.length > 0) {
@@ -1165,7 +1187,7 @@ export default function ResumeBuilder({
     } finally {
       setTailorRescoring(false);
     }
-  }, [candidateProfile, jd, tailorBulletAnalysis, tailorLineOverrides, addressedGaps, tailorAppliedBulletIndices]);
+  }, [candidateProfile, jd, tailorBulletAnalysis, tailorLineOverrides, addressedGaps, addressedGapActions, tailorAppliedBulletIndices]);
 
   /** Plain text with tailor bullet overrides applied (for gap-fix API + rescoring). */
   const effectiveCandidateProfile = useMemo(
@@ -1820,8 +1842,13 @@ export default function ResumeBuilder({
   }, [getSuggestions, selectSuggestion, setSuggestError, result?.ratings?.criteria]);
 
   /** Call /api/suggest-gap-fix for a single criterion, show micro-panel with targeted bullet rewrites. */
-  const handleFixGap = useCallback(async (gap: { name: string; notes: string }) => {
+  const handleFixGap = useCallback(async (gap: {
+    name: string;
+    notes: string;
+    type?: AddressedGapAction["type"];
+  }) => {
     if (!candidateProfile || !jd.trim()) return;
+    if (isGapAddressed(gap.name, addressedGaps, addressedGapActions)) return;
     setGapFixLoading(gap.name);
     setGapFixError(null);
     setGapFixPanel(null);
@@ -1841,13 +1868,18 @@ export default function ResumeBuilder({
       const suggs = (Array.isArray(data.suggestions) ? data.suggestions : []) as Array<{
         id: string; section: string; original: string; suggested: string; reason: string; priority: string;
       }>;
-      setGapFixPanel({ gapName: gap.name, gapNotes: gap.notes, suggestions: suggs });
+      setGapFixPanel({
+        gapName: gap.name,
+        gapNotes: gap.notes,
+        suggestions: suggs,
+        gapType: gap.type ?? "qualification",
+      });
     } catch (e: unknown) {
       setGapFixError(e instanceof Error ? e.message : "Could not get gap fixes. Please try again.");
     } finally {
       setGapFixLoading(null);
     }
-  }, [effectiveCandidateProfile, jd]);
+  }, [effectiveCandidateProfile, jd, addressedGaps, addressedGapActions]);
 
   /**
    * Apply one or more gap-fix suggestions to the HTML preview (Chromium export path — no LaTeX).
@@ -1860,7 +1892,18 @@ export default function ResumeBuilder({
     if (items.length === 0) return;
     const gapName = gapNameOverride ?? gapFixPanel?.gapName ?? "";
 
-    if (gapName) setAddressedGaps((prev) => new Set([...prev, gapName]));
+    const gapType: AddressedGapAction["type"] = gapFixPanel?.gapType ?? "qualification";
+    const draftedItems = suggestionsWithDrafts(items, gapFixDrafts);
+    const appliedText = draftedItems.map((s) => s.suggested).filter(Boolean).join("\n");
+
+    if (gapName) {
+      setAddressedGaps((prev) => new Set([...prev, gapName]));
+      setAddressedGapActions((prev) => {
+        const id = makeStableGapId(gapName, gapType);
+        if (prev.some((a) => a.id === id)) return prev;
+        return [...prev, { id, label: gapName, type: gapType, appliedText }];
+      });
+    }
     setGapFixPanel(null);
 
     setGapApplyBusy(true);
@@ -1878,7 +1921,7 @@ export default function ResumeBuilder({
         category: "strengthen_impact";
       }> = [];
 
-      for (const s of items) {
+      for (const s of draftedItems) {
         if (!s.original?.trim() || !s.suggested?.trim()) continue;
         const fixId = `gf_${Date.now()}_${s.id}`;
         newSuggestions.push({
@@ -1926,7 +1969,7 @@ export default function ResumeBuilder({
       if (gapName) {
         setResult((prev) => {
           if (!prev?.ratings) return prev;
-          return { ...prev, ratings: applyOptimisticGapAddressed(prev.ratings, gapName) };
+          return { ...prev, ratings: applyOptimisticGapAddressed(prev.ratings, gapName, gapType) };
         });
       }
 
@@ -1949,8 +1992,8 @@ export default function ResumeBuilder({
       setGapApplyBusy(false);
     }
   }, [candidateProfile, tailorBulletAnalysis, tailorLineOverrides, suggestions, suggestSummary,
-      strategicTips, interviewQuestions, hydrateSuggestions, acceptSuggestion, gapFixPanel, jd,
-      rescoreTailorRatings]);
+      strategicTips, interviewQuestions, hydrateSuggestions, acceptSuggestion, gapFixPanel, gapFixDrafts,
+      addressedGapActions, jd, rescoreTailorRatings]);
 
   const applyGapFix = useCallback(async (s: {
     id: string; section: string; original: string; suggested: string; reason: string; priority: string;
@@ -1965,7 +2008,11 @@ export default function ResumeBuilder({
   }, [applyGapFixes]);
 
   const ratings = result?.ratings;
-  const score   = ratings?.match_score ?? 0;
+  const displayRatings = useMemo(() => {
+    if (!ratings) return ratings;
+    return applyAddressedGapsToRatings(ratings, addressedGaps, addressedGapActions);
+  }, [ratings, addressedGaps, addressedGapActions]);
+  const score   = displayRatings?.match_score ?? ratings?.match_score ?? 0;
 
   /** Phase 2 — Parse candidateProfile into typed lines for the bullet editor. */
   const parsedProfileLines = useMemo(() => {
@@ -3102,10 +3149,10 @@ export default function ResumeBuilder({
               )}
 
               <section className="rb-tailor-workspace" aria-labelledby="rb-results-heading">
-              {ratings && isDetailedRatings(ratings) ? (
+              {displayRatings && isDetailedRatings(displayRatings) ? (
                 <>
                   <TailorMatchSidebar
-                    ratings={ratings}
+                    ratings={displayRatings}
                     hasSuggestions={suggestions.length > 0 && !generating}
                     strategicTips={strategicTips.length > 0 ? strategicTips : undefined}
                     interviewQuestions={interviewQuestions.length > 0 ? interviewQuestions : undefined}
@@ -3116,14 +3163,19 @@ export default function ResumeBuilder({
                   />
                   <div className="tb-split-work-slot">
                     <TailorMatchDetail
-                      ratings={ratings}
+                      ratings={displayRatings}
                       onFixGap={(item: DetailedRatingItem) => {
-                        void handleFixGap({ name: item.text, notes: item.analysis ?? "" });
+                        void handleFixGap({
+                          name: item.text,
+                          notes: item.analysis ?? "",
+                          type: "qualification",
+                        });
                       }}
                       onFixKeyword={(kw) => {
                         void handleFixGap({
                           name: kw,
                           notes: `This keyword is missing from the resume. Rewrite one of the most relevant existing bullets to naturally incorporate "${kw}" without fabricating experience.`,
+                          type: "keyword",
                         });
                       }}
                       fixingGapName={gapFixLoading}
@@ -3132,6 +3184,12 @@ export default function ResumeBuilder({
                       onApplyFix={applyGapFix}
                       onApplyAllGapFixes={applyAllGapFixes}
                       onDismissFix={() => setGapFixPanel(null)}
+                      addressedGaps={addressedGaps}
+                      addressedGapActions={addressedGapActions}
+                      gapFixDrafts={gapFixDrafts}
+                      onGapFixDraftChange={(id, text) => {
+                        setGapFixDrafts((prev) => ({ ...prev, [id]: text }));
+                      }}
                       keyGap={suggestSummary || undefined}
                       strategicTips={strategicTips.length > 0 ? strategicTips : undefined}
                       interviewQuestions={interviewQuestions.length > 0 ? interviewQuestions : undefined}
@@ -3187,6 +3245,10 @@ export default function ResumeBuilder({
                     onApplyFix={applyGapFix}
                     onDismissFix={() => setGapFixPanel(null)}
                     generating={generating}
+                    gapFixDrafts={gapFixDrafts}
+                    onGapFixDraftChange={(id, text) => {
+                      setGapFixDrafts((prev) => ({ ...prev, [id]: text }));
+                    }}
                   />
                   {/* Phase 3 — Re-score button when gaps have been addressed */}
                   {addressedGaps.size > 0 && (

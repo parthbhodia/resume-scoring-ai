@@ -225,6 +225,17 @@ def _parse_focus_gaps(raw: object) -> List[Dict[str, Any]]:
     return out
 
 
+def _category_with_resolved(raw: object) -> dict:
+    """Ensure detailed category buckets include resolved_by_user."""
+    if not isinstance(raw, dict):
+        return {"score": 0, "covered": [], "missing": [], "resolved_by_user": []}
+    out = dict(raw)
+    out.setdefault("covered", [])
+    out.setdefault("missing", [])
+    out.setdefault("resolved_by_user", [])
+    return out
+
+
 def _build_ratings_payload(llm_ratings: Optional[dict]) -> Optional[dict]:
     """Normalise _rate_resume output → the JSON shape the frontend expects.
 
@@ -282,8 +293,8 @@ def _build_ratings_payload(llm_ratings: Optional[dict]) -> Optional[dict]:
         "match_score": overall,
         "criteria": [],
         "job_title": llm_ratings.get("job_title") or {},
-        "qualifications": llm_ratings.get("qualifications") or {"score": 0, "covered": [], "missing": []},
-        "responsibilities": llm_ratings.get("responsibilities") or {"score": 0, "covered": [], "missing": []},
+        "qualifications": _category_with_resolved(llm_ratings.get("qualifications")),
+        "responsibilities": _category_with_resolved(llm_ratings.get("responsibilities")),
         "keywords": kw_payload,
         "whats_working": llm_ratings.get("whats_working") or [],
         "gaps": llm_ratings.get("gaps") or [],

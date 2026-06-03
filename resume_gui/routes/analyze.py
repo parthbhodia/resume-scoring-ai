@@ -221,7 +221,13 @@ async def api_analyze(request: Request):
     Used by the analyze-first tailor flow: user sees match score, gaps, and
     keywords BEFORE committing to a PDF compile.
 
-    Body:  { candidate_profile: str, job_description: str, model?: str }
+    Body:  {
+      candidate_profile: str,
+      job_description: str,
+      model?: str,
+      include_bullet_analysis?: bool,
+      addressed_gaps?: [{ id?, label, type?, appliedText? }],
+    }
     Returns: { ratings: <_build_ratings_payload output> }
     """
     try:
@@ -262,6 +268,17 @@ async def api_analyze(request: Request):
     ratings = _build_ratings_payload(llm_ratings)
     if ratings is None:
         return JSONResponse({"error": "model returned no usable ratings"}, status_code=502)
+
+    from resume_gui.tailor.gap_workflow import apply_gap_workflow, parse_addressed_gaps
+
+    addressed_gaps = parse_addressed_gaps(body.get("addressed_gaps"))
+    if addressed_gaps:
+        ratings = apply_gap_workflow(
+            ratings,
+            candidate_profile,
+            addressed_gaps,
+            job_description=job_description,
+        )
 
     payload: dict = {"ratings": ratings}
     if include_bullets and isinstance(analysis_raw, dict):

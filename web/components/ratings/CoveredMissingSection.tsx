@@ -1,17 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { accentCardBorder } from "@/lib/accentCardBorder";
-import type { DetailedCategory, DetailedRatingItem } from "@/lib/types";
-
-type GapFixSuggestion = {
-  id: string;
-  section: string;
-  original: string;
-  suggested: string;
-  reason: string;
-  priority: string;
-};
+import { isGapAddressed, suggestionsWithDrafts } from "@/lib/tailorGapFix";
+import type { AddressedGapAction, DetailedCategory, DetailedRatingItem } from "@/lib/types";
+import { GapFixSuggestionCard, type GapFixSuggestion } from "@/components/ratings/GapFixSuggestionCard";
 
 type GapFixPanel = {
   gapName: string;
@@ -30,6 +23,10 @@ type Props = {
   /** Apply all checked suggestions in one batch (preferred over per-item onApplyFix). */
   onApplyAllFixes?: (suggestions: GapFixSuggestion[]) => void | Promise<void>;
   onDismissFix?: () => void;
+  addressedGaps?: ReadonlySet<string>;
+  addressedGapActions?: readonly AddressedGapAction[];
+  gapFixDrafts?: Record<string, string>;
+  onGapFixDraftChange?: (id: string, text: string) => void;
 };
 
 export function CoveredMissingSection({
@@ -42,14 +39,22 @@ export function CoveredMissingSection({
   onApplyFix,
   onApplyAllFixes,
   onDismissFix,
+  addressedGaps,
+  addressedGapActions,
+  gapFixDrafts = {},
+  onGapFixDraftChange,
 }: Props) {
   const [coveredOpen, setCoveredOpen] = useState(true);
   const [missingOpen, setMissingOpen] = useState(true);
-  // Track which suggestions are checked (all checked by default)
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
-  // When a new panel opens, default all to checked
   const panelSuggestions = gapFixPanel?.suggestions ?? [];
+
+  useEffect(() => {
+    if (gapFixPanel?.gapName) {
+      setCheckedIds(new Set(panelSuggestions.map((s) => s.id)));
+    }
+  }, [gapFixPanel?.gapName, panelSuggestions.length]);
   const allPanelIds = panelSuggestions.map((s) => s.id);
   const effectiveChecked = checkedIds.size === 0 && panelSuggestions.length > 0
     ? new Set(allPanelIds)
@@ -64,7 +69,10 @@ export function CoveredMissingSection({
   };
 
   const covered = category.covered ?? [];
-  const missing = category.missing ?? [];
+  const resolved = category.resolved_by_user ?? [];
+  const missing = (category.missing ?? []).filter(
+    (item) => !isGapAddressed(item.text, addressedGaps ?? new Set(), addressedGapActions),
+  );
 
   return (
     <div>
@@ -101,6 +109,7 @@ export function CoveredMissingSection({
             {missing.map((item, i) => {
               const isFixing = fixingGapName === item.text;
               const isActivePanel = gapFixPanel?.gapName === item.text;
+              const isAddressed = isGapAddressed(item.text, addressedGaps ?? new Set(), addressedGapActions);
 
               return (
                 <div key={i}>
@@ -126,7 +135,7 @@ export function CoveredMissingSection({
                         <span style={{ fontSize: 12.5, color: "#f87171", lineHeight: 1.55 }}>{item.analysis}</span>
                       </div>
                     )}
-                    {onFixGap && !isActivePanel && (
+                    {onFixGap && !isActivePanel && !isAddressed && (
                       <button
                         type="button"
                         disabled={isFixing || !!fixingGapName}
@@ -205,7 +214,10 @@ export function CoveredMissingSection({
                           <button
                             type="button"
                             onClick={() => {
-                              const toApply = panelSuggestions.filter((s) => effectiveChecked.has(s.id));
+                              const toApply = suggestionsWithDrafts(
+                                panelSuggestions.filter((s) => effectiveChecked.has(s.id)),
+                                gapFixDrafts,
+                              );
                               if (toApply.length === 0) return;
                               if (onApplyAllFixes) {
                                 void onApplyAllFixes(toApply);
@@ -242,60 +254,16 @@ export function CoveredMissingSection({
                       {/* Bullet cards */}
                       {!gapFixError && panelSuggestions.length > 0 && (
                         <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                          {panelSuggestions.map((s) => {
-                            const checked = effectiveChecked.has(s.id);
-                            return (
-                              <div
-                                key={s.id}
-                                style={{
-                                  borderRadius: 10,
-                                  border: checked ? "1.5px solid rgba(99,102,241,0.35)" : "1px solid var(--border)",
-                                  background: checked ? "rgba(99,102,241,0.03)" : "var(--surface2)",
-                                  padding: "12px 14px",
-                                  transition: "border-color 0.15s, background 0.15s",
-                                }}
-                              >
-                                {/* Checkbox + section label */}
-                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleCheck(s.id)}
-                                    style={{
-                                      width: 18, height: 18, borderRadius: 5, flexShrink: 0,
-                                      border: checked ? "none" : "1.5px solid var(--border)",
-                                      background: checked ? "#6366f1" : "transparent",
-                                      display: "flex", alignItems: "center", justifyContent: "center",
-                                      cursor: "pointer", padding: 0,
-                                    }}
-                                  >
-                                    {checked && <span style={{ color: "#fff", fontSize: 11, lineHeight: 1 }}>✓</span>}
-                                  </button>
-                                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.2, textTransform: "uppercase" }}>{s.section}</span>
-                                </div>
-
-                                {/* Original bullet */}
-                                <div style={{ marginBottom: 8 }}>
-                                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 4 }}>Original bullet:</div>
-                                  <div style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.45 }}>
-                                    {s.original}
-                                  </div>
-                                </div>
-
-                                {/* Suggested correction */}
-                                <div style={{ marginBottom: 8 }}>
-                                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 4 }}>Suggested correction:</div>
-                                  <div style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(52,211,153,0.06)", border: "1px solid rgba(52,211,153,0.2)", fontSize: 12.5, color: "var(--green, #34d399)", lineHeight: 1.45 }}>
-                                    {s.suggested}
-                                  </div>
-                                </div>
-
-                                {/* Reason */}
-                                <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}>
-                                  <strong style={{ color: "var(--text)" }}>Fix explanation:</strong> {s.reason}
-                                </div>
-                              </div>
-                            );
-                          })}
+                          {panelSuggestions.map((s) => (
+                            <GapFixSuggestionCard
+                              key={s.id}
+                              suggestion={s}
+                              checked={effectiveChecked.has(s.id)}
+                              onToggleCheck={() => toggleCheck(s.id)}
+                              draftText={gapFixDrafts[s.id] ?? s.suggested}
+                              onDraftChange={(text) => onGapFixDraftChange?.(s.id, text)}
+                            />
+                          ))}
                         </div>
                       )}
                     </div>
@@ -307,7 +275,41 @@ export function CoveredMissingSection({
         )}
       </div>
 
-      {/* ── Covered section ──────────────────────────────── */}
+      {/* ── Applied (pending verification) ───────────────── */}
+      {resolved.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <div style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(245,158,11,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <span style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700 }}>◐</span>
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+              Applied — pending verification ({resolved.length})
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {resolved.map((item, i) => (
+              <div
+                key={item.id ?? i}
+                style={{
+                  padding: "16px 18px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(245,158,11,0.35)",
+                  background: "rgba(245,158,11,0.05)",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: item.context ? 8 : 0 }}>
+                  {item.text}
+                </div>
+                {item.context && (
+                  <span style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>{item.context}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Covered (verified) section ───────────────────── */}
       <div>
         <button
           type="button"
@@ -317,7 +319,7 @@ export function CoveredMissingSection({
           <div style={{ width: 22, height: 22, borderRadius: "50%", background: covered.length > 0 ? "rgba(52,211,153,0.15)" : "rgba(148,163,184,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <span style={{ fontSize: 12, color: "var(--green, #34d399)", fontWeight: 700 }}>✓</span>
           </div>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", textAlign: "left" }}>Covered {label} ({covered.length})</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", textAlign: "left" }}>Verified {label} ({covered.length})</span>
           <span style={{ fontSize: 12, color: "var(--dim)", marginLeft: "auto" }}>{coveredOpen ? "▾" : "▸"}</span>
         </button>
 

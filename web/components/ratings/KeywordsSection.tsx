@@ -1,16 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import type { KeywordsRating, ContextualKeyword } from "@/lib/types";
-
-type GapFixSuggestion = {
-  id: string;
-  section: string;
-  original: string;
-  suggested: string;
-  reason: string;
-  priority: string;
-};
+import { useEffect, useState } from "react";
+import { isGapAddressed, suggestionsWithDrafts } from "@/lib/tailorGapFix";
+import type { AddressedGapAction, KeywordsRating, ContextualKeyword } from "@/lib/types";
+import { GapFixSuggestionCard, type GapFixSuggestion } from "@/components/ratings/GapFixSuggestionCard";
 
 type GapFixPanel = {
   gapName: string;
@@ -27,6 +20,10 @@ type Props = {
   onApplyFix?: (s: GapFixSuggestion) => void | Promise<void>;
   onApplyAllFixes?: (suggestions: GapFixSuggestion[]) => void | Promise<void>;
   onDismissFix?: () => void;
+  addressedGaps?: ReadonlySet<string>;
+  addressedGapActions?: readonly AddressedGapAction[];
+  gapFixDrafts?: Record<string, string>;
+  onGapFixDraftChange?: (id: string, text: string) => void;
 };
 
 export function KeywordsSection({
@@ -38,20 +35,33 @@ export function KeywordsSection({
   onApplyFix,
   onApplyAllFixes,
   onDismissFix,
+  addressedGaps,
+  addressedGapActions,
+  gapFixDrafts = {},
+  onGapFixDraftChange,
 }: Props) {
-  // Normalise to categorised shape — handles both new and legacy flat schemas
+  const addressed = addressedGaps ?? new Set<string>();
   const dsFound: string[] = keywords.direct_skills?.found ?? keywords.found ?? [];
-  const dsMissing: string[] = keywords.direct_skills?.missing ?? keywords.missing ?? [];
+  const dsMissing: string[] = (keywords.direct_skills?.missing ?? keywords.missing ?? []).filter(
+    (kw) => !isGapAddressed(kw, addressed),
+  );
   const ctxFound: ContextualKeyword[] = keywords.contextual?.found ?? [];
-  const ctxMissing: string[] = keywords.contextual?.missing ?? [];
+  const ctxMissing: string[] = (keywords.contextual?.missing ?? []).filter(
+    (kw) => !isGapAddressed(kw, addressed),
+  );
 
   const totalFound = dsFound.length + ctxFound.length;
   const totalMissing = dsMissing.length + ctxMissing.length;
 
-  // Track checked suggestions in the active fix panel
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
   const panelSuggestions = gapFixPanel?.suggestions ?? [];
+
+  useEffect(() => {
+    if (gapFixPanel?.gapName) {
+      setCheckedIds(new Set(panelSuggestions.map((s) => s.id)));
+    }
+  }, [gapFixPanel?.gapName, panelSuggestions.length]);
   const allPanelIds = panelSuggestions.map((s) => s.id);
   const effectiveChecked =
     checkedIds.size === 0 && panelSuggestions.length > 0 ? new Set(allPanelIds) : checkedIds;
@@ -69,6 +79,7 @@ export function KeywordsSection({
   function MissingKeywordRow({ kw }: { kw: string }) {
     const isFixing = fixingKeyword === kw;
     const isActivePanel = gapFixPanel?.gapName === kw;
+    const isAddressed = isGapAddressed(kw, addressed, addressedGapActions);
 
     return (
       <div>
@@ -101,7 +112,7 @@ export function KeywordsSection({
                 ✕ Close
               </button>
             )}
-            {onFixKeyword && !isActivePanel && (
+            {onFixKeyword && !isActivePanel && !isAddressed && (
               <button
                 type="button"
                 disabled={isFixing || !!fixingKeyword}
@@ -176,7 +187,10 @@ export function KeywordsSection({
                 <button
                   type="button"
                   onClick={() => {
-                    const toApply = panelSuggestions.filter((s) => effectiveChecked.has(s.id));
+                    const toApply = suggestionsWithDrafts(
+                      panelSuggestions.filter((s) => effectiveChecked.has(s.id)),
+                      gapFixDrafts,
+                    );
                     if (toApply.length === 0) return;
                     if (onApplyAllFixes) {
                       void onApplyAllFixes(toApply);
@@ -215,59 +229,16 @@ export function KeywordsSection({
             {/* Suggestion cards */}
             {!gapFixError && panelSuggestions.length > 0 && (
               <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                {panelSuggestions.map((s) => {
-                  const checked = effectiveChecked.has(s.id);
-                  return (
-                    <div
-                      key={s.id}
-                      style={{
-                        borderRadius: 10,
-                        border: checked ? "1.5px solid rgba(99,102,241,0.35)" : "1px solid var(--border)",
-                        background: checked ? "rgba(99,102,241,0.03)" : "var(--surface2)",
-                        padding: "12px 14px",
-                        transition: "border-color 0.15s, background 0.15s",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                        <button
-                          type="button"
-                          onClick={() => toggleCheck(s.id)}
-                          style={{
-                            width: 18, height: 18, borderRadius: 5, flexShrink: 0,
-                            border: checked ? "none" : "1.5px solid var(--border)",
-                            background: checked ? "#6366f1" : "transparent",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            cursor: "pointer", padding: 0,
-                          }}
-                        >
-                          {checked && <span style={{ color: "#fff", fontSize: 11, lineHeight: 1 }}>✓</span>}
-                        </button>
-                        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)", letterSpacing: 0.2, textTransform: "uppercase" }}>
-                          {s.section}
-                        </span>
-                      </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 4 }}>
-                          Original bullet:
-                        </div>
-                        <div style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.45 }}>
-                          {s.original}
-                        </div>
-                      </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 4 }}>
-                          Suggested correction:
-                        </div>
-                        <div style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(52,211,153,0.06)", border: "1px solid rgba(52,211,153,0.2)", fontSize: 12.5, color: "var(--green, #34d399)", lineHeight: 1.45 }}>
-                          {s.suggested}
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}>
-                        <strong style={{ color: "var(--text)" }}>Fix explanation:</strong> {s.reason}
-                      </div>
-                    </div>
-                  );
-                })}
+                {panelSuggestions.map((s) => (
+                  <GapFixSuggestionCard
+                    key={s.id}
+                    suggestion={s}
+                    checked={effectiveChecked.has(s.id)}
+                    onToggleCheck={() => toggleCheck(s.id)}
+                    draftText={gapFixDrafts[s.id] ?? s.suggested}
+                    onDraftChange={(text) => onGapFixDraftChange?.(s.id, text)}
+                  />
+                ))}
               </div>
             )}
           </div>

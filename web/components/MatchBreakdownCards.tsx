@@ -1,16 +1,9 @@
 "use client";
 
 import type { Criterion } from "@/lib/types";
+import { isGapAddressed, suggestionsWithDrafts } from "@/lib/tailorGapFix";
 import { scoreColor, weightColor } from "@/lib/utils";
-
-type GapFixSuggestion = {
-  id: string;
-  section: string;
-  original: string;
-  suggested: string;
-  reason: string;
-  priority: string;
-};
+import { GapFixSuggestionCard, type GapFixSuggestion } from "@/components/ratings/GapFixSuggestionCard";
 
 type GapFixPanel = {
   gapName: string;
@@ -29,6 +22,8 @@ export default function MatchBreakdownCards({
   onApplyFix,
   onDismissFix,
   generating,
+  gapFixDrafts = {},
+  onGapFixDraftChange,
 }: {
   criteria: Criterion[];
   onImprove?: () => void;
@@ -40,6 +35,8 @@ export default function MatchBreakdownCards({
   onApplyFix?: (s: GapFixSuggestion) => void;
   onDismissFix?: () => void;
   generating?: boolean;
+  gapFixDrafts?: Record<string, string>;
+  onGapFixDraftChange?: (id: string, text: string) => void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -49,7 +46,7 @@ export default function MatchBreakdownCards({
         const weak = c.score <= 5;
         const notes = (c.notes ?? "").replace(/^\s+/, "").trimEnd();
         const isFixing = fixingGap === c.name;
-        const isAddressed = addressedGaps?.has(c.name) ?? false;
+        const isAddressed = isGapAddressed(c.name, addressedGaps ?? new Set());
         const isActivePanel = gapFixPanel?.gapName === c.name;
 
         return (
@@ -181,27 +178,34 @@ export default function MatchBreakdownCards({
                   </p>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {gapFixPanel!.suggestions.map((s, idx) => (
-                      <div
-                        key={idx}
-                        style={{ borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", padding: "10px 12px" }}
-                      >
-                        <div style={{ fontSize: 11, color: "var(--dim)", marginBottom: 5 }}>
-                          <span style={{ fontWeight: 600 }}>Was:</span> {s.original}
-                        </div>
-                        <div style={{ fontSize: 12.5, color: "var(--text)", lineHeight: 1.4, marginBottom: 6 }}>
-                          <span style={{ fontWeight: 600, color: "var(--accent)" }}>→ </span>{s.suggested}
-                        </div>
-                        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8, lineHeight: 1.4 }}>{s.reason}</div>
+                    {gapFixPanel!.suggestions.map((s) => (
+                      <div key={s.id}>
+                        <GapFixSuggestionCard
+                          suggestion={s}
+                          checked
+                          showCheckbox={false}
+                          onToggleCheck={() => {}}
+                          draftText={gapFixDrafts[s.id] ?? s.suggested}
+                          onDraftChange={(text) => onGapFixDraftChange?.(s.id, text)}
+                        />
                         {onApplyFix && (
                           <button
                             type="button"
                             disabled={generating}
-                            onClick={() => onApplyFix(s)}
+                            onClick={() => {
+                              const [drafted] = suggestionsWithDrafts([s], gapFixDrafts);
+                              void onApplyFix(drafted);
+                            }}
                             style={{
-                              padding: "5px 14px", borderRadius: 7, border: "none",
-                              background: "var(--accent)", color: "#fff",
-                              fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+                              marginTop: 8,
+                              padding: "5px 14px",
+                              borderRadius: 7,
+                              border: "none",
+                              background: "var(--accent)",
+                              color: "#fff",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              fontFamily: "inherit",
                               cursor: generating ? "not-allowed" : "pointer",
                               opacity: generating ? 0.6 : 1,
                             }}

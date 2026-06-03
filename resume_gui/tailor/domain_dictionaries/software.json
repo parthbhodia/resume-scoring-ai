@@ -1,0 +1,34 @@
+{
+  "entries": [
+    {
+      "canonical": "nuxt.js",
+      "aliases": ["nuxt", "nuxtjs", "nuxt js"],
+      "category": "software",
+      "confidence": "high"
+    },
+    {
+      "canonical": "vue.js",
+      "aliases": ["vue", "vuejs", "vue js"],
+      "category": "software",
+      "confidence": "high"
+    },
+    {
+      "canonical": "node.js",
+      "aliases": ["node", "nodejs", "node js"],
+      "category": "software",
+      "confidence": "high"
+    },
+    {
+      "canonical": "typescript",
+      "aliases": ["ts"],
+      "category": "software",
+      "confidence": "high"
+    },
+    {
+      "canonical": "aws lambda",
+      "aliases": ["lambda function", "serverless lambda"],
+      "category": "software",
+      "confidence": "high"
+    }
+  ]
+}

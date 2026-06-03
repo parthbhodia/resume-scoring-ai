@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { RatingsData, DetailedRatingItem } from "@/lib/types";
+import type { AddressedGapAction, RatingsData, DetailedRatingItem } from "@/lib/types";
 import { isDetailedRatings } from "@/lib/types";
 import { scoreColor } from "./ratings/scoreColor";
 import { OverallSection } from "./ratings/OverallSection";
@@ -68,6 +68,10 @@ type SharedProps = {
   onApplyFix?: (s: GapFixSuggestion) => void | Promise<void>;
   onApplyAllGapFixes?: (suggestions: GapFixSuggestion[]) => void | Promise<void>;
   onDismissFix?: () => void;
+  addressedGaps?: ReadonlySet<string>;
+  addressedGapActions?: readonly AddressedGapAction[];
+  gapFixDrafts?: Record<string, string>;
+  onGapFixDraftChange?: (id: string, text: string) => void;
   keyGap?: string;
   strategicTips?: string[];
   interviewQuestions?: string[];
@@ -337,6 +341,10 @@ export function TailorMatchDetail(props: SharedProps) {
     onApplyFix,
     onApplyAllGapFixes,
     onDismissFix,
+    addressedGaps,
+    addressedGapActions,
+    gapFixDrafts,
+    onGapFixDraftChange,
     keyGap,
     strategicTips,
     interviewQuestions,
@@ -399,13 +407,13 @@ export function TailorMatchDetail(props: SharedProps) {
         )}
         {activeTab === "job_title" && <JobTitleSection jobTitle={job_title} />}
         {activeTab === "qualifications" && (
-          <CoveredMissingSection category={qualifications} label="Qualifications" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} />
+          <CoveredMissingSection category={qualifications} label="Qualifications" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} addressedGaps={addressedGaps} addressedGapActions={addressedGapActions} gapFixDrafts={gapFixDrafts} onGapFixDraftChange={onGapFixDraftChange} />
         )}
         {activeTab === "responsibilities" && (
-          <CoveredMissingSection category={responsibilities} label="Responsibilities" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} />
+          <CoveredMissingSection category={responsibilities} label="Responsibilities" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} addressedGaps={addressedGaps} addressedGapActions={addressedGapActions} gapFixDrafts={gapFixDrafts} onGapFixDraftChange={onGapFixDraftChange} />
         )}
         {activeTab === "keywords" && (
-          <KeywordsSection keywords={keywords} onFixKeyword={onFixKeyword} fixingKeyword={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} />
+          <KeywordsSection keywords={keywords} onFixKeyword={onFixKeyword} fixingKeyword={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} addressedGaps={addressedGaps} addressedGapActions={addressedGapActions} gapFixDrafts={gapFixDrafts} onGapFixDraftChange={onGapFixDraftChange} />
         )}
         {activeTab === "interview" && (
           <InterviewSection keyGap={keyGap} tips={strategicTips} questions={interviewQuestions} onGetSuggestions={onGetSuggestions} suggestionsLoading={suggestionsLoading} />
