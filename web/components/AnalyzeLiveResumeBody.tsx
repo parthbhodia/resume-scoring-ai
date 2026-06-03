@@ -284,14 +284,23 @@ function _companyTechParagraphLines(rawLines: string[]): string[] {
 /** True when the structured payload has enough real content to render from. */
 export function isStructuredUsable(s: StructuredResume | null | undefined): boolean {
   if (!s) return false;
-  const hasIdentity = Boolean((s.full_name || "").trim() || (s.summary || "").trim()
-    || (s.email || "").trim() || (s.phone || "").trim());
+  const hasHeaderIdentity = Boolean(
+    (s.full_name || "").trim()
+    || (s.summary || "").trim()
+    || (s.email || "").trim()
+    || (s.phone || "").trim()
+    || (s.headline || "").trim(),
+  );
+  const firstExp = s.experience?.[0];
+  const hasEmployerIdentity = Boolean(
+    (firstExp?.company || "").trim() || (firstExp?.role || "").trim(),
+  );
   const hasBody =
     (s.experience?.some((e) => (e.role || e.company || "").trim() || (e.bullets?.length ?? 0) > 0) ?? false)
     || (s.education?.some((e) => (e.institution || e.degree || "").trim()) ?? false)
     || (s.projects?.some((p) => (p.name || "").trim() || (p.bullets?.length ?? 0) > 0) ?? false)
     || (s.skills?.some((sk) => (sk.items?.length ?? 0) > 0) ?? false);
-  return hasIdentity && hasBody;
+  return hasBody && (hasHeaderIdentity || hasEmployerIdentity);
 }
 
 // Matches the fixed section order emitted by resume_gui/extract/synthesize.py
@@ -1139,7 +1148,7 @@ export default function AnalyzeLiveResumeBody({
       {blocks.length === 0 && (
         <div style={{ color: "var(--resume-paper-muted)", fontStyle: "italic", textAlign: "center", padding: "32px 0", lineHeight: 1.5, fontSize: 11 }}>
           {structuredResumeAuthoritative && !structuredPreviewActive
-            ? "Structured preview unavailable. Re-upload your PDF on this flow so we can render from the extracted résumé model (not plain-text guessing)."
+            ? "Structured preview unavailable. Upload your PDF here, or run Match score — we'll extract a structured résumé model from your text (not plain-text guessing)."
             : "No extractable résumé text."}
         </div>
       )}
@@ -1324,6 +1333,15 @@ export default function AnalyzeLiveResumeBody({
                   rawLine.replace(/^[\s•\-–—*·◦▪▸→>]+/, "").trimStart(),
                 );
                 if (!neutralText) return null;
+                const tailorHl = presentationOnly
+                  ? tailorHighlightKind(neutralText, tailorGapFixHighlights, tailorAppliedHighlights)
+                  : null;
+                const tailorHlStyle =
+                  tailorHl === "applied"
+                    ? TAILOR_APPLIED_HIGHLIGHT
+                    : tailorHl === "gap"
+                      ? TAILOR_GAP_HIGHLIGHT
+                      : undefined;
                 return (
                   <div
                     key={`neutral-${bi}-${ii}`}
@@ -1332,6 +1350,7 @@ export default function AnalyzeLiveResumeBody({
                     style={{
                       marginLeft: 0,
                       lineHeight: "var(--az-resume-line-height, 1.45)",
+                      ...tailorHlStyle,
                     }}
                   >
                     <span style={{ flex: 1, fontSize: "var(--az-resume-body-font-size, 10px)", lineHeight: "inherit", color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>

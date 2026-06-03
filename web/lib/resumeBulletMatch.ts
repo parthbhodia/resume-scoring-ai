@@ -200,21 +200,15 @@ export function resolveBulletIndexForGapFix(
   return registerGapFixBullet(bullets, original, suggested, profileText);
 }
 
-/** Indices to purple-highlight while a gap-fix panel is open (virtual register for display). */
+/** Indices to purple-highlight while a gap-fix panel is open (existing analysis bullets only). */
 export function gapFixTargetBulletIndices(
   suggestions: Array<{ original: string; suggested: string }>,
   bullets: LiveBulletItem[],
   profileText: string,
 ): number[] {
-  const extended = [...bullets];
   const indices = new Set<number>();
   for (const s of suggestions) {
-    let idx = matchOriginalToBulletIndex(s.original, extended, profileText);
-    if (idx < 0) {
-      const reg = registerGapFixBullet(extended, s.original, s.suggested, profileText);
-      extended.splice(0, extended.length, ...reg.bullets);
-      idx = reg.index;
-    }
+    const idx = matchOriginalToBulletIndex(s.original, bullets, profileText);
     if (idx >= 0) indices.add(idx);
   }
   return [...indices];

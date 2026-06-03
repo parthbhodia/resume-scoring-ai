@@ -59,6 +59,12 @@ export default function TailorRecentJobs({ currentFolder, onPick }: Props) {
       const profile =
         typeof r.resume_doc?.profile === "string" ? r.resume_doc.profile : null;
       if (profile) sessionStorage.setItem("rn_builder_profile_prefill", profile);
+      const structured = r.resume_doc?.structured ?? r.resume_doc?.structuredResume;
+      if (structured && typeof structured === "object") {
+        try {
+          sessionStorage.setItem("rn_builder_structured_prefill", JSON.stringify(structured));
+        } catch { /* ignore */ }
+      }
     } catch { /* ignore */ }
 
     onPick?.();

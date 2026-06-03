@@ -47,8 +47,6 @@ export default function MatchBreakdownCards({
         const notes = (c.notes ?? "").replace(/^\s+/, "").trimEnd();
         const isFixing = fixingGap === c.name;
         const isAddressed = isGapAddressed(c.name, addressedGaps ?? new Set());
-        const isActivePanel = gapFixPanel?.gapName === c.name;
-
         return (
           <div key={i}>
             <div
@@ -143,82 +141,6 @@ export default function MatchBreakdownCards({
                 </div>
               ) : null}
             </div>
-
-            {/* Inline fix panel — appears directly under the card that was clicked */}
-            {isActivePanel && (
-              <div
-                style={{
-                  marginTop: 6,
-                  borderRadius: 12,
-                  border: "1px solid rgba(59,130,246,0.3)",
-                  background: "rgba(59,130,246,0.04)",
-                  padding: "14px 16px",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", letterSpacing: -0.2 }}>
-                    Suggested fixes for: <em style={{ fontStyle: "normal" }}>{gapFixPanel!.gapName}</em>
-                  </span>
-                  {onDismissFix && (
-                    <button
-                      type="button"
-                      onClick={onDismissFix}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 16, lineHeight: 1, padding: 4 }}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-
-                {gapFixError ? (
-                  <p style={{ margin: 0, fontSize: 12, color: "var(--error, #ef4444)" }}>{gapFixError}</p>
-                ) : gapFixPanel!.suggestions.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
-                    No targeted rewrites found — try &quot;Get full suggestions&quot; for a broader analysis.
-                  </p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {gapFixPanel!.suggestions.map((s) => (
-                      <div key={s.id}>
-                        <GapFixSuggestionCard
-                          suggestion={s}
-                          checked
-                          showCheckbox={false}
-                          onToggleCheck={() => {}}
-                          draftText={gapFixDrafts[s.id] ?? s.suggested}
-                          onDraftChange={(text) => onGapFixDraftChange?.(s.id, text)}
-                        />
-                        {onApplyFix && (
-                          <button
-                            type="button"
-                            disabled={generating}
-                            onClick={() => {
-                              const [drafted] = suggestionsWithDrafts([s], gapFixDrafts);
-                              void onApplyFix(drafted);
-                            }}
-                            style={{
-                              marginTop: 8,
-                              padding: "5px 14px",
-                              borderRadius: 7,
-                              border: "none",
-                              background: "var(--accent)",
-                              color: "#fff",
-                              fontSize: 12,
-                              fontWeight: 600,
-                              fontFamily: "inherit",
-                              cursor: generating ? "not-allowed" : "pointer",
-                              opacity: generating ? 0.6 : 1,
-                            }}
-                          >
-                            {generating ? "Applying…" : "Apply & regenerate →"}
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         );
       })}

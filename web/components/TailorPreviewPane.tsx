@@ -16,6 +16,7 @@ interface Props {
   structuredResume?: StructuredResume | null;
   previewLineOverrides?: Record<number, string>;
   gapFixTargetBulletIndices?: number[];
+  tailorGapFixHighlights?: string[];
   tailorAppliedBulletIndices?: ReadonlySet<number>;
   /** Optional DOCX export when a tailored folder exists. */
   onExportDocx?: () => void;
@@ -37,6 +38,7 @@ export default function TailorPreviewPane({
   structuredResume = null,
   previewLineOverrides = {},
   gapFixTargetBulletIndices = [],
+  tailorGapFixHighlights = [],
   tailorAppliedBulletIndices = new Set<number>(),
   onExportDocx,
   exportDocxEnabled = false,
@@ -62,6 +64,7 @@ export default function TailorPreviewPane({
       presentationOnly
       exportPdfEnabled
       gapFixTargetBulletIndices={gapFixTargetBulletIndices}
+      tailorGapFixHighlights={tailorGapFixHighlights}
       tailorAppliedBulletIndices={tailorAppliedBulletIndices}
       onExportDocx={exportDocxEnabled ? handleExportDocx : undefined}
       exportDocxEnabled={exportDocxEnabled && !docxExportBusy}

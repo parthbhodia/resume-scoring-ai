@@ -101,20 +101,39 @@ async def api_suggest_gap_fix(request: Request):
     gap_notes         = (body.get("gap_notes") or "").strip()
     job_description   = (body.get("job_description") or "").strip()
     structured_resume = body.get("structured_resume") or body.get("structuredResume")
+    candidate_profile = (body.get("candidate_profile") or "").strip()
 
     if not gap_name:
         return JSONResponse({"error": "gap_name required"}, status_code=400)
     if not job_description:
         return JSONResponse({"error": "job_description required"}, status_code=400)
 
+    loop = asyncio.get_event_loop()
     structured_targets = eligible_gap_fix_targets(structured_resume)
-    eligible_originals = eligible_originals_set(structured_targets)
     structured_json = structured_targets_json_for_prompt(structured_resume)
+
+    if not structured_json and candidate_profile:
+        try:
+            structured_doc = await loop.run_in_executor(
+                None, _llm_extract, candidate_profile, None,
+            )
+            if structured_doc is not None:
+                structured_resume = _resume_doc_to_dict(structured_doc)
+                structured_targets = eligible_gap_fix_targets(structured_resume)
+                structured_json = structured_targets_json_for_prompt(structured_resume)
+                logger.info(
+                    "suggest-gap-fix: text-path structured extract for legacy client (%s bullets)",
+                    len(structured_targets),
+                )
+        except Exception as exc:
+            logger.warning("suggest-gap-fix structured extract from profile failed: %s", exc)
+
+    eligible_originals = eligible_originals_set(structured_targets)
 
     if not structured_json:
         return JSONResponse(
             {
-                "error": "structured_resume required with at least one experience, project, or education bullet",
+                "error": "structured_resume required with at least one experience, project, or education bullet (re-upload PDF or run Match score)",
             },
             status_code=400,
         )
@@ -127,8 +146,6 @@ async def api_suggest_gap_fix(request: Request):
         eligible_bullets_json=structured_json,
         job_description=job_description,
     )
-
-    loop = asyncio.get_event_loop()
 
     try:
         logger.info(

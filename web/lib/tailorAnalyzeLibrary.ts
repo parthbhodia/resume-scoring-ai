@@ -3,6 +3,7 @@
  * so TailorRecentJobs can list and restore them.
  */
 import type { RatingsData } from "@/lib/types";
+import type { StructuredResume } from "@/store/resumeAnalyzeStore";
 import { slugToken } from "@/lib/resumeFileName";
 import { upsertResume } from "@/lib/supabase";
 
@@ -21,8 +22,12 @@ export async function saveTailorMatchToLibrary(opts: {
   ratings: RatingsData;
   jobDescription: string;
   candidateProfile?: string | null;
+  structuredResume?: StructuredResume | null;
 }): Promise<string | null> {
   const profile = opts.candidateProfile?.trim();
+  const resumeDoc: Record<string, unknown> = {};
+  if (profile) resumeDoc.profile = profile;
+  if (opts.structuredResume) resumeDoc.structured = opts.structuredResume;
   return upsertResume(
     opts.folder,
     opts.company,
@@ -35,7 +40,7 @@ export async function saveTailorMatchToLibrary(opts: {
     {
       renderer: "structured",
       schemaVersion: 1,
-      resumeDoc: profile ? { profile } : null,
+      resumeDoc: Object.keys(resumeDoc).length ? resumeDoc : null,
     },
     { bumpCreatedAt: true },
   );

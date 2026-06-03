@@ -10,8 +10,9 @@ import { CoveredMissingSection } from "./ratings/CoveredMissingSection";
 import { KeywordsSection } from "./ratings/KeywordsSection";
 import { InterviewSection } from "./ratings/InterviewSection";
 import CategoryFixPanel from "./CategoryFixPanel";
+import GapFixTabPanel from "./ratings/GapFixTabPanel";
 
-export type Tab = "overall" | "job_title" | "qualifications" | "responsibilities" | "keywords" | "interview" | "fixes";
+export type Tab = "overall" | "job_title" | "qualifications" | "responsibilities" | "keywords" | "interview" | "gapfix" | "fixes";
 
 const ALWAYS_TABS: Tab[] = ["overall", "job_title", "qualifications", "responsibilities", "keywords", "interview"];
 
@@ -30,6 +31,7 @@ const SECTION_ICON: Record<Tab, string> = {
   responsibilities: "📋",
   keywords:         "🔑",
   interview:        "🎤",
+  gapfix:           "⚡",
   fixes:            "✨",
 };
 
@@ -40,6 +42,7 @@ const SECTION_IMPACT: Record<Tab, Impact> = {
   responsibilities: "MEDIUM",
   keywords:         "HIGH",
   interview:        "HIGH",
+  gapfix:           "HIGH",
   fixes:            "HIGH",
 };
 
@@ -50,6 +53,7 @@ const SECTION_DESC: Record<Tab, string> = {
   responsibilities: "Review of your role descriptions and impact quantification.",
   keywords:         "ATS keyword optimisation check for skills and technologies.",
   interview:        "Coaching tips on how to position your story for this role in interviews.",
+  gapfix:           "Review targeted bullet rewrites for the gap you selected, then apply to your résumé.",
   fixes:            "Review and apply AI-suggested bullet improvements category by category.",
 };
 
@@ -87,11 +91,12 @@ type SharedProps = {
 function useTailorRatingsState({
   ratings,
   hasSuggestions = false,
+  gapFixPanel = null,
   strategicTips,
   interviewQuestions,
   activeTab: activeTabProp,
   onActiveTabChange,
-}: Pick<SharedProps, "ratings" | "hasSuggestions" | "strategicTips" | "interviewQuestions" | "activeTab" | "onActiveTabChange">) {
+}: Pick<SharedProps, "ratings" | "hasSuggestions" | "gapFixPanel" | "strategicTips" | "interviewQuestions" | "activeTab" | "onActiveTabChange">) {
   const [activeTabInternal, setActiveTabInternal] = useState<Tab>("overall");
   const activeTab = activeTabProp ?? activeTabInternal;
   const setActiveTab = (t: Tab) => {
@@ -114,7 +119,11 @@ function useTailorRatingsState({
     verdict,
   } = ratings;
 
-  const tabOrder: Tab[] = hasSuggestions ? [...ALWAYS_TABS, "fixes"] : ALWAYS_TABS;
+  const tabOrder: Tab[] = [
+    ...ALWAYS_TABS,
+    ...(gapFixPanel ? (["gapfix"] as Tab[]) : []),
+    ...(hasSuggestions ? (["fixes"] as Tab[]) : []),
+  ];
 
   type NavTab = { id: Tab; label: string; score: string; color: string };
   const navTabs: NavTab[] = [
@@ -152,6 +161,9 @@ function useTailorRatingsState({
         : "—",
       color: (interviewQuestions?.length ?? 0) > 0 || (strategicTips?.length ?? 0) > 0 ? "#f59e0b" : "var(--dim)",
     },
+    ...(gapFixPanel
+      ? [{ id: "gapfix" as Tab, label: "⚡ Gap fix", score: `${gapFixPanel.suggestions.length}`, color: "#818cf8" }]
+      : []),
     ...(hasSuggestions ? [{ id: "fixes" as Tab, label: "✨ Fixes", score: "Review", color: "#818cf8" }] : []),
   ];
 
@@ -184,17 +196,18 @@ function useTailorRatingsState({
 export function TailorMatchSidebar({
   ratings,
   hasSuggestions,
+  gapFixPanel,
   strategicTips,
   interviewQuestions,
   activeTab: activeTabProp,
   onActiveTabChange,
   collapsed = false,
   onCollapsedChange,
-}: Pick<SharedProps, "ratings" | "hasSuggestions" | "strategicTips" | "interviewQuestions" | "activeTab" | "onActiveTabChange"> & {
+}: Pick<SharedProps, "ratings" | "hasSuggestions" | "gapFixPanel" | "strategicTips" | "interviewQuestions" | "activeTab" | "onActiveTabChange"> & {
   collapsed?: boolean;
   onCollapsedChange?: (c: boolean) => void;
 }) {
-  const state = useTailorRatingsState({ ratings, hasSuggestions, strategicTips, interviewQuestions, activeTab: activeTabProp, onActiveTabChange });
+  const state = useTailorRatingsState({ ratings, hasSuggestions, gapFixPanel, strategicTips, interviewQuestions, activeTab: activeTabProp, onActiveTabChange });
   if (!state) return null;
 
   const { activeTab, setActiveTab, overall_score, navTabs } = state;
@@ -285,7 +298,7 @@ export function TailorMatchSidebar({
                 <span style={{
                   fontSize: 13,
                   fontWeight: isActive ? 600 : 500,
-                  color: tab.id === "fixes" ? "#818cf8" : (isActive ? "var(--text)" : "var(--muted)"),
+                  color: (tab.id === "fixes" || tab.id === "gapfix") ? "#818cf8" : (isActive ? "var(--text)" : "var(--muted)"),
                   textAlign: "left",
                 }}>
                   {tab.label}
@@ -307,6 +320,7 @@ export function TailorMatchDetail(props: SharedProps) {
   const state = useTailorRatingsState({
     ratings: props.ratings,
     hasSuggestions: props.hasSuggestions,
+    gapFixPanel: props.gapFixPanel,
     strategicTips: props.strategicTips,
     interviewQuestions: props.interviewQuestions,
     activeTab: props.activeTab,
@@ -356,7 +370,7 @@ export function TailorMatchDetail(props: SharedProps) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}>
-      {activeTab !== "fixes" && (
+      {activeTab !== "fixes" && activeTab !== "gapfix" && (
         <div
           style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -401,22 +415,34 @@ export function TailorMatchDetail(props: SharedProps) {
         </div>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: activeTab === "fixes" ? 0 : "24px 28px" }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: (activeTab === "fixes" || activeTab === "gapfix") ? 0 : "24px 28px" }}>
         {activeTab === "overall" && (
           <OverallSection overallScore={overall_score} jobTitleScore={job_title?.score} verdict={verdict} whats_working={whats_working} gaps={gaps} keywords={keywords} qualifications={qualifications} responsibilities={responsibilities} onNavigate={setActiveTab} />
         )}
         {activeTab === "job_title" && <JobTitleSection jobTitle={job_title} />}
         {activeTab === "qualifications" && (
-          <CoveredMissingSection category={qualifications} label="Qualifications" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} addressedGaps={addressedGaps} addressedGapActions={addressedGapActions} gapFixDrafts={gapFixDrafts} onGapFixDraftChange={onGapFixDraftChange} />
+          <CoveredMissingSection category={qualifications} label="Qualifications" onFixGap={onFixGap} fixingGapName={fixingGapName} addressedGaps={addressedGaps} addressedGapActions={addressedGapActions} />
         )}
         {activeTab === "responsibilities" && (
-          <CoveredMissingSection category={responsibilities} label="Responsibilities" onFixGap={onFixGap} fixingGapName={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} addressedGaps={addressedGaps} addressedGapActions={addressedGapActions} gapFixDrafts={gapFixDrafts} onGapFixDraftChange={onGapFixDraftChange} />
+          <CoveredMissingSection category={responsibilities} label="Responsibilities" onFixGap={onFixGap} fixingGapName={fixingGapName} addressedGaps={addressedGaps} addressedGapActions={addressedGapActions} />
         )}
         {activeTab === "keywords" && (
-          <KeywordsSection keywords={keywords} onFixKeyword={onFixKeyword} fixingKeyword={fixingGapName} gapFixPanel={gapFixPanel} gapFixError={gapFixError} onApplyFix={onApplyFix} onApplyAllFixes={onApplyAllGapFixes} onDismissFix={onDismissFix} addressedGaps={addressedGaps} addressedGapActions={addressedGapActions} gapFixDrafts={gapFixDrafts} onGapFixDraftChange={onGapFixDraftChange} />
+          <KeywordsSection keywords={keywords} onFixKeyword={onFixKeyword} fixingKeyword={fixingGapName} addressedGaps={addressedGaps} addressedGapActions={addressedGapActions} />
         )}
         {activeTab === "interview" && (
           <InterviewSection keyGap={keyGap} tips={strategicTips} questions={interviewQuestions} onGetSuggestions={onGetSuggestions} suggestionsLoading={suggestionsLoading} />
+        )}
+        {activeTab === "gapfix" && gapFixPanel && (
+          <GapFixTabPanel
+            gapFixPanel={gapFixPanel}
+            gapFixError={gapFixError}
+            onApplyFix={onApplyFix}
+            onApplyAllFixes={onApplyAllGapFixes}
+            onDismissFix={onDismissFix}
+            gapFixDrafts={gapFixDrafts}
+            onGapFixDraftChange={onGapFixDraftChange}
+            applyBusy={applyBusy}
+          />
         )}
         {activeTab === "fixes" && (
           <CategoryFixPanel onApplyAll={onApplyAllSuggestions ?? (() => {})} applyBusy={applyBusy ?? false} />

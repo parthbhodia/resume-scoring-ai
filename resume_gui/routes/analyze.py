@@ -227,8 +227,9 @@ async def api_analyze(request: Request):
       model?: str,
       include_bullet_analysis?: bool,
       addressed_gaps?: [{ id?, label, type?, appliedText? }],
+      include_structured_resume?: bool,  # text-path extract when upload had no vision doc
     }
-    Returns: { ratings: <_build_ratings_payload output> }
+    Returns: { ratings, optional structuredResume, optional bulletAnalysis, ... }
     """
     try:
         body = await request.json()
@@ -244,6 +245,7 @@ async def api_analyze(request: Request):
 
     model = str(body.get("model") or "").strip() or primary_llm_model_for_resume_workloads()
     include_bullets = bool(body.get("include_bullet_analysis"))
+    include_structured = bool(body.get("include_structured_resume"))
 
     loop = asyncio.get_event_loop()
     try:
@@ -252,15 +254,29 @@ async def api_analyze(request: Request):
             None,
             partial(_rate_resume, gemini_client, model, candidate_profile, job_description[:1500]),
         )
+        tasks: list = [ratings_future]
         if include_bullets:
-            analysis_future = loop.run_in_executor(
-                None,
-                partial(_analyze_resume_comprehensive, candidate_profile, job_description),
+            tasks.append(
+                loop.run_in_executor(
+                    None,
+                    partial(_analyze_resume_comprehensive, candidate_profile, job_description),
+                ),
             )
-            llm_ratings, analysis_raw = await asyncio.gather(ratings_future, analysis_future)
-        else:
-            llm_ratings = await ratings_future
-            analysis_raw = None
+        if include_structured:
+            tasks.append(
+                loop.run_in_executor(
+                    None,
+                    partial(_llm_extract, candidate_profile, None),
+                ),
+            )
+        results = await asyncio.gather(*tasks)
+        idx = 0
+        llm_ratings = results[idx]
+        idx += 1
+        analysis_raw = results[idx] if include_bullets else None
+        if include_bullets:
+            idx += 1
+        structured_doc = results[idx] if include_structured else None
     except Exception as exc:
         logger.exception("api_analyze: _rate_resume failed")
         return JSONResponse({"error": f"analysis failed: {exc}"}, status_code=500)
@@ -281,6 +297,11 @@ async def api_analyze(request: Request):
         )
 
     payload: dict = {"ratings": ratings}
+    if include_structured and structured_doc is not None:
+        try:
+            payload["structuredResume"] = _resume_doc_to_dict(structured_doc)
+        except Exception as exc:
+            logger.warning("api_analyze: structured serialize failed: %s", exc)
     if include_bullets and isinstance(analysis_raw, dict):
         for key in (
             "bulletAnalysis",

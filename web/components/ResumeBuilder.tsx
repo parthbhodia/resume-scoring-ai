@@ -36,7 +36,6 @@ import {
 import {
   gapFixTargetBulletIndices,
   matchOriginalToBulletIndex,
-  registerGapFixBullet,
   resolveBulletIndexForGapFix,
   synthesizeProfileWithBulletOverrides,
   type LiveBulletItem,
@@ -808,6 +807,40 @@ export default function ResumeBuilder({
       setStudioHandoff(false);
       try {
         sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+        const profile = sessionStorage.getItem("rn_builder_profile_prefill");
+        const structRaw = sessionStorage.getItem("rn_builder_structured_prefill");
+        const jdPre = sessionStorage.getItem(TAILOR_PREFILL_JD);
+        const companyPre = sessionStorage.getItem(TAILOR_PREFILL_COMPANY);
+        const rolePre = sessionStorage.getItem(TAILOR_PREFILL_ROLE);
+        if (profile) {
+          setCandidateProfile(profile);
+          setUploadedFileName("From library");
+          setResult(null);
+          setPreview("");
+        }
+        if (profile && structRaw) {
+          try {
+            const parsed = normalizeStructuredResume(JSON.parse(structRaw) as StructuredResume);
+            if (parsed && isStructuredUsable(parsed)) {
+              setStructuredUpload({ profile, structured: parsed });
+            }
+          } catch { /* ignore */ }
+        }
+        if (jdPre) {
+          setJdRaw(jdPre);
+          saveDraft({ jd: jdPre });
+        }
+        if (companyPre) {
+          setCompanyRaw(companyPre);
+          saveDraft({ company: companyPre });
+        }
+        if (rolePre) {
+          setRoleRaw(rolePre);
+          saveDraft({ role: rolePre });
+        }
+        sessionStorage.removeItem(TAILOR_PREFILL_JD);
+        sessionStorage.removeItem(TAILOR_PREFILL_COMPANY);
+        sessionStorage.removeItem(TAILOR_PREFILL_ROLE);
       } catch { /* ignore */ }
       sp.delete("intent");
       const qs = sp.toString();
@@ -825,6 +858,16 @@ export default function ResumeBuilder({
         setUploadedFileName(fromTemplateStudio ? "From template studio" : "From Analyze");
         setResult(null);
         setPreview("");
+        try {
+          const structRaw = sessionStorage.getItem("rn_builder_structured_prefill");
+          if (structRaw) {
+            const parsed = normalizeStructuredResume(JSON.parse(structRaw) as StructuredResume);
+            if (parsed && isStructuredUsable(parsed)) {
+              setStructuredUpload({ profile, structured: parsed });
+            }
+            sessionStorage.removeItem("rn_builder_structured_prefill");
+          }
+        } catch { /* ignore */ }
       }
       if (jdPre) {
         setJdRaw(jdPre);
@@ -1076,6 +1119,21 @@ export default function ResumeBuilder({
     void runAtsCheck(result.folder);
   }, [authReady, user?.id, result?.folder, result?.pdfUrl, atsLoading, studioHandoff, runAtsCheck]);
 
+  const tailorStructuredResume = useMemo<StructuredResume | null>(() => {
+    const normalized = normalizeStructuredResume(structuredUpload?.structured ?? null);
+    return isStructuredUsable(normalized) ? normalized : null;
+  }, [structuredUpload]);
+
+  const applyStructuredFromAnalyze = useCallback((raw: Record<string, unknown>, profile?: string) => {
+    const sr = normalizeStructuredResume(
+      (raw.structuredResume ?? raw.structured_resume) as StructuredResume | null | undefined,
+    );
+    if (!sr || !isStructuredUsable(sr)) return;
+    const prof = (profile ?? candidateProfile ?? "").trim();
+    if (!prof) return;
+    setStructuredUpload({ profile: prof, structured: sr });
+  }, [candidateProfile]);
+
   const handleAnalyze = useCallback(async () => {
     const effJd = jd.trim();
     if (!effJd) { setAnalyzeError("Please paste a job description first."); return; }
@@ -1091,6 +1149,7 @@ export default function ResumeBuilder({
           candidate_profile: candidateProfile,
           job_description: effJd,
           include_bullet_analysis: true,
+          include_structured_resume: !tailorStructuredResume,
         }),
       });
       if (!resp.ok) {
@@ -1102,6 +1161,7 @@ export default function ResumeBuilder({
       const raw = await resp.json() as Record<string, unknown>;
       const data = mergeAnalyzeApiJson(raw) as { ratings?: RatingsData; error?: string; bulletAnalysis?: LiveBulletItem[] };
       if (data.error || !data.ratings) throw new Error(data.error ?? "Analysis returned no ratings");
+      applyStructuredFromAnalyze(raw, candidateProfile ?? undefined);
       setTailorBulletAnalysis(Array.isArray(data.bulletAnalysis) ? data.bulletAnalysis : []);
       setTailorLineOverrides({});
       setTailorAppliedBulletIndices(new Set());
@@ -1127,6 +1187,9 @@ export default function ResumeBuilder({
             ratings: data.ratings,
             jobDescription: effJd,
             candidateProfile,
+            structuredResume: normalizeStructuredResume(
+              (raw.structuredResume ?? raw.structured_resume) as StructuredResume | null,
+            ),
           });
         } catch (e) {
           console.warn("saveTailorMatchToLibrary failed", e);
@@ -1139,7 +1202,7 @@ export default function ResumeBuilder({
     } finally {
       setAnalyzing(false);
     }
-  }, [jd, candidateProfile, company, role, model, user?.id]);
+  }, [jd, candidateProfile, company, role, model, user?.id, tailorStructuredResume, applyStructuredFromAnalyze]);
 
   /** Re-run JD match ratings on updated plain text (no LaTeX / no ATS folder).
    * Pass bulletsAtApply/overridesAtApply/appliedAtApply when calling from applyGapFixes
@@ -1171,6 +1234,7 @@ export default function ResumeBuilder({
           candidate_profile: prof,
           job_description: jd.trim(),
           include_bullet_analysis: true,
+          include_structured_resume: !tailorStructuredResume,
           addressed_gaps: addressedGapActions,
         }),
       });
@@ -1183,6 +1247,8 @@ export default function ResumeBuilder({
       };
       if (data.error || !data.ratings) return false;
 
+      applyStructuredFromAnalyze(raw, prof);
+
       const mergedRatings = mergeRescorePreservingAddressedGaps(
         data.ratings,
         addressedGaps,
@@ -1193,6 +1259,9 @@ export default function ResumeBuilder({
         result?.folder ?? tailorMatchFolder(company.trim() || "—", role.trim() || "—");
       if (user?.id && matchFolder) {
         try {
+          const sr = normalizeStructuredResume(
+            (raw.structuredResume ?? raw.structured_resume) as StructuredResume | null,
+          );
           await saveTailorMatchToLibrary({
             folder: matchFolder,
             company: company.trim() || "—",
@@ -1201,6 +1270,7 @@ export default function ResumeBuilder({
             ratings: mergedRatings,
             jobDescription: jd.trim(),
             candidateProfile: prof,
+            structuredResume: sr,
           });
         } catch (e) {
           console.warn("saveTailorMatchToLibrary (rescore) failed", e);
@@ -1243,7 +1313,7 @@ export default function ResumeBuilder({
   }, [
     candidateProfile, jd, company, role, model, user?.id, result?.folder,
     tailorBulletAnalysis, tailorLineOverrides, addressedGaps, addressedGapActions,
-    tailorAppliedBulletIndices,
+    tailorAppliedBulletIndices, tailorStructuredResume, applyStructuredFromAnalyze,
   ]);
 
   /** Plain text with tailor bullet overrides applied (for gap-fix API + rescoring). */
@@ -1256,17 +1326,12 @@ export default function ResumeBuilder({
     [candidateProfile, tailorBulletAnalysis, tailorLineOverrides],
   );
 
-  const tailorPreviewBullets = useMemo(() => {
-    let extended = [...tailorBulletAnalysis];
-    const profile = effectiveCandidateProfile;
-    if (gapFixPanel?.suggestions.length) {
-      for (const s of gapFixPanel.suggestions) {
-        if (matchOriginalToBulletIndex(s.original, extended, profile) >= 0) continue;
-        extended = registerGapFixBullet(extended, s.original, s.suggested, profile).bullets;
-      }
-    }
-    return extended;
-  }, [tailorBulletAnalysis, effectiveCandidateProfile, gapFixPanel]);
+  const tailorPreviewBullets = tailorBulletAnalysis;
+
+  const tailorGapFixHighlights = useMemo(
+    () => (gapFixPanel?.suggestions ?? []).map((s) => s.original).filter(Boolean),
+    [gapFixPanel?.suggestions],
+  );
 
   const gapFixTargetIndices = useMemo(() => {
     if (!gapFixPanel?.suggestions.length) return [];
@@ -1276,13 +1341,6 @@ export default function ResumeBuilder({
       effectiveCandidateProfile,
     );
   }, [gapFixPanel, tailorBulletAnalysis, effectiveCandidateProfile]);
-
-  // Structured preview whenever the upload doc is usable. Gap-fix text edits use
-  // tailorLineOverrides on bullet indices — they must not force text-parse fallback.
-  const tailorStructuredResume = useMemo<StructuredResume | null>(() => {
-    const normalized = normalizeStructuredResume(structuredUpload?.structured ?? null);
-    return isStructuredUsable(normalized) ? normalized : null;
-  }, [structuredUpload, tailorBulletAnalysis]);
 
   const getSuggestions = useCallback(async (
     focusGaps?: Array<{ name: string; score: number }>,
@@ -1902,9 +1960,10 @@ export default function ResumeBuilder({
     type?: AddressedGapAction["type"];
   }) => {
     if (!jd.trim()) return;
-    if (!tailorStructuredResume) {
+    const prof = effectiveCandidateProfile.trim();
+    if (!tailorStructuredResume && !prof) {
       setGapFixError(
-        "Fix with AI needs a structured résumé from your upload. Re-upload a PDF so we can extract experience and project bullets.",
+        "Fix with AI needs résumé text. Upload a PDF or paste your profile, then try again.",
       );
       return;
     }
@@ -1920,7 +1979,8 @@ export default function ResumeBuilder({
           gap_name: gap.name,
           gap_notes: gap.notes,
           job_description: jd.trim(),
-          structured_resume: tailorStructuredResume,
+          ...(tailorStructuredResume ? { structured_resume: tailorStructuredResume } : {}),
+          ...(prof ? { candidate_profile: prof } : {}),
         }),
       });
       const data = await resp.json() as { suggestions?: unknown[]; error?: string };
@@ -1935,12 +1995,21 @@ export default function ResumeBuilder({
         suggestions: eligible,
         gapType: gap.type ?? "qualification",
       });
+      setResultsActiveTab("gapfix");
     } catch (e: unknown) {
-      setGapFixError(e instanceof Error ? e.message : "Could not get gap fixes. Please try again.");
+      const msg = e instanceof Error ? e.message : "Could not get gap fixes. Please try again.";
+      setGapFixError(msg);
+      setGapFixPanel({
+        gapName: gap.name,
+        gapNotes: gap.notes,
+        suggestions: [],
+        gapType: gap.type ?? "qualification",
+      });
+      setResultsActiveTab("gapfix");
     } finally {
       setGapFixLoading(null);
     }
-  }, [jd, addressedGaps, addressedGapActions, tailorStructuredResume]);
+  }, [jd, addressedGaps, addressedGapActions, tailorStructuredResume, effectiveCandidateProfile]);
 
   /**
    * Apply one or more gap-fix suggestions to the HTML preview (Chromium export path — no LaTeX).
@@ -3367,6 +3436,7 @@ export default function ResumeBuilder({
                     structuredResume={tailorStructuredResume}
                     previewLineOverrides={tailorLineOverrides}
                     gapFixTargetBulletIndices={gapFixTargetIndices}
+                    tailorGapFixHighlights={tailorGapFixHighlights}
                     tailorAppliedBulletIndices={tailorAppliedBulletIndices}
                   />
                 </div>

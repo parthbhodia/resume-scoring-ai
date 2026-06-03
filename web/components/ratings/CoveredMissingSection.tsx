@@ -1,17 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { accentCardBorder } from "@/lib/accentCardBorder";
-import { isGapAddressed, suggestionsWithDrafts } from "@/lib/tailorGapFix";
+import { isGapAddressed } from "@/lib/tailorGapFix";
 import type { AddressedGapAction, DetailedCategory, DetailedRatingItem } from "@/lib/types";
-import { isGapFixEligibleLine } from "@/lib/resumeEntryLineHeuristics";
-import { GapFixSuggestionCard, type GapFixSuggestion } from "@/components/ratings/GapFixSuggestionCard";
-
-type GapFixPanel = {
-  gapName: string;
-  gapNotes: string;
-  suggestions: GapFixSuggestion[];
-};
 
 function gapTypeForLabel(label: string): AddressedGapAction["type"] {
   return label.toLowerCase().includes("responsibilit") ? "responsibility" : "qualification";
@@ -22,16 +14,8 @@ type Props = {
   label: string;
   onFixGap?: (item: DetailedRatingItem, gapType: AddressedGapAction["type"]) => void;
   fixingGapName?: string | null;
-  gapFixPanel?: GapFixPanel | null;
-  gapFixError?: string | null;
-  onApplyFix?: (s: GapFixSuggestion) => void | Promise<void>;
-  /** Apply all checked suggestions in one batch (preferred over per-item onApplyFix). */
-  onApplyAllFixes?: (suggestions: GapFixSuggestion[]) => void | Promise<void>;
-  onDismissFix?: () => void;
   addressedGaps?: ReadonlySet<string>;
   addressedGapActions?: readonly AddressedGapAction[];
-  gapFixDrafts?: Record<string, string>;
-  onGapFixDraftChange?: (id: string, text: string) => void;
 };
 
 export function CoveredMissingSection({
@@ -39,41 +23,11 @@ export function CoveredMissingSection({
   label,
   onFixGap,
   fixingGapName,
-  gapFixPanel,
-  gapFixError,
-  onApplyFix,
-  onApplyAllFixes,
-  onDismissFix,
   addressedGaps,
   addressedGapActions,
-  gapFixDrafts = {},
-  onGapFixDraftChange,
 }: Props) {
   const [coveredOpen, setCoveredOpen] = useState(true);
   const [missingOpen, setMissingOpen] = useState(true);
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
-
-  const panelSuggestions = (gapFixPanel?.suggestions ?? []).filter((s) =>
-    isGapFixEligibleLine(s.original),
-  );
-
-  useEffect(() => {
-    if (gapFixPanel?.gapName) {
-      setCheckedIds(new Set(panelSuggestions.map((s) => s.id)));
-    }
-  }, [gapFixPanel?.gapName, panelSuggestions.length]);
-  const allPanelIds = panelSuggestions.map((s) => s.id);
-  const effectiveChecked = checkedIds.size === 0 && panelSuggestions.length > 0
-    ? new Set(allPanelIds)
-    : checkedIds;
-
-  const toggleCheck = (id: string) => {
-    setCheckedIds((prev) => {
-      const next = new Set(effectiveChecked);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
 
   const covered = category.covered ?? [];
   const resolved = category.resolved_by_user ?? [];
@@ -115,22 +69,16 @@ export function CoveredMissingSection({
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {missing.map((item, i) => {
               const isFixing = fixingGapName === item.text;
-              const isActivePanel = gapFixPanel?.gapName === item.text;
               const isAddressed = isGapAddressed(item.text, addressedGaps ?? new Set(), addressedGapActions);
 
               return (
                 <div key={i}>
-                  {/* Gap card */}
                   <div
                     style={{
                       padding: "16px 18px",
                       borderRadius: 10,
-                      ...accentCardBorder(
-                        isActivePanel ? "#818cf8" : "#f87171",
-                        isActivePanel ? "rgba(99,102,241,0.4)" : "var(--border)",
-                      ),
-                      background: isActivePanel ? "rgba(99,102,241,0.04)" : "var(--surface2)",
-                      transition: "border-color 0.2s, background 0.2s",
+                      ...accentCardBorder("#f87171", "var(--border)"),
+                      background: "var(--surface2)",
                     }}
                   >
                     <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", lineHeight: 1.45, marginBottom: item.analysis ? 12 : 0 }}>
@@ -142,14 +90,11 @@ export function CoveredMissingSection({
                         <span style={{ fontSize: 12.5, color: "#f87171", lineHeight: 1.55 }}>{item.analysis}</span>
                       </div>
                     )}
-                    {onFixGap && !isActivePanel && !isAddressed && (
+                    {onFixGap && !isAddressed && (
                       <button
                         type="button"
                         disabled={isFixing || !!fixingGapName}
-                        onClick={() => {
-                          setCheckedIds(new Set());
-                          onFixGap?.(item, gapTypeForLabel(label));
-                        }}
+                        onClick={() => onFixGap?.(item, gapTypeForLabel(label))}
                         style={{
                           display: "inline-flex", alignItems: "center", gap: 6,
                           padding: "6px 14px", borderRadius: 7,
@@ -174,110 +119,7 @@ export function CoveredMissingSection({
                         )}
                       </button>
                     )}
-                    {isActivePanel && onDismissFix && (
-                      <button
-                        type="button"
-                        onClick={onDismissFix}
-                        style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
-                      >
-                        ✕ Close
-                      </button>
-                    )}
                   </div>
-
-                  {/* Gap fix panel — appears below the clicked card */}
-                  {isActivePanel && (
-                    <div
-                      style={{
-                        marginTop: 8,
-                        borderRadius: 12,
-                        border: "1.5px solid rgba(99,102,241,0.3)",
-                        background: "var(--surface)",
-                        overflow: "hidden",
-                        boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
-                      }}
-                    >
-                      {/* Panel header */}
-                      <div
-                        style={{
-                          padding: "14px 18px",
-                          background: "linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 100%)",
-                          borderBottom: "1px solid rgba(99,102,241,0.2)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 10,
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                          <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(99,102,241,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                            <span style={{ fontSize: 16 }}>⚡</span>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.2 }}>AI Suggested Fixes</div>
-                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>
-                              {panelSuggestions.length} fix{panelSuggestions.length !== 1 ? "es" : ""} for: <em style={{ fontStyle: "normal", fontWeight: 600 }}>{gapFixPanel!.gapName}</em>
-                            </div>
-                          </div>
-                        </div>
-                        {onApplyFix && panelSuggestions.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const toApply = suggestionsWithDrafts(
-                                panelSuggestions.filter((s) => effectiveChecked.has(s.id)),
-                                gapFixDrafts,
-                              );
-                              if (toApply.length === 0) return;
-                              if (onApplyAllFixes) {
-                                void onApplyAllFixes(toApply);
-                              } else {
-                                toApply.forEach((s) => { void onApplyFix!(s); });
-                              }
-                            }}
-                            style={{
-                              display: "inline-flex", alignItems: "center", gap: 6,
-                              padding: "8px 16px", borderRadius: 8,
-                              background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
-                              border: "none", color: "#fff",
-                              fontSize: 12, fontWeight: 700, fontFamily: "inherit",
-                              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-                            }}
-                          >
-                            ✓ Apply ({effectiveChecked.size})
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Error state */}
-                      {gapFixError && (
-                        <div style={{ padding: "14px 18px", fontSize: 12, color: "var(--error, #ef4444)" }}>{gapFixError}</div>
-                      )}
-
-                      {/* Empty state */}
-                      {!gapFixError && panelSuggestions.length === 0 && (
-                        <div style={{ padding: "20px 18px", fontSize: 12, color: "var(--muted)", textAlign: "center" }}>
-                          No targeted rewrites found — try "Get suggestions" for a broader analysis.
-                        </div>
-                      )}
-
-                      {/* Bullet cards */}
-                      {!gapFixError && panelSuggestions.length > 0 && (
-                        <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                          {panelSuggestions.map((s) => (
-                            <GapFixSuggestionCard
-                              key={s.id}
-                              suggestion={s}
-                              checked={effectiveChecked.has(s.id)}
-                              onToggleCheck={() => toggleCheck(s.id)}
-                              draftText={gapFixDrafts[s.id] ?? s.suggested}
-                              onDraftChange={(text) => onGapFixDraftChange?.(s.id, text)}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })}
