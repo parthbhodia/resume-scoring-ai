@@ -1054,7 +1054,11 @@ export default function AnalyzeLiveResumeBody({
 
               const nm = normalizeForMatch(rawLine);
               const showTextRaw = previewLineOverrides[bulletIdx] ?? (nm.length >= 8 ? nm : bullet.originalBullet);
-              const showText = softenRunOnExtractLine(showTextRaw);
+              // Strip any residual leading bullet chars before display — the CSS ::before already
+              // adds the visible bullet, so "• • text" or "- • text" must become "text".
+              const showText = softenRunOnExtractLine(
+                showTextRaw.replace(/^[\s•\-–—*·◦▪▸→>]+/, "").trimStart()
+              );
               const isHighlighted = activeCategory
                 ? bulletMatchesAnalysisCategory(
                     bullet,
