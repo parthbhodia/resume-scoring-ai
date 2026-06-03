@@ -141,6 +141,7 @@ Hook: `web/hooks/useHtmlPdfExport.ts`. Wired in `AnnotatedResumePanel`, `TailorP
 
 ### Lib (`web/lib/`)
 
+- `resumeLayout.ts` — canonical preview/PDF spacing: presets, CSS vars, TB inline styles, Analyze `paragraphBlockStyle` / bullet stylesheet. Template Builder + Analyze + Tailor should import here (not duplicate in components).
 - `analysisCategoryMatch.ts` — frontend mirror of the category bucketing logic. `guessIssueCategory` is the regex pile that maps an issue's text to one of the 8 categoryScores keys. Must stay in sync with backend prompts.
 - `resumeFileName.ts` — `ownerSlugFromProfile` derives filename stem from the candidate name.
 - `keywordDelta.ts` — `extractKeywords` + `computeKeywordDelta` for the inline +chips/–chips diff UI on each fix card.
@@ -196,6 +197,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 ---
 
 ## Recent changes (running log — newest first; **append after every commit**)
+
+- **Shared résumé layout module (`5edc891`)** — `web/lib/resumeLayout.ts` is the single source for style presets, page padding, CSS vars (`resumeLayoutCssVars` / `resumeLayoutCssVarsForPreviewStyle`), TB inline styles (`resumePageRootStyle`, `resumeSectionTitleStyle`, …), and Analyze block spacing (`paragraphBlockStyle`, `bulletsBlockStyle`, `RESUME_BULLET_STYLESHEET`). `ResumePreview`, `AnalyzeLiveResumeBody`, `AnnotatedResumePanel`, and `ResumePDFTemplate` import from here; `templateStyles.ts` is a thin deprecated re-export. **Invariant:** changing spacing/fonts for preview or Chromium export should touch only `resumeLayout.ts` (plus accent chips in `AnnotatedResumePanel`).
 
 - **Per-company Technologies under jobs (`87be5a4`)** — Follow-up to structured section-order fix (`0c9aa38`): résumés that put each employer's stack in `extra_sections` as `Technologies (Company)` / `TECHNOLOGIES - Company` (also `:` separator) no longer render as a trailing orphan section. `buildBlocksFromStructured` and `_synthesize_text_from_resume_doc` partition those extras, fuzzy-match company keys, emit `Technologies: …` under the matching experience entry (after bullets), and only append unmatched extras last. Bare `Technologies` (no company) stays global. Keeps structured preview and `extractedText` in sync. +2 tests in `test_resume_extraction.py`.
 
