@@ -601,6 +601,9 @@ export default function ResumeBuilder({
   const [addressedGapActions, setAddressedGapActions] = useState<AddressedGapAction[]>([]);
   const [gapFixDrafts, setGapFixDrafts] = useState<Record<string, string>>({});
   const [tailorRescoring, setTailorRescoring] = useState(false);
+  /** True after a gap fix is applied locally — the displayed match score is now
+   *  optimistic and a real /api/analyze re-check is available on demand. */
+  const [scoreStale, setScoreStale] = useState(false);
 
   useEffect(() => {
     if (!gapFixPanel?.gapName) {
@@ -1167,6 +1170,7 @@ export default function ResumeBuilder({
       setTailorAppliedBulletIndices(new Set());
       setAddressedGaps(new Set());
       setAddressedGapActions([]);
+      setScoreStale(false);
 
       const effCompany = company.trim() || "—";
       const effRole = role.trim() || "—";
@@ -1304,6 +1308,7 @@ export default function ResumeBuilder({
         setTailorLineOverrides(remappedOverrides);
         setTailorAppliedBulletIndices(remappedApplied);
       }
+      setScoreStale(false);
       return true;
     } catch {
       return false;
@@ -2096,23 +2101,21 @@ export default function ResumeBuilder({
         for (const s of newSuggestions) acceptSuggestion(s.id);
       }
 
+      // Apply is now LOCAL ONLY — mirror the Analyze flow. The override paints
+      // the suggested text into the preview instantly and the gap moves
+      // optimistically missing→covered. We do NOT rescore here: the per-apply
+      // /api/analyze rescore (with its bullet-index remap + structured
+      // re-extract) is what blanked the preview. The user re-runs the real
+      // score on demand via the "Re-check match" button (scoreStale below).
       if (gapName) {
         setResult((prev) => {
           if (!prev?.ratings) return prev;
           return { ...prev, ratings: applyOptimisticGapAddressed(prev.ratings, gapName, gapType) };
         });
       }
+      if (appliedIndices.size > 0 || gapName) setScoreStale(true);
 
-      if (jd.trim()) {
-        const updatedProfile = synthesizeProfileWithBulletOverrides(
-          candidateProfile ?? "",
-          bullets,
-          nextOverrides,
-        );
-        await rescoreTailorRatings(updatedProfile, bullets, nextOverrides, appliedIndices);
-      }
-
-      // Clear the green flash after rescore finishes (so remap runs first).
+      // Clear the green flash after a moment.
       if (appliedIndices.size > 0) {
         window.setTimeout(() => setTailorAppliedBulletIndices(new Set()), 3000);
       }
@@ -2123,7 +2126,7 @@ export default function ResumeBuilder({
     }
   }, [candidateProfile, tailorBulletAnalysis, tailorLineOverrides, suggestions, suggestSummary,
       strategicTips, interviewQuestions, hydrateSuggestions, acceptSuggestion, gapFixPanel, gapFixDrafts,
-      addressedGapActions, jd, rescoreTailorRatings]);
+      addressedGapActions, jd]);
 
   const applyGapFix = useCallback(async (s: {
     id: string; section: string; original: string; suggested: string; reason: string; priority: string;
@@ -3188,7 +3191,7 @@ export default function ResumeBuilder({
                 }
               `}</style>
               <div className="rb-results-body">
-              {/* ── Gap-fix apply spinner — shown while a single fix is being compiled + scored ── */}
+              {/* ── Gap-fix apply spinner — shown while a single fix is being applied to the preview ── */}
               {gapApplyBusy && (
                 <div style={{ marginBottom: 12, padding: "10px 16px", borderRadius: 10, border: "1px solid rgba(99,102,241,0.3)", background: "rgba(99,102,241,0.06)", display: "flex", alignItems: "center", gap: 10 }}>
                   <svg width="14" height="14" viewBox="0 0 18 18" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden>
@@ -3196,6 +3199,30 @@ export default function ResumeBuilder({
                     <path d="M9 2a7 7 0 017 7" stroke="#818cf8" strokeWidth="2.5" strokeLinecap="round"/>
                   </svg>
                   <span style={{ fontSize: 13, fontWeight: 600, color: "#818cf8" }}>Applying fix — updating preview…</span>
+                </div>
+              )}
+
+              {/* ── Stale-score banner — applies are local (like Analyze); the real
+                     match score is re-checked on demand here. ── */}
+              {scoreStale && !gapApplyBusy && (
+                <div style={{ marginBottom: 12, padding: "10px 16px", borderRadius: 10, border: "1px solid rgba(52,211,153,0.4)", background: "rgba(52,211,153,0.08)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--green, #34d399)", flex: 1, minWidth: 0 }}>
+                    ✓ Fixes applied to your preview. Match score shown is provisional.
+                  </span>
+                  <button
+                    type="button"
+                    disabled={tailorRescoring}
+                    onClick={() => { void rescoreTailorRatings(); }}
+                    style={{
+                      padding: "6px 14px", borderRadius: 8, border: "none",
+                      background: "var(--accent)", color: "#fff",
+                      fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                      cursor: tailorRescoring ? "not-allowed" : "pointer",
+                      opacity: tailorRescoring ? 0.6 : 1, flexShrink: 0,
+                    }}
+                  >
+                    {tailorRescoring ? "Re-checking…" : "Re-check match score →"}
+                  </button>
                 </div>
               )}
 
