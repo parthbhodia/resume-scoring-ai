@@ -430,4 +430,16 @@ export const RESUME_BULLET_STYLESHEET = `
   .az-clean-export .az-preview-applied-mark {
     display: none !important;
   }
+  .az-highlights-off .az-resume-bullet,
+  .az-highlights-off [data-bullet-idx] {
+    background: transparent !important;
+    border-left: none !important;
+    box-shadow: none !important;
+    animation: none !important;
+  }
+  .az-highlights-off .az-metric {
+    font-weight: inherit !important;
+    color: inherit !important;
+    background: transparent !important;
+  }
 `;

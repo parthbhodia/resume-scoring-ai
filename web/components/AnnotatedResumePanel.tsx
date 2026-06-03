@@ -278,6 +278,14 @@ export default function AnnotatedResumePanel({
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [previewStyleId, setPreviewStyleId] = useState<PreviewStyleId>("classic");
   const [previewAccent, setPreviewAccent] = useState(PREVIEW_ACCENTS[0].value);
+  const [highlightsEnabled, setHighlightsEnabled] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return sessionStorage.getItem("rn_preview_highlights") !== "0";
+    } catch {
+      return true;
+    }
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
 
@@ -296,8 +304,18 @@ export default function AnnotatedResumePanel({
   }, [candidateProfile, extractedText]);
   const handleHtmlPdfDownload = useCallback(() => {
     if (!paperRef.current) return;
-    void exportHtmlPdf(paperRef.current, htmlPdfFilename);
-  }, [exportHtmlPdf, htmlPdfFilename]);
+    void exportHtmlPdf(paperRef.current, htmlPdfFilename, { highlightsEnabled });
+  }, [exportHtmlPdf, htmlPdfFilename, highlightsEnabled]);
+
+  const toggleHighlights = useCallback(() => {
+    setHighlightsEnabled((on) => {
+      const next = !on;
+      try {
+        sessionStorage.setItem("rn_preview_highlights", next ? "1" : "0");
+      } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
   const [mirrorBox, setMirrorBox] = useState<{
     top: number;
     height: number;
@@ -712,6 +730,30 @@ export default function AnnotatedResumePanel({
             </div>
           ) : null}
           {useLiveDoc ? (
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: "var(--muted)",
+                cursor: "pointer",
+                userSelect: "none",
+                flexShrink: 0,
+              }}
+              title={highlightsEnabled ? "Turn off score and metric highlights in preview and PDF" : "Show score and metric highlights"}
+            >
+              <input
+                type="checkbox"
+                checked={highlightsEnabled}
+                onChange={toggleHighlights}
+                style={{ accentColor: "var(--accent)", cursor: "pointer" }}
+              />
+              Highlights
+            </label>
+          ) : null}
+          {useLiveDoc ? (
             <div
               style={{
                 display: "flex",
@@ -946,7 +988,7 @@ export default function AnnotatedResumePanel({
       >
         <div
           ref={paperRef}
-          className="az-resume-paper"
+          className={`az-resume-paper${highlightsEnabled ? "" : " az-highlights-off"}`}
           style={{
             ...previewStyleVars,
             position: "relative",
@@ -958,7 +1000,7 @@ export default function AnnotatedResumePanel({
             margin: "0 auto",
           }}
         >
-          {presentationOnly && (
+          {presentationOnly && highlightsEnabled && (
             <div
               className="az-pdf-ignore"
               aria-hidden
@@ -1002,6 +1044,7 @@ export default function AnnotatedResumePanel({
                 tailorAppliedHighlights={tailorAppliedHighlights}
                 gapFixTargetBulletIndices={gapFixTargetBulletIndices}
                 tailorAppliedBulletIndices={tailorAppliedBulletIndices}
+                highlightsEnabled={highlightsEnabled}
               />
           ) : (
           <>

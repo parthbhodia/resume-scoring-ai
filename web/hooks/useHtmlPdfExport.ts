@@ -18,7 +18,7 @@ import { apiUrl } from "@/lib/utils";
  *  5. Strip [data-bullet-idx] annotation backgrounds — defense-in-depth for
  *     the non-live-doc fallback path.
  */
-function cleanForExport(source: HTMLElement): HTMLElement {
+function cleanForExport(source: HTMLElement, highlightsEnabled = true): HTMLElement {
   const clone = source.cloneNode(true) as HTMLElement;
 
   // 1. Remove all explicitly marked UI chrome
@@ -26,6 +26,9 @@ function cleanForExport(source: HTMLElement): HTMLElement {
 
   // 2. Activate the component's own clean-export CSS rules
   clone.classList.add("az-clean-export");
+  if (!highlightsEnabled) {
+    clone.classList.add("az-highlights-off");
+  }
 
   // 3. Strip paper-card presentation chrome
   clone.style.boxShadow = "none";
@@ -39,6 +42,13 @@ function cleanForExport(source: HTMLElement): HTMLElement {
     row.style.borderLeft = "none";
     row.style.cursor = "default";
   });
+
+  if (!highlightsEnabled) {
+    clone.querySelectorAll("mark.az-metric").forEach((el) => {
+      const text = el.textContent ?? "";
+      el.replaceWith(clone.ownerDocument?.createTextNode(text) ?? document.createTextNode(text));
+    });
+  }
 
   // 5. Inject complete CSS variable definitions + export overrides.
   //    Headless Chromium has no globals.css so every var must be spelled out.
@@ -65,6 +75,7 @@ function cleanForExport(source: HTMLElement): HTMLElement {
     /* Ensure annotation backgrounds never bleed through */
     [data-bullet-idx]            { background: transparent !important; border-left: none !important; }
     .az-pdf-ignore               { display: none !important; }
+    .az-highlights-off .az-metric { font-weight: inherit !important; color: inherit !important; background: transparent !important; }
 
     /* Disable all animations and transitions — prevents Chromium capturing
        a mid-animation frame (e.g. the mirror-pulse outline) */
@@ -82,11 +93,15 @@ export function useHtmlPdfExport() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const exportPdf = useCallback(async (containerEl: HTMLElement, filename = "resume.pdf") => {
+  const exportPdf = useCallback(async (
+    containerEl: HTMLElement,
+    filename = "resume.pdf",
+    opts?: { highlightsEnabled?: boolean },
+  ) => {
     setExporting(true);
     setError(null);
     try {
-      const cleaned = cleanForExport(containerEl);
+      const cleaned = cleanForExport(containerEl, opts?.highlightsEnabled ?? true);
 
       const html = `<!DOCTYPE html>
 <html>

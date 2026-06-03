@@ -788,7 +788,16 @@ function renderLabeledLine(text: string): ReactNode {
   );
 }
 
-function renderMetricLineWithLabel(text: string): ReactNode {
+function renderMetricLineWithLabel(text: string, highlightsEnabled: boolean): ReactNode {
+  if (!highlightsEnabled) {
+    const split = splitLeadingLabelAndValue(text);
+    if (!split) return text;
+    return (
+      <>
+        <strong>{split.label}:</strong> {split.value}
+      </>
+    );
+  }
   const split = splitLeadingLabelAndValue(text);
   if (!split) return highlightMetricSpans(text);
   return (
@@ -940,7 +949,13 @@ function tailorHighlightKind(
   return null;
 }
 
-function scoreBgTint(score: number, highlighted: boolean, presentationOnly: boolean): string {
+function scoreBgTint(
+  score: number,
+  highlighted: boolean,
+  presentationOnly: boolean,
+  highlightsEnabled: boolean,
+): string {
+  if (!highlightsEnabled) return "transparent";
   if (presentationOnly) {
     if (highlighted) return "rgba(239,68,68,0.16)";
     if (score >= 70) return "rgba(52,211,153,0.15)";
@@ -990,6 +1005,8 @@ interface Props {
   gapFixTargetBulletIndices?: number[];
   /** Brief green flash on applied bullet indices after gap apply. */
   tailorAppliedBulletIndices?: ReadonlySet<number>;
+  /** Score / gap / metric tinting on bullets and lines (off = clean résumé for preview + PDF). */
+  highlightsEnabled?: boolean;
 }
 
 export default function AnalyzeLiveResumeBody({
@@ -1013,6 +1030,7 @@ export default function AnalyzeLiveResumeBody({
   tailorAppliedHighlights = [],
   gapFixTargetBulletIndices = [],
   tailorAppliedBulletIndices = new Set<number>(),
+  highlightsEnabled = true,
 }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   // Tracks which bullets are in "edit textarea" mode (after accepting or choosing to write own)
@@ -1123,7 +1141,9 @@ export default function AnalyzeLiveResumeBody({
   const popupPreviewApplied = popup != null ? previewLineOverrides[popup.bulletIdx] !== undefined : false;
 
   return (
-    <div style={{
+    <div
+      className={highlightsEnabled ? undefined : "az-highlights-off"}
+      style={{
       background: "var(--resume-paper-bg)",
       color: "var(--resume-paper-ink)",
       boxSizing: "border-box",
@@ -1279,7 +1299,7 @@ export default function AnalyzeLiveResumeBody({
                 }
                 // Plain paragraph text (summary, skills list, location, etc.)
                 const tailorHl =
-                  presentationOnly && bulletAnalysis.length === 0
+                  highlightsEnabled && presentationOnly && bulletAnalysis.length === 0
                     ? tailorHighlightKind(ln, tailorGapFixHighlights, tailorAppliedHighlights)
                     : null;
                 const tailorHlStyle =
@@ -1333,7 +1353,7 @@ export default function AnalyzeLiveResumeBody({
                   rawLine.replace(/^[\s•\-–—*·◦▪▸→>]+/, "").trimStart(),
                 );
                 if (!neutralText) return null;
-                const tailorHl = presentationOnly
+                const tailorHl = highlightsEnabled && presentationOnly
                   ? tailorHighlightKind(neutralText, tailorGapFixHighlights, tailorAppliedHighlights)
                   : null;
                 const tailorHlStyle =
@@ -1354,7 +1374,7 @@ export default function AnalyzeLiveResumeBody({
                     }}
                   >
                     <span style={{ flex: 1, fontSize: "var(--az-resume-body-font-size, 10px)", lineHeight: "inherit", color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-                      {renderMetricLineWithLabel(neutralText)}
+                      {renderMetricLineWithLabel(neutralText, highlightsEnabled)}
                     </span>
                   </div>
                 );
@@ -1382,20 +1402,21 @@ export default function AnalyzeLiveResumeBody({
               const hasActionable = !!(bullet.improvedBullet || issues.length);
               const isPulsing = pulseBulletIndex === bulletIdx;
               const isGapFixTarget =
-                presentationOnly && gapFixTargetBulletIndices.includes(bulletIdx);
+                highlightsEnabled && presentationOnly && gapFixTargetBulletIndices.includes(bulletIdx);
               const isGapFixApplied =
-                presentationOnly && tailorAppliedBulletIndices.has(bulletIdx);
+                highlightsEnabled && presentationOnly && tailorAppliedBulletIndices.has(bulletIdx);
 
-              let bgTint = scoreBgTint(bullet.score, isHighlighted, presentationOnly);
-              let leftBar =
-                activeCategory && isHighlighted
-                  ? "4px solid rgba(248, 113, 113, 0.95)"
-                  : `3px solid ${scoreBorderColor(bullet.score)}`;
+              let bgTint = scoreBgTint(bullet.score, isHighlighted, presentationOnly, highlightsEnabled);
+              let leftBar = highlightsEnabled && activeCategory && isHighlighted
+                ? "4px solid rgba(248, 113, 113, 0.95)"
+                : highlightsEnabled
+                  ? `3px solid ${scoreBorderColor(bullet.score)}`
+                  : "none";
 
-              if (presentationOnly && isGapFixApplied) {
+              if (highlightsEnabled && presentationOnly && isGapFixApplied) {
                 bgTint = "rgba(52,211,153,0.14)";
                 leftBar = "3px solid rgb(34, 197, 94)";
-              } else if (presentationOnly && isGapFixTarget) {
+              } else if (highlightsEnabled && presentationOnly && isGapFixTarget) {
                 bgTint = "rgba(139,92,246,0.12)";
                 leftBar = "3px solid #8b5cf6";
               }
@@ -1448,7 +1469,7 @@ export default function AnalyzeLiveResumeBody({
                     )}
 
                     <span style={{ flex: 1, fontSize: "var(--az-resume-body-font-size, 10px)", lineHeight: "inherit", color: "var(--resume-paper-ink)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-                      {renderMetricLineWithLabel(showText)}
+                      {renderMetricLineWithLabel(showText, highlightsEnabled)}
                       {previewLineApplied && (
                         <span className="az-pdf-ignore az-preview-applied-mark"
                           title={presentationOnly ? "Suggestion applied" : "Preview updated"}
@@ -1457,7 +1478,7 @@ export default function AnalyzeLiveResumeBody({
                           {presentationOnly ? "✓" : "●"}
                         </span>
                       )}
-                      {presentationOnly && hasActionable && !previewLineApplied && (
+                      {highlightsEnabled && presentationOnly && hasActionable && !previewLineApplied && (
                         <span className="az-pdf-ignore" title="Click to see AI suggestion" style={{ marginLeft: 5, fontSize: 9, color: "var(--resume-paper-muted)" }}>✦</span>
                       )}
                     </span>
