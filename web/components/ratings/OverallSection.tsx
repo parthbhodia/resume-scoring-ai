@@ -1,6 +1,10 @@
 "use client";
 
 import { scoreColor } from "./scoreColor";
+import type { KeywordsRating, DetailedCategory } from "@/lib/types";
+
+const MAX_KEYWORD_CHIPS = 8;
+const MAX_QUAL_CHIPS = 4;
 
 type Props = {
   overallScore: number;
@@ -8,9 +12,10 @@ type Props = {
   verdict?: string;
   whats_working?: string[];
   gaps?: string[];
-  keywords?: { found_count: number; total_count: number };
-  qualifications?: { covered: unknown[]; missing: unknown[] };
+  keywords?: KeywordsRating;
+  qualifications?: DetailedCategory;
   responsibilities?: { covered: unknown[]; missing: unknown[] };
+  onNavigate?: (tab: "keywords" | "qualifications" | "responsibilities") => void;
 };
 
 function qualityLabel(score: number) {
@@ -29,6 +34,7 @@ export function OverallSection({
   keywords,
   qualifications,
   responsibilities,
+  onNavigate,
 }: Props) {
   const ql = qualityLabel(overallScore);
   const pct = Math.min(100, Math.max(0, overallScore));
@@ -39,6 +45,23 @@ export function OverallSection({
   const missingQuals = qualifications ? qualifications.missing.length : 0;
   const coveredQuals = qualifications ? qualifications.covered.length : 0;
   const coveredResp = responsibilities ? responsibilities.covered.length : 0;
+
+  // Resolve actual missing keyword names (new schema → legacy fallback)
+  const missingKwNames: string[] = keywords
+    ? [
+        ...(keywords.direct_skills?.missing ?? []),
+        ...(keywords.contextual?.missing ?? []),
+        ...(keywords.missing ?? []),
+      ].filter((v, i, a) => a.indexOf(v) === i) // dedupe
+    : [];
+  const shownMissingKw = missingKwNames.slice(0, MAX_KEYWORD_CHIPS);
+  const extraKw = Math.max(0, missingKwNames.length - MAX_KEYWORD_CHIPS);
+
+  // Top missing qualifications (text of missing items)
+  const missingQualNames = qualifications
+    ? qualifications.missing.slice(0, MAX_QUAL_CHIPS).map((q) => q.text)
+    : [];
+  const extraQual = Math.max(0, missingQuals - MAX_QUAL_CHIPS);
 
   return (
     <div>
@@ -281,6 +304,76 @@ export function OverallSection({
           </div>
         </div>
       </div>
+
+      {/* ── Missing keyword chips ────────────────────────── */}
+      {shownMissingKw.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171", letterSpacing: 0.4, textTransform: "uppercase" }}>
+              Missing Keywords
+            </span>
+            {onNavigate && (
+              <button type="button" onClick={() => onNavigate("keywords")}
+                style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", background: "none",
+                  border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                See all →
+              </button>
+            )}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {shownMissingKw.map((kw) => (
+              <span key={kw} style={{ padding: "3px 10px", borderRadius: 99,
+                fontSize: 11, fontWeight: 600,
+                background: "rgba(248,113,113,0.10)", color: "#f87171",
+                border: "1px solid rgba(248,113,113,0.25)" }}>
+                −{kw}
+              </span>
+            ))}
+            {extraKw > 0 && (
+              <button type="button" onClick={() => onNavigate?.("keywords")}
+                style={{ padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+                  background: "var(--surface2)", color: "var(--muted)",
+                  border: "1px solid var(--border)", cursor: "pointer", fontFamily: "inherit" }}>
+                +{extraKw} more
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Missing qualification chips ───────────────────── */}
+      {missingQualNames.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", letterSpacing: 0.4, textTransform: "uppercase" }}>
+              Missing Qualifications
+            </span>
+            {onNavigate && (
+              <button type="button" onClick={() => onNavigate("qualifications")}
+                style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", background: "none",
+                  border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                See all →
+              </button>
+            )}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {missingQualNames.map((q) => (
+              <div key={q} style={{ display: "flex", gap: 8, alignItems: "flex-start",
+                fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+                <span style={{ color: "#f59e0b", flexShrink: 0, marginTop: 1 }}>→</span>
+                <span>{q}</span>
+              </div>
+            ))}
+            {extraQual > 0 && onNavigate && (
+              <button type="button" onClick={() => onNavigate("qualifications")}
+                style={{ alignSelf: "flex-start", fontSize: 11, fontWeight: 600, color: "var(--accent)",
+                  background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                +{extraQual} more qualifications →
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── What's Working ───────────────────────────────── */}
       {whats_working.length > 0 && (
