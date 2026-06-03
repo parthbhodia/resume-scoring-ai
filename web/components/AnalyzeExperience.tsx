@@ -33,145 +33,6 @@ function Spinner({ size = 18 }: { size?: number }) {
   );
 }
 
-/* ── Combined Score + Resume Preview mockup ─────────────────── */
-
-const CATS = [
-  { label: "Readability",        score: 88, color: "#34d399" },
-  { label: "ATS Safety",         score: 72, color: "#2f81f7" },
-  { label: "Quantification",     score: 55, color: "#f59e0b" },
-  { label: "Achievement Quality",score: 63, color: "#f59e0b" },
-  { label: "Language Quality",   score: 81, color: "#34d399" },
-  { label: "Section Structure",  score: 76, color: "#2f81f7" },
-];
-
-const RESUME_LINES = [
-  { text: "Alex Johnson", type: "name" },
-  { text: "alex@email.com · github.com/alexj · San Francisco, CA", type: "contact" },
-  { text: "EXPERIENCE", type: "section" },
-  { text: "Software Engineer II · Stripe · 2022–Present", type: "role" },
-  { text: "• Worked on backend API features for the product team.", type: "bad" },
-  { text: "• Built webhook system handling 2M+ events/day using Go and Kafka.", type: "ok" },
-  { text: "• Led team of 4 migrating legacy PHP to Go microservices.", type: "ok" },
-  { text: "• Responsible for improving system performance.", type: "bad" },
-  { text: "Software Engineer Intern · Airbnb · 2021", type: "role" },
-  { text: "• Developed React component library cutting UI dev time 20%.", type: "ok" },
-];
-
-function MiniScoreBar({ score, color }: { score: number; color: string }) {
-  return (
-    <div style={{ height: 4, borderRadius: 3, background: "var(--surface2)", overflow: "hidden", flex: 1 }}>
-      <div style={{ width: `${score}%`, height: "100%", borderRadius: 3, background: color }} />
-    </div>
-  );
-}
-
-function AnalyzePreviewMockup() {
-  return (
-    <div className="az-preview-mockup fade-in-up stagger-1">
-      {/* Mac-style chrome bar */}
-      <div className="az-preview-chrome">
-        <span className="az-preview-dot" style={{ background: "#ff5f57" }} />
-        <span className="az-preview-dot" style={{ background: "#febc2e" }} />
-        <span className="az-preview-dot" style={{ background: "#28c840" }} />
-        <span className="az-preview-chrome-label">Resunova · Improvement Plan · Quantification</span>
-        <span className="az-preview-tag az-preview-tag--red">5 flagged</span>
-        <span className="az-preview-tag az-preview-tag--amber">Score 55</span>
-      </div>
-
-      <div className="az-preview-body">
-        {/* Left — Score + bars */}
-        <div className="az-preview-score-col">
-          {/* Score circle */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, marginBottom: 16 }}>
-            <div style={{
-              width: 72, height: 72, borderRadius: "50%",
-              border: "5px solid #f59e0b",
-              boxShadow: "0 0 0 3px rgba(245,158,11,0.15)",
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-              background: "var(--surface2)",
-            }}>
-              <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: -1, color: "var(--text)", lineHeight: 1 }}>74</span>
-              <span style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1 }}>/100</span>
-            </div>
-            <span style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase", letterSpacing: 0.5 }}>Needs work</span>
-          </div>
-          {/* Category bars */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 7, width: "100%" }}>
-            {CATS.map(c => (
-              <div key={c.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 10.5, color: "var(--muted)", width: 100, flexShrink: 0, lineHeight: 1.2 }}>{c.label}</span>
-                <MiniScoreBar score={c.score} color={c.color} />
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: c.color, width: 22, textAlign: "right", flexShrink: 0 }}>{c.score}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Divider */}
-        <div className="az-preview-divider" />
-
-        {/* Right — Resume preview + apply card */}
-        <div className="az-preview-right-col">
-          {/* Mini resume paper */}
-          <div className="az-preview-resume-paper">
-            {RESUME_LINES.map((line, i) => {
-              const isName    = line.type === "name";
-              const isContact = line.type === "contact";
-              const isSec     = line.type === "section";
-              const isRole    = line.type === "role";
-              const isBad     = line.type === "bad";
-              const isOk      = line.type === "ok";
-              return (
-                <div key={i} style={{
-                  fontSize: isName ? 12 : isSec ? 8.5 : isContact ? 9 : 9.5,
-                  fontWeight: isName ? 800 : isSec ? 800 : isRole ? 600 : 400,
-                  color: isName ? "#111" : isSec ? "#555" : isContact ? "#888" : "#222",
-                  textTransform: isSec ? "uppercase" : "none",
-                  letterSpacing: isSec ? 0.6 : 0,
-                  marginTop: isSec ? 8 : isName ? 0 : 2,
-                  marginBottom: isSec ? 3 : 0,
-                  padding: (isBad || isOk) ? "2px 18px 2px 4px" : 0,
-                  borderRadius: (isBad || isOk) ? 3 : 0,
-                  background: isBad ? "rgba(248,113,113,0.13)" : isOk ? "rgba(52,211,153,0.1)" : "transparent",
-                  border: isBad ? "1px solid rgba(248,113,113,0.3)" : isOk ? "1px solid rgba(52,211,153,0.25)" : "none",
-                  lineHeight: 1.4,
-                  position: "relative" as const,
-                }}>
-                  {line.text}
-                  {isBad && <span style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", fontSize: 8, color: "#f87171", fontWeight: 700 }}>⚠</span>}
-                  {isOk  && <span style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", fontSize: 8, color: "#34d399", fontWeight: 700 }}>✓</span>}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Apply card */}
-          <div className="az-preview-apply-card">
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#f87171", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>⚠ Selected · fix 1 of 5</div>
-            <div style={{ fontSize: 10, color: "#888", lineHeight: 1.4, textDecoration: "line-through", marginBottom: 6, opacity: 0.7 }}>
-              Worked on backend API features for the product team.
-            </div>
-            <div style={{ fontSize: 10, color: "var(--text)", lineHeight: 1.4, padding: "6px 8px", borderRadius: 6, background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.3)", marginBottom: 7 }}>
-              ✨ Architected REST API serving 2M+ daily requests, cutting P95 latency 40%.
-            </div>
-            <div style={{ display: "flex", gap: 5 }}>
-              <button style={{ flex: 1, padding: "6px 0", borderRadius: 6, border: "none", background: "#2f81f7", color: "white", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
-                ↑ Apply
-              </button>
-              <button style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", fontSize: 10, cursor: "pointer" }}>
-                Copy
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="az-preview-footer">
-        Sample output · your results appear here ~60 seconds after upload
-      </div>
-    </div>
-  );
-}
 
 /** Pre-upload landing: hero, preview mockup, drop zone (primary), JD (optional). */
 export function AnalyzeUploadLanding({
@@ -196,15 +57,27 @@ export function AnalyzeUploadLanding({
   return (
     <div className="az-upload-landing">
       {/* Hero */}
-      <div className="fade-in" style={{ textAlign: "center", marginBottom: 24 }}>
-        <h1 className="az-analyze-hero-title">See your résumé the way recruiters do</h1>
-        <p className="az-analyze-hero-sub">
-          Upload a PDF — get a score, 8-dimension breakdown, and bullet-by-bullet rewrites you can apply in one click.
-        </p>
+      <div className="fade-in" style={{ textAlign: "center", marginBottom: 20 }}>
+        <h1 className="az-analyze-hero-title">Score your résumé in 60 seconds</h1>
+        <p className="az-analyze-hero-sub">Upload a PDF — get an 8-dimension score and bullet-by-bullet rewrites.</p>
+        <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          {[
+            { icon: "◎", label: "Overall score" },
+            { icon: "≡", label: "8 categories" },
+            { icon: "✦", label: "AI rewrites" },
+          ].map(({ icon, label }) => (
+            <span key={label} style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "4px 10px", borderRadius: 99,
+              border: "1px solid var(--border)", background: "var(--surface2)",
+              fontSize: 12, color: "var(--muted)",
+            }}>
+              <span style={{ color: "var(--accent)", fontSize: 11 }}>{icon}</span>
+              {label}
+            </span>
+          ))}
+        </div>
       </div>
-
-      {/* Combined score + resume preview mockup */}
-      <AnalyzePreviewMockup />
 
       {/* Drop zone — PRIMARY action, above JD */}
       <div
