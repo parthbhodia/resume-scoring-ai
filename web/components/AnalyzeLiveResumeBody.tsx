@@ -224,7 +224,10 @@ export function isStructuredUsable(s: StructuredResume | null | undefined): bool
   return hasIdentity && hasBody;
 }
 
-const _DEFAULT_SECTION_ORDER = ["summary", "experience", "education", "projects", "skills"];
+// Matches the fixed section order emitted by resume_gui/extract/synthesize.py
+// (summary → education → experience → projects → skills), so the structured
+// render shows the résumé in the same order the text path always has.
+const _DEFAULT_SECTION_ORDER = ["summary", "education", "experience", "projects", "skills"];
 
 export function buildBlocksFromStructured(
   s: StructuredResume,
@@ -331,17 +334,16 @@ export function buildBlocksFromStructured(
     }
   };
 
-  const order = (s.section_order && s.section_order.length ? s.section_order : _DEFAULT_SECTION_ORDER)
-    .map((k) => k.toLowerCase());
+  // Use the synthesizer's FIXED natural order (resume_gui/extract/synthesize.py),
+  // NOT the backend section_order — that field is an inference that can be
+  // scrambled (e.g. experience-before-summary) and the text-path synthesizer
+  // never honored it, so honoring it here would reorder the résumé vs. what
+  // users have always seen.
   const seen = new Set<string>();
-  for (const key of order) {
+  for (const key of _DEFAULT_SECTION_ORDER) {
     if (seen.has(key)) continue;
     seen.add(key);
     emitSection(key);
-  }
-  // Any known section not named in section_order still renders (defensive).
-  for (const key of _DEFAULT_SECTION_ORDER) {
-    if (!seen.has(key)) { seen.add(key); emitSection(key); }
   }
 
   // Extra sections (activities, certifications, etc.) appended last.
