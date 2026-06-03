@@ -2897,20 +2897,22 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
             time.sleep(2)
         try:
             if _is_grok(m):
-                result = _json_grok(m, prompt, temperature=1)
+                # temperature=0 → deterministic match score. The Tailor re-check
+                # (and re-runs of the same résumé) must return a stable number so
+                # applying a gap fix never appears to randomly raise/lower the
+                # score from sampling noise; the score should change ONLY when the
+                # résumé content actually changes.
+                result = _json_grok(m, prompt, temperature=0)
                 if not result:
                     continue
             else:
                 if client is None:
                     continue
-                # Enable thinking for Gemini 2.5 models
-                thinking_cfg = (
-                    types.ThinkingConfig(thinking_budget=8000)
-                    if "2.5" in m else None
-                )
+                # Determinism requires temperature=0, but Gemini rejects temp≠1
+                # when "thinking" is enabled — so we turn thinking OFF here to keep
+                # the rating stable on the Gemini fallback path too.
                 gen_cfg = types.GenerateContentConfig(
-                    temperature=1,  # required when thinking is on
-                    **({"thinking_config": thinking_cfg} if thinking_cfg else {}),
+                    temperature=0,
                 )
                 r = client.models.generate_content(
                     model=m, contents=prompt, config=gen_cfg,
