@@ -49,6 +49,8 @@ import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { useSuggestionsStore } from "@/store/suggestionsStore";
 import type { StructuredResume } from "@/store/resumeAnalyzeStore";
+import { normalizeStructuredResume } from "@/store/resumeAnalyzeStore";
+import { isStructuredUsable } from "@/components/AnalyzeLiveResumeBody";
 import {
   PRIORITY_BG,
   PRIORITY_COLOR,
@@ -607,12 +609,11 @@ export default function ResumeBuilder({
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Latest PDF extract text — used to merge into saved Profile */
   const lastResumeExtractRef = useRef<string>("");
-  /** Structured resume from the upload pipeline — paired with the profile text to avoid re-parsing on generate.
-   *  Initialized from the persisted draft so the Tailor preview keeps rendering from
-   *  typed fields after a reload (otherwise candidateProfile is restored but this ref is null). */
-  const structuredUploadRef = useRef<{ profile: string; structured: StructuredResume } | null>(
-    builderSession0?.structuredUpload ?? null,
-  );
+  /** Structured resume from upload / generate-stream — drives Tailor WYSIWYG preview (not text parse). */
+  const [structuredUpload, setStructuredUpload] = useState<{
+    profile: string;
+    structured: StructuredResume;
+  } | null>(() => builderSession0?.structuredUpload ?? null);
   /** Object URL for the last uploaded PDF — powers true PDF highlights in suggestions (revoked on replace / unmount). */
   const sourcePdfBlobUrlRef = useRef<string | null>(null);
   const [uploadedPdfDataUrl, setUploadedPdfDataUrl] = useState<string | null>(
@@ -673,7 +674,7 @@ export default function ResumeBuilder({
       // Ref, not state — persisted opportunistically whenever another field
       // changes. On upload, candidateProfile changes in the same tick the ref is
       // set, so this captures it; restored into the ref on next mount.
-      structuredUpload: structuredUploadRef.current,
+      structuredUpload,
     });
   }, [
     candidateProfile,
@@ -691,6 +692,7 @@ export default function ResumeBuilder({
     suggestResearchDigest,
     suggestResearchQueries,
     suggestResearchSources,
+    structuredUpload,
   ]);
 
   // Restore suggestions store from localStorage on mount (survives page refresh)
@@ -1196,15 +1198,12 @@ export default function ResumeBuilder({
     );
   }, [gapFixPanel, tailorBulletAnalysis, effectiveCandidateProfile]);
 
-  // Render the Tailor preview from the structured upload doc only while the
-  // current profile text is still the uploaded one (gap-fix edits live in
-  // tailorLineOverrides, not candidateProfile, so this holds through fixes).
-  // If the user edited the profile text directly, fall back to text parsing.
+  // Structured preview whenever the upload doc is usable. Gap-fix text edits use
+  // tailorLineOverrides on bullet indices — they must not force text-parse fallback.
   const tailorStructuredResume = useMemo<StructuredResume | null>(() => {
-    const up = structuredUploadRef.current;
-    if (!up) return null;
-    return up.profile === (candidateProfile ?? "").trim() ? up.structured : null;
-  }, [candidateProfile, tailorBulletAnalysis]);
+    const normalized = normalizeStructuredResume(structuredUpload?.structured ?? null);
+    return isStructuredUsable(normalized) ? normalized : null;
+  }, [structuredUpload, tailorBulletAnalysis]);
 
   const getSuggestions = useCallback(async (
     focusGaps?: Array<{ name: string; score: number }>,
@@ -1418,7 +1417,12 @@ export default function ResumeBuilder({
       setResumeHeaderLines(resumeHeader);
       setUploadedFileName(file.name);
       lastResumeExtractRef.current = previewText;
-      structuredUploadRef.current = structuredResume ? { profile: previewText, structured: structuredResume } : null;
+      const normalized = normalizeStructuredResume(structuredResume);
+      setStructuredUpload(
+        normalized && isStructuredUsable(normalized)
+          ? { profile: previewText, structured: normalized }
+          : null,
+      );
 
       if (sourcePdfBlobUrlRef.current) {
         URL.revokeObjectURL(sourcePdfBlobUrlRef.current);
@@ -1592,9 +1596,7 @@ export default function ResumeBuilder({
           user_email: user?.email ?? null,
           // Pass the pre-parsed structured resume from the upload step so the backend
           // can skip redundant LLM re-extraction when the profile text is the same.
-          ...(structuredUploadRef.current?.profile === (candidateProfile ?? "").trim()
-            ? { structured_resume: structuredUploadRef.current.structured }
-            : {}),
+          ...(tailorStructuredResume ? { structured_resume: tailorStructuredResume } : {}),
         }),
       });
 
@@ -1636,14 +1638,18 @@ export default function ResumeBuilder({
           switch (ev.event) {
             case "status":  setStatusMsg(ev.msg); break;
             case "chunk":   acc.latexPreview += ev.text; setPreview(p => p + ev.text); break;
-            case "structured_doc":
+            case "structured_doc": {
               if (ev.data && typeof ev.data === "object") {
-                structuredUploadRef.current = {
-                  profile: candidateProfile ?? "",
-                  structured: ev.data as unknown as StructuredResume,
-                };
+                const normalized = normalizeStructuredResume(ev.data as unknown as StructuredResume);
+                if (normalized && isStructuredUsable(normalized)) {
+                  setStructuredUpload({
+                    profile: (candidateProfile ?? "").trim(),
+                    structured: normalized,
+                  });
+                }
               }
               break;
+            }
             case "sources": {
               const urls = ev.urls as Source[];
               acc.sources = urls;
@@ -1757,7 +1763,7 @@ export default function ResumeBuilder({
         generateStreamAbortRef.current = null;
       }
     }
-  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources, scrollBuilderToTop]);
+  }, [company, role, jd, jobUrl, importFromUrl, baseFolder, candidateProfile, user, styleReferenceFolder, studioHandoff, suggestions, acceptedIds, result, suggestResearchDigest, suggestResearchQueries, suggestResearchSources, scrollBuilderToTop, tailorStructuredResume]);
 
   /** Template customize: run full compile, then optional blob download + toast. */
   const finalizeLayoutPdf = useCallback(

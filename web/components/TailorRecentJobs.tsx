@@ -31,10 +31,12 @@ export default function TailorRecentJobs({ currentFolder, onPick }: Props) {
   useEffect(() => {
     fetchResumes()
       .then((rs) => {
-        // Only show records that have a JD + company/role so they're actually restoreable
+        // Only show records that have a JD + company/role so they're actually restoreable.
+        // Re-sort by created_at — fetchResumes() pins is_default first, which is wrong here.
         const filtered = rs
           .filter((r) => r.job_description?.trim() && (r.company?.trim() || r.role?.trim()))
-          .slice(0, 5);
+          .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))
+          .slice(0, 10);
         setItems(filtered);
       })
       .catch(() => setItems([]));
@@ -66,7 +68,19 @@ export default function TailorRecentJobs({ currentFolder, onPick }: Props) {
       }}>
         Recent jobs
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          /* ~3 job cards visible, scroll for the rest (matches Analyze past-runs strip). */
+          maxHeight: 178,
+          minHeight: 0,
+          overflowY: "auto",
+          WebkitOverflowScrolling: "touch",
+          paddingRight: 2,
+        }}
+      >
         {items.map((r) => {
           const isActive = currentFolder && r.folder === currentFolder;
           return (
