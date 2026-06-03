@@ -3003,7 +3003,7 @@ export default function ResumeBuilder({
                   flex: 1;
                   min-height: 0;
                   display: grid;
-                  grid-template-columns: minmax(52px, 220px) minmax(260px, 2fr) minmax(280px, 3fr);
+                  grid-template-columns: auto minmax(260px, 2fr) minmax(280px, 3fr);
                   grid-template-rows: minmax(0, 1fr);
                   overflow: hidden;
                 }
