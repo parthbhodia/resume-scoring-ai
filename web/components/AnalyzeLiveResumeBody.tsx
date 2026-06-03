@@ -1111,14 +1111,14 @@ export default function AnalyzeLiveResumeBody({
           }
 
           return (
-            <div key={bi} style={{ textAlign: "center", marginBottom: 12, paddingBottom: 10, borderBottom: "1.5px solid var(--resume-paper-accent)" }}>
+            <div key={bi} style={{ textAlign: "left", marginBottom: 14 }}>
               {nameLine && (
                 <div style={{
-                  fontSize: 22,
+                  fontSize: "var(--az-resume-name-size, 22px)",
                   fontWeight: 700,
-                  letterSpacing: 0.4,
+                  letterSpacing: 0.3,
                   color: "var(--resume-paper-ink)",
-                  marginBottom: 5,
+                  marginBottom: 3,
                   fontFamily: RESUME_HEADING_FONT,
                 }}>
                   {renderInline(nameLine)}
@@ -1128,17 +1128,17 @@ export default function AnalyzeLiveResumeBody({
                 <div style={{
                   display: "flex",
                   flexWrap: "wrap",
-                  justifyContent: "center",
+                  justifyContent: "flex-start",
                   alignItems: "center",
-                  gap: "0 4px",
-                  fontSize: 9.4,
+                  gap: "0 6px",
+                  fontSize: 9.6,
                   color: "var(--resume-paper-muted)",
                   fontFamily: RESUME_BODY_FONT,
                   lineHeight: 1.5,
                 }}>
                   {contactItems.map((item, ci) => (
-                    <span key={ci} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                      {ci > 0 && <span style={{ color: "var(--resume-paper-dim)", fontSize: 8 }}>◆</span>}
+                    <span key={ci} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {ci > 0 && <span style={{ color: "var(--resume-paper-dim)" }}>|</span>}
                       {renderInline(item)}
                     </span>
                   ))}
@@ -1148,20 +1148,17 @@ export default function AnalyzeLiveResumeBody({
           );
         }
 
-        /* ── Section heading ── */
+        /* ── Section heading (Template Builder SECTION_TITLE look) ── */
         if (blk.type === "section") {
-          const isPrimarySection = Boolean(roleForKnownSection(blk.text));
           return (
             <div key={bi} style={{
-              marginTop: isPrimarySection ? "var(--az-resume-section-margin-top, 13px)" : 8,
-              marginBottom: isPrimarySection ? 5 : 4,
-              paddingBottom: isPrimarySection ? 3 : 2,
-              borderBottom: isPrimarySection
-                ? "1.5px solid var(--resume-paper-accent)"
-                : "1px solid color-mix(in srgb, var(--resume-paper-accent) 72%, transparent)",
-              fontSize: isPrimarySection ? 9 : 10,
-              fontWeight: 800,
-              letterSpacing: isPrimarySection ? 1.6 : 1.25,
+              marginTop: "var(--az-resume-section-margin-top, 11px)",
+              marginBottom: 6,
+              paddingBottom: 2,
+              borderBottom: "0.5px solid var(--resume-paper-accent)",
+              fontSize: "var(--az-resume-section-size, 10.5px)",
+              fontWeight: 700,
+              letterSpacing: "var(--az-resume-section-tracking, 1px)",
               color: "var(--resume-paper-accent)",
               textTransform: "uppercase",
               fontFamily: RESUME_HEADING_FONT,

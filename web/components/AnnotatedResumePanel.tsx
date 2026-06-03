@@ -131,48 +131,64 @@ function mirrorToneStyles(score: number): { bar: string; bg: string; shadow: str
 
 type PreviewStyleId = "classic" | "modern" | "compact";
 
+// Mirrors the Template Builder presets (web/components/TemplateBuilder/templateStyles.ts)
+// so the Analyze/Tailor preview matches the Template Builder's clean look.
+// Ids kept as classic/modern/compact for backward-compat with persisted picks;
+// labels updated. Helvetica stack matches TB FONT_STACK["Helvetica"].
+const HELV = "'Helvetica Neue', Helvetica, Arial, sans-serif";
+const TIMES = "'Times New Roman', Georgia, serif";
+
 const PREVIEW_STYLE_OPTIONS: Array<{
   id: PreviewStyleId;
   label: string;
   vars: Record<string, string>;
 }> = [
   {
-    id: "classic",
+    id: "classic", // TB "classic" — Times serif
     label: "Classic",
     vars: {
-      "--az-resume-heading-font": "'Georgia', 'Times New Roman', serif",
-      "--az-resume-body-font": "'Georgia', 'Times New Roman', serif",
-      "--az-resume-ui-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      "--az-resume-base-font-size": "10.5px",
-      "--az-resume-line-height": "1.37",
-      "--az-resume-paper-padding": "26px 32px 36px",
-      "--az-resume-section-margin-top": "13px",
+      "--az-resume-heading-font": TIMES,
+      "--az-resume-body-font": TIMES,
+      "--az-resume-ui-font": TIMES,
+      "--az-resume-base-font-size": "10.8px",
+      "--az-resume-line-height": "1.42",
+      "--az-resume-name-size": "22.5px",
+      "--az-resume-section-size": "10.8px",
+      "--az-resume-section-tracking": "0.8px",
+      "--az-resume-paper-padding": "28px 36px 36px",
+      "--az-resume-section-margin-top": "11px",
     },
   },
   {
-    id: "modern",
+    id: "modern", // TB "modern" — Helvetica, tighter
     label: "Modern",
     vars: {
-      "--az-resume-heading-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      "--az-resume-body-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      "--az-resume-ui-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      "--az-resume-base-font-size": "10.3px",
-      "--az-resume-line-height": "1.35",
-      "--az-resume-paper-padding": "24px 32px 32px",
-      "--az-resume-section-margin-top": "12px",
+      "--az-resume-heading-font": HELV,
+      "--az-resume-body-font": HELV,
+      "--az-resume-ui-font": HELV,
+      "--az-resume-base-font-size": "10.2px",
+      "--az-resume-line-height": "1.38",
+      "--az-resume-name-size": "21px",
+      "--az-resume-section-size": "10.2px",
+      "--az-resume-section-tracking": "0.9px",
+      "--az-resume-paper-padding": "26px 34px 32px",
+      "--az-resume-section-margin-top": "9px",
     },
   },
   {
-    id: "compact",
-    label: "Compact",
+    id: "compact", // TB "executive" — Helvetica, polished hierarchy
+    label: "Executive",
     vars: {
-      "--az-resume-heading-font": "'Georgia', 'Times New Roman', serif",
-      "--az-resume-body-font": "'Georgia', 'Times New Roman', serif",
-      "--az-resume-ui-font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      "--az-resume-base-font-size": "9.8px",
-      "--az-resume-line-height": "1.3",
-      "--az-resume-paper-padding": "20px 30px 26px",
-      "--az-resume-section-margin-top": "10px",
+      "--az-resume-heading-font": HELV,
+      "--az-resume-body-font": HELV,
+      "--az-resume-ui-font": HELV,
+      "--az-resume-base-font-size": "10.5px",
+      "--az-resume-line-height": "1.45",
+      "--az-resume-name-size": "22px",
+      "--az-resume-section-size": "10.5px",
+      "--az-resume-section-tracking": "1px",
+      "--az-resume-paper-padding": "30px 38px 38px",
+      "--az-resume-section-margin-top": "11px",
     },
   },
 ];
