@@ -60,7 +60,7 @@ type GapFixPanel = { gapName: string; gapNotes: string; suggestions: GapFixSugge
 
 type SharedProps = {
   ratings: RatingsData;
-  onFixGap?: (item: DetailedRatingItem) => void;
+  onFixGap?: (item: DetailedRatingItem, gapType: AddressedGapAction["type"]) => void;
   onFixKeyword?: (keyword: string) => void;
   fixingGapName?: string | null;
   gapFixPanel?: GapFixPanel | null;

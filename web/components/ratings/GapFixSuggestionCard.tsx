@@ -80,8 +80,13 @@ export function GapFixSuggestionCard({
         <textarea
           value={draftText}
           onChange={(e) => onDraftChange(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onFocus={(e) => e.stopPropagation()}
           rows={4}
+          aria-label="Suggested correction"
           style={{
+            cursor: "text",
             width: "100%",
             boxSizing: "border-box",
             padding: "8px 10px",

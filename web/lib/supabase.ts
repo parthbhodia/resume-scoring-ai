@@ -134,6 +134,7 @@ export async function upsertResume(
     renderer?: "legacy" | "structured";
     schemaVersion?: number;
   },
+  opts?: { bumpCreatedAt?: boolean },
 ): Promise<string> {
   const db = getSupabaseClient();
 
@@ -180,9 +181,12 @@ export async function upsertResume(
 
   const persistResumeRow = async (payload: Record<string, unknown>): Promise<string> => {
     if (existing?.id) {
+      const updatePayload = opts?.bumpCreatedAt
+        ? { ...payload, created_at: new Date().toISOString() }
+        : payload;
       const { data: upd, error: upErr } = await db
         .from("resumes")
-        .update(payload)
+        .update(updatePayload)
         .eq("id", existing.id as string)
         .select("id")
         .single();

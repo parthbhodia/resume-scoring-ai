@@ -8,6 +8,7 @@ import {
   normalizeResumeExtractLine as normalizeExtractLine,
   looksLikeLoneJobTitleLine,
   looksLikeEntryHeader,
+  isGapFixEligibleLine,
 } from "@/lib/resumeEntryLineHeuristics";
 
 export interface LiveBulletItem {
@@ -76,6 +77,7 @@ export function findLineIndexForOriginal(original: string, lines: string[]): num
   let best = -1;
   let bestScore = 0;
   for (let li = 0; li < lines.length; li++) {
+    if (!isGapFixEligibleLine(lines[li])) continue;
     const ln = normalizeForMatch(lines[li]);
     if (ln.length < 4) continue;
     if (ln === origNorm) return li;

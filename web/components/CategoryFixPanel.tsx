@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
   useSuggestionsStore,
   CATEGORY_META,
@@ -30,10 +30,8 @@ function BulletCard({
   onUndo: () => void;
   onSelect: () => void;
 }) {
-  const [editedSuggestion, setEditedSuggestion] = useState(suggestion.suggested);
-  const [editing, setEditing] = useState(false);
+  const updateSuggested = useSuggestionsStore((s) => s.updateSuggested);
   const meta = CATEGORY_META[suggestion.category ?? "strengthen_impact"];
-  const status = accepted ? "accepted" : rejected ? "rejected" : "pending";
 
   return (
     <div
@@ -163,56 +161,50 @@ function BulletCard({
           </div>
         </div>
 
-        {/* Suggested */}
-        <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#34d399", textTransform: "uppercase", letterSpacing: 0.4 }}>
-              Suggested correction
-            </div>
-            <button
-              type="button"
-              onClick={() => setEditing((e) => !e)}
-              style={{ fontSize: 11, color: "var(--dim)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
-              title="Edit suggestion"
-            >
-              ✏️
-            </button>
-          </div>
-          {editing ? (
-            <textarea
-              value={editedSuggestion}
-              onChange={(e) => setEditedSuggestion(e.target.value)}
-              onBlur={() => setEditing(false)}
-              autoFocus
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: 8,
-                background: "rgba(52,211,153,0.06)",
-                border: "1px solid rgba(52,211,153,0.3)",
-                fontSize: 13,
-                color: "#34d399",
-                lineHeight: 1.6,
-                resize: "vertical",
-                minHeight: 80,
-                fontFamily: "inherit",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-          ) : (
-            <div style={{
+        {/* Suggested — always editable; edits persist in the suggestions store */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          role="presentation"
+        >
+          <label
+            htmlFor={`cf-sug-${suggestion.id}`}
+            style={{
+              display: "block",
+              fontSize: 10,
+              fontWeight: 700,
+              color: "#34d399",
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              marginBottom: 6,
+            }}
+          >
+            Suggested correction (editable)
+          </label>
+          <textarea
+            id={`cf-sug-${suggestion.id}`}
+            value={suggestion.suggested}
+            onChange={(e) => updateSuggested(suggestion.id, e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onFocus={(e) => e.stopPropagation()}
+            rows={4}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
               padding: "10px 12px",
               borderRadius: 8,
               background: "rgba(52,211,153,0.06)",
               border: "1px solid rgba(52,211,153,0.3)",
               fontSize: 13,
-              color: "#34d399",
+              color: "var(--text)",
               lineHeight: 1.6,
-            }}>
-              {editedSuggestion}
-            </div>
-          )}
+              resize: "vertical",
+              minHeight: 88,
+              fontFamily: "inherit",
+              outline: "none",
+              cursor: "text",
+            }}
+          />
         </div>
 
         {/* Reason */}

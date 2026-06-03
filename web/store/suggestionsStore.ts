@@ -76,6 +76,8 @@ export interface SuggestionsStore {
   undoAccept: (id: string) => void;
   undoReject: (id: string) => void;
   select: (id: string | null) => void;
+  /** Update suggested text without resetting accept/reject state. */
+  updateSuggested: (id: string, suggested: string) => void;
   setActiveCategory: (cat: SuggestionCategory | null) => void;
   markCategoryDone: (cat: SuggestionCategory) => void;
   markCategorySkipped: (cat: SuggestionCategory) => void;
@@ -167,6 +169,13 @@ export const useSuggestionsStore = create<SuggestionsStore>((set, get) => ({
     set((s) => { const next = new Set(s.rejectedIds); next.delete(id); return { rejectedIds: next }; }),
 
   select: (id) => set({ selectedId: id }),
+
+  updateSuggested: (id, suggested) =>
+    set((s) => ({
+      suggestions: s.suggestions.map((sg) =>
+        sg.id === id ? { ...sg, suggested } : sg,
+      ),
+    })),
 
   setActiveCategory: (cat) => set({ activeCategory: cat }),
 

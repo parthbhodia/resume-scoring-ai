@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { accentCardBorder } from "@/lib/accentCardBorder";
 import { isGapAddressed, suggestionsWithDrafts } from "@/lib/tailorGapFix";
 import type { AddressedGapAction, DetailedCategory, DetailedRatingItem } from "@/lib/types";
+import { isGapFixEligibleLine } from "@/lib/resumeEntryLineHeuristics";
 import { GapFixSuggestionCard, type GapFixSuggestion } from "@/components/ratings/GapFixSuggestionCard";
 
 type GapFixPanel = {
@@ -12,10 +13,14 @@ type GapFixPanel = {
   suggestions: GapFixSuggestion[];
 };
 
+function gapTypeForLabel(label: string): AddressedGapAction["type"] {
+  return label.toLowerCase().includes("responsibilit") ? "responsibility" : "qualification";
+}
+
 type Props = {
   category: DetailedCategory;
   label: string;
-  onFixGap?: (item: DetailedRatingItem) => void;
+  onFixGap?: (item: DetailedRatingItem, gapType: AddressedGapAction["type"]) => void;
   fixingGapName?: string | null;
   gapFixPanel?: GapFixPanel | null;
   gapFixError?: string | null;
@@ -48,7 +53,9 @@ export function CoveredMissingSection({
   const [missingOpen, setMissingOpen] = useState(true);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
-  const panelSuggestions = gapFixPanel?.suggestions ?? [];
+  const panelSuggestions = (gapFixPanel?.suggestions ?? []).filter((s) =>
+    isGapFixEligibleLine(s.original),
+  );
 
   useEffect(() => {
     if (gapFixPanel?.gapName) {
@@ -139,7 +146,10 @@ export function CoveredMissingSection({
                       <button
                         type="button"
                         disabled={isFixing || !!fixingGapName}
-                        onClick={() => { setCheckedIds(new Set()); onFixGap(item); }}
+                        onClick={() => {
+                          setCheckedIds(new Set());
+                          onFixGap?.(item, gapTypeForLabel(label));
+                        }}
                         style={{
                           display: "inline-flex", alignItems: "center", gap: 6,
                           padding: "6px 14px", borderRadius: 7,

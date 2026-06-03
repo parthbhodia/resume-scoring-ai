@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { isGapAddressed, suggestionsWithDrafts } from "@/lib/tailorGapFix";
+import { isGapFixEligibleLine } from "@/lib/resumeEntryLineHeuristics";
 import type { AddressedGapAction, KeywordsRating, ContextualKeyword } from "@/lib/types";
 import { GapFixSuggestionCard, type GapFixSuggestion } from "@/components/ratings/GapFixSuggestionCard";
 
@@ -55,7 +56,9 @@ export function KeywordsSection({
 
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
-  const panelSuggestions = gapFixPanel?.suggestions ?? [];
+  const panelSuggestions = (gapFixPanel?.suggestions ?? []).filter((s) =>
+    isGapFixEligibleLine(s.original),
+  );
 
   useEffect(() => {
     if (gapFixPanel?.gapName) {

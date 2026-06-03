@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { GenerationResult, SSEEvent, RatingsData, DiffLine, Source, ChangeRationale, ParsedSection } from "@/lib/types";
 import { buildResumeFileStem } from "@/lib/resumeFileName";
+import { saveTailorMatchToLibrary, tailorMatchFolder } from "@/lib/tailorAnalyzeLibrary";
 import { accentCardBorder } from "@/lib/accentCardBorder";
 import { getBaseResumeBanner } from "@/lib/libraryFolderLabel";
 import { apiUrl, isResumeUploadFile, parseJsonOrThrow, scoreColor } from "@/lib/utils";
@@ -603,8 +604,16 @@ export default function ResumeBuilder({
   const [tailorRescoring, setTailorRescoring] = useState(false);
 
   useEffect(() => {
-    setGapFixDrafts({});
-  }, [gapFixPanel?.gapName]);
+    if (!gapFixPanel?.gapName) {
+      setGapFixDrafts({});
+      return;
+    }
+    const next: Record<string, string> = {};
+    for (const s of gapFixPanel.suggestions) {
+      next[s.id] = s.suggested;
+    }
+    setGapFixDrafts(next);
+  }, [gapFixPanel?.gapName, gapFixPanel?.suggestions]);
 
   // Phase 2 — Inline bullet editor state
   const [bulletEditorOpen, setBulletEditorOpen] = useState(false);
@@ -1098,16 +1107,39 @@ export default function ResumeBuilder({
       setTailorAppliedBulletIndices(new Set());
       setAddressedGaps(new Set());
       setAddressedGapActions([]);
-      setResult({
+
+      const effCompany = company.trim() || "—";
+      const effRole = role.trim() || "—";
+      const matchFolder = tailorMatchFolder(effCompany, effRole);
+      let nextResult: GenerationResult = {
         ...EMPTY_RESULT,
         ratings: data.ratings,
-      });
+        folder: matchFolder,
+      };
+
+      if (user?.id) {
+        try {
+          await saveTailorMatchToLibrary({
+            folder: matchFolder,
+            company: effCompany,
+            role: effRole,
+            model,
+            ratings: data.ratings,
+            jobDescription: effJd,
+            candidateProfile,
+          });
+        } catch (e) {
+          console.warn("saveTailorMatchToLibrary failed", e);
+        }
+      }
+
+      setResult(nextResult);
     } catch (e: unknown) {
       setAnalyzeError(e instanceof Error ? e.message : "Analysis failed");
     } finally {
       setAnalyzing(false);
     }
-  }, [jd, candidateProfile]);
+  }, [jd, candidateProfile, company, role, model, user?.id]);
 
   /** Re-run JD match ratings on updated plain text (no LaTeX / no ATS folder).
    * Pass bulletsAtApply/overridesAtApply/appliedAtApply when calling from applyGapFixes
@@ -1156,7 +1188,28 @@ export default function ResumeBuilder({
         addressedGaps,
         addressedGapActions,
       );
-      setResult((prev) => (prev ? { ...prev, ratings: mergedRatings } : prev));
+
+      const matchFolder =
+        result?.folder ?? tailorMatchFolder(company.trim() || "—", role.trim() || "—");
+      if (user?.id && matchFolder) {
+        try {
+          await saveTailorMatchToLibrary({
+            folder: matchFolder,
+            company: company.trim() || "—",
+            role: role.trim() || "—",
+            model,
+            ratings: mergedRatings,
+            jobDescription: jd.trim(),
+            candidateProfile: prof,
+          });
+        } catch (e) {
+          console.warn("saveTailorMatchToLibrary (rescore) failed", e);
+        }
+      }
+
+      setResult((prev) => (
+        prev ? { ...prev, ratings: mergedRatings, folder: matchFolder ?? prev.folder } : prev
+      ));
 
       if (Array.isArray(data.bulletAnalysis) && data.bulletAnalysis.length > 0) {
         const newBullets = data.bulletAnalysis;
@@ -1187,7 +1240,11 @@ export default function ResumeBuilder({
     } finally {
       setTailorRescoring(false);
     }
-  }, [candidateProfile, jd, tailorBulletAnalysis, tailorLineOverrides, addressedGaps, addressedGapActions, tailorAppliedBulletIndices]);
+  }, [
+    candidateProfile, jd, company, role, model, user?.id, result?.folder,
+    tailorBulletAnalysis, tailorLineOverrides, addressedGaps, addressedGapActions,
+    tailorAppliedBulletIndices,
+  ]);
 
   /** Plain text with tailor bullet overrides applied (for gap-fix API + rescoring). */
   const effectiveCandidateProfile = useMemo(
@@ -1405,10 +1462,7 @@ export default function ResumeBuilder({
     }
   }, [jd, candidateProfile, studioHandoff, hydrateSuggestions, appendSuggestStream, setSuggestLoading, setSuggestError, resetSuggestions, scrollBuilderToTop]);
 
-  const patchSuggestionSuggested = useCallback((id: string, suggested: string) => {
-    const updated = suggestions.map((s) => (s.id === id ? { ...s, suggested } : s));
-    hydrateSuggestions(updated, suggestSummary, strategicTips, interviewQuestions);
-  }, [suggestions, suggestSummary, strategicTips, interviewQuestions, hydrateSuggestions]);
+  const patchSuggestionSuggested = useSuggestionsStore((s) => s.updateSuggested);
 
   const mergeProfileFromLastExtract = useCallback(() => {
     const text = lastResumeExtractRef.current.trim();
@@ -1847,7 +1901,13 @@ export default function ResumeBuilder({
     notes: string;
     type?: AddressedGapAction["type"];
   }) => {
-    if (!candidateProfile || !jd.trim()) return;
+    if (!jd.trim()) return;
+    if (!tailorStructuredResume) {
+      setGapFixError(
+        "Fix with AI needs a structured résumé from your upload. Re-upload a PDF so we can extract experience and project bullets.",
+      );
+      return;
+    }
     if (isGapAddressed(gap.name, addressedGaps, addressedGapActions)) return;
     setGapFixLoading(gap.name);
     setGapFixError(null);
@@ -1859,8 +1919,8 @@ export default function ResumeBuilder({
         body: JSON.stringify({
           gap_name: gap.name,
           gap_notes: gap.notes,
-          candidate_profile: effectiveCandidateProfile,
           job_description: jd.trim(),
+          structured_resume: tailorStructuredResume,
         }),
       });
       const data = await resp.json() as { suggestions?: unknown[]; error?: string };
@@ -1868,10 +1928,11 @@ export default function ResumeBuilder({
       const suggs = (Array.isArray(data.suggestions) ? data.suggestions : []) as Array<{
         id: string; section: string; original: string; suggested: string; reason: string; priority: string;
       }>;
+      const eligible = suggs.filter((s) => s.original?.trim() && s.suggested?.trim());
       setGapFixPanel({
         gapName: gap.name,
         gapNotes: gap.notes,
-        suggestions: suggs,
+        suggestions: eligible,
         gapType: gap.type ?? "qualification",
       });
     } catch (e: unknown) {
@@ -1879,7 +1940,7 @@ export default function ResumeBuilder({
     } finally {
       setGapFixLoading(null);
     }
-  }, [effectiveCandidateProfile, jd, addressedGaps, addressedGapActions]);
+  }, [jd, addressedGaps, addressedGapActions, tailorStructuredResume]);
 
   /**
    * Apply one or more gap-fix suggestions to the HTML preview (Chromium export path — no LaTeX).
@@ -3164,11 +3225,11 @@ export default function ResumeBuilder({
                   <div className="tb-split-work-slot">
                     <TailorMatchDetail
                       ratings={displayRatings}
-                      onFixGap={(item: DetailedRatingItem) => {
+                      onFixGap={(item: DetailedRatingItem, gapType) => {
                         void handleFixGap({
                           name: item.text,
                           notes: item.analysis ?? "",
-                          type: "qualification",
+                          type: gapType,
                         });
                       }}
                       onFixKeyword={(kw) => {

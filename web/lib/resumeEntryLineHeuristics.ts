@@ -44,6 +44,28 @@ export function looksLikeLoneJobTitleLine(line: string): boolean {
   return true;
 }
 
+/** Achievement verbs — lines without these that look like headers are not gap-fix bullets. */
+const ACHIEVEMENT_VERB_RE =
+  /\b(built|developed|designed|implemented|led|managed|created|delivered|optimized|migrated|improved|reduced|increased|achieved|engineered|architected|automated|deployed|established|launched|scaled|streamlined|collaborated|maintained|won|spearheaded|drove|owned|integrated|delivered)\b/i;
+
+/**
+ * True when a plain-text line is a real achievement bullet eligible for gap-fix rewrites.
+ * Excludes project titles ("App | Vue, MongoDB"), job headers, and tech-stack-only lines.
+ */
+export function isGapFixEligibleLine(line: string): boolean {
+  const t = normalizeResumeExtractLine(line);
+  if (t.length < 12) return false;
+  if (KNOWN_SECTIONS.test(t)) return false;
+  if (lineLooksLikeBulletLead(line)) return true;
+  if (looksLikeLoneJobTitleLine(line)) return false;
+  if (t.includes("|") && !ACHIEVEMENT_VERB_RE.test(t) && t.length < 140) return false;
+  if (t.includes("·") && t.split("·").length >= 2 && !ACHIEVEMENT_VERB_RE.test(t) && t.length < 120) {
+    return false;
+  }
+  if (looksLikeEntryHeader(line) && !ACHIEVEMENT_VERB_RE.test(t)) return false;
+  return true;
+}
+
 /** Job/education entry header (title | company | date, or date ranges, etc.). */
 export function looksLikeEntryHeader(line: string): boolean {
   const t = line.trim();

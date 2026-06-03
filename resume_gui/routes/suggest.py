@@ -1,6 +1,16 @@
 """Coach suggestions and gap-fix routes."""
 from __future__ import annotations
 
+from resume_gui.llm.gap_fix_call import call_suggest_gap_fix_llm
+from resume_gui.tailor.gap_fix_prompt import build_suggest_gap_fix_prompt
+from resume_gui.tailor.gap_fix_terms import extract_gap_target_terms
+from resume_gui.tailor.requirement_match.role_family import classify_role_family
+from resume_gui.tailor.gap_fix_validate import validate_gap_fix_suggestions
+from resume_gui.tailor.structured_gap_fix import (
+    eligible_gap_fix_targets,
+    eligible_originals_set,
+    structured_targets_json_for_prompt,
+)
 from resume_gui.routes._shared import *  # noqa: F403
 
 async def api_suggest_changes(request: Request):
@@ -73,10 +83,10 @@ async def api_suggest_gap_fix(request: Request):
     best matching bullets to rewrite, without web research or strategic tips.
 
     Body: {
-        "gap_name": str,          # e.g. "Zendesk Administration"
-        "gap_notes": str,         # the gap explanation text shown in the UI
-        "candidate_profile": str, # plain-text resume
+        "gap_name": str,
+        "gap_notes": str,
         "job_description": str,
+        "structured_resume": dict,  # required — vision extract; bullets only
     }
     Returns: {
         "suggestions": [{"id", "original", "suggested", "reason", "section", "priority"}]
@@ -89,156 +99,60 @@ async def api_suggest_gap_fix(request: Request):
 
     gap_name          = (body.get("gap_name") or "").strip()
     gap_notes         = (body.get("gap_notes") or "").strip()
-    candidate_profile = (body.get("candidate_profile") or "").strip()
     job_description   = (body.get("job_description") or "").strip()
+    structured_resume = body.get("structured_resume") or body.get("structuredResume")
 
     if not gap_name:
         return JSONResponse({"error": "gap_name required"}, status_code=400)
-    if not candidate_profile:
-        return JSONResponse({"error": "candidate_profile required"}, status_code=400)
     if not job_description:
         return JSONResponse({"error": "job_description required"}, status_code=400)
 
-    notes_line = f"\nGap detail: {gap_notes}" if gap_notes else ""
-    prompt = (
-        "You are an expert resume coach. A candidate's résumé was scored and one specific criterion scored low.\n\n"
-        f"LOW-SCORING CRITERION: {gap_name}{notes_line}\n\n"
-        f"RÉSUMÉ:\n{candidate_profile[:5000]}\n\n"
-        f"JOB DESCRIPTION:\n{job_description[:2000]}\n\n"
-        "Task: Find the 2-3 bullets in the résumé that are most relevant to this gap and suggest improved "
-        "rewrites that better surface the skill or experience. If no bullet directly addresses the gap, "
-        "find the closest transferable experience and reframe it.\n\n"
-        "Rules:\n"
-        "- Only rewrite bullets that EXIST verbatim in the résumé — quote each original exactly.\n"
-        "- Do NOT invent metrics, employers, dates, or facts not already in the résumé.\n"
-        # A5 — length is flexible upward, never downward
-        "- Length: rewrites should be the same length or longer than the original. They may grow\n"
-        "  to fit new keywords, but they may NOT shrink by dropping content. One bullet → one\n"
-        "  bullet (no splitting), but use as many words as you need to preserve everything.\n"
-        "- Focus on vocabulary and framing that matches the job description keywords.\n"
-        "- KEYWORD PRESERVATION (CRITICAL): the suggested rewrite MUST preserve every concrete\n"
-        "  technical term from the original bullet. Specifically:\n"
-        "    * AWS service names (Lambda, Cognito, API Gateway, Bedrock, S3, SQS, DynamoDB, etc.)\n"
-        "    * Cloud / DevOps tools (Docker, Kubernetes, Terraform, Jenkins, GitHub Actions, etc.)\n"
-        "    * Programming languages and frameworks (Python, Java, Spring Boot, FastAPI, React, etc.)\n"
-        "    * Protocols and standards (gRPC, REST, GraphQL, OAuth, SAML, WCAG, etc.)\n"
-        "    * Database / data engine names (PostgreSQL, Redis, Kafka, RabbitMQ, etc.)\n"
-        "    * Specific product / project nouns (e.g. 'live audio and text', 'CI/CD pipelines',\n"
-        "      'infrastructure as code') — do NOT generalize them to vague phrases like 'live data'.\n"
-        "  You may ADD new keywords from the JD. You may REPHRASE. You may NOT delete any of the\n"
-        "  named technologies, services, protocols, or domain-specific nouns above.\n"
-        # A2 — anti-abstraction rule with concrete examples
-        "- NO ABSTRACTING (CRITICAL): do not replace a specific term with a generic one. Examples\n"
-        "  of changes you must NEVER make:\n"
-        "    * 'live audio and text'  →  'live data'                       ❌ (lost the product)\n"
-        "    * 'PostgreSQL'            →  'database' or 'a relational store' ❌ (lost the engine)\n"
-        "    * 'AWS Lambda'            →  'serverless functions'           ❌ (lost the service)\n"
-        "    * 'Kubernetes'            →  'container orchestration'         ❌ (lost the tool)\n"
-        "    * 'gRPC streaming'        →  'real-time streaming'             ❌ (lost the protocol)\n"
-        "    * 'CI/CD pipelines'       →  'automated deployment'            ❌ (lost the keyword)\n"
-        "  The right move is to ADD JD vocabulary alongside the original specifics, not replace.\n"
-        "- HONESTY: if the bullet's actual content has no genuine connection to the gap, do NOT\n"
-        "  shoehorn the gap's vocabulary in. Skip that bullet and pick a different one, or return\n"
-        "  fewer than 3 suggestions. A weak forced bridge is worse than a missing one.\n\n"
-        # A3 — few-shot examples (good, bad, skip)
-        "Examples of good / bad / skip — STUDY THESE before responding.\n\n"
-        "ORIGINAL bullet: 'Built FastAPI service on AWS Lambda that ingests Kafka events into\n"
-        "                  PostgreSQL with sub-second latency.'\n"
-        "GAP: 'real-time data pipelines'\n"
-        "✅ GOOD rewrite: 'Built FastAPI service on AWS Lambda that powers a real-time data\n"
-        "                  pipeline, ingesting Kafka events into PostgreSQL with sub-second\n"
-        "                  latency.'\n"
-        "   Why: every original keyword (FastAPI, AWS Lambda, Kafka, PostgreSQL) is preserved.\n"
-        "   'real-time data pipeline' is ADDED. Length grew by one phrase.\n"
-        "❌ BAD rewrite:  'Built a real-time data pipeline with sub-second latency on AWS.'\n"
-        "   Why: dropped FastAPI, Lambda (now just 'AWS'), Kafka, PostgreSQL — four keywords\n"
-        "   gone in exchange for one. Bullet is shorter and weaker. NEVER do this.\n\n"
-        "ORIGINAL bullet: 'Designed onboarding flow with progress bars and tooltips for new users.'\n"
-        "GAP: 'experience with retail labor systems'\n"
-        "⊘ SKIP this bullet. There is no honest bridge from onboarding UI work to retail labor\n"
-        "   systems. Forcing a connection ('Designed retail labor onboarding flow…') would be a\n"
-        "   lie. Pick a different bullet, or return fewer suggestions.\n\n"
-        # A4 — self-critique / verification step
-        "Self-check before responding: for EACH suggestion you produce, do these steps mentally:\n"
-        "  1. List every capitalized noun, acronym, and CamelCase term in the ORIGINAL bullet.\n"
-        "  2. Confirm each of those terms appears verbatim in your SUGGESTED rewrite.\n"
-        "  3. If any term from step 1 is missing in step 2, DO NOT emit that suggestion — revise\n"
-        "     it until every term is preserved, or drop the suggestion entirely.\n"
-        "  4. Confirm your rewrite is at least as long as the original (in words).\n"
-        "  5. Confirm at least one phrase from the JOB DESCRIPTION appears in the rewrite (added,\n"
-        "     not substituted).\n"
-        "Only return a suggestion that passes all five checks.\n\n"
-        # Force the category to match what the rewrite actually does — the
-        # server-side validator will reject 'quantification' suggestions that
-        # add no numerals, and reject any rewrite that drops a numeral or
-        # proper noun from the original.
-        "CATEGORY TRUTH: pick the category that matches what your rewrite actually does.\n"
-        "  - 'quantification' is only valid if your rewrite adds a numeral (digits, %, scale, or\n"
-        "    a [X]/[$Y]/[~N] placeholder) that was NOT in the original.\n"
-        "  - 'add_keywords' / 'relevance' are valid when you add JD vocabulary alongside the\n"
-        "    original specifics.\n"
-        "  - 'remove_filler' is the ONLY category that may shrink the bullet, and even then it\n"
-        "    must preserve every numeral and named technology from the original.\n"
-        "  - 'readability' / 'languageQuality' / 'action_verbs' must NOT delete numerals or\n"
-        "    named technologies — they apply to wording and verb choice, not content removal.\n"
-        "  The server will reject any suggestion whose rewrite drops a numeral or proper noun\n"
-        "  from the original, and any 'quantification' suggestion that adds no new numerals.\n\n"
-        "Return ONLY a JSON object:\n"
-        '{\n'
-        '  "suggestions": [\n'
-        '    {\n'
-        '      "id": "gf1",\n'
-        '      "section": "Work Experience",\n'
-        '      "original": "The exact bullet text from the résumé (verbatim)",\n'
-        '      "suggested": "The improved bullet text",\n'
-        '      "reason": "One sentence explaining how this rewrite addresses the gap.",\n'
-        '      "category": "add_keywords",\n'
-        '      "priority": "high"\n'
-        '    }\n'
-        '  ]\n'
-        '}\n'
-        "Return 2-3 suggestions maximum. Return ONLY the JSON, no markdown fences."
+    structured_targets = eligible_gap_fix_targets(structured_resume)
+    eligible_originals = eligible_originals_set(structured_targets)
+    structured_json = structured_targets_json_for_prompt(structured_resume)
+
+    if not structured_json:
+        return JSONResponse(
+            {
+                "error": "structured_resume required with at least one experience, project, or education bullet",
+            },
+            status_code=400,
+        )
+
+    gap_target_terms = extract_gap_target_terms(gap_name, gap_notes)
+    prompt = build_suggest_gap_fix_prompt(
+        gap_name=gap_name,
+        gap_notes=gap_notes,
+        gap_target_terms=gap_target_terms,
+        eligible_bullets_json=structured_json,
+        job_description=job_description,
     )
 
     loop = asyncio.get_event_loop()
 
-    def _call():
-        return coach_suggestions_llm(prompt)
-
     try:
-        logger.info("suggest-gap-fix  |  gap=%s  profile_chars=%s", gap_name, len(candidate_profile))
-        text = await loop.run_in_executor(None, _call)
-        if text.startswith("```"):
-            text = re.sub(r"^```[a-z]*\n?", "", text)
-            text = re.sub(r"\n?```$", "", text)
-        data = json.loads(text)
-        suggestions = data.get("suggestions") if isinstance(data, dict) else []
+        logger.info(
+            "suggest-gap-fix  |  gap=%s  eligible_bullets=%s  role=%s",
+            gap_name,
+            len(structured_targets),
+            classify_role_family(job_description),
+        )
+        data = await loop.run_in_executor(None, lambda: call_suggest_gap_fix_llm(prompt))
+        if not isinstance(data, dict):
+            return JSONResponse({"error": "AI response could not be parsed."}, status_code=500)
+        suggestions = data.get("suggestions")
         if not isinstance(suggestions, list):
             suggestions = []
-        # Drop any rewrite that silently deletes numerals or proper nouns
-        # from the original bullet — those are the "lossy rewrite tagged
-        # readability" failure mode we saw repeatedly. Better to return
-        # fewer suggestions than a lying one.
-        validated: List[dict] = []
-        for s in suggestions:
-            if not isinstance(s, dict):
-                continue
-            original = str(s.get("original") or "").strip()
-            suggested = str(s.get("suggested") or "").strip()
-            if not original or not suggested:
-                continue
-            cat = str(s.get("category") or "").strip().lower() or None
-            ok, why = _validate_rewrite_against_original(original, suggested, category=cat)
-            if not ok:
-                logger.info(
-                    "suggest-gap-fix dropped suggestion (%s): orig=%r  rewrite=%r",
-                    why, original[:80], suggested[:80],
-                )
-                continue
-            validated.append(s)
+        validated = validate_gap_fix_suggestions(
+            suggestions,
+            eligible_originals=eligible_originals,
+            gap_name=gap_name,
+            gap_notes=gap_notes,
+            validate_rewrite_fn=_validate_rewrite_against_original,
+        )
         return JSONResponse({"suggestions": validated})
     except json.JSONDecodeError as exc:
-        logger.error("suggest-gap-fix JSON parse error: %s  raw=%s", exc, text[:200])
+        logger.error("suggest-gap-fix JSON parse error: %s", exc)
         return JSONResponse({"error": "AI response could not be parsed."}, status_code=500)
     except Exception as exc:
         logger.exception("suggest-gap-fix failed")
