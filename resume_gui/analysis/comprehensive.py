@@ -818,7 +818,7 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
 
     # Build LLM prompt
     jd_section = (
-        f"\nJOB DESCRIPTION (analyze keyword match against this):\n{jd[:3000]}"
+        f"\nJOB DESCRIPTION (analyze keyword match against this):\n{jd[:4000]}"
         if jd.strip()
         else "\n(No job description provided. Set jobMatch and keywordScore to null.)"
     )

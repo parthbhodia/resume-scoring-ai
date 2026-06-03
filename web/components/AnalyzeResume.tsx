@@ -41,6 +41,37 @@ import { Badge } from "@/components/ui/badge";
 // AnalyzeRecord is imported from @/lib/supabase (result typed as `any` for
 // JSON column flexibility); we cast result → AnalysisResult when reading.
 
+interface RequirementConceptFE {
+  id: string;
+  canonical: string;
+  aliases: string[];
+  type: string;
+  importance: "required" | "preferred" | "nice_to_have";
+  roleFamily: string;
+  sourceText: string;
+  confidence: number;
+}
+
+interface JdMatchBreakdown {
+  job_title:        { score: number; matched: boolean; evidence: string[] };
+  qualifications:   { total: number; covered: number; missing: number };
+  responsibilities: { total: number; covered: number; missing: number };
+  keywords: {
+    required_total:   number;
+    required_found:   number;
+    preferred_total:  number;
+    preferred_found:  number;
+  };
+  overall_score: number;
+}
+
+interface ScoringMeta {
+  scoring_model:     string;
+  scoring_version:   string;
+  prompt_version:    string;
+  scoring_algorithm: string;
+}
+
 interface AnalysisResult {
   overallScore: number;
   categoryScores: {
@@ -106,6 +137,14 @@ interface AnalysisResult {
       months: number;
     }>;
   };
+  /** Deterministic JD match score (0–100). Present only when a JD was supplied. */
+  jdMatchScore?: number | null;
+  /** Per-bucket breakdown of the deterministic JD match scoring. */
+  jdMatchBreakdown?: JdMatchBreakdown | null;
+  /** Structured JD requirements extracted by the LLM (one entry per concept). */
+  requirementConcepts?: RequirementConceptFE[];
+  /** Provenance/version metadata for the deterministic scorer. */
+  scoringMeta?: ScoringMeta | null;
 }
 
 

@@ -2821,7 +2821,7 @@ def _rating_explain_model_chain() -> List[str]:
     return [m for m in merged if m not in seen_all and not seen_all.add(m)]
 
 
-def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Optional[Dict]:
+def _rate_resume(client, model: str, resume_repr: str, jd_snippet: str) -> Optional[Dict]:
     # ``client`` may be ``None`` when only xAI is configured — Gemini slots in the chain are skipped.
     prompt = (
         "You are a coach giving the candidate an honest, direct read on their fit for a job. "
@@ -2887,8 +2887,9 @@ def _rate_resume(client, model: str, latex_body: str, jd_snippet: str) -> Option
         "- overall_score must be honest — do not inflate\n"
         "- whats_working: 3-5 bullets; gaps: 2-4 bullets\n"
         "- Everything in second person ('you'/'your') — no third person\n\n"
-        f"JOB DESCRIPTION:\n{jd_snippet}\n\n"
-        f"RESUME BODY (LaTeX — ignore formatting commands, read only content):\n{latex_body[:6000]}"
+        f"JOB DESCRIPTION:\n{jd_snippet[:20000]}\n\n"
+        f"RESUME (structured content — JSON fields or résumé text; read the content, "
+        f"ignore any formatting):\n{resume_repr[:20000]}"
     )
     reasoning_chain = _rating_explain_model_chain()
 

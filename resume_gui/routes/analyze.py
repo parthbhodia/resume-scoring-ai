@@ -3,6 +3,95 @@ from __future__ import annotations
 
 from resume_gui.routes._shared import *  # noqa: F403
 
+# Lazy imports for requirement matching — only used when a JD is present.
+# Wrapped in a try/except so a missing dep never breaks the import chain.
+try:
+    from resume_gui.tailor.requirement_match.jd_extractor import extract_requirements_from_jd
+    from resume_gui.tailor.requirement_match.matcher import score_resume_against_requirements
+    from resume_gui.tailor.requirement_match.weighted_scorer import calculate_jd_match_score
+    _REQUIREMENT_MATCH_AVAILABLE = True
+except Exception:  # pragma: no cover
+    _REQUIREMENT_MATCH_AVAILABLE = False
+
+
+_SCORING_META = {
+    "scoring_model": "deterministic_weighted_v1",
+    "scoring_version": "2026-06-03-v1",
+    "prompt_version": "jd-extract-v1",
+    "scoring_algorithm": "weighted-v1",
+}
+
+
+def _run_jd_match_pipeline(resume_text: str, jd: str) -> dict:
+    """Extract JD requirements, match against resume, return scoring payload.
+
+    Returns a dict with keys: requirementConcepts, jdMatchBreakdown,
+    jdMatchScore, scoringMeta.  Returns empty/None values on any failure so
+    the caller can safely merge without checking.
+    """
+    if not _REQUIREMENT_MATCH_AVAILABLE or not jd.strip():
+        return {
+            "requirementConcepts": [],
+            "jdMatchBreakdown": None,
+            "jdMatchScore": None,
+            "scoringMeta": _SCORING_META,
+        }
+    try:
+        concepts = extract_requirements_from_jd(jd)
+        if not concepts:
+            return {
+                "requirementConcepts": [],
+                "jdMatchBreakdown": None,
+                "jdMatchScore": None,
+                "scoringMeta": _SCORING_META,
+            }
+        matches = score_resume_against_requirements(resume_text[:12000], concepts)
+        scoring = calculate_jd_match_score(matches, concepts)
+        # Override scoringMeta with the canonical version string from this route.
+        scoring["scoringMeta"] = _SCORING_META
+        return scoring
+    except Exception as exc:
+        logger.warning("jd_match_pipeline failed (non-fatal): %s", exc)
+        return {
+            "requirementConcepts": [],
+            "jdMatchBreakdown": None,
+            "jdMatchScore": None,
+            "scoringMeta": _SCORING_META,
+        }
+
+
+def _resume_json_for_rating(d: dict) -> str:
+    """Compact, content-only JSON of the structured résumé for the rating LLM.
+
+    The scorer reads this instead of the raw candidate_profile text. We keep the
+    substance a recruiter judges on (summary, experience bullets, education,
+    projects, skills) and drop contact/formatting noise (email/phone/links,
+    section_order) that only dilutes the prompt.
+    """
+    def _trim_rows(rows, fields):
+        out = []
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            row = {k: r.get(k) for k in fields if r.get(k)}
+            if row:
+                out.append(row)
+        return out
+
+    keep = {
+        "name": (d.get("full_name") or "").strip(),
+        "headline": (d.get("headline") or "").strip(),
+        "summary": (d.get("summary") or "").strip(),
+        "experience": _trim_rows(d.get("experience"), ("company", "role", "dates", "location", "bullets")),
+        "education": _trim_rows(d.get("education"), ("institution", "degree", "dates", "bullets")),
+        "projects": _trim_rows(d.get("projects"), ("name", "tech", "bullets")),
+        "skills": d.get("skills") or [],
+        "additional": d.get("extra_sections") or [],
+    }
+    keep = {k: v for k, v in keep.items() if v}
+    return json.dumps(keep, ensure_ascii=False)
+
+
 async def api_analyze_upload(request: Request):
     """POST /api/analyze-upload — upload a PDF or Word (.doc / .docx) and run comprehensive AI analysis.
 
@@ -120,6 +209,26 @@ async def api_analyze_upload(request: Request):
             except Exception as exc:
                 logger.warning("experience_summary failed: %s", exc)
             _log_structured_doc("analyze_upload_structured_resume", structured)
+
+        # ── JD requirement match (deterministic layer) ───────────────────────
+        # Only runs when a JD was supplied. Adds requirementConcepts,
+        # jdMatchBreakdown, jdMatchScore, scoringMeta to the response dict.
+        # Never raises — failure leaves those keys with empty/None values.
+        if jd and isinstance(result, dict):
+            jd_scoring = await loop.run_in_executor(
+                None,
+                _run_jd_match_pipeline,
+                (analysis_input_text or preview_text or ""),
+                jd,
+            )
+            result.update(jd_scoring)
+        elif isinstance(result, dict):
+            result.update({
+                "requirementConcepts": [],
+                "jdMatchBreakdown": None,
+                "jdMatchScore": None,
+                "scoringMeta": _SCORING_META,
+            })
 
         # Persist analysis result for student history + cohort analytics (best-effort).
         # Prefer the verified Supabase session over form fields; advisor institution
@@ -248,11 +357,34 @@ async def api_analyze(request: Request):
     include_structured = bool(body.get("include_structured_resume"))
 
     loop = asyncio.get_event_loop()
+    gemini_client = _optional_gemini_client()
+
+    # ── Resolve the structured résumé we SCORE against ──────────────────────
+    # We score the clean, typed structured doc — NOT the raw candidate_profile
+    # text (which carries column-extraction artifacts). The client sends
+    # `structured_resume` on the tailor flow (no extra LLM call); otherwise we
+    # extract it once here. candidate_profile is consumed only as the source
+    # for that extraction, never fed to the scorer directly.
+    client_structured = body.get("structured_resume")
+    structured_dict = (
+        client_structured if isinstance(client_structured, dict) and client_structured else None
+    )
+    if structured_dict is None:
+        try:
+            doc = await loop.run_in_executor(None, partial(_llm_extract, candidate_profile, None))
+            if doc is not None:
+                structured_dict = _resume_doc_to_dict(doc)
+        except Exception as exc:
+            logger.warning("api_analyze: structured extract for rating failed: %s", exc)
+
+    resume_for_rating = (
+        _resume_json_for_rating(structured_dict) if structured_dict else candidate_profile
+    )
+
     try:
-        gemini_client = _optional_gemini_client()
         ratings_future = loop.run_in_executor(
             None,
-            partial(_rate_resume, gemini_client, model, candidate_profile, job_description[:1500]),
+            partial(_rate_resume, gemini_client, model, resume_for_rating, job_description),
         )
         tasks: list = [ratings_future]
         if include_bullets:
@@ -262,21 +394,9 @@ async def api_analyze(request: Request):
                     partial(_analyze_resume_comprehensive, candidate_profile, job_description),
                 ),
             )
-        if include_structured:
-            tasks.append(
-                loop.run_in_executor(
-                    None,
-                    partial(_llm_extract, candidate_profile, None),
-                ),
-            )
         results = await asyncio.gather(*tasks)
-        idx = 0
-        llm_ratings = results[idx]
-        idx += 1
-        analysis_raw = results[idx] if include_bullets else None
-        if include_bullets:
-            idx += 1
-        structured_doc = results[idx] if include_structured else None
+        llm_ratings = results[0]
+        analysis_raw = results[1] if include_bullets else None
     except Exception as exc:
         logger.exception("api_analyze: _rate_resume failed")
         return JSONResponse({"error": f"analysis failed: {exc}"}, status_code=500)
@@ -297,11 +417,8 @@ async def api_analyze(request: Request):
         )
 
     payload: dict = {"ratings": ratings}
-    if include_structured and structured_doc is not None:
-        try:
-            payload["structuredResume"] = _resume_doc_to_dict(structured_doc)
-        except Exception as exc:
-            logger.warning("api_analyze: structured serialize failed: %s", exc)
+    if include_structured and structured_dict is not None:
+        payload["structuredResume"] = structured_dict
     if include_bullets and isinstance(analysis_raw, dict):
         for key in (
             "bulletAnalysis",
@@ -315,6 +432,18 @@ async def api_analyze(request: Request):
         ):
             if key in analysis_raw:
                 payload[key] = analysis_raw[key]
+
+    # ── JD requirement match (deterministic layer) ───────────────────────────
+    # job_description is always non-empty here (required field checked above).
+    # Use candidate_profile as the resume text — it's the synthesized clean
+    # text the tailor flow passes in.  Failure is non-fatal.
+    jd_scoring = await loop.run_in_executor(
+        None,
+        _run_jd_match_pipeline,
+        candidate_profile,
+        job_description,
+    )
+    payload.update(jd_scoring)
 
     return JSONResponse(payload)
 
@@ -352,7 +481,7 @@ async def api_explain_category_score(request: Request):
 
     label = _CATEGORY_DISPLAY_NAMES.get(category, category)
     jd_section = (
-        f"\nJOB DESCRIPTION:\n{jd[:2000]}"
+        f"\nJOB DESCRIPTION:\n{jd[:4000]}"
         if jd.strip()
         else "\n(No job description was provided.)"
     )
