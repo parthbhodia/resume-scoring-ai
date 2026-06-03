@@ -68,6 +68,7 @@ import {
 import ScoreRing    from "./ScoreRing";
 import MatchBreakdownCards from "./MatchBreakdownCards";
 import { TailorMatchSidebar, TailorMatchDetail } from "./DetailedRatingsView";
+import TailorRecentJobs from "./TailorRecentJobs";
 import TailorPreviewPane from "./TailorPreviewPane";
 import CategoryFixPanel from "./CategoryFixPanel";
 import { isDetailedRatings } from "@/lib/types";
@@ -2647,6 +2648,7 @@ export default function ResumeBuilder({
             title="Target job"
             subtitle="Company, role, and job text"
           >
+            <TailorRecentJobs currentFolder={(result as { folder?: string } | null)?.folder ?? baseFolder} />
             <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               <Field label="Company">
                 <input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Google" />
