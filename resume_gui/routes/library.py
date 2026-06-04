@@ -82,7 +82,19 @@ async def api_upload_resume(request: Request):
             return extract_upload_markdown(content, filename, pdf_plain_fallback=None)
 
         outcome = await loop.run_in_executor(None, _extract_sync)
-        if not (outcome.markdown or "").strip():
+        markdown_content = inject_section_line_breaks(outcome.markdown or "")
+
+        pdf_bytes_for_vision = content if filename.lower().endswith(".pdf") else None
+        vision_doc = None
+        if pdf_bytes_for_vision:
+            try:
+                vision_doc = await loop.run_in_executor(
+                    None, _llm_extract, markdown_content, pdf_bytes_for_vision,
+                )
+            except Exception as exc:
+                logger.warning("upload_resume: vision extract failed: %s", exc)
+
+        if not markdown_content.strip() and vision_doc is None:
             return JSONResponse(
                 {
                     "error": message_for_empty_resume_extract(outcome.empty_reason),
@@ -92,32 +104,29 @@ async def api_upload_resume(request: Request):
                 status_code=422,
             )
 
-        markdown_content = inject_section_line_breaks(outcome.markdown)
+        if markdown_content.strip():
+            def _pipeline_sync():
+                return parse_upload_bytes(content, filename, markdown_content)
 
-        def _pipeline_sync():
-            return parse_upload_bytes(content, filename, markdown_content)
-
-        structured, plain_text, parse_status, hints = await loop.run_in_executor(None, _pipeline_sync)
+            structured, plain_text, parse_status, hints = await loop.run_in_executor(None, _pipeline_sync)
+        else:
+            # Scanned/image-only PDF path: no text markdown, rely on vision extract.
+            structured, plain_text, parse_status, hints = None, "", "llm_failed", []
 
         preview_text = (plain_text or "").strip()
         structured_payload: Optional[dict] = None
         if parse_status in ("ready", "ready_deterministic") and structured:
             structured_payload = structured
 
-        pdf_bytes_for_vision = content if filename.lower().endswith(".pdf") else None
-        if pdf_bytes_for_vision:
-            vision_doc = await loop.run_in_executor(
-                None, _llm_extract, markdown_content, pdf_bytes_for_vision,
-            )
-            if vision_doc is not None:
-                synthesized = _synthesize_text_from_resume_doc(vision_doc)
-                if synthesized.strip():
-                    preview_text = synthesized.strip()
-                    logger.info(
-                        "upload_resume: vision-synthesized preview text (%d → %d chars)",
-                        len(plain_text or ""), len(preview_text),
-                    )
-                structured_payload = _resume_doc_to_dict(vision_doc)
+        if vision_doc is not None:
+            synthesized = _synthesize_text_from_resume_doc(vision_doc)
+            if synthesized.strip():
+                preview_text = synthesized.strip()
+                logger.info(
+                    "upload_resume: vision-synthesized preview text (%d → %d chars)",
+                    len(plain_text or ""), len(preview_text),
+                )
+            structured_payload = _resume_doc_to_dict(vision_doc)
 
         logger.info(
             "Resume upload  |  %s  |  md_chars=%s  plain_chars=%s  preview_chars=%s  parse_status=%s",
