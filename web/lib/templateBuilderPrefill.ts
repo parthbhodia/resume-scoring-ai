@@ -147,12 +147,17 @@ function mapStructuredResumeToTemplateData(structured: StructuredResume): TBResu
       const customs = mapExtraSections(structured);
       const core = mapStructuredCoreSectionOrder(structured.section_order);
       const customSlots = customs.map((c) => customSectionSlot(c.id));
+      // Auto-hide sections that have no data in the imported resume so the
+      // preview doesn't show empty placeholder sections.
+      const hiddenSections: string[] = [];
+      if (!projects.length) hiddenSections.push("projects");
+      if (!structured.summary?.trim()) hiddenSections.push("summary");
       return {
         customSections: customs,
         sectionOrder: normalizeSectionOrder([...core, ...customSlots], customs),
+        hiddenSections,
       };
     })(),
-    hiddenSections: [],
   };
 }
 

@@ -218,12 +218,14 @@ export function resumeLayoutFromPreviewStyle(
   pageWidthId: TBPageWidth = "standard",
   accentColor?: string,
   fontSize: TBFontSize = "medium",
+  font?: TBFont,
 ): ResumeLayoutContext {
   return resolveResumeLayout({
     stylePreset: PREVIEW_STYLE_TO_PRESET[styleId],
     pageWidth: pageWidthId,
     accentColor,
     fontSize,
+    font,
   });
 }
 
@@ -258,8 +260,9 @@ export function resumeLayoutCssVarsForPreviewStyle(
   pageWidthId: TBPageWidth = "standard",
   accentColor?: string,
   fontSize: TBFontSize = "medium",
+  font?: TBFont,
 ): Record<string, string> {
-  return resumeLayoutCssVars(resumeLayoutFromPreviewStyle(styleId, pageWidthId, accentColor, fontSize));
+  return resumeLayoutCssVars(resumeLayoutFromPreviewStyle(styleId, pageWidthId, accentColor, fontSize, font));
 }
 
 /** Template Builder `ResumePreview` page root. */

@@ -141,7 +141,7 @@ export const DEFAULT_CUSTOM_SECTION = (): TBCustomSection => ({
   lines: "",
 });
 
-/** Coerce section order; append missing core keys; keep valid custom slots. */
+/** Coerce section order; insert missing core keys at their default position; keep valid custom slots. */
 export function normalizeSectionOrder(
   raw: TBSectionSlot[] | null | undefined,
   customSections: TBCustomSection[] = [],
@@ -157,9 +157,14 @@ export function normalizeSectionOrder(
     }
     if (validCustom.has(s)) out.push(s);
   }
-  for (const key of DEFAULT_CORE_SECTION_ORDER) {
-    if (!out.includes(key)) out.push(key);
-  }
+  // Insert missing core sections at their default position rather than always
+  // appending to the end — prevents "summary" landing at the bottom when it
+  // is absent from older stored sectionOrder arrays.
+  DEFAULT_CORE_SECTION_ORDER.forEach((key, defaultIdx) => {
+    if (!out.includes(key)) {
+      out.splice(Math.min(defaultIdx, out.length), 0, key);
+    }
+  });
   return out;
 }
 

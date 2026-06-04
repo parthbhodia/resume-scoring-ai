@@ -250,7 +250,7 @@ export default function TemplateBuilderClient() {
   const searchParams = useSearchParams();
   const store = useTemplateBuilderStore();
   const { data, loaded } = store;
-  const [activeTab, setActiveTab] = useState<SectionKey>("profile");
+  const [activeTab, setActiveTab] = useState<SectionKey>("sections");
   const [editingCustomId, setEditingCustomId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
@@ -440,7 +440,7 @@ export default function TemplateBuilderClient() {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", letterSpacing: -0.3 }}>
-            Resume Builder
+            Template Builder
           </span>
           <span style={{ fontSize: 11, color: "var(--muted)", padding: "2px 7px", border: "1px solid var(--border)", borderRadius: 10 }}>
             Free
