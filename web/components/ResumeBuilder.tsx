@@ -544,6 +544,8 @@ export default function ResumeBuilder({
     setRole("");
     setAtsResult(null);
     setAtsError(null);
+    setTailorSidebarVisible(true);
+    setMatchSidebarCollapsed(false);
     clearDraft();
   }, [clearSuggestionsState, resetActiveTailorWork]);
 
@@ -625,9 +627,8 @@ export default function ResumeBuilder({
     () => builderSession0?.candidateProfile ?? null,
   );
   const [resumeHeaderLines, setResumeHeaderLines] = useState<string[]>([]);
-  const [matchSidebarCollapsed, setMatchSidebarCollapsed] = useState(
-    () => typeof window !== "undefined" && window.innerWidth < 900,
-  );
+  const [matchSidebarCollapsed, setMatchSidebarCollapsed] = useState(false);
+  const [tailorSidebarVisible, setTailorSidebarVisible] = useState(true);
   const [uploadedFileName,    setUploadedFileName]    = useState<string | null>(
     () => builderSession0?.uploadedFileName ?? null,
   );
@@ -1147,6 +1148,7 @@ export default function ResumeBuilder({
     const initialStructured = tailorStructuredResume && profile === (structuredUpload?.profile ?? "").trim()
       ? tailorStructuredResume : null;
     setAnalyzing(true);
+    appShellSidebar?.collapseSidebar();
     setAnalyzeError(null);
     setError(null);
     try {
@@ -1218,12 +1220,13 @@ export default function ResumeBuilder({
       }
 
       setResult(nextResult);
+      setMatchSidebarCollapsed(false);
     } catch (e: unknown) {
       setAnalyzeError(e instanceof Error ? e.message : "Analysis failed");
     } finally {
       setAnalyzing(false);
     }
-  }, [jd, candidateProfile, company, role, model, user?.id, tailorStructuredResume, structuredUpload?.profile, applyStructuredFromAnalyze]);
+  }, [jd, candidateProfile, company, role, model, user?.id, tailorStructuredResume, structuredUpload?.profile, applyStructuredFromAnalyze, appShellSidebar]);
 
   /** Re-run JD match ratings on updated plain text (no LaTeX / no ATS folder).
    * Pass bulletsAtApply/overridesAtApply/appliedAtApply when calling from applyGapFixes
@@ -2375,6 +2378,7 @@ export default function ResumeBuilder({
 
   const showBuilderInputs =
     !result && !generating && !analyzing && !suggestLoading;
+  const tailorPreResult = !result && !studioHandoff;
   /** Live research streaming removed. */
   const showSuggestResearchPanel = false;
   const showGenerateWebResearchPanel =
@@ -2400,16 +2404,6 @@ export default function ResumeBuilder({
   useLayoutEffect(() => {
     if (showGenerateLoaderAtTop) scrollBuilderToTop("auto");
   }, [showGenerateLoaderAtTop, scrollBuilderToTop]);
-
-  // Collapse the outer sidebar when analysis (ratings) first loads so the
-  // DetailedRatingsView gets the full width as the "second navbar".
-  useEffect(() => {
-    const r = result?.ratings;
-    if (r && isDetailedRatings(r)) {
-      appShellSidebar?.collapseSidebar();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!result?.ratings]);
 
   useLayoutEffect(() => {
     if (generating && result && !studioHandoff) scrollBuilderToTop("smooth");
@@ -2469,22 +2463,24 @@ export default function ResumeBuilder({
           style={{
             padding: result
               ? "0"
-              : "clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh)",
+              : tailorPreResult
+                ? "0"
+                : "clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh)",
             maxWidth:
               result && studioHandoff
                 ? "min(1440px, 98vw)"
-                : result
+                : result || tailorPreResult
                   ? "100%"
                   : studioHandoff
                     ? 920
                     : 820,
-            margin: result ? 0 : "0 auto",
+            margin: result || tailorPreResult ? 0 : "0 auto",
             width: "100%",
             boxSizing: "border-box",
-            display: result ? "flex" : undefined,
-            flexDirection: result ? "column" as const : undefined,
-            flex: result ? 1 : undefined,
-            minHeight: result ? 0 : undefined,
+            display: result || tailorPreResult ? "flex" : undefined,
+            flexDirection: result || tailorPreResult ? "column" as const : undefined,
+            flex: result || tailorPreResult ? 1 : undefined,
+            minHeight: result || tailorPreResult ? 0 : undefined,
           }}
         >
           <style>{`
@@ -2536,6 +2532,153 @@ export default function ResumeBuilder({
           `}</style>
 
           {/* Loaders are shown via GenerateOverlay (fixed full-screen blur card) — no duplicate step lists */}
+
+          {tailorPreResult && (
+              <style>{`
+                .rb-tailor-shell {
+                  display: flex;
+                  flex: 1 1 0%;
+                  min-height: 0;
+                  width: 100%;
+                  align-items: stretch;
+                  overflow: hidden;
+                  background: var(--bg);
+                }
+                .rb-tailor-sidebar {
+                  width: min(320px, 40vw);
+                  flex-shrink: 0;
+                  border-right: 1px solid var(--border);
+                  overflow: hidden;
+                  display: flex;
+                  flex-direction: column;
+                  background: var(--surface);
+                  padding: 20px 14px;
+                  box-sizing: border-box;
+                  align-self: stretch;
+                  min-height: 0;
+                  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                              opacity 0.22s,
+                              padding 0.28s,
+                              border-color 0.28s;
+                }
+                .rb-tailor-shell.rb-tailor-sidebar-hidden .rb-tailor-sidebar {
+                  width: 0;
+                  padding-left: 0;
+                  padding-right: 0;
+                  opacity: 0;
+                  overflow: hidden;
+                  border-right-color: transparent;
+                  pointer-events: none;
+                }
+                .rb-tailor-sidebar-inner {
+                  flex: 1;
+                  min-height: 0;
+                  display: flex;
+                  flex-direction: column;
+                }
+                .rb-tailor-sidebar-pinned {
+                  flex-shrink: 0;
+                  padding-bottom: 12px;
+                  margin-bottom: 4px;
+                  border-bottom: 1px solid var(--border);
+                }
+                .rb-tailor-sidebar-scroll {
+                  flex: 1;
+                  min-height: 0;
+                  overflow-y: auto;
+                  -webkit-overflow-scrolling: touch;
+                  padding-top: 4px;
+                }
+                .rb-tailor-main {
+                  flex: 1 1 0%;
+                  min-width: 0;
+                  min-height: 0;
+                  overflow-y: auto;
+                  padding: clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) max(72px, 12vh);
+                  max-width: 820px;
+                  margin: 0 auto;
+                  width: 100%;
+                  box-sizing: border-box;
+                }
+                .rb-tailor-recent-mobile { display: none; }
+                @media (max-width: 767px) {
+                  .rb-tailor-sidebar { display: none !important; }
+                  .rb-tailor-recent-mobile { display: block; margin-bottom: 14px; }
+                  .rb-tailor-main {
+                    padding: 16px 14px 60px;
+                    max-width: 100%;
+                  }
+                }
+              `}</style>
+          )}
+          <div
+            className={tailorPreResult ? `rb-tailor-shell${tailorSidebarVisible ? "" : " rb-tailor-sidebar-hidden"}` : undefined}
+            style={tailorPreResult ? undefined : { display: "contents" }}
+          >
+            {tailorPreResult ? (
+                <aside className="rb-tailor-sidebar" style={{ position: "relative" }}>
+                  <div className="rb-tailor-sidebar-inner">
+                    <div className="rb-tailor-sidebar-pinned">
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 }}>
+                        Recent jobs
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "var(--dim)", lineHeight: 1.45 }}>
+                        Pick up where you left off — company, role, and JD restore automatically.
+                      </div>
+                    </div>
+                    <div className="rb-tailor-sidebar-scroll">
+                      <TailorRecentJobs
+                        currentFolder={baseFolder}
+                        showHeader={false}
+                        showWhenEmpty
+                        embedded
+                      />
+                      {analyzing && (
+                        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                            <Spinner size={14} />
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+                              Analysing match…
+                            </span>
+                          </div>
+                          <p style={{ margin: 0, fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                            Scoring fit, extracting gaps, and identifying missing keywords (~20s).
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="rb-tailor-sidebar-hide"
+                    onClick={() => setTailorSidebarVisible(false)}
+                    title="Hide recent jobs — more space for the form"
+                    style={{
+                      position: "absolute",
+                      top: 16,
+                      right: 10,
+                      width: 24,
+                      height: 24,
+                      borderRadius: 6,
+                      border: "none",
+                      background: "var(--surface2)",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--dim)",
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+                      <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                </aside>
+            ) : null}
+            <div
+              className={tailorPreResult ? "rb-tailor-main" : undefined}
+              style={tailorPreResult ? undefined : { display: "contents" }}
+            >
 
           {/* ── Analyze loader ── */}
           {analyzing && !studioHandoff && (
@@ -2869,7 +3012,9 @@ export default function ResumeBuilder({
             title="Target job"
             subtitle="Company, role, and job text"
           >
-            <TailorRecentJobs currentFolder={(result as { folder?: string } | null)?.folder ?? baseFolder} />
+            <div className="rb-tailor-recent-mobile">
+              <TailorRecentJobs currentFolder={baseFolder} />
+            </div>
             <div className="rb-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               <Field label="Company">
                 <input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Google" />
@@ -3021,6 +3166,9 @@ export default function ResumeBuilder({
           )}
 
           </>)} {/* end !result && !generating inputs block */}
+
+            </div>
+          </div>
 
           {/* ── Web research for suggestions (streams in during Get suggestions) ── */}
           {showSuggestResearchPanel && (

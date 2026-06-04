@@ -33,6 +33,7 @@ import {
 } from "@/components/AnalyzeExperience";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { useAppShellSidebar } from "@/contexts/AppShellSidebarContext";
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 // Full strongly-typed shape of the AI analysis response.
@@ -334,6 +335,7 @@ function lsPush(uid: string, rec: AnalyzeRecord) {
 
 export default function AnalyzeResume() {
   const searchParams = useSearchParams();
+  const appShellSidebar = useAppShellSidebar();
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging]         = useState(false);
   const [loading, setLoading]           = useState(false);
@@ -353,8 +355,8 @@ export default function AnalyzeResume() {
    *  *that* card instead of defaulting to the first flagged one. */
   const pendingExpandIdxRef = useRef<number | null>(null);
   const restoredFromUrlRef = useRef(false);
-  /** Desktop: improvement plan column — hidden on upload page, auto-shows when analysis completes. */
-  const [improvementPlanVisible, setImprovementPlanVisible] = useState(false);
+  /** Desktop: recent-analyses / improvement-plan column — open by default; user can hide via toggle. */
+  const [improvementPlanVisible, setImprovementPlanVisible] = useState(true);
   const [selectedBulletIndex, setSelectedBulletIndex] = useState<number | null>(null);
   /** User picked a row from Recent Analyses — original upload file is not available until they upload again. */
   const [historyRestoreActive, setHistoryRestoreActive] = useState(false);
@@ -491,7 +493,8 @@ export default function AnalyzeResume() {
     setLoading(true);
     setError(null);
     setResult(null);
-    
+    appShellSidebar?.collapseSidebar();
+
     setExpandedBullets({});
     setActiveCategory(null);
     setSelectedBulletIndex(null);
@@ -532,13 +535,14 @@ export default function AnalyzeResume() {
     } finally {
       setLoading(false);
     }
-  }, [jd, persistResult]);
+  }, [jd, persistResult, appShellSidebar]);
 
   const runFolder = useCallback(async (folder: string) => {
     setLoading(true);
     setError(null);
     setResult(null);
-    
+    appShellSidebar?.collapseSidebar();
+
     setExpandedBullets({});
     setActiveCategory(null);
     setSelectedBulletIndex(null);
@@ -564,7 +568,7 @@ export default function AnalyzeResume() {
     } finally {
       setLoading(false);
     }
-  }, [jd, persistResult]);
+  }, [jd, persistResult, appShellSidebar]);
 
   // Restore a cached result instantly — no re-analysis needed
   const restoreRecord = useCallback((rec: AnalyzeRecord) => {

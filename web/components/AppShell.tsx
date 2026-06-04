@@ -14,7 +14,6 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { apiUrl } from "@/lib/utils";
 import { isUmbcUser } from "@/lib/userDomainDetection";
 import ResumeSidebar from "./ResumeSidebar";
-import { useAppBreakpoints } from "@/hooks/useAppBreakpoints";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -91,7 +90,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const active = useAppView();
   const onTemplateBuilderPage =
     (pathname ?? "").replace(/\/$/, "") === "/template-builder";
-  const { isTablet } = useAppBreakpoints();
   const isMobile = useIsMobile();
   const flowRaw = (searchParams?.get("flow") || "tailor").toLowerCase();
   const builderFlow: "tailor" | "template" =
@@ -108,10 +106,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setSidebarOpen(!readSidebarCollapsed());
   }, []);
-
-  useEffect(() => {
-    if (isTablet) setSidebarOpen(false);
-  }, [isTablet]);
 
   const handleSidebarOpenChange = useCallback((open: boolean) => {
     setSidebarOpen(open);

@@ -7,6 +7,7 @@ import type { ResumeRecord } from "@/lib/types";
 import { TAILOR_PREFILL_JD, TAILOR_PREFILL_COMPANY, TAILOR_PREFILL_ROLE } from "@/lib/tailorPrefill";
 import { RESUME_LIBRARY_CHANGED_EVENT } from "@/lib/resumeLibraryEvents";
 import { scoreColor } from "./ratings/scoreColor";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -23,9 +24,21 @@ type Props = {
   currentFolder?: string | null;
   /** Called after navigation so parent knows the user is picking up from history. */
   onPick?: () => void;
+  /** When false, parent renders the section title (sidebar layout). */
+  showHeader?: boolean;
+  /** Show loading/empty placeholders instead of returning null. */
+  showWhenEmpty?: boolean;
+  /** Tighter spacing when embedded in the tailor sidebar column. */
+  embedded?: boolean;
 };
 
-export default function TailorRecentJobs({ currentFolder, onPick }: Props) {
+export default function TailorRecentJobs({
+  currentFolder,
+  onPick,
+  showHeader = true,
+  showWhenEmpty = false,
+  embedded = false,
+}: Props) {
   const router = useRouter();
   const [items, setItems] = useState<ResumeRecord[] | null>(null);
 
@@ -48,7 +61,7 @@ export default function TailorRecentJobs({ currentFolder, onPick }: Props) {
     return () => window.removeEventListener(RESUME_LIBRARY_CHANGED_EVENT, onLibraryChanged);
   }, []);
 
-  if (!items || items.length === 0) return null;
+  if (!showWhenEmpty && (!items || items.length === 0)) return null;
 
   function pickJob(r: ResumeRecord) {
     try {
@@ -73,13 +86,33 @@ export default function TailorRecentJobs({ currentFolder, onPick }: Props) {
   }
 
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{
-        fontSize: 10, fontWeight: 700, color: "var(--dim)",
-        textTransform: "uppercase", letterSpacing: 0.7, marginBottom: 8,
-      }}>
-        Recent jobs
-      </div>
+    <div style={{ marginBottom: embedded ? 0 : 14 }}>
+      {showHeader ? (
+        <div style={{
+          fontSize: 10, fontWeight: 700, color: "var(--dim)",
+          textTransform: "uppercase", letterSpacing: 0.7, marginBottom: 8,
+        }}>
+          Recent jobs
+        </div>
+      ) : null}
+      {!items ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[1, 2, 3].map((i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
+              <Skeleton className="h-8 w-8 shrink-0 rounded-lg" />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+                <Skeleton className="h-[11px] w-3/4 rounded" />
+                <Skeleton className="h-[10px] w-[55%] rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : items.length === 0 ? (
+        <div style={{ fontSize: 13, color: "var(--dim)", textAlign: "center", paddingTop: embedded ? 12 : 24, lineHeight: 1.7 }}>
+          No tailored jobs yet.<br />
+          <span style={{ fontSize: 12 }}>Upload a résumé and paste a JD<br />to get started.</span>
+        </div>
+      ) : (
       <div
         style={{
           display: "flex",
@@ -161,6 +194,7 @@ export default function TailorRecentJobs({ currentFolder, onPick }: Props) {
           );
         })}
       </div>
+      )}
     </div>
   );
 }
