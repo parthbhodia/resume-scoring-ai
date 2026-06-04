@@ -295,6 +295,18 @@ export function AppSidebar({
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
+              tooltip="Contact"
+              className={NAV_MENU_BTN_CLASS}
+              render={<Link href="/contact" prefetch={false} />}
+            >
+              <span className="app-nav-icon" aria-hidden>
+                {NAV_ICONS.contact}
+              </span>
+              {showLabels ? <span className="app-nav-label">Contact</span> : null}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
               tooltip="Report a bug"
               className={NAV_MENU_BTN_CLASS}
               onClick={() => setBugReportOpen(true)}
@@ -329,6 +341,13 @@ export function AppSidebar({
             className="text-muted-foreground no-underline hover:text-foreground"
           >
             Privacy
+          </Link>
+          <Link
+            href="/contact"
+            prefetch={false}
+            className="text-muted-foreground no-underline hover:text-foreground"
+          >
+            Contact
           </Link>
         </nav>
         <p className="px-2 pb-1 text-[10px] tracking-wide text-muted-foreground group-data-[collapsible=icon]:hidden">

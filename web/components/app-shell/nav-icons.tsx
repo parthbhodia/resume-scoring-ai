@@ -113,6 +113,18 @@ export const NAV_ICONS = {
       />
     </svg>
   ),
+  contact: (
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="2" y="3.5" width="12" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M2.5 4.5 8 8.5l5.5-4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ),
   bug: (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
       <path d="M6 2.5a2 2 0 014 0" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
