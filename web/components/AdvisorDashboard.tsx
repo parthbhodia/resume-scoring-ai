@@ -117,6 +117,10 @@ function fmt(d: string | null): string {
   catch { return d; }
 }
 
+function pluralStudents(count: number): string {
+  return count === 1 ? "student" : "students";
+}
+
 function resolvePublicPdfUrl(url: string): string {
   if (url.startsWith("http")) return url;
   return apiUrl(url.startsWith("/") ? url : `/${url}`);
@@ -567,10 +571,17 @@ function CohortOverview({
       </div>
 
       <div className="mb-7 grid grid-cols-1 gap-3 md:grid-cols-5">
-        <KpiCard value={data.student_count} label="Total Students" note="Unique accounts" />
+        <KpiCard
+          value={data.student_count}
+          label={data.student_count === 1 ? "Total Student" : "Total Students"}
+          note="Unique accounts"
+        />
         <KpiCard value={data.analysis_count} label="Analyzed Resumes" />
         <KpiCard value={data.avg_overall !== null ? Math.round(data.avg_overall) : "—"} label="Average Resume Score" note="Out of 100" />
-        <KpiCard value={needAttentionCount} label="Students Needing Attention" />
+        <KpiCard
+          value={needAttentionCount}
+          label={needAttentionCount === 1 ? "Student Needing Attention" : "Students Needing Attention"}
+        />
         <KpiCard value={data.tailored_resume_count ?? 0} label="Tailored Resumes Created" />
       </div>
 
@@ -612,7 +623,7 @@ function CohortOverview({
                 <div key={idx} className="border-b border-border py-2 last:border-b-0">
                   <div className="mb-1 flex items-center justify-between text-sm">
                     <span className="text-foreground">{item.issue}</span>
-                    <Badge variant="outline">{item.count} students</Badge>
+                    <Badge variant="outline">{item.count} {pluralStudents(item.count)}</Badge>
                   </div>
                   <div className="h-1.5 rounded bg-muted">
                     <div className="h-full rounded bg-foreground/70" style={{ width: `${width}%` }} />
@@ -624,7 +635,11 @@ function CohortOverview({
         </AdvisorCard>
       </div>
 
-      <AdvisorCard title="Students needing review" description="Prioritized queue for advisor follow-up." className="mb-4">
+      <AdvisorCard
+        title={studentsNeedingReview.length === 1 ? "Student needing review" : "Students needing review"}
+        description="Prioritized queue for advisor follow-up."
+        className="mb-4"
+      >
         {studentsNeedingReview.length === 0 ? (
           <p className="text-sm text-muted-foreground">No urgent reviews right now.</p>
         ) : (
@@ -678,7 +693,9 @@ function CohortOverview({
               placeholder="Search by email"
               className="w-[240px]"
             />
-            <div className="text-xs text-muted-foreground">{filtered.length} students</div>
+            <div className="text-xs text-muted-foreground">
+              {filtered.length} {pluralStudents(filtered.length)}
+            </div>
           </div>
 
           {filtered.length === 0 ? (
