@@ -385,6 +385,7 @@ async def api_advisor_access(request: Request):
 
     return JSONResponse({
         "allowed": True,
+        "global_admin": bool((scope or {}).get("global_admin")),
         "institutions": (scope or {}).get("institutions") or [],
     })
 

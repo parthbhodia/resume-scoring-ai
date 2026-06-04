@@ -40,7 +40,7 @@ from resume_gui.routes.misc import (
     api_generate_skills,
     api_resume_analysis,
 )
-from resume_gui.routes.feedback import api_bug_report
+from resume_gui.routes.feedback import api_admin_bug_reports, api_bug_report
 from resume_gui.routes.rewrite import api_rewrite_bullet, api_rewrite_role
 from resume_gui.routes.share import api_share_create, api_share_resolve, api_share_revoke
 from resume_gui.routes.static import api_health, homepage, serve_pdf
@@ -88,5 +88,6 @@ def all_routes():
         Route("/api/explain-category-score", api_explain_category_score, methods=["POST"]),
         Route("/api/export-pdf-html", api_export_pdf_html, methods=["POST"]),
         Route("/api/bug-report", api_bug_report, methods=["POST"]),
+        Route("/api/admin/bug-reports", api_admin_bug_reports, methods=["GET"]),
         Route("/pdf/{folder}/{filename}", serve_pdf),
     ]

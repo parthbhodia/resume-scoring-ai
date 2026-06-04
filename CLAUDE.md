@@ -212,6 +212,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 
 - **Quant 75% target + required placeholder rewrites (`668de41`)** — Analysis prompt requires `categoryRewrites.quantification` / `improvedBullet` with `[X%]`/`[$Y]` when flagging quant bullets; recruiter bar ~75% metric coverage. `normalize` treats bracket placeholders as quant support and backfills `improvedBullet` from `categoryRewrites.quantification`. UI copy + `TARGET_QUANTIFIED_BULLET_SHARE=0.75`.
 
+- **Advisor bug reports (admin-only, `uncommitted`)** — `GET /api/admin/bug-reports` lists `bug_reports` only when `institution_advisors.role = 'admin'` (`global_admin`). `cohort-stats` + `advisor-access` expose `global_admin`; `AdvisorDashboard` shows a Bug reports panel for admins only — UMBC advisors never see it.
+
 - **Deterministic topIssues gated to LLM-fallback only (`668de41`)** — Normal analyze skips `inject_deterministic_insights`; frontend hides `source: "deterministic"` topIssues. Quantification UX = LLM rationales + flagged bullet rewrites only.
 
 - **Deterministic recruiter insights + universal-filler buzzwords (`0f1e0df`)** — `deterministic_insights.py` + narrowed `_BUZZWORDS`; inject originally ran post-LLM (reverted for UX). `test_deterministic_insights.py`. Optional `pyspellchecker` dep.

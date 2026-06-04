@@ -197,6 +197,7 @@ async def api_cohort_stats(request: Request):
             "top_issues": [],
             "student_roster": [],
             "institutions": (scope or {}).get("institutions") or [],
+            "global_admin": bool((scope or {}).get("global_admin")),
             "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
         })
 
@@ -234,6 +235,7 @@ async def api_cohort_stats(request: Request):
             "top_issues": [],
             "student_roster": student_roster,
             "institutions": (scope or {}).get("institutions") or [],
+            "global_admin": bool((scope or {}).get("global_admin")),
             "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
         })
 
@@ -334,6 +336,7 @@ async def api_cohort_stats(request: Request):
         "top_issues":      top_issues,
         "student_roster":  student_roster,
         "institutions":    (scope or {}).get("institutions") or [],
+        "global_admin":    bool((scope or {}).get("global_admin")),
         "generated_at":    __import__("datetime").datetime.utcnow().isoformat() + "Z",
     })
 

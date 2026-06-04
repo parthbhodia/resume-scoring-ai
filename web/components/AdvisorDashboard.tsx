@@ -58,7 +58,19 @@ interface CohortStats {
   weakest_dims: WeakDim[];
   top_issues: TopIssue[];
   student_roster: Student[];
+  global_admin?: boolean;
   generated_at: string;
+}
+
+interface BugReportRow {
+  id: string;
+  user_id: string | null;
+  user_email: string | null;
+  category: string | null;
+  title: string | null;
+  description: string | null;
+  page_url: string | null;
+  created_at: string | null;
 }
 
 interface ScorePoint { date: string | null; score: number | null; label: string | null; }
@@ -518,12 +530,125 @@ function StudentDetailPanel({
   );
 }
 
+const BUG_CATEGORY_LABELS: Record<string, string> = {
+  general: "General",
+  analyze: "Analyze / scoring",
+  tailor: "Tailor / builder",
+  export: "PDF export",
+  auth: "Login / account",
+  performance: "Slow / crash",
+  other: "Other",
+};
+
+function BugReportsPanel({
+  reports,
+  loading,
+  error,
+  onRefresh,
+}: {
+  reports: BugReportRow[];
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  return (
+    <Card className="mb-4 border-amber-500/30">
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+        <div>
+          <Badge variant="outline" className="mb-2 w-fit">Platform admin only</Badge>
+          <CardTitle className="text-lg">Bug reports</CardTitle>
+          <CardDescription>
+            User-submitted feedback from the in-app report dialog. Not visible to institution advisors.
+          </CardDescription>
+        </div>
+        <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
+          {loading ? "Loading…" : "Refresh reports"}
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <p className="text-sm text-destructive">{error}</p>
+        ) : loading && reports.length === 0 ? (
+          <div className="space-y-2">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        ) : reports.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No bug reports yet.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Title</TableHead>
+                <TableHead>Reporter</TableHead>
+                <TableHead>Page</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {reports.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                    {fmtRelative(r.created_at)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {BUG_CATEGORY_LABELS[r.category ?? ""] ?? r.category ?? "—"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="max-w-[220px]">
+                    <div className="text-sm font-medium text-foreground">{r.title ?? "—"}</div>
+                    {r.description ? (
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{r.description}</p>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {r.user_email ?? (r.user_id ? `${String(r.user_id).slice(0, 8)}…` : "Anonymous")}
+                  </TableCell>
+                  <TableCell className="max-w-[140px] truncate text-xs">
+                    {r.page_url ? (
+                      <a
+                        href={r.page_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent hover:underline"
+                        title={r.page_url}
+                      >
+                        Link
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Cohort Overview ───────────────────────────────────────────────────────────
 
 function CohortOverview({
-  data, onRefresh, onSelectStudent,
+  data,
+  globalAdmin,
+  bugReports,
+  bugReportsLoading,
+  bugReportsError,
+  onRefreshBugReports,
+  onRefresh,
+  onSelectStudent,
 }: {
   data: CohortStats;
+  globalAdmin: boolean;
+  bugReports: BugReportRow[];
+  bugReportsLoading: boolean;
+  bugReportsError: string | null;
+  onRefreshBugReports: () => void;
   onRefresh: () => void;
   onSelectStudent: (id: string) => void;
 }) {
@@ -558,10 +683,14 @@ function CohortOverview({
     <div className="mx-auto max-w-[1060px] px-8 py-10 pb-24">
       <div className="mb-9 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <Badge variant="outline" className="mb-3">UMBC Advisor View</Badge>
+          <Badge variant="outline" className="mb-3">
+            {globalAdmin ? "Platform admin" : "UMBC Advisor View"}
+          </Badge>
           <h1 className="m-0 text-2xl font-medium tracking-[-0.04em] text-foreground">Advisor Dashboard</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Resume insights based on UMBC Career Center guidelines.
+            {globalAdmin
+              ? "Cohort analytics across all institutions. Bug reports are admin-only."
+              : "Resume insights based on UMBC Career Center guidelines."}
           </p>
           <div className="mt-2 text-xs text-muted-foreground">Updated {fmt(data.generated_at)}</div>
         </div>
@@ -584,6 +713,15 @@ function CohortOverview({
         />
         <KpiCard value={data.tailored_resume_count ?? 0} label="Tailored Resumes Created" />
       </div>
+
+      {globalAdmin ? (
+        <BugReportsPanel
+          reports={bugReports}
+          loading={bugReportsLoading}
+          error={bugReportsError}
+          onRefresh={onRefreshBugReports}
+        />
+      ) : null}
 
       {isEmpty && (
         <Card className="mb-4 border-dashed">
@@ -760,8 +898,34 @@ export default function AdvisorDashboard() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [globalAdmin, setGlobalAdmin] = useState(false);
+  const [bugReports, setBugReports] = useState<BugReportRow[]>([]);
+  const [bugReportsLoading, setBugReportsLoading] = useState(false);
+  const [bugReportsError, setBugReportsError] = useState<string | null>(null);
   const [oauthBusy, setOauthBusy] = useState(false);
   const authUserIdRef = useRef<string | null>(null);
+
+  const loadBugReports = useCallback(async () => {
+    setBugReportsLoading(true);
+    setBugReportsError(null);
+    try {
+      const resp = await fetch(apiUrl("/api/admin/bug-reports?limit=50"), {
+        headers: await advisorAuthHeaders(),
+      });
+      if (resp.status === 403) {
+        setBugReports([]);
+        return;
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const payload = await resp.json() as { reports?: BugReportRow[] };
+      setBugReports(payload.reports ?? []);
+    } catch (e) {
+      setBugReportsError(e instanceof Error ? e.message : "Failed to load bug reports.");
+      setBugReports([]);
+    } finally {
+      setBugReportsLoading(false);
+    }
+  }, []);
 
   const load = useCallback(async (opts?: { keepStale?: boolean }) => {
     if (!opts?.keepStale) {
@@ -773,13 +937,21 @@ export default function AdvisorDashboard() {
       if (resp.status === 401) { setError("not_signed_in"); setData(null); return; }
       if (resp.status === 403) { setError("not_authorized"); setData(null); return; }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      setData(await resp.json() as CohortStats);
+      const stats = await resp.json() as CohortStats;
+      setData(stats);
+      const isAdmin = !!stats.global_admin;
+      setGlobalAdmin(isAdmin);
+      if (isAdmin) void loadBugReports();
+      else {
+        setBugReports([]);
+        setBugReportsError(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadBugReports]);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -962,6 +1134,11 @@ export default function AdvisorDashboard() {
   return (
     <CohortOverview
       data={data}
+      globalAdmin={globalAdmin}
+      bugReports={bugReports}
+      bugReportsLoading={bugReportsLoading}
+      bugReportsError={bugReportsError}
+      onRefreshBugReports={() => void loadBugReports()}
       onRefresh={() => userEmail && void load()}
       onSelectStudent={setSelectedId}
     />
