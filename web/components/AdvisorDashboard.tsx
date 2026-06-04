@@ -34,6 +34,8 @@ interface Student {
   user_id: string;
   user_email?: string;
   latest_score: number | null;
+  first_score?: number | null;
+  score_delta?: number | null;
   latest_at: string | null;
   analysis_count: number;
 }
@@ -69,6 +71,8 @@ interface StudentDetail {
   latest_category_scores: Record<string, number | null>;
   resumes: ResumeEntry[];
   latest_resume_text: string;
+  latest_source_pdf_url?: string | null;
+  latest_source_filename?: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -127,13 +131,20 @@ function fmtRelative(d: string | null): string {
   }
 }
 
-type StudentStatus = "Needs Work" | "Improving" | "Ready" | "No Analysis Yet";
+type StudentStatus = "Needs Work" | "Improving" | "Ready" | "On Track" | "No Analysis Yet";
 
 function studentStatus(student: Student): StudentStatus {
   if ((student.analysis_count ?? 0) <= 0 || student.latest_score === null) return "No Analysis Yet";
+
+  const count = student.analysis_count ?? 0;
+  const delta = student.score_delta;
+  const hasTrend = count >= 2 && typeof delta === "number";
+
+  if (hasTrend && delta > 0) return "Improving";
+  if (hasTrend && delta < 0) return "Needs Work";
   if (student.latest_score < 65) return "Needs Work";
-  if (student.latest_score < 80) return "Improving";
-  return "Ready";
+  if (student.latest_score >= 80) return "Ready";
+  return "On Track";
 }
 
 function studentPriority(student: Student): number {
@@ -141,14 +152,26 @@ function studentPriority(student: Student): number {
   if (status === "Needs Work") return 0;
   if (status === "No Analysis Yet") return 1;
   if (status === "Improving") return 2;
-  return 3;
+  if (status === "On Track") return 3;
+  return 4;
 }
 
 function reviewReason(student: Student): string {
   const status = studentStatus(student);
+  const delta = student.score_delta;
   if (status === "No Analysis Yet") return "No completed analysis yet";
+  if (status === "Improving" && typeof delta === "number") {
+    return `Score up ${delta > 0 ? "+" : ""}${delta} since first analysis`;
+  }
+  if (status === "Needs Work" && typeof delta === "number" && delta < 0) {
+    return `Score down ${Math.abs(delta)} since first analysis`;
+  }
   if (status === "Needs Work") return "Low latest score";
-  if (status === "Improving") return "Moderate score, coaching can lift results";
+  if (status === "On Track") {
+    return (student.analysis_count ?? 0) < 2
+      ? "One analysis — run again to measure progress"
+      : "Latest score steady between runs";
+  }
   return "Strong profile, periodic check only";
 }
 
@@ -396,25 +419,59 @@ function StudentDetailPanel({
               </AdvisorCard>
             </div>
 
-            {/* Uploaded resume text */}
-            {d.latest_resume_text && (
-              <AdvisorCard title="Latest uploaded résumé" className="mb-4">
-                <pre style={{
-                  margin: 0,
-                  fontSize: 11.5,
-                  lineHeight: 1.7,
-                  color: "var(--text)",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  maxHeight: 320,
-                  overflowY: "auto",
-                  background: "var(--surface2)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  padding: "12px 14px",
-                }}>
-                  {d.latest_resume_text}
-                </pre>
+            {/* Uploaded résumé — PDF when stored (Analyze uploads), else extracted text */}
+            {(d.latest_source_pdf_url || d.latest_resume_text) && (
+              <AdvisorCard
+                title={d.latest_source_pdf_url ? "Latest uploaded résumé (PDF)" : "Latest uploaded résumé"}
+                className="mb-4"
+              >
+                {d.latest_source_pdf_url ? (
+                  <>
+                    {d.latest_source_filename ? (
+                      <p style={{ margin: "0 0 10px", fontSize: 11.5, color: "var(--muted)" }}>
+                        {d.latest_source_filename}
+                      </p>
+                    ) : null}
+                    <div style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      overflow: "hidden",
+                      background: "var(--surface2)",
+                      marginBottom: 10,
+                    }}>
+                      <iframe
+                        title="Student résumé PDF"
+                        src={d.latest_source_pdf_url}
+                        style={{ width: "100%", height: 360, border: "none", display: "block" }}
+                      />
+                    </div>
+                    <a
+                      href={d.latest_source_pdf_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={buttonVariants({ variant: "outline", size: "sm" })}
+                    >
+                      Open PDF in new tab
+                    </a>
+                  </>
+                ) : (
+                  <pre style={{
+                    margin: 0,
+                    fontSize: 11.5,
+                    lineHeight: 1.7,
+                    color: "var(--text)",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    maxHeight: 320,
+                    overflowY: "auto",
+                    background: "var(--surface2)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    padding: "12px 14px",
+                  }}>
+                    {d.latest_resume_text}
+                  </pre>
+                )}
               </AdvisorCard>
             )}
 
@@ -494,7 +551,7 @@ function CohortOverview({
     })
     .filter(s => {
       const status = studentStatus(s);
-      return status === "Needs Work" || status === "No Analysis Yet" || status === "Improving";
+      return status === "Needs Work" || status === "No Analysis Yet" || status === "Improving" || status === "On Track";
     })
     .slice(0, 6);
   const filtered = data.student_roster.filter(s =>
@@ -593,7 +650,7 @@ function CohortOverview({
                 </div>
                 <div className="flex items-center gap-2">
                   <ScoreBadge score={s.latest_score} />
-                  <Badge variant={status === "Needs Work" ? "destructive" : status === "Improving" ? "outline" : "secondary"}>
+                  <Badge variant={status === "Needs Work" ? "destructive" : status === "Improving" ? "secondary" : status === "Ready" ? "secondary" : "outline"}>
                     {status}
                   </Badge>
                   <Button variant="outline" size="sm" onClick={() => onSelectStudent(s.user_id)}>
@@ -659,7 +716,7 @@ function CohortOverview({
                         <ScoreBadge score={s.latest_score} />
                       </TableCell>
                       <TableCell>
-                        <Badge variant={status === "Needs Work" ? "destructive" : status === "Improving" ? "outline" : status === "Ready" ? "secondary" : "outline"}>
+                        <Badge variant={status === "Needs Work" ? "destructive" : status === "Improving" ? "secondary" : status === "Ready" ? "secondary" : "outline"}>
                           {status}
                         </Badge>
                       </TableCell>

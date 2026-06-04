@@ -178,6 +178,8 @@ export default function LibraryResumeDetailPanel({
             score={item.score}
             createdAt={dateShort}
             result={analysisJson}
+            sourcePdfUrl={analysis?.sourcePdfUrl ?? (typeof analysisJson.sourcePdfUrl === "string" ? analysisJson.sourcePdfUrl : null)}
+            sourceFilename={analysis?.sourceFilename ?? null}
             onOpenAnalysis={onOpenAnalysis}
             onTailorAnalysis={onTailorAnalysis}
             onEditInTemplateBuilder={onEditInTemplateBuilder}
@@ -341,6 +343,8 @@ function AnalyzedDetails({
   score,
   createdAt,
   result,
+  sourcePdfUrl,
+  sourceFilename,
   onOpenAnalysis,
   onTailorAnalysis,
   onEditInTemplateBuilder,
@@ -349,6 +353,8 @@ function AnalyzedDetails({
   score: number | null;
   createdAt: string;
   result: Record<string, unknown>;
+  sourcePdfUrl?: string | null;
+  sourceFilename?: string | null;
   onOpenAnalysis: () => void;
   onTailorAnalysis: () => void;
   onEditInTemplateBuilder: () => void;
@@ -428,6 +434,42 @@ function AnalyzedDetails({
           </div>
         </SectionBlock>
       )}
+
+      {sourcePdfUrl ? (
+        <SectionBlock title="Uploaded PDF">
+          {sourceFilename ? (
+            <p style={{ margin: "0 0 8px", fontSize: 11.5, color: "var(--muted)" }}>{sourceFilename}</p>
+          ) : null}
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
+            <iframe
+              title="Analyzed résumé PDF"
+              src={sourcePdfUrl.startsWith("http") ? sourcePdfUrl : apiUrl(sourcePdfUrl.startsWith("/") ? sourcePdfUrl : `/${sourcePdfUrl}`)}
+              style={{ width: "100%", height: 280, border: "none", display: "block" }}
+            />
+          </div>
+          <a
+            href={sourcePdfUrl.startsWith("http") ? sourcePdfUrl : apiUrl(sourcePdfUrl.startsWith("/") ? sourcePdfUrl : `/${sourcePdfUrl}`)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "1px solid var(--border-h)",
+              background: "var(--surface3)",
+              color: "var(--text)",
+              textDecoration: "none",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            Download original PDF
+          </a>
+        </SectionBlock>
+      ) : null}
 
       <SectionBlock title="Live resume preview">
         <div

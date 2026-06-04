@@ -145,6 +145,10 @@ interface AnalysisResult {
   requirementConcepts?: RequirementConceptFE[];
   /** Provenance/version metadata for the deterministic scorer. */
   scoringMeta?: ScoringMeta | null;
+  /** Set when backend persisted this run (analyze-upload). */
+  analysisId?: string;
+  sourcePdfUrl?: string | null;
+  sourceFilename?: string | null;
 }
 
 
@@ -441,7 +445,14 @@ export default function AnalyzeResume() {
     if (userId) lsPush(userId, optimistic);
 
     try {
-      const newId = await insertAnalysis(label, res);
+      const backendId = res.analysisId ?? null;
+      const sourcePdfUrl = res.sourcePdfUrl ?? null;
+      const sourceFilename = res.sourceFilename ?? null;
+      // Backend analyze-upload already persisted when signed in; avoid duplicate rows.
+      const newId = backendId ?? await insertAnalysis(label, res, {
+        sourcePdfUrl,
+        sourceFilename,
+      });
       if (newId) {
         migrateEdits(optimistic.id, newId);
         setActiveEditDraftId((cur) => (cur === optimistic.id ? newId : cur));

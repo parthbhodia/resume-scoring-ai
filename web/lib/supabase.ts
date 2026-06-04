@@ -11,6 +11,8 @@ export interface AnalyzeRecord {
   label:     string;
   score:     number;
   createdAt: string;
+  sourcePdfUrl?: string | null;
+  sourceFilename?: string | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   result:    any;
 }
@@ -346,7 +348,7 @@ export async function fetchAnalyses(limit = 20): Promise<AnalyzeRecord[]> {
 
   const { data, error } = await db
     .from("resume_analyses")
-    .select("id, label, score, result, created_at")
+    .select("id, label, score, result, created_at, source_pdf_url, source_filename")
     .eq("user_id", session.user.id)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -358,6 +360,8 @@ export async function fetchAnalyses(limit = 20): Promise<AnalyzeRecord[]> {
     label:     row.label as string,
     score:     row.score as number,
     createdAt: row.created_at as string,
+    sourcePdfUrl: (row.source_pdf_url as string | null) ?? null,
+    sourceFilename: (row.source_filename as string | null) ?? null,
     result:    row.result,
   }));
 }
@@ -367,20 +371,26 @@ export async function insertAnalysis(
   label: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   result: any,
+  opts?: { id?: string; sourcePdfUrl?: string | null; sourceFilename?: string | null },
 ): Promise<string | null> {
   const db = getSupabaseClient();
   const { data: { session } } = await db.auth.getSession();
   if (!session?.user?.id) return null;
 
+  const row: Record<string, unknown> = {
+    user_id: session.user.id,
+    user_email: session.user.email ?? null,
+    label,
+    score: result.overallScore,
+    result,
+  };
+  if (opts?.id) row.id = opts.id;
+  if (opts?.sourcePdfUrl) row.source_pdf_url = opts.sourcePdfUrl;
+  if (opts?.sourceFilename) row.source_filename = opts.sourceFilename;
+
   const { data, error } = await db
     .from("resume_analyses")
-    .insert({
-      user_id: session.user.id,
-      user_email: session.user.email ?? null,
-      label,
-      score:   result.overallScore,
-      result,
-    })
+    .insert(row)
     .select("id")
     .single();
 

@@ -228,6 +228,7 @@ async def api_cohort_stats(request: Request):
                 "user_id":        uid_str,
                 "user_email":     None,
                 "latest_score":   r.get("score"),
+                "first_score":    r.get("score"),
                 "latest_at":      r.get("created_at"),
                 "analysis_count": 0,
             }
@@ -236,11 +237,20 @@ async def api_cohort_stats(request: Request):
         row_email = str(r.get("user_email") or "").strip()
         if row_email and not entry.get("user_email"):
             entry["user_email"] = row_email
+        # Rows are newest-first; later rows for same user are older runs.
+        if r.get("score") is not None:
+            entry["first_score"] = r.get("score")
 
     email_map = _email_by_user_id(list(seen.keys()))
     for uid_str, entry in seen.items():
         if not (entry.get("user_email") or "").strip():
             entry["user_email"] = email_map.get(uid_str)
+        first = entry.get("first_score")
+        latest = entry.get("latest_score")
+        if isinstance(first, (int, float)) and isinstance(latest, (int, float)):
+            entry["score_delta"] = latest - first
+        else:
+            entry["score_delta"] = None
 
     student_roster = sorted(seen.values(), key=lambda x: x.get("latest_score") or 0)
 
@@ -300,7 +310,7 @@ async def api_student_detail(request: Request):
     try:
         a_resp = (
             analyses_table
-            .select("id,user_email,label,score,result,created_at")
+            .select("id,user_email,label,score,result,created_at,source_pdf_url,source_filename")
             .eq("user_id", student_id)
             .order("created_at", desc=False)
             .limit(100)
@@ -362,6 +372,8 @@ async def api_student_detail(request: Request):
     delta = (latest_score - first_score) if (first_score is not None and latest_score is not None) else None
 
     resolved_email = None
+    latest_source_pdf_url = None
+    latest_source_filename = None
     if analyses:
         for row in analyses:
             em = str(row.get("user_email") or "").strip()
@@ -370,6 +382,11 @@ async def api_student_detail(request: Request):
                 break
     if not resolved_email:
         resolved_email = _email_by_user_id([student_id]).get(student_id)
+
+    latest_row = analyses[-1] if analyses else None
+    if latest_row:
+        latest_source_pdf_url = str(latest_row.get("source_pdf_url") or "").strip() or None
+        latest_source_filename = str(latest_row.get("source_filename") or "").strip() or None
 
     return JSONResponse({
         "student_id":     student_id,
@@ -385,4 +402,6 @@ async def api_student_detail(request: Request):
         "latest_category_scores": latest_result.get("categoryScores") or {},
         "resumes":        resumes,
         "latest_resume_text":  (latest_result.get("extractedText") or "")[:4000],
+        "latest_source_pdf_url": latest_source_pdf_url,
+        "latest_source_filename": latest_source_filename,
     })

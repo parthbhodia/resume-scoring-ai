@@ -261,9 +261,35 @@ async def api_analyze_upload(request: Request):
         # membership is derived from this email, so client-supplied email is not enough.
         user_id = auth_user_id or (form.get("user_id") or "").strip()
         user_email = auth_user_email or ""
-        if user_id and isinstance(result, dict):
+        analysis_id = str(uuid4())
+        source_pdf_url = None
+        if user_id and filename.lower().endswith(".pdf"):
             try:
-                await loop.run_in_executor(None, _persist_analysis, result, user_id, user_email, bool(jd))
+                source_pdf_url = await loop.run_in_executor(
+                    None, upload_analyze_source_pdf, user_id, analysis_id, data,
+                )
+            except Exception as exc:
+                logger.warning("analyze_upload source PDF upload failed: %s", exc)
+
+        if user_id and isinstance(result, dict):
+            result["analysisId"] = analysis_id
+            if source_pdf_url:
+                result["sourcePdfUrl"] = source_pdf_url
+            try:
+                def _persist_sync():
+                    return _persist_analysis(
+                        result,
+                        user_id,
+                        user_email,
+                        bool(jd),
+                        analysis_id=analysis_id,
+                        source_pdf_url=source_pdf_url,
+                        source_filename=filename,
+                    )
+
+                persisted_id = await loop.run_in_executor(None, _persist_sync)
+                if persisted_id:
+                    result["analysisId"] = persisted_id
             except Exception:
                 pass  # never block the response for analytics writes
 

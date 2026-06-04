@@ -129,6 +129,7 @@ from resume_gui.storage import (
     load_version,
     save_version,
     storage_status,
+    upload_analyze_source_pdf,
     upload_pdf,
     upload_tex,
 )
@@ -259,6 +260,7 @@ __all__ = [
     "stream_latex_resume",
     "structured_ratings_from_ats",
     "threading",
+    "upload_analyze_source_pdf",
     "upload_pdf",
     "upload_tex",
     "uuid4",

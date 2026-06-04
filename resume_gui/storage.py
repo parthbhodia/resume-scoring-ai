@@ -132,6 +132,25 @@ def _write_local(user_id: str, folder: str, ext: str, data: bytes | str) -> Opti
         return None
 
 
+def upload_analyze_source_pdf(user_id: str, analysis_id: str, pdf_bytes: bytes) -> Optional[str]:
+    """Upload the student's original Analyze PDF. Path: <user_id>/analyze-<analysis_id>.pdf"""
+    if not user_id or not analysis_id or not pdf_bytes:
+        return None
+    folder = f"analyze-{analysis_id}"
+    super_path = _safe_path(user_id, folder, "pdf")
+    url = _upload(PDF_BUCKET, super_path, pdf_bytes, "application/pdf")
+    if url is None:
+        _write_local(user_id, folder, "pdf", pdf_bytes)
+        base = (os.environ.get("PUBLIC_API_URL") or "").strip().rstrip("/")
+        if base:
+            fallback = f"{base}/pdf/{folder}/{folder}.pdf"
+            logger.info("Analyze PDF kept on disk — returning public API URL  |  %s", fallback)
+            return fallback
+    elif url:
+        logger.info("Analyze source PDF uploaded  |  %d bytes  |  %s", len(pdf_bytes), url)
+    return url
+
+
 def upload_pdf(user_id: str, folder: str, pdf_path: str) -> Optional[str]:
     """Upload a generated PDF to the resume-pdfs bucket. Returns public URL or None.
     
