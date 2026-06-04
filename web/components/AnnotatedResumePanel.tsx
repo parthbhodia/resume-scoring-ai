@@ -143,8 +143,10 @@ function mirrorToneStyles(score: number): { bar: string; bg: string; shadow: str
 type PreviewStyleId = "classic" | "modern" | "compact";
 
 import {
+  RESUME_FONT_SIZE_OPTIONS,
   resumeLayoutCssVarsForPreviewStyle,
   type ResumePreviewStyleId,
+  type TBFontSize,
 } from "@/lib/resumeLayout";
 
 const PREVIEW_STYLE_LABEL: Record<ResumePreviewStyleId, string> = {
@@ -153,15 +155,25 @@ const PREVIEW_STYLE_LABEL: Record<ResumePreviewStyleId, string> = {
   compact: "Executive",
 };
 
-const PREVIEW_STYLE_OPTIONS: Array<{
-  id: PreviewStyleId;
-  label: string;
-  vars: Record<string, string>;
-}> = (["classic", "modern", "compact"] as ResumePreviewStyleId[]).map((id) => ({
+const PREVIEW_STYLE_OPTIONS: Array<{ id: PreviewStyleId; label: string }> = (
+  ["classic", "modern", "compact"] as ResumePreviewStyleId[]
+).map((id) => ({
   id,
   label: PREVIEW_STYLE_LABEL[id],
-  vars: resumeLayoutCssVarsForPreviewStyle(id),
 }));
+
+const PREVIEW_FONT_SIZE_STORAGE_KEY = "rn_preview_font_size";
+
+function readStoredPreviewFontSize(): TBFontSize {
+  if (typeof window === "undefined") return "medium";
+  try {
+    const raw = localStorage.getItem(PREVIEW_FONT_SIZE_STORAGE_KEY);
+    if (raw === "small" || raw === "medium" || raw === "large") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "medium";
+}
 
 const PREVIEW_ACCENTS = [
   { label: "Blue", value: "#0969da" },
@@ -290,6 +302,7 @@ export default function AnnotatedResumePanel({
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [previewStyleId, setPreviewStyleId] = useState<PreviewStyleId>("classic");
   const [previewAccent, setPreviewAccent] = useState(PREVIEW_ACCENTS[0].value);
+  const [previewFontSize, setPreviewFontSize] = useState<TBFontSize>(() => readStoredPreviewFontSize());
   const [highlightsEnabled, setHighlightsEnabled] = useState(() => {
     if (typeof window === "undefined") return true;
     try {
@@ -411,14 +424,24 @@ export default function AnnotatedResumePanel({
         ? "synthetic"
         : "none";
   const useLiveDoc = extractKind !== "none";
-  const previewStyleVars = useMemo(() => {
-    const preset = PREVIEW_STYLE_OPTIONS.find((option) => option.id === previewStyleId)
-      ?? PREVIEW_STYLE_OPTIONS[0];
-    return {
-      ...preset.vars,
-      "--resume-paper-accent": previewAccent,
-    } as CSSProperties;
-  }, [previewStyleId, previewAccent]);
+  const previewStyleVars = useMemo(
+    () => resumeLayoutCssVarsForPreviewStyle(
+      previewStyleId,
+      "standard",
+      previewAccent,
+      previewFontSize,
+    ) as CSSProperties,
+    [previewStyleId, previewAccent, previewFontSize],
+  );
+
+  const setPreviewFontSizePersisted = useCallback((size: TBFontSize) => {
+    setPreviewFontSize(size);
+    try {
+      localStorage.setItem(PREVIEW_FONT_SIZE_STORAGE_KEY, size);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const flaggedCount = activeCategory
     ? countBulletsInCategory(bulletAnalysis, activeCategory, categoryAssignmentOpts)
@@ -721,6 +744,26 @@ export default function AnnotatedResumePanel({
                 }}
               >
                 {PREVIEW_STYLE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+              <select
+                value={previewFontSize}
+                onChange={(event) => setPreviewFontSizePersisted(event.target.value as TBFontSize)}
+                aria-label="Preview font size"
+                title="Font size"
+                style={{
+                  width: "auto",
+                  minWidth: 56,
+                  height: 28,
+                  padding: "3px 22px 3px 8px",
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: "var(--surface)",
+                }}
+              >
+                {RESUME_FONT_SIZE_OPTIONS.map((option) => (
                   <option key={option.id} value={option.id}>{option.label}</option>
                 ))}
               </select>

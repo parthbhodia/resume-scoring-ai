@@ -455,10 +455,11 @@ export default function TemplateBuilderClient() {
 
 /* ── Bullet list editor ────────────────────────────────────────── */
 
-function parseBulletsToArray(raw: string): string[] {
+function parseBulletsToArray(raw: string, minRows = 1): string[] {
   const lines = raw.split("\n").map((l) => l.replace(/^[•·\-*]\s*/, "").trim());
   const filtered = lines.filter((l) => l.length > 0);
-  return filtered.length > 0 ? filtered : [""];
+  if (filtered.length > 0) return filtered;
+  return Array.from({ length: Math.max(1, minRows) }, () => "");
 }
 
 function joinBulletsFromArray(items: string[]): string {
@@ -574,18 +575,20 @@ function BulletRow({ value, isFirst, isLast, context, onChange, onMoveUp, onMove
   );
 }
 
-function BulletListEditor({ bullets, onChange, context }: {
+function BulletListEditor({ bullets, onChange, context, minRows = 1, label = "Key Achievements" }: {
   bullets: string;
   onChange: (v: string) => void;
   context?: { role?: string; company?: string };
+  minRows?: number;
+  label?: string;
 }) {
-  const items = parseBulletsToArray(bullets);
+  const items = parseBulletsToArray(bullets, minRows);
 
   const updateItems = (next: string[]) => onChange(joinBulletsFromArray(next));
 
   return (
     <div>
-      <label style={{ ...labelStyle, marginBottom: 8 }}>Key Achievements</label>
+      <label style={{ ...labelStyle, marginBottom: 8 }}>{label}</label>
       {items.map((item, idx) => (
         <BulletRow
           key={idx}
@@ -608,7 +611,11 @@ function BulletListEditor({ bullets, onChange, context }: {
           }}
           onRemove={() => {
             const next = items.filter((_, i) => i !== idx);
-            updateItems(next.length > 0 ? next : [""]);
+            updateItems(
+              next.length >= minRows
+                ? next
+                : Array.from({ length: minRows }, () => ""),
+            );
           }}
         />
       ))}
@@ -898,6 +905,8 @@ function ProjectsSection({ store, data }: { store: StoreType; data: StoreType["d
             bullets={p.bullets}
             onChange={(v) => store.setProject(p.id, "bullets", v)}
             context={{ role: p.name }}
+            minRows={2}
+            label="Bullet Points"
           />
         </div>
       ))}

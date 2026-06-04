@@ -175,6 +175,17 @@ const FONT_SIZE_SCALE: Record<TBFontSize, number> = {
   large: 1.10,
 };
 
+export const RESUME_FONT_SIZE_OPTIONS: ReadonlyArray<{
+  id: TBFontSize;
+  label: string;
+  shortLabel: string;
+  description: string;
+}> = [
+  { id: "small", label: "Small", shortLabel: "S", description: "Fits more content" },
+  { id: "medium", label: "Medium", shortLabel: "M", description: "Default balance" },
+  { id: "large", label: "Large", shortLabel: "L", description: "Easy to read" },
+];
+
 export function resolveResumeLayout(opts: {
   stylePreset?: TBStylePreset;
   pageWidth?: TBPageWidth;
@@ -206,11 +217,13 @@ export function resumeLayoutFromPreviewStyle(
   styleId: ResumePreviewStyleId,
   pageWidthId: TBPageWidth = "standard",
   accentColor?: string,
+  fontSize: TBFontSize = "medium",
 ): ResumeLayoutContext {
   return resolveResumeLayout({
     stylePreset: PREVIEW_STYLE_TO_PRESET[styleId],
     pageWidth: pageWidthId,
     accentColor,
+    fontSize,
   });
 }
 
@@ -244,8 +257,9 @@ export function resumeLayoutCssVarsForPreviewStyle(
   styleId: ResumePreviewStyleId,
   pageWidthId: TBPageWidth = "standard",
   accentColor?: string,
+  fontSize: TBFontSize = "medium",
 ): Record<string, string> {
-  return resumeLayoutCssVars(resumeLayoutFromPreviewStyle(styleId, pageWidthId, accentColor));
+  return resumeLayoutCssVars(resumeLayoutFromPreviewStyle(styleId, pageWidthId, accentColor, fontSize));
 }
 
 /** Template Builder `ResumePreview` page root. */
