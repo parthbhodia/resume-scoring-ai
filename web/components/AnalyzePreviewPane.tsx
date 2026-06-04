@@ -38,10 +38,6 @@ interface Props {
   builderOpening?: boolean;
   /** Shown when a saved analysis was restored — original upload bytes are not in storage. */
   restoredResumeNoPdfHint?: boolean;
-  /** Optional JD text — enables JD-tailored PDF export. */
-  jd?: string;
-  /** Passed through to preview panel; defaults to export readiness from structured resume. */
-  exportPdfEnabled?: boolean;
   exportDocxEnabled?: boolean;
   categoryAssignmentOpts?: CategoryAssignmentOptions;
 }
@@ -65,12 +61,10 @@ export default function AnalyzePreviewPane({
   builderReady,
   builderOpening,
   restoredResumeNoPdfHint = false,
-  jd = "",
-  exportPdfEnabled,
   exportDocxEnabled,
   categoryAssignmentOpts,
 }: Props) {
-  const { exportPdf, exportDocx, exporting, canExport, error: exportError } = useAnalyzeExport({ jd });
+  const { exportDocx, exporting, canExport, error: exportError } = useAnalyzeExport();
   const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
   const resumeHeaderStore = useResumeAnalyzeStore((s) => s.resumeHeader);
   const bulletsStore = useResumeAnalyzeStore((s) => s.analysisBullets);
@@ -116,8 +110,6 @@ export default function AnalyzePreviewPane({
       builderOpening={builderOpening}
       pulseBulletIndex={pulseBulletIndex}
       restoredResumeNoPdfHint={restoredResumeNoPdfHint}
-      onExportPdf={exportPdf}
-      exportPdfEnabled={exportPdfEnabled !== false && canExport}
       onExportDocx={exportDocx}
       exportDocxEnabled={exportDocxEnabled !== false && canExport}
       exportingResume={exporting}

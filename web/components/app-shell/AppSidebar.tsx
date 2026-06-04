@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
@@ -28,6 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { AppSidebarUser } from "./AppSidebarUser";
+import { BugReportDialog } from "./BugReportDialog";
 import {
   BUILDER_SUBFLOWS,
   NAV_ACTIVE_CLASS,
@@ -115,6 +117,7 @@ export function AppSidebar({
   const router = useRouter();
   const { state, setOpen } = useSidebar();
   const showLabels = state === "expanded";
+  const [bugReportOpen, setBugReportOpen] = React.useState(false);
   const handleBuilderClick = () => {
     if (state === "collapsed") {
       setOpen(true);
@@ -290,6 +293,18 @@ export function AppSidebar({
               {showLabels ? <span className="app-nav-label">Theme</span> : null}
             </SidebarMenuButton>
           </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="Report a bug"
+              className={NAV_MENU_BTN_CLASS}
+              onClick={() => setBugReportOpen(true)}
+            >
+              <span className="app-nav-icon" aria-hidden>
+                {NAV_ICONS.bug}
+              </span>
+              {showLabels ? <span className="app-nav-label">Report a bug</span> : null}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem className="group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">
             <AppSidebarUser
               initial={userInitial}
@@ -321,6 +336,7 @@ export function AppSidebar({
         </p>
       </SidebarFooter>
       <SidebarRail />
+      <BugReportDialog open={bugReportOpen} onOpenChange={setBugReportOpen} />
     </Sidebar>
   );
 }

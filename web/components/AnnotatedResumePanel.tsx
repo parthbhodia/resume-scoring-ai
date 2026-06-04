@@ -70,10 +70,6 @@ interface Props {
   pulseBulletIndex?: number | null;
   /** Shown when a saved analysis was restored (no upload on this session). */
   restoredResumeNoPdfHint?: boolean;
-  /** Export accepted edits to PDF via LaTeX (Harshibar) + pdflatex. */
-  onExportPdf?: (opts?: { referenceFolder?: string }) => void;
-  /** When false, PDF download stays visible but disabled (no structured resume yet). */
-  exportPdfEnabled?: boolean;
   /** Export accepted edits to DOCX. */
   onExportDocx?: () => void;
   /** When false, DOCX control stays visible but disabled (no structured resume yet). */
@@ -262,8 +258,6 @@ export default function AnnotatedResumePanel({
   presentationOnly = false,
   pulseBulletIndex = null,
   restoredResumeNoPdfHint = false,
-  onExportPdf,
-  exportPdfEnabled = true,
   onExportDocx,
   exportDocxEnabled = true,
   exportingResume = false,
@@ -765,16 +759,8 @@ export default function AnnotatedResumePanel({
             >
               {(() => {
                 // Use the WYSIWYG HTML→Chromium pipeline. The button stays
-                // enabled whenever we have something to render (paperRef is
-                // populated once the preview mounts) — no dependency on the
-                // backend structured-resume "canExport" flag the LaTeX path
-                // needed. The legacy `onExportPdf` prop is kept in the type
-                // signature for parents that still pass it but is unused
-                // here; we'll drop the prop in a follow-up once nothing
-                // depends on it.
-                void onExportPdf;  // intentionally unused — see comment above
                 const busy = htmlPdfExporting;
-                const enabled = exportPdfEnabled !== false;
+                const enabled = true;
                 return (
                   <button
                     type="button"

@@ -461,6 +461,8 @@ export default function ResumeBuilder({
   const [libraryToast, setLibraryToast] = useState<string | null>(null);
   /** Toast for template customize flow (Save / Download with fresh compile). */
   const [customizeExportToast, setCustomizeExportToast] = useState<string | null>(null);
+  /** Generic feedback toast (for API policy responses like scan limits). */
+  const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
   /** Feedback after /api/apply-suggestions completes. */
   const [applyFeedback, setApplyFeedback] = useState<{
     patchesApplied: number;
@@ -479,6 +481,12 @@ export default function ResumeBuilder({
   const [tailorBulletAnalysis, setTailorBulletAnalysis] = useState<LiveBulletItem[]>([]);
   const [tailorLineOverrides, setTailorLineOverrides] = useState<Record<number, string>>({});
   const [tailorAppliedBulletIndices, setTailorAppliedBulletIndices] = useState<ReadonlySet<number>>(() => new Set());
+
+  useEffect(() => {
+    if (!feedbackToast) return;
+    const t = window.setTimeout(() => setFeedbackToast(null), 5200);
+    return () => window.clearTimeout(t);
+  }, [feedbackToast]);
   const hasWebResearch = searchQueries.length > 0 || searchSources.length > 0;
   /** After Template gallery / content picker / manual form — compile PDF from layout + extract only (no JD UI). */
   const [studioHandoff, setStudioHandoff] = useState(() => builderSession0?.studioHandoff ?? false);
@@ -1130,8 +1138,13 @@ export default function ResumeBuilder({
 
   const handleAnalyze = useCallback(async () => {
     const effJd = jd.trim();
+    const profile = (candidateProfile ?? "").trim();
     if (!effJd) { setAnalyzeError("Please paste a job description first."); return; }
-    if (!(candidateProfile ?? "").trim()) { setAnalyzeError("Please upload your résumé first."); return; }
+    if (!profile) { setAnalyzeError("Please upload your résumé first."); return; }
+    const canUseClientStructured = Boolean(
+      tailorStructuredResume
+      && profile === (structuredUpload?.profile ?? "").trim(),
+    );
     setAnalyzing(true);
     setAnalyzeError(null);
     setError(null);
@@ -1140,16 +1153,28 @@ export default function ResumeBuilder({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          candidate_profile: candidateProfile,
+          candidate_profile: profile,
           job_description: effJd,
           include_bullet_analysis: true,
-          include_structured_resume: !tailorStructuredResume,
+          include_structured_resume: true,
+          ...(canUseClientStructured ? { structured_resume: tailorStructuredResume } : {}),
         }),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
         let msg = `Analysis failed (HTTP ${resp.status})`;
-        try { const j = JSON.parse(body) as { error?: string }; if (j?.error) msg = j.error; } catch { /* */ }
+        try {
+          const j = JSON.parse(body) as { error?: string; code?: string; limit?: number };
+          if (j?.error) msg = j.error;
+          if (resp.status === 429 && j?.code === "daily_scan_limit_reached") {
+            const freeLimit = Number.isFinite(Number(j?.limit)) && Number(j.limit) > 0 ? Number(j.limit) : 5;
+            setFeedbackToast(
+              `Daily limit reached. UMBC students get unlimited scans. Other users get ${freeLimit} scans/day for free.`,
+            );
+          }
+        } catch {
+          /* */
+        }
         throw new Error(toUserFriendlyErrorMessage(msg));
       }
       const raw = await resp.json() as Record<string, unknown>;
@@ -1197,7 +1222,7 @@ export default function ResumeBuilder({
     } finally {
       setAnalyzing(false);
     }
-  }, [jd, candidateProfile, company, role, model, user?.id, tailorStructuredResume, applyStructuredFromAnalyze]);
+  }, [jd, candidateProfile, company, role, model, user?.id, tailorStructuredResume, structuredUpload?.profile, applyStructuredFromAnalyze]);
 
   /** Re-run JD match ratings on updated plain text (no LaTeX / no ATS folder).
    * Pass bulletsAtApply/overridesAtApply/appliedAtApply when calling from applyGapFixes
@@ -1220,6 +1245,10 @@ export default function ResumeBuilder({
       )
     ).trim();
     if (!prof || !jd.trim()) return false;
+    const canUseClientStructured = Boolean(
+      tailorStructuredResume
+      && prof === (structuredUpload?.profile ?? "").trim(),
+    );
     setTailorRescoring(true);
     try {
       const resp = await fetch(apiUrl("/api/analyze"), {
@@ -1229,11 +1258,26 @@ export default function ResumeBuilder({
           candidate_profile: prof,
           job_description: jd.trim(),
           include_bullet_analysis: true,
-          include_structured_resume: !tailorStructuredResume,
+          include_structured_resume: true,
+          ...(canUseClientStructured ? { structured_resume: tailorStructuredResume } : {}),
           addressed_gaps: addressedGapActions,
         }),
       });
-      if (!resp.ok) return false;
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        try {
+          const j = JSON.parse(body) as { code?: string; limit?: number };
+          if (resp.status === 429 && j?.code === "daily_scan_limit_reached") {
+            const freeLimit = Number.isFinite(Number(j?.limit)) && Number(j.limit) > 0 ? Number(j.limit) : 5;
+            setFeedbackToast(
+              `Daily limit reached. UMBC students get unlimited scans. Other users get ${freeLimit} scans/day for free.`,
+            );
+          }
+        } catch {
+          /* */
+        }
+        return false;
+      }
       const raw = await resp.json() as Record<string, unknown>;
       const data = mergeAnalyzeApiJson(raw) as {
         ratings?: RatingsData;
@@ -1309,7 +1353,7 @@ export default function ResumeBuilder({
   }, [
     candidateProfile, jd, company, role, model, user?.id, result?.folder,
     tailorBulletAnalysis, tailorLineOverrides, addressedGaps, addressedGapActions,
-    tailorAppliedBulletIndices, tailorStructuredResume, applyStructuredFromAnalyze,
+    tailorAppliedBulletIndices, tailorStructuredResume, structuredUpload?.profile, applyStructuredFromAnalyze,
   ]);
 
   /** Plain text with tailor bullet overrides applied (for gap-fix API + rescoring). */
@@ -2380,6 +2424,30 @@ export default function ResumeBuilder({
         overflow: "hidden",
       }}
     >
+      {feedbackToast ? (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 18,
+            zIndex: 1200,
+            maxWidth: "min(440px, calc(100vw - 32px))",
+            padding: "12px 14px",
+            borderRadius: 12,
+            background: "rgba(30,41,59,0.96)",
+            border: "1px solid rgba(148,163,184,0.32)",
+            boxShadow: "0 14px 30px rgba(2,6,23,0.35)",
+            color: "#f8fafc",
+            fontSize: 12.5,
+            lineHeight: 1.45,
+            letterSpacing: -0.15,
+          }}
+        >
+          {feedbackToast}
+        </div>
+      ) : null}
 
       {/* ── Main — landmark + busy state for assistive tech (WCAG 4.1.3) */}
       <main
@@ -3150,15 +3218,6 @@ export default function ResumeBuilder({
               `}</style>
               <div className="rb-results-body">
               {/* ── Gap-fix apply spinner — shown while a single fix is being applied to the preview ── */}
-              {gapApplyBusy && (
-                <div style={{ marginBottom: 12, padding: "10px 16px", borderRadius: 10, border: "1px solid rgba(99,102,241,0.3)", background: "rgba(99,102,241,0.06)", display: "flex", alignItems: "center", gap: 10 }}>
-                  <svg width="14" height="14" viewBox="0 0 18 18" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden>
-                    <circle cx="9" cy="9" r="7" stroke="rgba(99,102,241,0.3)" strokeWidth="2.5"/>
-                    <path d="M9 2a7 7 0 017 7" stroke="#818cf8" strokeWidth="2.5" strokeLinecap="round"/>
-                  </svg>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#818cf8" }}>Applying fix — updating preview…</span>
-                </div>
-              )}
 
               {/* ── Stale-score banner — applies are local (like Analyze); the real
                      match score is re-checked on demand here. ── */}
@@ -3263,7 +3322,8 @@ export default function ResumeBuilder({
                 </div>
               )}
 
-              <section className="rb-tailor-workspace" aria-labelledby="rb-results-heading">
+              <section className="rb-tailor-workspace" aria-labelledby="rb-results-heading" style={{ position: "relative" }}>
+              {(tailorRescoring || gapApplyBusy) && <RescanOverlay />}
               {displayRatings && isDetailedRatings(displayRatings) ? (
                 <>
                   <TailorMatchSidebar
@@ -4976,6 +5036,115 @@ function InfoTip({ children, label }: { children: React.ReactNode; label?: strin
 }
 
 /** Prominent progress while tailor PDF generate runs on the results page. */
+function RescanOverlay() {
+  const steps = [
+    "CHECKING QUALIFICATIONS",
+    "ANALYZING RESPONSIBILITIES",
+    "MATCHING KEYWORDS",
+  ];
+  return (
+    <div
+      aria-live="polite"
+      aria-busy="true"
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 40,
+        backdropFilter: "blur(4px)",
+        WebkitBackdropFilter: "blur(4px)",
+        background: "rgba(255,255,255,0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 20,
+          boxShadow: "0 8px 40px rgba(0,0,0,0.14)",
+          padding: "36px 40px",
+          width: 340,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 20,
+        }}
+      >
+        {/* spinner icon */}
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 14,
+            background: "#f1f5f9",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <svg
+            width={28}
+            height={28}
+            viewBox="0 0 28 28"
+            fill="none"
+            style={{ animation: "spin 0.9s linear infinite" }}
+            aria-hidden
+          >
+            <circle cx={14} cy={14} r={11} stroke="#e2e8f0" strokeWidth={3} />
+            <path d="M14 3a11 11 0 0111 11" stroke="#6366f1" strokeWidth={3} strokeLinecap="round" />
+          </svg>
+        </div>
+
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "#0f172a", letterSpacing: -0.4, marginBottom: 6 }}>
+            Refining Your Match
+          </div>
+          <div style={{ fontSize: 12.5, color: "#64748b", lineHeight: 1.5 }}>
+            Analyzing your updated résumé against the job description…
+          </div>
+        </div>
+
+        <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
+          {steps.map((step, i) => (
+            <div
+              key={step}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "9px 14px",
+                borderRadius: 10,
+                background: "#f8fafc",
+                fontSize: 11,
+                fontWeight: 700,
+                color: "#475569",
+                letterSpacing: 0.4,
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  background: i === 0 ? "#6366f1" : i === 1 ? "#a855f7" : "#3b82f6",
+                  animation: `pulse ${0.9 + i * 0.3}s ease-in-out infinite`,
+                }}
+              />
+              {step}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 10.5, color: "#94a3b8", letterSpacing: 0.3, fontWeight: 600 }}>
+          USUALLY TAKES 3–8 SECONDS
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TailorBuildProgressBanner({ statusMsg }: { statusMsg: string }) {
   return (
     <div

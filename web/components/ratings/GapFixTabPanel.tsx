@@ -138,10 +138,11 @@ export default function GapFixTabPanel({
               </div>
             )}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {panelSuggestions.map((s) => (
+              {panelSuggestions.map((s, i) => (
                 <GapFixSuggestionCard
                   key={s.id}
                   suggestion={s}
+                  index={i}
                   checked={effectiveChecked.has(s.id)}
                   onToggleCheck={() => toggleCheck(s.id)}
                   draftText={gapFixDrafts[s.id] ?? s.suggested}

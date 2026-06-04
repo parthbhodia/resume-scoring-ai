@@ -69,6 +69,7 @@ from resume_gui.extract.synthesize import _synthesize_text_from_resume_doc
 from resume_gui.extract.text_utils import _stitch_wrapped_bullets
 from resume_gui.llm.client import _analysis_model, _llm_json_call
 from resume_gui.services.persistence import _persist_analysis
+from resume_gui.services.scan_limits import _scan_limit_status_for_user
 from resume_gui.services.template import (
     _count_approved_suggestions,
     _create_structured_output_folder,
@@ -192,6 +193,7 @@ __all__ = [
     "_optional_gemini_client",
     "_parse_focus_gaps",
     "_persist_analysis",
+    "_scan_limit_status_for_user",
     "_post_clean_resume_text",
     "_rate_resume",
     "_rationales_from_accepted_suggestions",

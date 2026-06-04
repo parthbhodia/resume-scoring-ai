@@ -2,16 +2,13 @@
 
 import { useState, useCallback } from "react";
 import { apiUrl } from "@/lib/utils";
-import { DEFAULT_REFERENCE_FOLDER } from "@/lib/resumeTemplates";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 
 export interface UseAnalyzeExportOptions {
-  /** Optional JD text — if provided, the PDF export tailors bullets to the JD. */
   jd?: string;
 }
 
 export interface UseAnalyzeExportReturn {
-  exportPdf: (opts?: { referenceFolder?: string }) => Promise<void>;
   exportDocx: () => Promise<void>;
   exporting: boolean;
   error: string | null;
@@ -62,40 +59,11 @@ async function downloadBlob(resp: Response, fallbackFilename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function useAnalyzeExport({ jd = "" }: UseAnalyzeExportOptions = {}): UseAnalyzeExportReturn {
+export function useAnalyzeExport(_opts: UseAnalyzeExportOptions = {}): UseAnalyzeExportReturn {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const structuredResume = useResumeAnalyzeStore((s) => s.structuredResume);
   const canExport = structuredResume !== null;
-
-  const exportPdf = useCallback(async (opts?: { referenceFolder?: string }) => {
-    const sr = useResumeAnalyzeStore.getState().structuredResume;
-    if (!sr) { setError("No structured resume available — re-upload your file to enable PDF export."); return; }
-    const referenceFolder = (opts?.referenceFolder || DEFAULT_REFERENCE_FOLDER).trim() || DEFAULT_REFERENCE_FOLDER;
-    setExporting(true);
-    setError(null);
-    try {
-      const resp = await fetch(apiUrl("/api/analyze-export-pdf"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          structuredResume: sr,
-          acceptedEdits: buildAcceptedEdits(),
-          referenceFolder,
-          jd: jd.trim() || undefined,
-        }),
-      });
-      if (!resp.ok) {
-        const json = await resp.json().catch(() => ({})) as { error?: string };
-        throw new Error(json.error ?? "PDF export failed");
-      }
-      await downloadBlob(resp, "resume_export.pdf");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "PDF export failed");
-    } finally {
-      setExporting(false);
-    }
-  }, [jd]);
 
   const exportDocx = useCallback(async () => {
     const sr = useResumeAnalyzeStore.getState().structuredResume;
@@ -123,5 +91,5 @@ export function useAnalyzeExport({ jd = "" }: UseAnalyzeExportOptions = {}): Use
     }
   }, []);
 
-  return { exportPdf, exportDocx, exporting, error, clearError: () => setError(null), canExport };
+  return { exportDocx, exporting, error, clearError: () => setError(null), canExport };
 }

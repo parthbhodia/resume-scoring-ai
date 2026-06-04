@@ -19,6 +19,99 @@ async def api_advisor_access(request: Request):
         "institutions": (scope or {}).get("institutions") or [],
     })
 
+
+async def api_sync_institution_student(request: Request):
+    """POST /api/sync-institution-student — ensure authenticated user is mapped to institution_students by email domain."""
+    user_id, user_email = _authenticated_supabase_user(request)
+    if not user_id or not user_email:
+        return JSONResponse({"error": "authentication required"}, status_code=401)
+
+    normalized_email = str(user_email or "").strip().lower()
+    domain = normalized_email.rsplit("@", 1)[1] if "@" in normalized_email else ""
+    if not domain:
+        return JSONResponse({"mapped": False, "reason": "missing_email_domain", "institutions": []})
+
+    institutions_table = _supabase_table("institutions")
+    students_table = _supabase_table("institution_students")
+    if institutions_table is None or students_table is None:
+        return JSONResponse({"error": "advisor access schema unavailable"}, status_code=503)
+
+    try:
+        inst_resp = (
+            institutions_table
+            .select("id,slug,name,email_domain")
+            .eq("email_domain", domain)
+            .execute()
+        )
+        institutions = inst_resp.data or []
+    except Exception as exc:
+        logger.warning("sync institution lookup failed: %s", exc)
+        return JSONResponse({"error": "institution lookup failed"}, status_code=500)
+
+    if not institutions:
+        return JSONResponse({"mapped": False, "reason": "no_matching_institution", "institutions": []})
+
+    synced = 0
+    now_iso = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+    for inst in institutions:
+        institution_id = inst.get("id")
+        if not institution_id:
+            continue
+        try:
+            existing_resp = (
+                students_table
+                .select("institution_id,student_user_id,source")
+                .eq("institution_id", institution_id)
+                .eq("student_user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            existing_rows = existing_resp.data or []
+            if existing_rows:
+                update_payload = {
+                    "student_email": normalized_email,
+                    "last_seen_at": now_iso,
+                }
+                existing_source = str((existing_rows[0] or {}).get("source") or "").strip()
+                if not existing_source:
+                    update_payload["source"] = "manual"
+                (
+                    students_table
+                    .update(update_payload)
+                    .eq("institution_id", institution_id)
+                    .eq("student_user_id", user_id)
+                    .execute()
+                )
+            else:
+                (
+                    students_table
+                    .insert({
+                        "institution_id": institution_id,
+                        "student_user_id": user_id,
+                        "student_email": normalized_email,
+                        "source": "manual",
+                        "first_seen_at": now_iso,
+                        "last_seen_at": now_iso,
+                    })
+                    .execute()
+                )
+            synced += 1
+        except Exception as exc:
+            logger.warning(
+                "sync institution student failed: institution_id=%s user_id=%s err=%s",
+                institution_id,
+                user_id,
+                exc,
+            )
+
+    return JSONResponse({
+        "mapped": synced > 0,
+        "institutions": institutions,
+        "synced_count": synced,
+        "user_id": user_id,
+        "user_email": normalized_email,
+    })
+
 async def api_cohort_stats(request: Request):
     """GET /api/cohort-stats — aggregate analysis stats across all students.
 

@@ -73,13 +73,22 @@ def validate_gap_fix_suggestions(
                 suggested[:80],
             )
             continue
+        action_type = str(raw.get("action_type") or "rewrite").strip().lower()
+        if action_type not in ("rewrite", "append"):
+            action_type = "rewrite"
+        risk_level = str(raw.get("risk_level") or "low").strip().lower()
+        if risk_level not in ("low", "medium", "high"):
+            risk_level = "low"
         validated.append({
             "id": str(raw.get("id") or f"gf{len(validated) + 1}"),
             "section": str(raw.get("section") or "Work Experience"),
+            "employer": str(raw.get("employer") or "").strip(),
             "original": original,
             "suggested": suggested,
             "reason": str(raw.get("reason") or "").strip(),
             "category": cat or "add_keywords",
             "priority": pri,
+            "action_type": action_type,
+            "risk_level": risk_level,
         })
     return validated

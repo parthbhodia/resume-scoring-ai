@@ -118,6 +118,15 @@ RULES:
 
 {examples}
 
+7. Set `employer` to the `context` field of the matched eligible bullet (company/project name).
+8. Set `action_type`:
+   - "rewrite" when modifying an existing bullet body.
+   - "append" when the bullet is being substantially extended with new content beyond the original scope.
+9. Set `risk_level`:
+   - "low"    — rephrasing, keyword addition, or quantification only; no new factual claims.
+   - "medium" — adds a specific claim that is directly supported by the original context.
+   - "high"   — introduces an assertion not clearly evidenced in the original bullet.
+
 Output must conform to the enforced JSON schema (suggestions array, max 3 items).
 Schema categories: add_keywords, relevance, quantification, readability, action_verbs,
 languageQuality, remove_filler. Priority: high, medium, low.

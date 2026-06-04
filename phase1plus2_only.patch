@@ -1,0 +1,1668 @@
+From 3080077a319eda6fd2ddb9d8cecd88fca170891c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 18 May 2026 04:00:46 +0000
+Subject: [PATCH 1/3] feat(analyze): apply az-* design system to all bullet UI
+ components
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- highlightResumeMetrics: swap inline <mark> styles for .az-metric class (amber bold)
+- AnalyzeLiveResumeBody: score badges use .az-score-badge--weak/fair/strong; issue chips use .az-chips + .az-chip with max-3 + overflow pill; AI box is now .az-suggestion-card with ✦ header; all edit/accept buttons use .az-btn variants; accepted state shows full accepted text inline via .az-bullet-accepted-text
+- AnnotatedResumePanel: legend replaced with compact .az-legend-pill + .az-legend-dot pills
+- BulletImprovedEditor: textarea now uses .az-edit-textarea (neutral bg, Georgia serif, focus ring)
+
+https://claude.ai/code/session_015ED4ARZAgLY1ww81cRfeDs
+---
+ web/app/globals.css                      | 224 +++++++++++++++++++++++
+ web/components/AnalyzeLiveResumeBody.tsx | 118 ++++--------
+ web/components/AnnotatedResumePanel.tsx  |  23 ++-
+ web/components/BulletImprovedEditor.tsx  |  18 +-
+ web/lib/highlightResumeMetrics.tsx       |  11 +-
+ 5 files changed, 275 insertions(+), 119 deletions(-)
+
+diff --git a/web/app/globals.css b/web/app/globals.css
+index 3442f59..4e560d0 100644
+--- a/web/app/globals.css
++++ b/web/app/globals.css
+@@ -520,3 +520,227 @@ select option { background: var(--surface); }
+ }
+ 
+ 
++
++/* ═══════════════════════════════════════════════════════════════════════════
++   Analyze Resume — Design System
++   Spacing scale: --az-1=4px  --az-2=8px  --az-3=12px  --az-4=16px  --az-5=24px
++   ═══════════════════════════════════════════════════════════════════════════ */
++
++:root {
++  --az-1: 4px;
++  --az-2: 8px;
++  --az-3: 12px;
++  --az-4: 16px;
++  --az-5: 24px;
++
++  /* Score tier palette */
++  --az-weak-bg:     rgba(239, 68, 68, 0.07);
++  --az-weak-border: #ef4444;
++  --az-weak-text:   #dc2626;
++  --az-fair-bg:     rgba(245, 158, 11, 0.07);
++  --az-fair-border: #f59e0b;
++  --az-fair-text:   #d97706;
++  --az-strong-bg:   rgba(34, 197, 94, 0.07);
++  --az-strong-border: #22c55e;
++  --az-strong-text:   #16a34a;
++
++  /* Accepted states */
++  --az-accepted-ai-bg:     rgba(34, 197, 94, 0.08);
++  --az-accepted-ai-border: #22c55e;
++  --az-accepted-custom-bg:     rgba(96, 165, 250, 0.08);
++  --az-accepted-custom-border: #60a5fa;
++}
++
++/* ── Buttons ─────────────────────────────────────────────────────────────── */
++.az-btn {
++  display: inline-flex;
++  align-items: center;
++  gap: var(--az-1);
++  padding: 5px var(--az-3);
++  border-radius: 6px;
++  font-size: 11px;
++  font-weight: 600;
++  font-family: system-ui, sans-serif;
++  cursor: pointer;
++  border: 1.5px solid transparent;
++  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
++  white-space: nowrap;
++  line-height: 1.4;
++}
++.az-btn:disabled { opacity: 0.45; cursor: not-allowed; }
++.az-btn--primary {
++  background: var(--az-strong-border);
++  color: #fff;
++  border-color: var(--az-strong-border);
++}
++.az-btn--primary:hover:not(:disabled) { opacity: 0.88; }
++.az-btn--ghost {
++  background: transparent;
++  color: var(--muted);
++  border-color: var(--border);
++}
++.az-btn--ghost:hover:not(:disabled) { background: var(--surface2); color: var(--fg); }
++.az-btn--danger {
++  background: transparent;
++  color: var(--az-weak-text);
++  border-color: rgba(239, 68, 68, 0.35);
++}
++.az-btn--danger:hover:not(:disabled) { background: var(--az-weak-bg); }
++.az-btn--sm {
++  padding: 3px var(--az-2);
++  font-size: 10px;
++  border-radius: 5px;
++}
++
++/* ── Score badge ─────────────────────────────────────────────────────────── */
++.az-score-badge {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-width: 26px;
++  height: 18px;
++  padding: 0 5px;
++  border-radius: 9px;
++  font-size: 10px;
++  font-weight: 800;
++  font-family: system-ui, sans-serif;
++  flex-shrink: 0;
++  letter-spacing: -0.3px;
++}
++.az-score-badge--weak   { background: var(--az-weak-bg);   color: var(--az-weak-text);   border: 1px solid rgba(239,68,68,0.25); }
++.az-score-badge--fair   { background: var(--az-fair-bg);   color: var(--az-fair-text);   border: 1px solid rgba(245,158,11,0.25); }
++.az-score-badge--strong { background: var(--az-strong-bg); color: var(--az-strong-text); border: 1px solid rgba(34,197,94,0.25); }
++.az-score-badge--accepted { background: var(--az-accepted-ai-bg); color: var(--az-strong-text); border: 1px solid rgba(34,197,94,0.35); }
++
++/* ── Issue chips ─────────────────────────────────────────────────────────── */
++.az-chips {
++  display: flex;
++  flex-wrap: wrap;
++  gap: var(--az-1);
++  margin-bottom: var(--az-2);
++}
++.az-chip {
++  display: inline-flex;
++  align-items: center;
++  padding: 2px var(--az-2);
++  border-radius: 99px;
++  font-size: 10px;
++  font-weight: 500;
++  font-family: system-ui, sans-serif;
++  background: var(--az-weak-bg);
++  color: var(--az-weak-text);
++  border: 1px solid rgba(239, 68, 68, 0.2);
++  white-space: nowrap;
++  max-width: 160px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++}
++.az-chip--overflow {
++  background: var(--surface2);
++  color: var(--muted);
++  border-color: var(--border);
++}
++
++/* ── AI suggestion card ──────────────────────────────────────────────────── */
++.az-suggestion-card {
++  border: 1.5px solid rgba(34, 197, 94, 0.3);
++  border-radius: 7px;
++  background: rgba(34, 197, 94, 0.05);
++  overflow: hidden;
++  margin-bottom: var(--az-2);
++}
++.az-suggestion-card__header {
++  display: flex;
++  align-items: center;
++  gap: var(--az-1);
++  padding: 5px var(--az-2);
++  background: rgba(34, 197, 94, 0.08);
++  border-bottom: 1px solid rgba(34, 197, 94, 0.15);
++  font-size: 9px;
++  font-weight: 800;
++  text-transform: uppercase;
++  letter-spacing: 0.6px;
++  color: var(--az-strong-text);
++  font-family: system-ui, sans-serif;
++}
++.az-suggestion-card__body {
++  padding: var(--az-2) var(--az-3);
++  font-size: 10.5px;
++  line-height: 1.5;
++  color: var(--fg);
++  font-family: 'Georgia', serif;
++}
++
++/* ── Bullet edit textarea ────────────────────────────────────────────────── */
++.az-edit-textarea {
++  width: 100%;
++  box-sizing: border-box;
++  min-height: 68px;
++  font-size: 10.5px;
++  line-height: 1.5;
++  padding: var(--az-2) var(--az-3);
++  border-radius: 6px;
++  border: 1.5px solid var(--border);
++  background: var(--bg);
++  color: var(--fg);
++  resize: vertical;
++  font-family: 'Georgia', serif;
++  transition: border-color 0.15s;
++  outline: none;
++}
++.az-edit-textarea:focus { border-color: var(--accent, #3b82f6); }
++.az-edit-textarea::placeholder { color: var(--muted); font-style: italic; font-family: system-ui, sans-serif; font-size: 10px; }
++
++/* ── Metric highlight ────────────────────────────────────────────────────── */
++.az-metric {
++  font-weight: 700;
++  color: var(--az-fair-text);
++}
++
++/* ── Accepted bullet row ─────────────────────────────────────────────────── */
++.az-bullet-accepted-text {
++  font-size: 10.5px;
++  line-height: 1.45;
++  color: var(--fg);
++  margin-bottom: var(--az-1);
++  word-break: break-word;
++}
++
++/* ── Skeleton loading ────────────────────────────────────────────────────── */
++@keyframes az-shimmer {
++  0%   { background-position: 200% 0; }
++  100% { background-position: -200% 0; }
++}
++.az-skeleton {
++  border-radius: 4px;
++  background: linear-gradient(
++    90deg,
++    var(--surface2) 25%,
++    var(--border) 50%,
++    var(--surface2) 75%
++  );
++  background-size: 400% 100%;
++  animation: az-shimmer 1.6s ease-in-out infinite;
++}
++
++/* ── Legend pill ─────────────────────────────────────────────────────────── */
++.az-legend-pill {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  padding: 2px 7px;
++  border-radius: 99px;
++  font-size: 9.5px;
++  font-family: system-ui, sans-serif;
++  color: var(--muted);
++  border: 1px solid var(--border);
++  background: var(--surface2);
++  cursor: default;
++  white-space: nowrap;
++}
++.az-legend-dot {
++  width: 7px;
++  height: 7px;
++  border-radius: 50%;
++  flex-shrink: 0;
++}
+diff --git a/web/components/AnalyzeLiveResumeBody.tsx b/web/components/AnalyzeLiveResumeBody.tsx
+index 19df3bb..546558d 100644
+--- a/web/components/AnalyzeLiveResumeBody.tsx
++++ b/web/components/AnalyzeLiveResumeBody.tsx
+@@ -985,17 +985,7 @@ export default function AnalyzeLiveResumeBody({
+                   <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                     {/* Score badge — visible in non-presentation mode only */}
+                     {!presentationOnly && (
+-                      <span className="az-score-badge" style={{
+-                        flexShrink: 0,
+-                        marginTop: 1,
+-                        fontSize: 9,
+-                        fontWeight: 800,
+-                        padding: "1px 5px",
+-                        borderRadius: 8,
+-                        background: bullet.score >= 70 ? "rgba(52,211,153,0.14)" : bullet.score >= 55 ? "rgba(245,158,11,0.14)" : "rgba(248,113,113,0.14)",
+-                        color: bullet.score >= 70 ? "var(--green)" : bullet.score >= 55 ? "var(--yellow)" : "var(--red)",
+-                        fontFamily: "system-ui, sans-serif",
+-                      }}>
++                      <span className={`az-score-badge az-score-badge--${bullet.score >= 70 ? "strong" : bullet.score >= 55 ? "fair" : "weak"}`} style={{ flexShrink: 0, marginTop: 1 }}>
+                         {bullet.score}
+                       </span>
+                     )}
+@@ -1031,13 +1021,7 @@ export default function AnalyzeLiveResumeBody({
+                             value={editDraft}
+                             onChange={e => setEditDrafts(prev => ({ ...prev, [bulletIdx]: e.target.value }))}
+                             placeholder="Write your improved bullet…"
+-                            style={{
+-                              width: "100%", boxSizing: "border-box", minHeight: 64,
+-                              fontSize: 11, lineHeight: 1.45, padding: "7px 9px",
+-                              borderRadius: 5, border: "1.5px solid var(--border)",
+-                              background: "var(--input-bg, var(--bg))", color: "var(--fg)",
+-                              resize: "vertical", fontFamily: "inherit",
+-                            }}
++                            className="az-edit-textarea"
+                           />
+                           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                             <button
+@@ -1048,19 +1032,11 @@ export default function AnalyzeLiveResumeBody({
+                                 patchBulletRewrite(bulletIdx, t);
+                                 setEditingBullets(prev => { const n = { ...prev }; delete n[bulletIdx]; return n; });
+                               }}
+-                              style={{
+-                                fontSize: 10, fontWeight: 700, padding: "4px 12px", borderRadius: 5,
+-                                border: "none", cursor: "pointer",
+-                                background: "var(--green)", color: "#fff",
+-                              }}
++                              className="az-btn az-btn--primary az-btn--sm"
+                             >Save</button>
+                             <button
+                               onClick={() => setEditingBullets(prev => { const n = { ...prev }; delete n[bulletIdx]; return n; })}
+-                              style={{
+-                                fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 5,
+-                                border: "1px solid var(--border)", cursor: "pointer",
+-                                background: "transparent", color: "var(--muted)",
+-                              }}
++                              className="az-btn az-btn--ghost az-btn--sm"
+                             >Cancel</button>
+                             {editDraft.trim() && (
+                               <CopyTiny text={editDraft} />
+@@ -1072,73 +1048,64 @@ export default function AnalyzeLiveResumeBody({
+ 
+                     // ── State C: accepted ──
+                     if (accepted) {
++                      const acceptedText = previewLineOverrides[bulletIdx] ?? rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "";
+                       return (
+                         <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 6 }} onClick={e => e.stopPropagation()}>
+-                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+-                            <span style={{
+-                              fontSize: 9, fontWeight: 800, padding: "1px 7px", borderRadius: 8,
+-                              background: accepted === "ai" ? "rgba(52,211,153,0.15)" : "rgba(96,165,250,0.15)",
+-                              color: accepted === "ai" ? "var(--green)" : "#60a5fa",
+-                              textTransform: "uppercase",
++                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
++                            <span className={`az-score-badge az-score-badge--${accepted === "ai" ? "accepted" : "accepted"}`} style={{
++                              background: accepted === "ai" ? "var(--az-accepted-ai-bg)" : "var(--az-accepted-custom-bg)",
++                              borderColor: accepted === "ai" ? "var(--az-accepted-ai-border)" : "var(--az-accepted-custom-border)",
++                              color: accepted === "ai" ? "var(--az-strong-text)" : "#2563eb",
+                             }}>
+-                              {accepted === "ai" ? "✓ AI Accepted" : "✓ Custom"}
++                              {accepted === "ai" ? "✓ AI" : "✓ Custom"}
+                             </span>
+                             <button
+                               onClick={() => {
+-                                const current = previewLineOverrides[bulletIdx] ?? rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "";
+-                                setEditDrafts(prev => ({ ...prev, [bulletIdx]: current }));
++                                setEditDrafts(prev => ({ ...prev, [bulletIdx]: acceptedText }));
+                                 setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
+                               }}
+-                              style={{
+-                                fontSize: 9, fontWeight: 600, padding: "2px 8px", borderRadius: 5,
+-                                border: "1px solid var(--border)", cursor: "pointer",
+-                                background: "transparent", color: "var(--muted)",
+-                              }}
++                              className="az-btn az-btn--ghost az-btn--sm"
+                             >Edit</button>
+                             <button
+                               onClick={() => {
+                                 unacceptBullet(bulletIdx);
+                                 patchBulletRewrite(bulletIdx, null);
+                               }}
+-                              style={{
+-                                fontSize: 9, fontWeight: 600, padding: "2px 8px", borderRadius: 5,
+-                                border: "1px solid var(--border)", cursor: "pointer",
+-                                background: "transparent", color: "var(--muted)",
+-                              }}
++                              className="az-btn az-btn--ghost az-btn--sm"
+                             >Undo</button>
+                           </div>
++                          {acceptedText && (
++                            <div className="az-bullet-accepted-text">{acceptedText}</div>
++                          )}
+                         </div>
+                       );
+                     }
+ 
+                     // ── State B: expanded suggestion view ──
++                    const MAX_CHIPS = 3;
++                    const visibleIssues = bullet.issues.slice(0, MAX_CHIPS);
++                    const overflowCount = bullet.issues.length - MAX_CHIPS;
+                     return (
+                       <div style={{ fontFamily: "system-ui, sans-serif", marginTop: 6 }} onClick={e => e.stopPropagation()}>
+-                        {/* Issues chips */}
++                        {/* Issues chips — max 3 + overflow pill */}
+                         {bullet.issues.length > 0 && (
+-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8, paddingLeft: 2 }}>
+-                            {bullet.issues.map((issue, ij) => (
+-                              <span key={ij} style={{
+-                                fontSize: 9, padding: "1px 6px", borderRadius: 8,
+-                                background: "var(--red-bg)", color: "var(--red)", fontWeight: 500,
+-                              }}>
+-                                {issue}
+-                              </span>
++                          <div className="az-chips" style={{ marginBottom: 8, paddingLeft: 2 }}>
++                            {visibleIssues.map((issue, ij) => (
++                              <span key={ij} className="az-chip">{issue}</span>
+                             ))}
++                            {overflowCount > 0 && (
++                              <span className="az-chip az-chip--overflow">+{overflowCount} more</span>
++                            )}
+                           </div>
+                         )}
+ 
+-                        {/* AI suggestion box */}
++                        {/* AI suggestion card */}
+                         {bullet.improvedBullet && (
+-                          <div style={{
+-                            padding: "8px 10px", borderRadius: 5, marginBottom: 8,
+-                            border: "1px solid var(--border)",
+-                            background: "rgba(52,211,153,0.06)",
+-                          }}>
+-                            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", marginBottom: 4 }}>
+-                              AI Suggestion
++                          <div className="az-suggestion-card">
++                            <div className="az-suggestion-card__header">
++                              <span>✦</span> AI Suggestion
+                             </div>
+-                            <div style={{ fontSize: 10.5, lineHeight: 1.45, color: "var(--fg)" }}>
++                            <div className="az-suggestion-card__body">
+                               {bullet.improvedBullet}
+                             </div>
+                           </div>
+@@ -1148,40 +1115,29 @@ export default function AnalyzeLiveResumeBody({
+                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                           {bullet.improvedBullet && (
+                             <button
++                              className="az-btn az-btn--primary az-btn--sm"
+                               onClick={() => {
+                                 acceptBullet(bulletIdx, bullet.improvedBullet!, "ai");
+                                 patchBulletRewrite(bulletIdx, bullet.improvedBullet!);
+                               }}
+-                              style={{
+-                                fontSize: 10, fontWeight: 700, padding: "4px 12px", borderRadius: 5,
+-                                border: "none", cursor: "pointer",
+-                                background: "var(--green)", color: "#fff",
+-                              }}
+                             >Accept AI</button>
+                           )}
+                           {bullet.improvedBullet && (
+                             <button
++                              className="az-btn az-btn--ghost az-btn--sm"
+                               onClick={() => {
+                                 setEditDrafts(prev => ({ ...prev, [bulletIdx]: bullet.improvedBullet! }));
+                                 setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
+                               }}
+-                              style={{
+-                                fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 5,
+-                                border: "1px solid var(--border)", cursor: "pointer",
+-                                background: "transparent", color: "var(--fg)",
+-                              }}
+-                            >Edit AI draft</button>
++                            >Edit draft</button>
+                           )}
+                           <button
++                            className="az-btn az-btn--ghost az-btn--sm"
++                            style={{ color: "var(--muted)" }}
+                             onClick={() => {
+                               setEditDrafts(prev => ({ ...prev, [bulletIdx]: "" }));
+                               setEditingBullets(prev => ({ ...prev, [bulletIdx]: true }));
+                             }}
+-                            style={{
+-                              fontSize: 10, fontWeight: 600, padding: "4px 10px", borderRadius: 5,
+-                              border: "1px solid var(--border)", cursor: "pointer",
+-                              background: "transparent", color: "var(--muted)",
+-                            }}
+                           >Write my own</button>
+                         </div>
+                       </div>
+diff --git a/web/components/AnnotatedResumePanel.tsx b/web/components/AnnotatedResumePanel.tsx
+index bfa9f26..0fce83a 100644
+--- a/web/components/AnnotatedResumePanel.tsx
++++ b/web/components/AnnotatedResumePanel.tsx
+@@ -959,25 +959,24 @@ export default function AnnotatedResumePanel({
+       {/* Legend — hidden on PDF tab (viewer has its own legend + download) */}
+       {!(sourcePdfUrl && viewMode === "pdf") && (
+         <div style={{
+-          padding: "7px 14px",
++          padding: "6px 14px",
+           borderBottom: "1px solid var(--border)",
+           display: "flex",
+           alignItems: "center",
+-          gap: 14,
++          gap: 6,
+           flexShrink: 0,
+           background: "var(--surface2)",
+-          fontSize: 10,
+-          color: "var(--muted)",
++          flexWrap: "wrap",
+         }}>
+           {[
+-            { bg: "#ffcdd2", label: "Weak line", border: "#ef5350" },
+-            { bg: "#fff9c4", label: "Fair", border: "#fbc02d" },
+-            { bg: "#c8e6c9", label: "Strong / metrics", border: "#66bb6a" },
+-          ].map(({ bg, label, border }) => (
+-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+-              <div style={{ width: 14, height: 6, borderRadius: 2, background: bg, boxShadow: `inset 0 0 0 1px ${border}55` }} />
+-              <span>{label}</span>
+-            </div>
++            { color: "var(--az-weak-text)", bg: "var(--az-weak-bg)", label: "Needs work" },
++            { color: "var(--az-fair-text)", bg: "var(--az-fair-bg)", label: "Fair" },
++            { color: "var(--az-strong-text)", bg: "var(--az-strong-bg)", label: "Strong" },
++          ].map(({ color, bg, label }) => (
++            <span key={label} className="az-legend-pill">
++              <span className="az-legend-dot" style={{ background: color, boxShadow: `0 0 0 1px ${color}66` }} />
++              {label}
++            </span>
+           ))}
+         </div>
+       )}
+diff --git a/web/components/BulletImprovedEditor.tsx b/web/components/BulletImprovedEditor.tsx
+index 3e3efdc..a0cd181 100644
+--- a/web/components/BulletImprovedEditor.tsx
++++ b/web/components/BulletImprovedEditor.tsx
+@@ -145,22 +145,8 @@ export default function BulletImprovedEditor({
+         onBlur={onTextareaBlur}
+         spellCheck
+         aria-label="Edit AI improved bullet"
+-        style={{
+-          display: "block",
+-          width: "100%",
+-          boxSizing: "border-box",
+-          minHeight,
+-          resize: "vertical",
+-          fontSize: 12.5,
+-          lineHeight: 1.65,
+-          color: "var(--green)",
+-          background: "rgba(52,211,153,0.06)",
+-          border: "1px solid rgba(52,211,153,0.18)",
+-          borderRadius: 8,
+-          padding: "9px 12px",
+-          fontFamily: "inherit",
+-          margin: 0,
+-        }}
++        className="az-edit-textarea"
++        style={{ minHeight }}
+       />
+       {(onReplaceInPreview || (previewLineApplied && onRevertPreviewLine)) && (
+         <div style={{
+diff --git a/web/lib/highlightResumeMetrics.tsx b/web/lib/highlightResumeMetrics.tsx
+index ad2b215..d7257cb 100644
+--- a/web/lib/highlightResumeMetrics.tsx
++++ b/web/lib/highlightResumeMetrics.tsx
+@@ -14,16 +14,7 @@ export function highlightMetricSpans(text: string): ReactNode[] {
+   while ((m = re.exec(text)) !== null) {
+     if (m.index > last) out.push(text.slice(last, m.index));
+     out.push(
+-      <mark
+-        key={`hk-${key++}`}
+-        style={{
+-          background: "rgba(165, 214, 167, 0.55)",
+-          color: "inherit",
+-          padding: "0 2px",
+-          borderRadius: 2,
+-          fontWeight: 600,
+-        }}
+-      >
++      <mark key={`hk-${key++}`} className="az-metric">
+         {m[0]}
+       </mark>,
+     );
+-- 
+2.43.0
+
+
+From 37f842f8d43c71cf365db55ce0b1a1e7d9f7d0c5 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 18 May 2026 04:18:09 +0000
+Subject: [PATCH 2/3] =?UTF-8?q?feat:=20unified=20extraction=20engine=20?=
+ =?UTF-8?q?=E2=80=94=20split=20=5Fllm=5Fextract=20from=20tailor,=20DOCX=20?=
+ =?UTF-8?q?support,=20structuredResume?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Backend:
+- Add _EXTRACT_SCHEMA_FAITHFUL: faithful extraction schema (no JD rewriting)
+- Add _llm_extract(text): pure structure extraction shared by Analyze path; runs concurrently with _analyze_resume_comprehensive via asyncio.gather
+- Add _resume_doc_to_dict(): serialize ResumeDocModel → JSON for transport
+- api_analyze_upload: replace raw pdfplumber with extract_upload_markdown (handles PDF + DOCX via MarkItDown); return structuredResume + bulletMap alongside analysis
+- Add api_export_docx: POST /api/export-docx builds a styled DOCX from ResumeDocModel JSON + optional acceptedEdits patch map using python-docx
+- Add python-docx>=1.1.0 to requirements.txt
+
+Frontend:
+- resumeAnalyzeStore: add StructuredResume, BulletMapEntry types; store structuredResume + bulletMap (the index bridge to Phase 2 export)
+- AnalyzeResume: accept structuredResume/bulletMap in AnalysisResult and pass through hydrateFromAnalysis; accept .docx in file input; fix validation message
+
+https://claude.ai/code/session_015ED4ARZAgLY1ww81cRfeDs
+---
+ requirements.txt                 |   1 +
+ resume_gui/app.py                | 341 ++++++++++++++++++++++++++++++-
+ web/components/AnalyzeResume.tsx |  15 +-
+ web/store/resumeAnalyzeStore.ts  |  49 +++++
+ 4 files changed, 394 insertions(+), 12 deletions(-)
+
+diff --git a/requirements.txt b/requirements.txt
+index fdd495a..86422cf 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -58,6 +58,7 @@ pydantic-settings>=2.1.0
+ pdfplumber>=0.11.0
+ # Unified PDF/DOCX → markdown for upload pipeline (Resume-Matcher style)
+ markitdown[docx]>=0.1.4
++python-docx>=1.1.0
+ pypdf>=4.2.0
+ unstructured>=0.15.0
+ python-multipart>=0.0.9
+diff --git a/resume_gui/app.py b/resume_gui/app.py
+index 906e98e..7a2a6f5 100644
+--- a/resume_gui/app.py
++++ b/resume_gui/app.py
+@@ -916,6 +916,27 @@ _EXTRACT_SCHEMA = """{
+   "education": [{"institution": "string", "degree": "string", "dates": "string", "details": ["string"]}]
+ }"""
+ 
++_EXTRACT_SCHEMA_FAITHFUL = """{
++  "full_name": "string",
++  "headline": "string — candidate's current title/role copied exactly",
++  "location": "string",
++  "email": "string",
++  "phone": "string",
++  "linkedin": "string — URL or handle",
++  "github": "string — URL or handle",
++  "summary": "string — professional summary copied exactly from the resume",
++  "skills": [{"category": "string", "items": ["string"]}],
++  "experience": [{
++    "company": "string",
++    "role": "string",
++    "dates": "string",
++    "location": "string",
++    "bullets": ["string — bullet copied EXACTLY as written, no rewriting"]
++  }],
++  "projects": [{"name": "string", "bullets": ["string — copied exactly"]}],
++  "education": [{"institution": "string", "degree": "string", "dates": "string", "details": ["string"]}]
++}"""
++
+ 
+ def _llm_extract_and_tailor(
+     candidate_profile: str,
+@@ -1035,6 +1056,135 @@ Instructions:
+         return None
+ 
+ 
++def _llm_extract(text: str) -> "Optional[ResumeDocModel]":
++    """Extract structured resume data faithfully — no tailoring or bullet rewriting.
++
++    Used by the Analyze path so the structured model mirrors what the user actually wrote.
++    Returns None on failure.
++    """
++    profile_snippet = (text or "")[:6000].strip()
++    if not profile_snippet:
++        return None
++
++    prompt = f"""You are a precise resume parser. Extract ALL content from this resume into structured JSON.
++IMPORTANT: Copy all bullets EXACTLY as written — do NOT rewrite, improve, or change any text.
++Copy the professional summary exactly as it appears. Preserve original phrasing throughout.
++
++RESUME TEXT:
++{profile_snippet}
++
++Output ONLY valid JSON matching this schema (no markdown, no explanation):
++
++{_EXTRACT_SCHEMA_FAITHFUL}"""
++
++    try:
++        raw = _llm_json_call(prompt)
++        if not raw or not isinstance(raw, dict):
++            return None
++
++        full_name = str(raw.get("full_name") or "Candidate").strip() or "Candidate"
++
++        skills: list[tuple[str, list[str]]] = []
++        for sk in (raw.get("skills") or []):
++            cat = _clean_model_text(str(sk.get("category") or "Skills"))
++            items = normalize_skill_items(str(i) for i in (sk.get("items") or []))
++            if items:
++                skills.append((cat or "Skills", items))
++
++        experience: list[ExperienceItem] = []
++        for exp in (raw.get("experience") or []):
++            bullets = [
++                _clean_model_text(str(b))
++                for b in (exp.get("bullets") or [])
++                if _clean_model_text(str(b))
++            ]
++            experience.append(ExperienceItem(
++                company=_clean_model_text(str(exp.get("company") or "")) or "Company",
++                role=_clean_model_text(str(exp.get("role") or "")),
++                dates=_clean_model_text(str(exp.get("dates") or "")),
++                location=_clean_model_text(str(exp.get("location") or "")),
++                bullets=bullets,
++            ))
++
++        extra_sections: list[tuple[str, list[str]]] = []
++        for proj in (raw.get("projects") or []):
++            name = _clean_model_text(str(proj.get("name") or "Project"))
++            pbullets = [_clean_model_text(str(b)) for b in (proj.get("bullets") or []) if _clean_model_text(str(b))]
++            if pbullets:
++                extra_sections.append((name, pbullets))
++        if extra_sections:
++            all_project_lines: list[str] = []
++            for pname, pbullets in extra_sections:
++                all_project_lines.append(pname)
++                all_project_lines.extend(pbullets)
++            extra_sections = [("Projects", all_project_lines)]
++
++        for edu in (raw.get("education") or []):
++            edu_lines: list[str] = []
++            degree = _clean_model_text(str(edu.get("degree") or ""))
++            institution = _clean_model_text(str(edu.get("institution") or ""))
++            dates = _clean_model_text(str(edu.get("dates") or ""))
++            if degree:
++                edu_lines.append(degree)
++            if institution:
++                line = institution
++                if dates:
++                    line += f" | {dates}"
++                edu_lines.append(line)
++            for detail in (edu.get("details") or []):
++                d = _clean_model_text(str(detail))
++                if d:
++                    edu_lines.append(d)
++            if edu_lines:
++                extra_sections.append(("Education", edu_lines))
++
++        return ResumeDocModel(
++            full_name=full_name,
++            headline=_clean_model_text(str(raw.get("headline") or "")),
++            location=_clean_model_text(str(raw.get("location") or "")),
++            email=_clean_model_text(str(raw.get("email") or "")),
++            phone=_clean_model_text(str(raw.get("phone") or "")),
++            linkedin=_clean_model_text(str(raw.get("linkedin") or "")),
++            github=_clean_model_text(str(raw.get("github") or "")),
++            summary=_clean_model_text(str(raw.get("summary") or "")),
++            skills=skills,
++            experience=experience,
++            extra_sections=extra_sections,
++        )
++    except Exception as exc:
++        logger.warning(f"LLM extract failed: {exc}")
++        return None
++
++
++def _resume_doc_to_dict(doc: "ResumeDocModel") -> dict:
++    """Serialize a ResumeDocModel to a plain dict for JSON transport."""
++    return {
++        "full_name": doc.full_name,
++        "headline": doc.headline,
++        "location": doc.location,
++        "email": doc.email,
++        "phone": doc.phone,
++        "linkedin": doc.linkedin,
++        "github": doc.github,
++        "summary": doc.summary,
++        "skills": [{"category": cat, "items": items} for cat, items in (doc.skills or [])],
++        "experience": [
++            {
++                "company": e.company,
++                "role": e.role,
++                "dates": e.dates,
++                "location": e.location,
++                "bullets": list(e.bullets),
++            }
++            for e in (doc.experience or [])
++        ],
++        "extra_sections": [
++            {"title": title, "lines": lines}
++            for title, lines in (doc.extra_sections or [])
++        ],
++    }
++
++
+ def _resume_doc_from_profile_text(candidate_profile: Optional[str], role: str, company: str) -> ResumeDocModel:
+     parsed = parse_profile_text(candidate_profile)
+     extra_sec = list(parsed.extra_sections or [])
+@@ -3520,10 +3670,10 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
+ 
+ 
+ async def api_analyze_upload(request: Request):
+-    """POST /api/analyze-upload — upload a PDF and run comprehensive AI analysis.
++    """POST /api/analyze-upload — upload a PDF or DOCX and run comprehensive AI analysis.
+ 
+     Form fields:
+-      file  — PDF binary
++      file  — PDF or DOCX binary
+       jd    — optional job description text
+     """
+     try:
+@@ -3532,16 +3682,53 @@ async def api_analyze_upload(request: Request):
+         jd     = (form.get("jd") or "").strip()
+         if not upload:
+             return JSONResponse({"error": "No file provided"}, status_code=400)
+-        data = await upload.read()
+-        with pdfplumber.open(io.BytesIO(data)) as pdf:
+-            text = _extract_pdf_text(pdf)
++        data     = await upload.read()
++        filename = getattr(upload, "filename", None) or "resume.pdf"
++
++        loop = asyncio.get_event_loop()
++
++        def _extract_text() -> str:
++            # Try MarkItDown (handles PDF + DOCX) first; fall back to pdfplumber for PDFs.
++            try:
++                from resume_upload_parse import extract_upload_markdown  # type: ignore
++                outcome = extract_upload_markdown(data, filename, pdf_plain_fallback=None)
++                text = (outcome.markdown or "").strip()
++                if text:
++                    return text
++            except Exception as exc:
++                logger.warning("MarkItDown extract failed for analyze_upload: %s", exc)
++            # pdfplumber fallback (PDF only)
++            if filename.lower().endswith(".pdf") or not filename.lower().endswith(".docx"):
++                try:
++                    with pdfplumber.open(io.BytesIO(data)) as pdf:
++                        return _extract_pdf_text(pdf)
++                except Exception as exc:
++                    logger.warning("pdfplumber fallback failed: %s", exc)
++            return ""
++
++        text = await loop.run_in_executor(None, _extract_text)
+         if not text.strip():
+-            return JSONResponse({"error": "Could not extract text from PDF"}, status_code=400)
+-        loop   = asyncio.get_event_loop()
+-        result = await loop.run_in_executor(None, _analyze_resume_comprehensive, text, jd)
++            return JSONResponse({"error": "Could not extract text from the uploaded file"}, status_code=400)
++
++        # Run comprehensive analysis and structured extraction concurrently
++        analysis_future = loop.run_in_executor(None, _analyze_resume_comprehensive, text, jd)
++        extract_future  = loop.run_in_executor(None, _llm_extract, text)
++
++        result, structured = await asyncio.gather(analysis_future, extract_future)
++
+         if isinstance(result, dict):
+             result["extractedText"] = text[:25000]
+-            result["resumeHeader"] = _extract_resume_header(text)
++            result["resumeHeader"]  = _extract_resume_header(text)
++
++        if structured is not None:
++            # Build flat bulletMap: index in bulletAnalysis → {experienceIdx, bulletIdx}
++            bullet_map: list[dict] = []
++            for ei, exp in enumerate(structured.experience):
++                for bi in range(len(exp.bullets)):
++                    bullet_map.append({"experienceIdx": ei, "bulletIdx": bi})
++            result["structuredResume"] = _resume_doc_to_dict(structured)
++            result["bulletMap"]        = bullet_map
++
+         return JSONResponse(result)
+     except Exception as exc:
+         logger.exception("analyze_upload failed")
+@@ -4003,6 +4190,141 @@ Return ONLY the JSON object."""
+     })
+ 
+ 
++async def api_export_docx(request: Request):
++    """POST /api/export-docx — generate a DOCX from a ResumeDocModel JSON payload.
++
++    Body (JSON):
++      structuredResume — dict matching _resume_doc_to_dict() output
++      acceptedEdits    — optional {experienceIdx: {bulletIdx: newText}} patch map
++    """
++    try:
++        body = await request.json()
++    except Exception:
++        return JSONResponse({"error": "invalid JSON"}, status_code=400)
++
++    structured = body.get("structuredResume")
++    if not structured or not isinstance(structured, dict):
++        return JSONResponse({"error": "structuredResume required"}, status_code=400)
++
++    accepted_edits: dict = body.get("acceptedEdits") or {}
++
++    def _build_docx() -> bytes:
++        try:
++            from docx import Document  # type: ignore
++            from docx.shared import Pt, RGBColor  # type: ignore
++            from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore
++        except ImportError:
++            raise RuntimeError("python-docx is not installed. Add 'python-docx' to requirements.txt.")
++
++        doc = Document()
++
++        # Narrow margins
++        for section in doc.sections:
++            section.top_margin    = Pt(36)
++            section.bottom_margin = Pt(36)
++            section.left_margin   = Pt(54)
++            section.right_margin  = Pt(54)
++
++        def _h(text: str, size: int = 11, bold: bool = False, color: tuple = (0, 0, 0), align=WD_ALIGN_PARAGRAPH.LEFT):
++            p = doc.add_paragraph()
++            p.alignment = align
++            run = p.add_run(text)
++            run.bold = bold
++            run.font.size = Pt(size)
++            run.font.color.rgb = RGBColor(*color)
++            return p
++
++        # Header — name
++        full_name = structured.get("full_name") or "Candidate"
++        _h(full_name, size=18, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
++
++        # Contact line
++        contact_parts = [v for k in ("email", "phone", "linkedin", "github", "location")
++                         if (v := structured.get(k))]
++        if contact_parts:
++            _h(" | ".join(contact_parts), size=9, align=WD_ALIGN_PARAGRAPH.CENTER, color=(80, 80, 80))
++
++        # Summary
++        if structured.get("summary"):
++            doc.add_paragraph()
++            _h("SUMMARY", size=9, bold=True, color=(70, 70, 70))
++            doc.add_paragraph().add_run(structured["summary"]).font.size = Pt(10)
++
++        # Skills
++        skills = structured.get("skills") or []
++        if skills:
++            doc.add_paragraph()
++            _h("SKILLS", size=9, bold=True, color=(70, 70, 70))
++            for sk in skills:
++                cat   = sk.get("category", "")
++                items = sk.get("items") or []
++                p = doc.add_paragraph(style="List Bullet")
++                run = p.add_run(f"{cat}: " if cat else "")
++                run.bold = True
++                run.font.size = Pt(10)
++                p.add_run(", ".join(items)).font.size = Pt(10)
++
++        # Experience
++        experience = structured.get("experience") or []
++        if experience:
++            doc.add_paragraph()
++            _h("EXPERIENCE", size=9, bold=True, color=(70, 70, 70))
++            for ei, exp in enumerate(experience):
++                # Role | Company · Dates
++                header_parts = []
++                if exp.get("role"):
++                    header_parts.append(exp["role"])
++                if exp.get("company"):
++                    header_parts.append(exp["company"])
++                role_line = " | ".join(header_parts)
++                p = doc.add_paragraph()
++                r = p.add_run(role_line)
++                r.bold = True
++                r.font.size = Pt(10.5)
++                if exp.get("dates"):
++                    p.add_run(f"  {exp['dates']}").font.size = Pt(9)
++
++                bullets = exp.get("bullets") or []
++                ei_str  = str(ei)
++                for bi, bullet in enumerate(bullets):
++                    # Apply accepted edit if present
++                    bi_str = str(bi)
++                    text = accepted_edits.get(ei_str, {}).get(bi_str) or bullet
++                    p2 = doc.add_paragraph(style="List Bullet")
++                    p2.add_run(text).font.size = Pt(10)
++
++        # Extra sections (Projects, Education, etc.)
++        for sec in (structured.get("extra_sections") or []):
++            title = sec.get("title", "")
++            lines = sec.get("lines") or []
++            if not lines:
++                continue
++            doc.add_paragraph()
++            _h(title.upper(), size=9, bold=True, color=(70, 70, 70))
++            for line in lines:
++                p = doc.add_paragraph(style="List Bullet")
++                p.add_run(line).font.size = Pt(10)
++
++        buf = io.BytesIO()
++        doc.save(buf)
++        return buf.getvalue()
++
++    try:
++        docx_bytes = await asyncio.get_event_loop().run_in_executor(None, _build_docx)
++    except RuntimeError as exc:
++        return JSONResponse({"error": str(exc)}, status_code=501)
++    except Exception as exc:
++        logger.exception("export_docx failed")
++        return JSONResponse({"error": str(exc)}, status_code=500)
++
++    filename = f"resume-{(structured.get('full_name') or 'export').replace(' ', '_')}.docx"
++    return Response(
++        content=docx_bytes,
++        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
++        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
++    )
++
++
+ routes = [
+     Route("/",                              homepage),
+     Route("/api/resumes",                   api_resumes),
+@@ -4025,6 +4347,7 @@ routes = [
+     Route("/api/storage-status",            api_storage_status,methods=["GET"]),
+     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
+     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
++    Route("/api/export-docx",             api_export_docx,     methods=["POST"]),
+     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
+     Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),
+     Route("/api/rewrite-bullet",          api_rewrite_bullet,  methods=["POST"]),
+diff --git a/web/components/AnalyzeResume.tsx b/web/components/AnalyzeResume.tsx
+index 243ed9d..6b11bd7 100644
+--- a/web/components/AnalyzeResume.tsx
++++ b/web/components/AnalyzeResume.tsx
+@@ -14,6 +14,7 @@ import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
+ import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
+ import { stripResumeBulletPrefix } from "@/lib/stripResumeBulletPrefix";
+ import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
++import type { StructuredResume, BulletMapEntry } from "@/store/resumeAnalyzeStore";
+ import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
+ import type { AnalyzeRecord } from "@/lib/supabase";
+ import { TAILOR_PREFILL_JD } from "@/lib/tailorPrefill";
+@@ -61,6 +62,10 @@ interface AnalysisResult {
+   extractedText?: string;
+   /** Name + contact lines extracted before the first section heading. */
+   resumeHeader?: string[];
++  /** Faithfully-extracted structured model (no JD tailoring). */
++  structuredResume?: StructuredResume | null;
++  /** Maps flat bulletAnalysis[i] → {experienceIdx, bulletIdx} in structuredResume. */
++  bulletMap?: BulletMapEntry[];
+   sectionFeedback: Array<{ section: string; score: number; feedback: string }>;
+   rewriteSuggestions: Array<{ before: string; after: string; reason: string }>;
+   finalRecommendations: string[];
+@@ -324,6 +329,8 @@ export default function AnalyzeResume() {
+       extractedText: result.extractedText,
+       bulletAnalysis: result.bulletAnalysis,
+       resumeHeader: result.resumeHeader,
++      structuredResume: result.structuredResume,
++      bulletMap: result.bulletMap,
+     });
+   }, [result]);
+ 
+@@ -393,7 +400,7 @@ export default function AnalyzeResume() {
+       setResult(resWithMeta);
+       setBuilderLinkReady(true);
+       bindSourcePdf(file);
+-      persistResult(file.name.replace(/\.pdf$/i, ""), resWithMeta, draftId);
++      persistResult(file.name.replace(/\.(pdf|docx)$/i, ""), resWithMeta, draftId);
+     } catch (e: unknown) {
+       setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Unknown error"));
+       lastPdfRef.current = null;
+@@ -701,7 +708,7 @@ export default function AnalyzeResume() {
+   }, [activeCategory]);
+ 
+   const onFile = (f: File | null | undefined) => {
+-    if (!f || !f.name.endsWith(".pdf")) { setError("Please upload a PDF file."); return; }
++    if (!f || !/\.(pdf|docx)$/i.test(f.name)) { setError("Please upload a PDF or DOCX file."); return; }
+     run(f);
+   };
+ 
+@@ -803,6 +810,8 @@ export default function AnalyzeResume() {
+       extractedText: result.extractedText,
+       bulletAnalysis: result.bulletAnalysis,
+       resumeHeader: result.resumeHeader,
++      structuredResume: result.structuredResume,
++      bulletMap: result.bulletMap,
+     });
+     
+     setEditDraftStatus("Cleared saved draft; preview reset to analysis text.");
+@@ -2769,7 +2778,7 @@ export default function AnalyzeResume() {
+       <input
+         ref={fileRef}
+         type="file"
+-        accept=".pdf"
++        accept=".pdf,.docx"
+         style={{ display: "none" }}
+         onChange={e => onFile(e.target.files?.[0])}
+       />
+diff --git a/web/store/resumeAnalyzeStore.ts b/web/store/resumeAnalyzeStore.ts
+index 60bfe30..11bdfe0 100644
+--- a/web/store/resumeAnalyzeStore.ts
++++ b/web/store/resumeAnalyzeStore.ts
+@@ -14,10 +14,51 @@ export interface AnalyzeBulletSnapshot {
+ 
+ export type AnnotationTone = "weak" | "fair" | "strong";
+ 
++/** Structured resume model returned by the backend's _llm_extract(). */
++export interface StructuredResumeExperience {
++  company: string;
++  role: string;
++  dates: string;
++  location: string;
++  bullets: string[];
++}
++
++export interface StructuredResumeSkill {
++  category: string;
++  items: string[];
++}
++
++export interface StructuredResumeExtraSection {
++  title: string;
++  lines: string[];
++}
++
++export interface StructuredResume {
++  full_name: string;
++  headline: string;
++  location: string;
++  email: string;
++  phone: string;
++  linkedin: string;
++  github: string;
++  summary: string;
++  skills: StructuredResumeSkill[];
++  experience: StructuredResumeExperience[];
++  extra_sections: StructuredResumeExtraSection[];
++}
++
++/** Maps flat bulletAnalysis[flatIdx] → position in structuredResume.experience. */
++export interface BulletMapEntry {
++  experienceIdx: number;
++  bulletIdx: number;
++}
++
+ export interface ResumeAnalyzeHydratePayload {
+   extractedText?: string | null;
+   bulletAnalysis: AnalyzeBulletSnapshot[];
+   resumeHeader?: string[];
++  structuredResume?: StructuredResume | null;
++  bulletMap?: BulletMapEntry[];
+ }
+ 
+ // ─── LocalStorage persistence ─────────────────────────────────────────────────
+@@ -90,6 +131,10 @@ export interface ResumeAnalyzeStore {
+   resumeHeader: string[];
+   analysisBullets: AnalyzeBulletSnapshot[];
+   annotationByIndex: Record<number, AnnotationTone>;
++  /** Faithfully-extracted structured model (no JD tailoring). Available after analyze-upload. */
++  structuredResume: StructuredResume | null;
++  /** Maps flat bulletAnalysis index → {experienceIdx, bulletIdx} in structuredResume. */
++  bulletMap: BulletMapEntry[];
+ 
+   // ── Edit state (single source of truth — replaces rewriteEdits useState + analyzeEditDraft.ts) ──
+   /** Preview line overrides applied to the resume document. */
+@@ -149,6 +194,8 @@ const initial = () => ({
+   resumeHeader: [] as string[],
+   analysisBullets: [] as AnalyzeBulletSnapshot[],
+   annotationByIndex: {} as Record<number, AnnotationTone>,
++  structuredResume: null as StructuredResume | null,
++  bulletMap: [] as BulletMapEntry[],
+   ...emptyEdits(),
+   pulseBulletIndex: null as number | null,
+   pulseToken: 0,
+@@ -168,6 +215,8 @@ export const useResumeAnalyzeStore = create<ResumeAnalyzeStore>((set, get) => ({
+       resumeHeader: payload.resumeHeader ?? [],
+       analysisBullets: bullets,
+       annotationByIndex,
++      structuredResume: payload.structuredResume ?? null,
++      bulletMap: payload.bulletMap ?? [],
+       ...emptyEdits(),
+       pulseBulletIndex: null,
+       pulseToken: 0,
+-- 
+2.43.0
+
+
+From f3a2fabb060f0295cdf8e2a53a29bbfa3ae7755d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 18 May 2026 04:28:20 +0000
+Subject: [PATCH 3/3] =?UTF-8?q?feat:=20Phase=202=20=E2=80=94=20export=20ac?=
+ =?UTF-8?q?cepted=20Analyze=20edits=20to=20PDF=20+=20DOCX?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Backend:
+- _llm_tailor_to_jd(doc, jd, role, company): re-tailor an extracted model to a specific JD without re-extracting; patches summary + bullets, falls back to original on LLM error
+- _doc_from_structured_dict(structured, accepted_edits): rebuild ResumeDocModel from structuredResume JSON with bullet-level patches applied
+- POST /api/analyze-export-pdf: dict → patch → optional JD tailor → Jinja2/LaTeX → pdflatex → PDF download; same template pipeline as Tailor
+- Route registered alongside /api/export-docx
+
+Frontend:
+- useAnalyzeExport hook: reads structuredResume + bulletMap + acceptedBullets from store, builds acceptedEdits map, calls /api/analyze-export-pdf or /api/export-docx, triggers browser download
+- AnalyzePreviewPane: wires useAnalyzeExport with jd prop, passes onExportPdf/onExportDocx/exportingResume to AnnotatedResumePanel
+- AnnotatedResumePanel: accepts export callbacks, renders "Export PDF" + "Export DOCX" buttons in presentation-only toolbar (right of existing template picker); buttons disabled while exporting
+- AnalyzeResume: passes jd to AnalyzePreviewPane
+
+https://claude.ai/code/session_015ED4ARZAgLY1ww81cRfeDs
+---
+ resume_gui/app.py                       | 206 ++++++++++++++++++++++++
+ web/components/AnalyzePreviewPane.tsx   |   8 +
+ web/components/AnalyzeResume.tsx        |   1 +
+ web/components/AnnotatedResumePanel.tsx |  59 +++++++
+ web/hooks/useAnalyzeExport.ts           | 117 ++++++++++++++
+ 5 files changed, 391 insertions(+)
+ create mode 100644 web/hooks/useAnalyzeExport.ts
+
+diff --git a/resume_gui/app.py b/resume_gui/app.py
+index 7a2a6f5..b80d8a4 100644
+--- a/resume_gui/app.py
++++ b/resume_gui/app.py
+@@ -4325,6 +4325,211 @@ async def api_export_docx(request: Request):
+     )
+ 
+ 
++def _llm_tailor_to_jd(doc: "ResumeDocModel", jd: str, role: str, company: str) -> "ResumeDocModel":
++    """Re-tailor an already-extracted ResumeDocModel to a specific JD.
++
++    Returns the tailored doc, or the original doc unchanged if LLM fails.
++    """
++    jd_snippet     = (jd or "")[:3000].strip()
++    profile_snippet = (jd or "")[:100]  # just for context; real content is from doc
++
++    # Serialize the existing model's content into a compact profile block
++    lines: list[str] = []
++    if doc.summary:
++        lines.append(f"SUMMARY: {doc.summary}")
++    for exp in (doc.experience or []):
++        lines.append(f"\nROLE: {exp.role} at {exp.company} ({exp.dates})")
++        for b in exp.bullets:
++            lines.append(f"  - {b}")
++    serialized = "\n".join(lines)[:5000]
++
++    prompt = f"""You are an expert resume writer. Rewrite the professional summary and experience bullets
++to target this specific role and JD. Keep all dates, company names, and core facts exactly as given.
++Strengthen verbs, quantify where data is present, and naturally weave in 1-2 JD keywords per bullet.
++Do NOT fabricate metrics.
++
++TARGET ROLE: {role} at {company}
++
++JOB DESCRIPTION:
++{jd_snippet}
++
++CURRENT RESUME CONTENT:
++{serialized}
++
++Output ONLY valid JSON (no markdown) with this schema:
++{{
++  "summary": "string — new 2-3 sentence summary tailored to JD",
++  "experience": [
++    {{
++      "company": "string — exact original value",
++      "role": "string — exact original value",
++      "bullets": ["string — rewritten bullet"]
++    }}
++  ]
++}}"""
++
++    try:
++        raw = _llm_json_call(prompt)
++        if not raw or not isinstance(raw, dict):
++            return doc
++
++        new_summary = _clean_model_text(str(raw.get("summary") or ""))
++        if new_summary:
++            doc = doc._replace(summary=new_summary) if hasattr(doc, "_replace") else ResumeDocModel(
++                full_name=doc.full_name, headline=doc.headline, location=doc.location,
++                email=doc.email, phone=doc.phone, linkedin=doc.linkedin, github=doc.github,
++                summary=new_summary, skills=doc.skills, experience=doc.experience,
++                extra_sections=doc.extra_sections,
++            )
++
++        exp_list = raw.get("experience") or []
++        new_experience = list(doc.experience or [])
++        for ei, raw_exp in enumerate(exp_list):
++            if ei >= len(new_experience):
++                break
++            raw_bullets = [_clean_model_text(str(b)) for b in (raw_exp.get("bullets") or []) if _clean_model_text(str(b))]
++            if raw_bullets:
++                old = new_experience[ei]
++                new_experience[ei] = ExperienceItem(
++                    company=old.company, role=old.role, dates=old.dates,
++                    location=old.location, bullets=raw_bullets,
++                )
++
++        doc = ResumeDocModel(
++            full_name=doc.full_name, headline=doc.headline, location=doc.location,
++            email=doc.email, phone=doc.phone, linkedin=doc.linkedin, github=doc.github,
++            summary=doc.summary, skills=doc.skills, experience=new_experience,
++            extra_sections=doc.extra_sections,
++        )
++        return doc
++    except Exception as exc:
++        logger.warning(f"_llm_tailor_to_jd failed: {exc}")
++        return doc
++
++
++def _doc_from_structured_dict(
++    structured: dict,
++    accepted_edits: "dict[str, dict[str, str]]",
++) -> "ResumeDocModel":
++    """Rebuild a ResumeDocModel from a structuredResume dict (Phase 1 format),
++    patching in any accepted bullet edits from the Analyze UI.
++
++    accepted_edits format: { "<experienceIdx>": { "<bulletIdx>": "new text" } }
++    """
++    experience: list[ExperienceItem] = []
++    for ei, exp in enumerate(structured.get("experience") or []):
++        raw_bullets = list(exp.get("bullets") or [])
++        ei_key = str(ei)
++        patched = []
++        for bi, bullet in enumerate(raw_bullets):
++            override = (accepted_edits.get(ei_key) or {}).get(str(bi))
++            patched.append(_clean_model_text(override) if override else _clean_model_text(bullet))
++        experience.append(ExperienceItem(
++            company=_clean_model_text(str(exp.get("company") or "")) or "Company",
++            role=_clean_model_text(str(exp.get("role") or "")),
++            dates=_clean_model_text(str(exp.get("dates") or "")),
++            location=_clean_model_text(str(exp.get("location") or "")),
++            bullets=[b for b in patched if b],
++        ))
++
++    skills: list[tuple[str, list[str]]] = []
++    for sk in (structured.get("skills") or []):
++        cat   = _clean_model_text(str(sk.get("category") or "Skills"))
++        items = normalize_skill_items(str(i) for i in (sk.get("items") or []))
++        if items:
++            skills.append((cat or "Skills", items))
++
++    extra_sections: list[tuple[str, list[str]]] = []
++    for sec in (structured.get("extra_sections") or []):
++        title = str(sec.get("title") or "")
++        lines = [_clean_model_text(str(l)) for l in (sec.get("lines") or []) if _clean_model_text(str(l))]
++        if title and lines:
++            extra_sections.append((title, lines))
++
++    return ResumeDocModel(
++        full_name=_clean_model_text(str(structured.get("full_name") or "Candidate")) or "Candidate",
++        headline=_clean_model_text(str(structured.get("headline") or "")),
++        location=_clean_model_text(str(structured.get("location") or "")),
++        email=_clean_model_text(str(structured.get("email") or "")),
++        phone=_clean_model_text(str(structured.get("phone") or "")),
++        linkedin=_clean_model_text(str(structured.get("linkedin") or "")),
++        github=_clean_model_text(str(structured.get("github") or "")),
++        summary=_clean_model_text(str(structured.get("summary") or "")),
++        skills=skills,
++        experience=experience,
++        extra_sections=extra_sections,
++    )
++
++
++async def api_analyze_export_pdf(request: Request):
++    """POST /api/analyze-export-pdf — render accepted Analyze edits to a PDF.
++
++    Body (JSON):
++      structuredResume  — dict from /api/analyze-upload (required)
++      acceptedEdits     — { "<ei>": { "<bi>": "new text" } } (optional)
++      referenceFolder   — LaTeX template key, e.g. "Adobe_FullStack" (optional)
++      jd                — job description text; if present, runs _llm_tailor_to_jd first (optional)
++      role              — job title (optional, used for tailoring + folder naming)
++      company           — company name (optional, used for tailoring + folder naming)
++    """
++    try:
++        body = await request.json()
++    except Exception:
++        return JSONResponse({"error": "invalid JSON"}, status_code=400)
++
++    structured = body.get("structuredResume")
++    if not structured or not isinstance(structured, dict):
++        return JSONResponse({"error": "structuredResume required"}, status_code=400)
++
++    accepted_edits: dict  = body.get("acceptedEdits") or {}
++    reference_folder: str = (body.get("referenceFolder") or "Adobe_FullStack").strip()
++    jd: str               = (body.get("jd") or "").strip()
++    role: str             = (body.get("role") or structured.get("headline") or "Candidate").strip()
++    company: str          = (body.get("company") or "").strip()
++
++    loop = asyncio.get_event_loop()
++
++    def _build_pdf() -> tuple[bytes, str]:
++        # 1. Rebuild ResumeDocModel from structured dict + accepted edits
++        doc = _doc_from_structured_dict(structured, accepted_edits)
++
++        # 2. Optionally tailor to JD
++        if jd:
++            doc = _llm_tailor_to_jd(doc, jd, role, company)
++
++        # 3. Render LaTeX
++        renderer = JinjaLatexRenderer()
++        template_name = _template_name_for_reference(reference_folder)
++        new_tex = renderer.render(doc, template_name=template_name)
++
++        # 4. Compile to PDF
++        out_folder, _ = _create_structured_output_folder(None, reference_folder, role, company or "export")
++        compiled = recompile_resume_from_tex(out_folder, new_tex)
++
++        pdf_path = compiled.get("pdf_path")
++        if not pdf_path or not os.path.isfile(pdf_path):
++            raise RuntimeError("PDF compilation failed — check pdflatex is installed.")
++
++        with open(pdf_path, "rb") as f:
++            pdf_bytes = f.read()
++
++        safe_name = (doc.full_name or "resume").replace(" ", "_")
++        filename  = f"{safe_name}_tailored.pdf"
++        return pdf_bytes, filename
++
++    try:
++        pdf_bytes, filename = await loop.run_in_executor(None, _build_pdf)
++    except Exception as exc:
++        logger.exception("analyze_export_pdf failed")
++        return JSONResponse({"error": str(exc)}, status_code=500)
++
++    return Response(
++        content=pdf_bytes,
++        media_type="application/pdf",
++        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
++    )
++
++
+ routes = [
+     Route("/",                              homepage),
+     Route("/api/resumes",                   api_resumes),
+@@ -4348,6 +4553,7 @@ routes = [
+     Route("/api/backfill-tex",              api_backfill_tex,  methods=["POST"]),
+     Route("/api/analyze-upload",           api_analyze_upload,  methods=["POST"]),
+     Route("/api/export-docx",             api_export_docx,     methods=["POST"]),
++    Route("/api/analyze-export-pdf",      api_analyze_export_pdf, methods=["POST"]),
+     Route("/api/analyze-folder/{folder}", api_analyze_folder,  methods=["POST"]),
+     Route("/api/rewrite-role",            api_rewrite_role,    methods=["POST"]),
+     Route("/api/rewrite-bullet",          api_rewrite_bullet,  methods=["POST"]),
+diff --git a/web/components/AnalyzePreviewPane.tsx b/web/components/AnalyzePreviewPane.tsx
+index bd15e07..38f7ae3 100644
+--- a/web/components/AnalyzePreviewPane.tsx
++++ b/web/components/AnalyzePreviewPane.tsx
+@@ -3,6 +3,7 @@
+ import { useEffect } from "react";
+ import AnnotatedResumePanel from "@/components/AnnotatedResumePanel";
+ import { useResumeAnalyzeStore, type AnalyzeBulletSnapshot } from "@/store/resumeAnalyzeStore";
++import { useAnalyzeExport } from "@/hooks/useAnalyzeExport";
+ 
+ const PULSE_MS = 850;
+ 
+@@ -38,6 +39,8 @@ interface Props {
+   sourcePdfFileName?: string | null;
+   /** Shown when a saved analysis was restored — PDF bytes are not in storage. */
+   restoredResumeNoPdfHint?: boolean;
++  /** Optional JD text — enables JD-tailored PDF export. */
++  jd?: string;
+ }
+ 
+ /**
+@@ -60,7 +63,9 @@ export default function AnalyzePreviewPane({
+   sourcePdfUrl = null,
+   sourcePdfFileName = null,
+   restoredResumeNoPdfHint = false,
++  jd = "",
+ }: Props) {
++  const { exportPdf, exportDocx, exporting, canExport } = useAnalyzeExport({ jd });
+   const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
+   const resumeHeaderStore = useResumeAnalyzeStore((s) => s.resumeHeader);
+   const bulletsStore = useResumeAnalyzeStore((s) => s.analysisBullets);
+@@ -107,6 +112,9 @@ export default function AnalyzePreviewPane({
+       sourcePdfUrl={sourcePdfUrl}
+       sourcePdfFileName={sourcePdfFileName}
+       restoredResumeNoPdfHint={restoredResumeNoPdfHint}
++      onExportPdf={canExport ? exportPdf : undefined}
++      onExportDocx={canExport ? exportDocx : undefined}
++      exportingResume={exporting}
+     />
+   );
+ }
+diff --git a/web/components/AnalyzeResume.tsx b/web/components/AnalyzeResume.tsx
+index 6b11bd7..d356827 100644
+--- a/web/components/AnalyzeResume.tsx
++++ b/web/components/AnalyzeResume.tsx
+@@ -1772,6 +1772,7 @@ export default function AnalyzeResume() {
+               sourcePdfUrl={sourcePdfUrl}
+               sourcePdfFileName={sourcePdfFileName}
+               restoredResumeNoPdfHint={historyRestoreActive && !sourcePdfUrl}
++              jd={jd}
+             />
+             </div>
+           </div>
+diff --git a/web/components/AnnotatedResumePanel.tsx b/web/components/AnnotatedResumePanel.tsx
+index 0fce83a..25cad4a 100644
+--- a/web/components/AnnotatedResumePanel.tsx
++++ b/web/components/AnnotatedResumePanel.tsx
+@@ -74,6 +74,12 @@ interface Props {
+   sourcePdfFileName?: string | null;
+   /** Explain why PDF / Original download toggles are missing after opening a saved analysis. */
+   restoredResumeNoPdfHint?: boolean;
++  /** Export accepted edits to PDF via unified pipeline. Receives selected template folder. */
++  onExportPdf?: (opts: { referenceFolder: string }) => void;
++  /** Export accepted edits to DOCX. */
++  onExportDocx?: () => void;
++  /** True while an export is in progress. */
++  exportingResume?: boolean;
+ }
+ 
+ function scoreColor(score: number): string {
+@@ -213,6 +219,9 @@ export default function AnnotatedResumePanel({
+   sourcePdfUrl = null,
+   sourcePdfFileName = null,
+   restoredResumeNoPdfHint = false,
++  onExportPdf,
++  onExportDocx,
++  exportingResume = false,
+ }: Props) {
+   const styleTemplates = useMemo(() => distinctStyleTemplates(), []);
+   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+@@ -905,6 +914,56 @@ export default function AnnotatedResumePanel({
+             >
+               {pdfExporting ? "Exporting…" : "Download preview PDF"}
+             </button>
++            {(onExportPdf || onExportDocx) && (
++              <>
++                <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "2px 0" }} />
++                {onExportPdf && (
++                  <button
++                    type="button"
++                    disabled={exportingResume}
++                    onClick={() => onExportPdf({ referenceFolder: selectedReferenceFolder })}
++                    title="Export your resume with accepted edits applied, rendered via the full LaTeX pipeline."
++                    style={{
++                      fontSize: 10.5,
++                      fontWeight: 700,
++                      padding: "5px 12px",
++                      borderRadius: 8,
++                      border: "none",
++                      background: exportingResume ? "var(--surface3)" : "var(--accent)",
++                      color: "#fff",
++                      cursor: exportingResume ? "wait" : "pointer",
++                      fontFamily: "inherit",
++                      whiteSpace: "nowrap",
++                      boxShadow: exportingResume ? "none" : "var(--shadow-sm)",
++                    }}
++                  >
++                    {exportingResume ? "Exporting…" : "Export PDF"}
++                  </button>
++                )}
++                {onExportDocx && (
++                  <button
++                    type="button"
++                    disabled={exportingResume}
++                    onClick={onExportDocx}
++                    title="Download your resume with accepted edits as a Word .docx file."
++                    style={{
++                      fontSize: 10.5,
++                      fontWeight: 700,
++                      padding: "5px 12px",
++                      borderRadius: 8,
++                      border: "1px solid var(--border-h)",
++                      background: "var(--surface)",
++                      color: "var(--text)",
++                      cursor: exportingResume ? "wait" : "pointer",
++                      fontFamily: "inherit",
++                      whiteSpace: "nowrap",
++                    }}
++                  >
++                    {exportingResume ? "Exporting…" : "Export DOCX"}
++                  </button>
++                )}
++              </>
++            )}
+           </div>
+         ) : null}
+         {extractKind === "synthetic" && !presentationOnly ? (
+diff --git a/web/hooks/useAnalyzeExport.ts b/web/hooks/useAnalyzeExport.ts
+new file mode 100644
+index 0000000..8bfdba3
+--- /dev/null
++++ b/web/hooks/useAnalyzeExport.ts
+@@ -0,0 +1,117 @@
++"use client";
++
++import { useState, useCallback } from "react";
++import { apiUrl } from "@/lib/utils";
++import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
++
++export interface UseAnalyzeExportOptions {
++  /** Optional JD text — if provided, the PDF export tailors bullets to the JD. */
++  jd?: string;
++}
++
++export interface UseAnalyzeExportReturn {
++  exportPdf: (opts: { referenceFolder: string }) => Promise<void>;
++  exportDocx: () => Promise<void>;
++  exporting: boolean;
++  error: string | null;
++  clearError: () => void;
++  /** True when structuredResume is available (export is possible). */
++  canExport: boolean;
++}
++
++/** Builds the acceptedEdits map from Analyze store state for API transport. */
++function buildAcceptedEdits(): Record<string, Record<string, string>> {
++  const { bulletMap, acceptedBullets, rewriteEdits, analysisBullets } =
++    useResumeAnalyzeStore.getState();
++  const out: Record<string, Record<string, string>> = {};
++  for (const flatIdxStr of Object.keys(acceptedBullets)) {
++    const flatIdx = Number(flatIdxStr);
++    const entry = bulletMap[flatIdx];
++    if (!entry) continue;
++    const text = (rewriteEdits[flatIdx] ?? analysisBullets[flatIdx]?.improvedBullet ?? "").trim();
++    if (!text) continue;
++    const ei = String(entry.experienceIdx);
++    const bi = String(entry.bulletIdx);
++    if (!out[ei]) out[ei] = {};
++    out[ei][bi] = text;
++  }
++  return out;
++}
++
++async function downloadBlob(resp: Response, fallbackFilename: string) {
++  const disposition = resp.headers.get("Content-Disposition") ?? "";
++  const match = disposition.match(/filename="([^"]+)"/);
++  const filename = match?.[1] ?? fallbackFilename;
++  const blob = await resp.blob();
++  const url = URL.createObjectURL(blob);
++  const a = document.createElement("a");
++  a.href = url;
++  a.download = filename;
++  document.body.appendChild(a);
++  a.click();
++  document.body.removeChild(a);
++  URL.revokeObjectURL(url);
++}
++
++export function useAnalyzeExport({ jd = "" }: UseAnalyzeExportOptions = {}): UseAnalyzeExportReturn {
++  const [exporting, setExporting] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const structuredResume = useResumeAnalyzeStore((s) => s.structuredResume);
++  const canExport = structuredResume !== null;
++
++  const exportPdf = useCallback(async ({ referenceFolder }: { referenceFolder: string }) => {
++    const sr = useResumeAnalyzeStore.getState().structuredResume;
++    if (!sr) { setError("No structured resume available — re-upload your file to enable PDF export."); return; }
++    setExporting(true);
++    setError(null);
++    try {
++      const resp = await fetch(apiUrl("/api/analyze-export-pdf"), {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({
++          structuredResume: sr,
++          acceptedEdits: buildAcceptedEdits(),
++          referenceFolder,
++          jd: jd.trim() || undefined,
++        }),
++      });
++      if (!resp.ok) {
++        const json = await resp.json().catch(() => ({})) as { error?: string };
++        throw new Error(json.error ?? "PDF export failed");
++      }
++      await downloadBlob(resp, "resume_export.pdf");
++    } catch (e) {
++      setError(e instanceof Error ? e.message : "PDF export failed");
++    } finally {
++      setExporting(false);
++    }
++  }, [jd]);
++
++  const exportDocx = useCallback(async () => {
++    const sr = useResumeAnalyzeStore.getState().structuredResume;
++    if (!sr) { setError("No structured resume available — re-upload your file to enable DOCX export."); return; }
++    setExporting(true);
++    setError(null);
++    try {
++      const resp = await fetch(apiUrl("/api/export-docx"), {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({
++          structuredResume: sr,
++          acceptedEdits: buildAcceptedEdits(),
++        }),
++      });
++      if (!resp.ok) {
++        const json = await resp.json().catch(() => ({})) as { error?: string };
++        throw new Error(json.error ?? "DOCX export failed");
++      }
++      await downloadBlob(resp, "resume_export.docx");
++    } catch (e) {
++      setError(e instanceof Error ? e.message : "DOCX export failed");
++    } finally {
++      setExporting(false);
++    }
++  }, []);
++
++  return { exportPdf, exportDocx, exporting, error, clearError: () => setError(null), canExport };
++}
+-- 
+2.43.0
+

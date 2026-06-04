@@ -16,15 +16,20 @@ SUGGEST_GAP_FIX_SCHEMA = {
                 "required": [
                     "id",
                     "section",
+                    "employer",
                     "original",
                     "suggested",
                     "reason",
                     "category",
                     "priority",
+                    "action_type",
+                    "risk_level",
                 ],
                 "properties": {
                     "id": {"type": "string"},
                     "section": {"type": "string"},
+                    # Company / project / institution name from the eligible bullet's context field.
+                    "employer": {"type": "string"},
                     "original": {"type": "string"},
                     "suggested": {"type": "string"},
                     "reason": {"type": "string"},
@@ -43,6 +48,16 @@ SUGGEST_GAP_FIX_SCHEMA = {
                     "priority": {
                         "type": "string",
                         "enum": ["high", "medium", "low"],
+                    },
+                    # "rewrite" = modifies an existing bullet; "append" = adds a new bullet
+                    "action_type": {
+                        "type": "string",
+                        "enum": ["rewrite", "append"],
+                    },
+                    # low = rephrasing / keyword addition; medium = adds a claim; high = new factual assertion
+                    "risk_level": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
                     },
                 },
             },

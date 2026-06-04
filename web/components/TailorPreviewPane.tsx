@@ -62,7 +62,6 @@ export default function TailorPreviewPane({
       structuredResumeAuthoritative
       resumeHeader={resumeHeader}
       presentationOnly
-      exportPdfEnabled
       gapFixTargetBulletIndices={gapFixTargetBulletIndices}
       tailorGapFixHighlights={tailorGapFixHighlights}
       tailorAppliedBulletIndices={tailorAppliedBulletIndices}

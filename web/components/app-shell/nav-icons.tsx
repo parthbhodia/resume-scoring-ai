@@ -113,6 +113,19 @@ export const NAV_ICONS = {
       />
     </svg>
   ),
+  bug: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M6 2.5a2 2 0 014 0" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path
+        d="M5.5 4.5h5a3 3 0 013 3v2a3 3 0 01-3 3h-5a3 3 0 01-3-3v-2a3 3 0 013-3z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <path d="M8 7.5v3M6.5 9h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M2.5 6.5L4.5 8M13.5 6.5L11.5 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M2.5 10.5L4.5 9.5M13.5 10.5L11.5 9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
 } satisfies Record<string, ReactNode>;
 
 export const BUILDER_SUBFLOW_ICONS = {

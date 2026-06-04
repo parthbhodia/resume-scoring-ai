@@ -1,7 +1,12 @@
 """Collect all HTTP routes for the Starlette app."""
 from starlette.routing import Route
 
-from resume_gui.routes.advisor import api_advisor_access, api_cohort_stats, api_student_detail
+from resume_gui.routes.advisor import (
+    api_advisor_access,
+    api_cohort_stats,
+    api_student_detail,
+    api_sync_institution_student,
+)
 from resume_gui.routes.analyze import (
     api_analyze,
     api_analyze_folder,
@@ -10,7 +15,6 @@ from resume_gui.routes.analyze import (
     api_my_analyses,
 )
 from resume_gui.routes.export import (
-    api_analyze_export_pdf,
     api_builder_export_docx,
     api_export_docx,
     api_export_pdf_html,
@@ -36,10 +40,11 @@ from resume_gui.routes.misc import (
     api_generate_skills,
     api_resume_analysis,
 )
+from resume_gui.routes.feedback import api_bug_report
 from resume_gui.routes.rewrite import api_rewrite_bullet, api_rewrite_role
 from resume_gui.routes.share import api_share_create, api_share_resolve, api_share_revoke
 from resume_gui.routes.static import api_health, homepage, serve_pdf
-from resume_gui.routes.suggest import api_apply_suggestions, api_suggest_changes, api_suggest_changes_stream, api_suggest_gap_fix
+from resume_gui.routes.suggest import api_suggest_changes_stream, api_suggest_gap_fix
 
 
 def all_routes():
@@ -69,20 +74,19 @@ def all_routes():
         Route("/api/analyze-upload", api_analyze_upload, methods=["POST"]),
         Route("/api/my-analyses", api_my_analyses, methods=["GET"]),
         Route("/api/advisor-access", api_advisor_access, methods=["GET"]),
+        Route("/api/sync-institution-student", api_sync_institution_student, methods=["POST"]),
         Route("/api/cohort-stats", api_cohort_stats, methods=["GET"]),
         Route("/api/student-detail", api_student_detail, methods=["GET"]),
         Route("/api/export-docx", api_export_docx, methods=["POST"]),
-        Route("/api/apply-suggestions", api_apply_suggestions, methods=["POST"]),
         Route("/api/builder-export-docx", api_builder_export_docx, methods=["POST"]),
-        Route("/api/analyze-export-pdf", api_analyze_export_pdf, methods=["POST"]),
         Route("/api/analyze-folder/{folder}", api_analyze_folder, methods=["POST"]),
         Route("/api/rewrite-role", api_rewrite_role, methods=["POST"]),
         Route("/api/rewrite-bullet", api_rewrite_bullet, methods=["POST"]),
         Route("/api/tb-enhance", api_tb_enhance, methods=["POST"]),
-        Route("/api/suggest-changes", api_suggest_changes, methods=["POST"]),
         Route("/api/suggest-changes-stream", api_suggest_changes_stream, methods=["POST"]),
         Route("/api/suggest-gap-fix", api_suggest_gap_fix, methods=["POST"]),
         Route("/api/explain-category-score", api_explain_category_score, methods=["POST"]),
         Route("/api/export-pdf-html", api_export_pdf_html, methods=["POST"]),
+        Route("/api/bug-report", api_bug_report, methods=["POST"]),
         Route("/pdf/{folder}/{filename}", serve_pdf),
     ]
