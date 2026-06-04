@@ -70,6 +70,10 @@ interface Props {
   pulseBulletIndex?: number | null;
   /** Shown when a saved analysis was restored (no upload on this session). */
   restoredResumeNoPdfHint?: boolean;
+  /** Open Template Builder with structured prefill from this analysis. */
+  onEditInTemplateBuilder?: () => void;
+  /** When false, edit-in-builder stays visible but disabled (no structured resume). */
+  editInBuilderEnabled?: boolean;
   /** Export accepted edits to DOCX. */
   onExportDocx?: () => void;
   /** When false, DOCX control stays visible but disabled (no structured resume yet). */
@@ -269,6 +273,8 @@ export default function AnnotatedResumePanel({
   presentationOnly = false,
   pulseBulletIndex = null,
   restoredResumeNoPdfHint = false,
+  onEditInTemplateBuilder,
+  editInBuilderEnabled = true,
   onExportDocx,
   exportDocxEnabled = true,
   exportingResume = false,
@@ -777,6 +783,34 @@ export default function AnnotatedResumePanel({
                 justifyContent: "flex-end",
               }}
             >
+              {onEditInTemplateBuilder ? (
+                <button
+                  type="button"
+                  disabled={!editInBuilderEnabled}
+                  onClick={onEditInTemplateBuilder}
+                  title={
+                    editInBuilderEnabled
+                      ? "Edit full résumé in Template Builder — reorder sections, fix bullets, download PDF"
+                      : "Structured résumé data is missing — re-upload and analyze to enable editing"
+                  }
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-h)",
+                    background: editInBuilderEnabled ? "var(--surface3)" : "var(--surface2)",
+                    color: editInBuilderEnabled ? "var(--text)" : "var(--dim)",
+                    cursor: editInBuilderEnabled ? "pointer" : "not-allowed",
+                    fontFamily: "inherit",
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                    opacity: editInBuilderEnabled ? 1 : 0.72,
+                  }}
+                >
+                  Edit in Builder
+                </button>
+              ) : null}
               {(() => {
                 // Use the WYSIWYG HTML→Chromium pipeline. The button stays
                 const busy = htmlPdfExporting;

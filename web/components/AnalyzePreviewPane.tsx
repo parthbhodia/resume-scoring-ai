@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import AnnotatedResumePanel from "@/components/AnnotatedResumePanel";
+import { isStructuredUsable } from "@/components/AnalyzeLiveResumeBody";
 import type { CategoryAssignmentOptions } from "@/lib/analysisCategoryMatch";
+import { stashTemplateBuilderStructuredPrefillFromStructuredResume } from "@/lib/templateBuilderPrefill";
 import { useResumeAnalyzeStore, type AnalyzeBulletSnapshot } from "@/store/resumeAnalyzeStore";
 import { useAnalyzeExport } from "@/hooks/useAnalyzeExport";
 
@@ -64,8 +67,10 @@ export default function AnalyzePreviewPane({
   exportDocxEnabled,
   categoryAssignmentOpts,
 }: Props) {
+  const router = useRouter();
   const { exportDocx, exporting, canExport, error: exportError } = useAnalyzeExport();
   const extractedTextStore = useResumeAnalyzeStore((s) => s.extractedText);
+  const structuredResume = useResumeAnalyzeStore((s) => s.structuredResume);
   const resumeHeaderStore = useResumeAnalyzeStore((s) => s.resumeHeader);
   const bulletsStore = useResumeAnalyzeStore((s) => s.analysisBullets);
   const snapExtract = analyzeSnapshot?.extractedText ?? "";
@@ -89,6 +94,13 @@ export default function AnalyzePreviewPane({
     const id = window.setTimeout(() => clearPulse(), PULSE_MS);
     return () => window.clearTimeout(id);
   }, [pulseToken, pulseBulletIndex, clearPulse]);
+
+  const editInBuilderEnabled = isStructuredUsable(structuredResume);
+  const handleEditInTemplateBuilder = useCallback(() => {
+    if (!editInBuilderEnabled || !structuredResume) return;
+    stashTemplateBuilderStructuredPrefillFromStructuredResume(structuredResume);
+    router.push("/template-builder/");
+  }, [editInBuilderEnabled, structuredResume, router]);
 
   return (
     <AnnotatedResumePanel
@@ -115,6 +127,8 @@ export default function AnalyzePreviewPane({
       exportingResume={exporting}
       exportError={exportError}
       categoryAssignmentOpts={categoryAssignmentOpts}
+      onEditInTemplateBuilder={handleEditInTemplateBuilder}
+      editInBuilderEnabled={editInBuilderEnabled}
     />
   );
 }

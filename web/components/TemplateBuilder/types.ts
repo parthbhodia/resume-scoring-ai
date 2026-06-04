@@ -61,6 +61,56 @@ export interface TBSkills {
   descriptions: string; // newline-separated category lines, e.g. "Languages: Python, Go"
 }
 
+/** Résumé body sections (header/contact always renders first). */
+export type TBContentSection = "summary" | "experience" | "education" | "projects" | "skills";
+
+export const DEFAULT_SECTION_ORDER: TBContentSection[] = [
+  "summary",
+  "experience",
+  "education",
+  "projects",
+  "skills",
+];
+
+export const TB_SECTION_LABELS: Record<TBContentSection, string> = {
+  summary: "Professional Summary",
+  experience: "Work Experience",
+  education: "Education",
+  projects: "Projects",
+  skills: "Skills & Interests",
+};
+
+const SECTION_ALIASES: Record<string, TBContentSection> = {
+  summary: "summary",
+  experience: "experience",
+  work: "experience",
+  employment: "experience",
+  education: "education",
+  projects: "projects",
+  skills: "skills",
+  skill: "skills",
+};
+
+/** Coerce persisted/prefill section order; append any missing keys. */
+export function normalizeTbSectionOrder(raw?: TBContentSection[] | null): TBContentSection[] {
+  const out: TBContentSection[] = [];
+  for (const key of raw ?? []) {
+    const mapped = SECTION_ALIASES[String(key).toLowerCase()];
+    if (mapped && !out.includes(mapped)) out.push(mapped);
+  }
+  for (const key of DEFAULT_SECTION_ORDER) {
+    if (!out.includes(key)) out.push(key);
+  }
+  return out;
+}
+
+export function mapStructuredSectionOrder(order?: string[]): TBContentSection[] {
+  const mapped = (order ?? [])
+    .map((s) => SECTION_ALIASES[String(s).toLowerCase()])
+    .filter((s): s is TBContentSection => !!s);
+  return normalizeTbSectionOrder(mapped.length ? mapped : undefined);
+}
+
 export interface TBResumeData {
   profile: TBProfile;
   workExperiences: TBWorkExperience[];
@@ -68,6 +118,10 @@ export interface TBResumeData {
   projects: TBProject[];
   skills: TBSkills;
   customization: TBCustomization;
+  /** Order of body sections in preview/PDF (after name + contact). */
+  sectionOrder: TBContentSection[];
+  /** Sections hidden from preview/export; data is kept for re-enable. */
+  hiddenSections: TBContentSection[];
 }
 
 export const DEFAULT_CUSTOMIZATION: TBCustomization = {
@@ -107,11 +161,15 @@ export const DEFAULT_RESUME: TBResumeData = {
   projects: [DEFAULT_PROJECT()],
   skills: DEFAULT_SKILLS(),
   customization: DEFAULT_CUSTOMIZATION,
+  sectionOrder: [...DEFAULT_SECTION_ORDER],
+  hiddenSections: [],
 };
 
 // Prefilled demo resume — shown to first-time users so the preview is never blank
 export const DEMO_RESUME: TBResumeData = {
   customization: DEFAULT_CUSTOMIZATION,
+  sectionOrder: [...DEFAULT_SECTION_ORDER],
+  hiddenSections: [],
   profile: {
     name: "Alex Johnson",
     email: "alex.johnson@email.com",

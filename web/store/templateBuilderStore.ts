@@ -1,10 +1,11 @@
 "use client";
 import { create } from "zustand";
 import type {
-  TBResumeData, TBWorkExperience, TBEducation, TBProject, TBProfile, TBCustomization, TBSkills,
+  TBResumeData, TBWorkExperience, TBEducation, TBProject, TBProfile, TBCustomization, TBSkills, TBContentSection,
 } from "@/components/TemplateBuilder/types";
 import {
   DEFAULT_RESUME, DEFAULT_CUSTOMIZATION, DEFAULT_WORK, DEFAULT_EDU, DEFAULT_PROJECT, DEFAULT_SKILLS, DEMO_RESUME,
+  normalizeTbSectionOrder,
 } from "@/components/TemplateBuilder/types";
 
 const STORAGE_KEY = "rn_template_builder";
@@ -38,6 +39,8 @@ function safeLoad(): TBResumeData {
       ...parsed,
       skills,
       customization: { ...DEFAULT_CUSTOMIZATION, ...(parsed.customization ?? {}) },
+      sectionOrder: normalizeTbSectionOrder(parsed.sectionOrder),
+      hiddenSections: Array.isArray(parsed.hiddenSections) ? parsed.hiddenSections : [],
     };
   } catch {
     return DEMO_RESUME;
@@ -70,6 +73,8 @@ export interface TemplateBuilderStore {
   setFeaturedSkill: (idx: number, skill: string, rating: number) => void;
   setSkillDescriptions: (value: string) => void;
   setCustomization: (field: keyof TBCustomization, value: string) => void;
+  reorderSection: (fromIdx: number, toIdx: number) => void;
+  toggleSectionHidden: (section: TBContentSection) => void;
   reset: () => void;
 }
 
@@ -83,8 +88,13 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
   },
 
   replaceData: (data) => {
-    safeSave(data);
-    set({ data, loaded: true });
+    const normalized: TBResumeData = {
+      ...data,
+      sectionOrder: normalizeTbSectionOrder(data.sectionOrder),
+      hiddenSections: Array.isArray(data.hiddenSections) ? data.hiddenSections : [],
+    };
+    safeSave(normalized);
+    set({ data: normalized, loaded: true });
   },
 
   setProfile: (field, value) => {
@@ -264,6 +274,37 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
   setCustomization: (field, value) => {
     set((s) => {
       const data = { ...s.data, customization: { ...s.data.customization, [field]: value } };
+      safeSave(data);
+      return { data };
+    });
+  },
+
+  reorderSection: (fromIdx, toIdx) => {
+    set((s) => {
+      const arr = [...s.data.sectionOrder];
+      if (
+        fromIdx < 0 ||
+        toIdx < 0 ||
+        fromIdx >= arr.length ||
+        toIdx >= arr.length ||
+        fromIdx === toIdx
+      ) {
+        return s;
+      }
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      const data = { ...s.data, sectionOrder: arr };
+      safeSave(data);
+      return { data };
+    });
+  },
+
+  toggleSectionHidden: (section) => {
+    set((s) => {
+      const hidden = new Set(s.data.hiddenSections);
+      if (hidden.has(section)) hidden.delete(section);
+      else hidden.add(section);
+      const data = { ...s.data, hiddenSections: [...hidden] };
       safeSave(data);
       return { data };
     });

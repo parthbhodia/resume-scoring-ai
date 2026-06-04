@@ -7,6 +7,8 @@ import {
   DEFAULT_PROJECT,
   DEFAULT_RESUME,
   DEFAULT_WORK,
+  mapStructuredSectionOrder,
+  normalizeTbSectionOrder,
   type TBResumeData,
 } from "@/components/TemplateBuilder/types";
 import {
@@ -117,7 +119,30 @@ function mapStructuredResumeToTemplateData(structured: StructuredResume): TBResu
       descriptions: descriptionLines.join("\n"),
     },
     customization: DEFAULT_CUSTOMIZATION,
+    sectionOrder: mapStructuredSectionOrder(structured.section_order),
+    hiddenSections: [],
   };
+}
+
+function stashPrefillData(data: TBResumeData): boolean {
+  try {
+    sessionStorage.setItem(
+      TEMPLATE_BUILDER_STRUCTURED_PREFILL_KEY,
+      JSON.stringify({ version: 1, data }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function stashTemplateBuilderStructuredPrefillFromStructuredResume(
+  structured: StructuredResume | null | undefined,
+): boolean {
+  if (typeof sessionStorage === "undefined") return false;
+  const normalized = normalizeStructuredResume(structured);
+  if (!normalized) return false;
+  return stashPrefillData(mapStructuredResumeToTemplateData(normalized));
 }
 
 export function stashTemplateBuilderStructuredPrefillFromAnalysisResult(result: unknown): boolean {
@@ -128,13 +153,7 @@ export function stashTemplateBuilderStructuredPrefillFromAnalysisResult(result: 
     (raw.structuredResume ?? raw.structured_resume) as StructuredResume | null | undefined,
   );
   if (!normalized) return false;
-  try {
-    const data = mapStructuredResumeToTemplateData(normalized);
-    sessionStorage.setItem(TEMPLATE_BUILDER_STRUCTURED_PREFILL_KEY, JSON.stringify({ version: 1, data }));
-    return true;
-  } catch {
-    return false;
-  }
+  return stashPrefillData(mapStructuredResumeToTemplateData(normalized));
 }
 
 export function consumeTemplateBuilderStructuredPrefill(): TBResumeData | null {
@@ -145,7 +164,11 @@ export function consumeTemplateBuilderStructuredPrefill(): TBResumeData | null {
     sessionStorage.removeItem(TEMPLATE_BUILDER_STRUCTURED_PREFILL_KEY);
     const parsed = JSON.parse(raw) as { version?: number; data?: TBResumeData };
     if (parsed.version !== 1 || !parsed.data) return null;
-    return parsed.data;
+    return {
+      ...parsed.data,
+      sectionOrder: normalizeTbSectionOrder(parsed.data.sectionOrder),
+      hiddenSections: Array.isArray(parsed.data.hiddenSections) ? parsed.data.hiddenSections : [],
+    };
   } catch {
     return null;
   }

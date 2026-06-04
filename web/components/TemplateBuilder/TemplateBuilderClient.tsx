@@ -9,6 +9,7 @@ import { PAGE_WIDTH_OPTIONS, STYLE_PRESETS } from "./templateStyles";
 import { apiUrl } from "@/lib/utils";
 import { buildNameRoleExportFilename } from "@/lib/resumeFileName";
 import { consumeTemplateBuilderStructuredPrefill } from "@/lib/templateBuilderPrefill";
+import TemplateBuilderSectionsPanel from "./TemplateBuilderSectionsPanel";
 
 /* ── Shared style helpers ──────────────────────────────────────── */
 const inputBase: React.CSSProperties = {
@@ -230,9 +231,10 @@ const FONT_OPTIONS: { label: string; value: TBFont; sub: string }[] = [
   { label: "Courier", value: "Courier",     sub: "Technical / developer" },
 ];
 
-type SectionKey = "profile" | "experience" | "education" | "projects" | "skills" | "customize";
+type SectionKey = "sections" | "profile" | "experience" | "education" | "projects" | "skills" | "customize";
 
 const TABS: { key: SectionKey; label: string; icon: string }[] = [
+  { key: "sections",   label: "Sections",   icon: "☰" },
   { key: "profile",    label: "Profile",    icon: "👤" },
   { key: "experience", label: "Experience", icon: "💼" },
   { key: "education",  label: "Education",  icon: "🎓" },
@@ -354,7 +356,7 @@ export default function TemplateBuilderClient() {
           {/* Section Tabs */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: "repeat(4, 1fr)",
             gap: 0,
             borderBottom: "1px solid var(--border)",
             flexShrink: 0,
@@ -387,6 +389,14 @@ export default function TemplateBuilderClient() {
 
           {/* Section Content */}
           <div style={{ flex: 1, overflowY: "auto", padding: "18px 16px 32px" }}>
+            {activeTab === "sections" && (
+              <TemplateBuilderSectionsPanel
+                store={store}
+                sectionOrder={data.sectionOrder}
+                hiddenSections={data.hiddenSections}
+                onEditSection={(tab) => setActiveTab(tab)}
+              />
+            )}
             {activeTab === "profile" && (
               <ProfileSection store={store} data={data} />
             )}
