@@ -4,15 +4,21 @@ import type { ReactNode } from "react";
 export const NAV_ICONS = {
   advisor: (
     <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <circle cx="8" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.4" />
       <path
-        d="M3 13c0-2.761 2.239-4 5-4s5 1.239 5 4"
+        d="M2.5 13.5h11"
         stroke="currentColor"
         strokeWidth="1.4"
         strokeLinecap="round"
       />
       <path
-        d="M11.5 7.5l1 1 2-2"
+        d="M4 13.5V9.5M7.5 13.5V6M11 13.5V8.5M14.5 13.5V4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M11.5 5.5l1.25 1.25L15 4"
         stroke="currentColor"
         strokeWidth="1.3"
         strokeLinecap="round"
