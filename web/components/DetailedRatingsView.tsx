@@ -425,7 +425,7 @@ export function TailorMatchDetail(props: SharedProps) {
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: (activeTab === "fixes" || activeTab === "gapfix") ? 0 : "24px 28px" }}>
         {activeTab === "overall" && (
-          <OverallSection overallScore={overall_score} jobTitleScore={job_title?.score} verdict={verdict} whats_working={whats_working} gaps={gaps} keywords={keywords} qualifications={qualifications} responsibilities={responsibilities} onNavigate={setActiveTab} />
+          <OverallSection overallScore={overall_score} jobTitleScore={job_title?.score} verdict={verdict} whats_working={whats_working} gaps={gaps} keywords={keywords} qualifications={qualifications} responsibilities={responsibilities} roleContext={props.ratings?.role_context ?? []} onNavigate={setActiveTab} />
         )}
         {activeTab === "job_title" && <JobTitleSection jobTitle={job_title} />}
         {activeTab === "qualifications" && (

@@ -259,6 +259,30 @@ def _drop_non_actionable(items: object) -> list:
     return [it for it in items if not _NON_ACTIONABLE_REQUIREMENT_RE.search(_requirement_text(it))]
 
 
+def _collect_non_actionable(raw: object) -> list:
+    """Pull the non-actionable items (location / seniority / culture-fit) out of a
+    category so they can be shown as read-only "fit factors" — they mean something
+    to the candidate, they just can't be fixed by editing a bullet."""
+    if not isinstance(raw, dict):
+        return []
+    out: list = []
+    seen: set = set()
+    for bucket in ("covered", "missing", "resolved_by_user"):
+        for it in raw.get(bucket) or []:
+            text = _requirement_text(it).strip()
+            if not text or not _NON_ACTIONABLE_REQUIREMENT_RE.search(text):
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            note = {"text": text}
+            if isinstance(it, dict) and it.get("analysis"):
+                note["analysis"] = it["analysis"]
+            out.append(note)
+    return out
+
+
 def _category_with_resolved(raw: object) -> dict:
     """Ensure detailed category buckets include resolved_by_user, and strip
     non-actionable (location / seniority / culture-fit) requirement items."""
@@ -323,18 +347,25 @@ def _build_ratings_payload(llm_ratings: Optional[dict]) -> Optional[dict]:
             "total_count": len(found_kw) + len(missing_kw),
         }
 
+    qual_raw = llm_ratings.get("qualifications")
+    resp_raw = llm_ratings.get("responsibilities")
+    # Location / seniority / culture-fit lines aren't fixable gaps, but they DO
+    # matter — surface them read-only as "role fit factors" instead of dropping.
+    role_context = _collect_non_actionable(qual_raw) + _collect_non_actionable(resp_raw)
+
     return {
         "overall_score": overall,
         "match_score": overall,
         "criteria": [],
         "job_title": llm_ratings.get("job_title") or {},
-        "qualifications": _category_with_resolved(llm_ratings.get("qualifications")),
-        "responsibilities": _category_with_resolved(llm_ratings.get("responsibilities")),
+        "qualifications": _category_with_resolved(qual_raw),
+        "responsibilities": _category_with_resolved(resp_raw),
         "keywords": kw_payload,
         "whats_working": llm_ratings.get("whats_working") or [],
         "gaps": llm_ratings.get("gaps") or [],
         "verdict": llm_ratings.get("verdict", ""),
         "strategic_tips": llm_ratings.get("strategic_tips") or [],
         "interview_questions": llm_ratings.get("interview_questions") or [],
+        "role_context": role_context,
     }
 

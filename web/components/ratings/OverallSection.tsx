@@ -6,6 +6,8 @@ import type { KeywordsRating, DetailedCategory } from "@/lib/types";
 const MAX_KEYWORD_CHIPS = 8;
 const MAX_QUAL_CHIPS = 4;
 
+type RoleContextItem = { text: string; analysis?: string };
+
 type Props = {
   overallScore: number;
   jobTitleScore?: number;
@@ -15,6 +17,8 @@ type Props = {
   keywords?: KeywordsRating;
   qualifications?: DetailedCategory;
   responsibilities?: { covered: unknown[]; missing: unknown[] };
+  /** Read-only fit factors (location / seniority / culture) — not bullet-fixable. */
+  roleContext?: RoleContextItem[];
   onNavigate?: (tab: "keywords" | "qualifications" | "responsibilities") => void;
 };
 
@@ -34,6 +38,7 @@ export function OverallSection({
   keywords,
   qualifications,
   responsibilities,
+  roleContext = [],
   onNavigate,
 }: Props) {
   const ql = qualityLabel(overallScore);
@@ -441,6 +446,49 @@ export function OverallSection({
               >
                 <span style={{ color: "#f87171", flexShrink: 0, marginTop: 1 }}>→</span>
                 <span>{g}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Role fit factors (read-only — location / seniority / culture) ── */}
+      {roleContext.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "var(--dim)",
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              marginBottom: 4,
+            }}
+          >
+            Good to know about this role
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--dim)", marginBottom: 10, lineHeight: 1.45 }}>
+            Fit factors you can&apos;t fix by editing a bullet — worth keeping in mind when you apply.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {roleContext.map((c, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  fontSize: 13,
+                  color: "var(--muted)",
+                  lineHeight: 1.5,
+                  alignItems: "flex-start",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--surface2)",
+                }}
+              >
+                <span style={{ color: "var(--dim)", flexShrink: 0, marginTop: 1 }}>•</span>
+                <span>{c.text}</span>
               </div>
             ))}
           </div>

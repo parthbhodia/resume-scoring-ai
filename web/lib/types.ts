@@ -79,6 +79,9 @@ export interface RatingsData {
   qualifications?: DetailedCategory;
   responsibilities?: DetailedCategory;
   keywords?: KeywordsRating;
+  /** Read-only fit factors (location / seniority / culture) pulled out of
+   *  qualifications/responsibilities — shown for context, not as fixable gaps. */
+  role_context?: { text: string; analysis?: string }[];
 }
 
 export function isDetailedRatings(r: RatingsData): r is RatingsData & {
