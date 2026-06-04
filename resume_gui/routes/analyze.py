@@ -272,15 +272,13 @@ async def api_analyze_upload(request: Request):
                 logger.warning("analyze_upload source PDF upload failed: %s", exc)
 
         if user_id and isinstance(result, dict):
-            result["analysisId"] = analysis_id
-            if source_pdf_url:
-                result["sourcePdfUrl"] = source_pdf_url
+            persisted_id = None
             try:
                 def _persist_sync():
                     return _persist_analysis(
                         result,
                         user_id,
-                        user_email,
+                        user_email or auth_user_email or "",
                         bool(jd),
                         analysis_id=analysis_id,
                         source_pdf_url=source_pdf_url,
@@ -288,10 +286,18 @@ async def api_analyze_upload(request: Request):
                     )
 
                 persisted_id = await loop.run_in_executor(None, _persist_sync)
-                if persisted_id:
-                    result["analysisId"] = persisted_id
-            except Exception:
-                pass  # never block the response for analytics writes
+            except Exception as exc:
+                logger.warning("analyze_upload persist failed user_id=%s: %s", user_id, exc)
+            if persisted_id:
+                result["analysisId"] = persisted_id
+                result["analysisPersisted"] = True
+                if source_pdf_url:
+                    result["sourcePdfUrl"] = source_pdf_url
+                if filename:
+                    result["sourceFilename"] = filename
+            else:
+                result["analysisPersisted"] = False
+                # Do not set analysisId when DB write failed — frontend must fall back to insertAnalysis.
 
         return JSONResponse(result)
     except Exception as exc:

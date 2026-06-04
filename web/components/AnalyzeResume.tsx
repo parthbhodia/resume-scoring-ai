@@ -153,6 +153,8 @@ interface AnalysisResult {
   scoringMeta?: ScoringMeta | null;
   /** Set when backend persisted this run (analyze-upload). */
   analysisId?: string;
+  /** True when backend wrote resume_analyses; false/absent means client should insert. */
+  analysisPersisted?: boolean;
   sourcePdfUrl?: string | null;
   sourceFilename?: string | null;
 }
@@ -460,10 +462,10 @@ export default function AnalyzeResume() {
     if (userId) lsPush(userId, optimistic);
 
     try {
-      const backendId = res.analysisId ?? null;
+      const backendPersisted = res.analysisPersisted === true;
+      const backendId = backendPersisted ? (res.analysisId ?? null) : null;
       const sourcePdfUrl = res.sourcePdfUrl ?? null;
       const sourceFilename = res.sourceFilename ?? null;
-      // Backend analyze-upload already persisted when signed in; avoid duplicate rows.
       const newId = backendId ?? await insertAnalysis(label, res, {
         sourcePdfUrl,
         sourceFilename,
@@ -496,6 +498,10 @@ export default function AnalyzeResume() {
       const supabase = getSupabaseClient();
       const { data: { session } } = await supabase.auth.getSession();
       const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined;
+      if (session?.user?.id) {
+        fd.set("user_id", session.user.id);
+        if (session.user.email) fd.set("user_email", session.user.email);
+      }
       const resp = await fetch(apiUrl("/api/analyze-upload"), { method: "POST", body: fd, headers });
       const json = await resp.json();
       if (!resp.ok) {
