@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { apiUrl } from "@/lib/utils";
 import { getSupabaseClient } from "@/lib/supabase";
@@ -729,40 +729,17 @@ export default function AdvisorDashboard() {
   const [error,      setError]      = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [oauthBusy, setOauthBusy] = useState(false);
+  const authUserIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    let cancelled = false;
-    supabase.auth.getUser()
-      .then(({ data: d }) => {
-        if (cancelled) return;
-        setUserEmail(d.user?.email ?? null);
-        setAuthChecked(true);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setUserEmail(null);
-        setAuthChecked(true);
-      });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUserEmail(session?.user?.email ?? null);
-      setAuthChecked(true);
-      setData(null);
-      setSelectedId(null);
-    });
-    return () => {
-      cancelled = true;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { keepStale?: boolean }) => {
+    if (!opts?.keepStale) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const resp = await fetch(apiUrl("/api/cohort-stats"), { headers: await advisorAuthHeaders() });
-      if (resp.status === 401) { setError("not_signed_in"); return; }
-      if (resp.status === 403) { setError("not_authorized"); return; }
+      if (resp.status === 401) { setError("not_signed_in"); setData(null); return; }
+      if (resp.status === 403) { setError("not_authorized"); setData(null); return; }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       setData(await resp.json() as CohortStats);
     } catch (e) {
@@ -773,14 +750,77 @@ export default function AdvisorDashboard() {
   }, []);
 
   useEffect(() => {
-    if (!authChecked) return;
-    if (userEmail) {
-      void load();
-    } else {
-      setLoading(false);
-      setData(null);
-    }
-  }, [authChecked, userEmail, load]);
+    const supabase = getSupabaseClient();
+    let cancelled = false;
+
+    const applySession = (session: { user?: { id?: string; email?: string | null } } | null) => {
+      const uid = session?.user?.id ?? null;
+      const email = session?.user?.email ?? null;
+      setUserEmail(email);
+      setAuthChecked(true);
+      if (!uid) {
+        authUserIdRef.current = null;
+        setData(null);
+        setSelectedId(null);
+        setLoading(false);
+        return;
+      }
+      const userChanged = authUserIdRef.current !== null && authUserIdRef.current !== uid;
+      authUserIdRef.current = uid;
+      if (userChanged) {
+        setData(null);
+        setSelectedId(null);
+        void load();
+      }
+    };
+
+    supabase.auth.getSession()
+      .then(({ data: d }) => {
+        if (cancelled) return;
+        applySession(d.session);
+        if (d.session?.user?.id) void load();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        applySession(null);
+      });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled) return;
+      if (event === "SIGNED_OUT") {
+        applySession(null);
+        return;
+      }
+      const prevUid = authUserIdRef.current;
+      applySession(session);
+      // Token refresh / tab focus must not wipe loaded cohort data.
+      if (event === "SIGNED_IN" || (prevUid && prevUid !== session?.user?.id)) {
+        void load();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once auth wiring; load is stable
+  }, []);
+
+  // Recover if cohort data was cleared while the user is still signed in (e.g. race on mount).
+  useEffect(() => {
+    if (!authChecked || !userEmail || loading || error || data) return;
+    void load();
+  }, [authChecked, userEmail, loading, error, data, load]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!authChecked || !userEmail || loading || error) return;
+      if (!data) void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [authChecked, userEmail, loading, error, data, load]);
 
   const signInWithGoogle = async () => {
     setOauthBusy(true);
@@ -865,21 +905,18 @@ export default function AdvisorDashboard() {
     </Card>
   );
 
-  if (!data) return (
-    <Card className="mx-auto mt-24 max-w-[520px]">
-      <CardHeader>
-        <Badge variant="outline" className="w-fit">No dashboard data yet</Badge>
-        <CardDescription>
-          We could not load advisor cohort data for this view yet. This can happen briefly when switching tabs while auth/session checks are still settling.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-wrap gap-2">
-        <Button variant="outline" onClick={() => userEmail && void load()}>
-          Try again
-        </Button>
-      </CardContent>
-    </Card>
-  );
+  if (!data) {
+    return (
+      <div className="mx-auto grid min-h-[60vh] max-w-[760px] content-center gap-4 px-8">
+        <Skeleton className="h-24 rounded-xl" />
+        <div className="grid grid-cols-3 gap-3">
+          <Skeleton className="h-24 rounded-xl" />
+          <Skeleton className="h-24 rounded-xl" />
+          <Skeleton className="h-24 rounded-xl" />
+        </div>
+      </div>
+    );
+  }
 
   if (selectedId) {
     return (
