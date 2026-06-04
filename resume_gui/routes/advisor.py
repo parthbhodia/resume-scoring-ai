@@ -445,7 +445,14 @@ async def api_student_detail(request: Request):
         resolved_email = _email_by_user_id([student_id]).get(student_id)
 
     latest_row = analyses[-1] if analyses else None
-    if latest_row:
+    # Prefer the most recent analysis that has an uploaded source PDF.
+    for row in reversed(analyses):
+        pdf_url = str(row.get("source_pdf_url") or "").strip()
+        if pdf_url:
+            latest_source_pdf_url = pdf_url
+            latest_source_filename = str(row.get("source_filename") or "").strip() or None
+            break
+    if latest_row and not latest_source_pdf_url:
         latest_source_pdf_url = str(latest_row.get("source_pdf_url") or "").strip() or None
         latest_source_filename = str(latest_row.get("source_filename") or "").strip() or None
 

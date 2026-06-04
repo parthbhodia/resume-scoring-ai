@@ -117,6 +117,33 @@ function fmt(d: string | null): string {
   catch { return d; }
 }
 
+function resolvePublicPdfUrl(url: string): string {
+  if (url.startsWith("http")) return url;
+  return apiUrl(url.startsWith("/") ? url : `/${url}`);
+}
+
+function StudentPdfEmbed({ url, title }: { url: string; title: string }) {
+  const src = resolvePublicPdfUrl(url);
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        overflow: "hidden",
+        background: "var(--surface2)",
+        marginBottom: 10,
+      }}
+    >
+      <embed
+        src={`${src}#view=FitH`}
+        type="application/pdf"
+        title={title}
+        style={{ width: "100%", height: 360, display: "block" }}
+      />
+    </div>
+  );
+}
+
 function fmtRelative(d: string | null): string {
   if (!d) return "—";
   try {
@@ -408,21 +435,9 @@ function StudentDetailPanel({
                         {d.latest_source_filename}
                       </p>
                     ) : null}
-                    <div style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      overflow: "hidden",
-                      background: "var(--surface2)",
-                      marginBottom: 10,
-                    }}>
-                      <iframe
-                        title="Student résumé PDF"
-                        src={d.latest_source_pdf_url}
-                        style={{ width: "100%", height: 360, border: "none", display: "block" }}
-                      />
-                    </div>
+                    <StudentPdfEmbed url={d.latest_source_pdf_url} title="Student résumé PDF" />
                     <a
-                      href={d.latest_source_pdf_url}
+                      href={resolvePublicPdfUrl(d.latest_source_pdf_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={buttonVariants({ variant: "outline", size: "sm" })}
