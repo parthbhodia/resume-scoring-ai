@@ -336,17 +336,28 @@ async def api_student_detail(request: Request):
         except Exception as exc:
             logger.warning("student_detail resumes query failed: %s", exc)
 
+    dim_keys = ["readability", "atsCompatibility", "jobMatch", "achievementQuality",
+                "quantification", "sectionStructure", "languageQuality", "technicalBranding"]
+
     # Build score history and extract latest analysis details
     score_history = [
         {"date": r.get("created_at"), "score": r.get("score"), "label": r.get("label")}
+        for r in analyses
+    ]
+    category_history = [
+        {
+            "date": r.get("created_at"),
+            "scores": {
+                dk: ((r.get("result") or {}).get("categoryScores") or {}).get(dk)
+                for dk in dim_keys
+            },
+        }
         for r in analyses
     ]
     latest = analyses[-1] if analyses else None
     latest_result = (latest or {}).get("result") or {}
 
     # Compute per-student averages across all analyses
-    dim_keys = ["readability", "atsCompatibility", "jobMatch", "achievementQuality",
-                "quantification", "sectionStructure", "languageQuality", "technicalBranding"]
 
     def _avg(vals):
         clean = [v for v in vals if isinstance(v, (int, float))]
@@ -396,6 +407,7 @@ async def api_student_detail(request: Request):
         "latest_score":   latest_score,
         "score_delta":    delta,
         "score_history":  score_history,
+        "category_history": category_history,
         "dim_avgs":       dim_avgs,
         "top_issues":     top_issues,
         "latest_strengths":     latest_result.get("topStrengths") or [],

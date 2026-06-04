@@ -12,6 +12,14 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  ScoreLineChart,
+  ScoreBarChart,
+  DimensionTrendChart,
+  buildBarEntries,
+  weakestDimKeys,
+  type CategoryHistoryPoint,
+} from "@/components/advisor/AdvisorCharts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -65,6 +73,7 @@ interface StudentDetail {
   latest_score: number | null;
   score_delta: number | null;
   score_history: ScorePoint[];
+  category_history?: CategoryHistoryPoint[];
   dim_avgs: DimAvgs;
   top_issues: TopIssue[];
   latest_strengths: string[];
@@ -105,12 +114,6 @@ function scoreBg(s: number | null): string {
 function fmt(d: string | null): string {
   if (!d) return "—";
   try { return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
-  catch { return d; }
-}
-
-function fmtShort(d: string | null): string {
-  if (!d) return "";
-  try { return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
   catch { return d; }
 }
 
@@ -190,23 +193,6 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-function DimRow({ label, value }: { label: string; value: number | null }) {
-  const color = scoreColor(value);
-  return (
-    <div className="flex items-center gap-3 border-b border-border py-2 last:border-b-0">
-      <div className="w-36 shrink-0 text-xs text-muted-foreground">{label}</div>
-      <Progress
-        value={value ?? 0}
-        className="flex-1 gap-0"
-        style={{ "--primary": color } as CSSProperties}
-      />
-      <div className="w-8 shrink-0 text-right text-xs font-semibold" style={{ color }}>
-        {value !== null ? Math.round(value) : "—"}
-      </div>
-    </div>
-  );
-}
-
 function TierRow({ label, count, total, color }: { label: string; count: number; total: number; color: string }) {
   const pct = total > 0 ? (count / total) * 100 : 0;
   return (
@@ -259,42 +245,6 @@ function ScoreBadge({ score }: { score: number | null }) {
     <Badge variant={score >= 75 ? "secondary" : score >= 55 ? "outline" : "destructive"} style={{ color: scoreColor(score), background: scoreBg(score) }}>
       {score}
     </Badge>
-  );
-}
-
-// ── Score Sparkline ───────────────────────────────────────────────────────────
-
-function ScoreSparkline({ history }: { history: ScorePoint[] }) {
-  const valid = history.filter(p => p.score !== null);
-  if (valid.length === 0) return <p style={{ fontSize: 12, color: "var(--dim)" }}>No data yet.</p>;
-
-  const max = Math.max(...valid.map(p => p.score!));
-  const min = Math.min(...valid.map(p => p.score!));
-  const range = Math.max(max - min, 10);
-  const h = 80;
-
-  return (
-    <div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: h, marginBottom: 8 }}>
-        {valid.map((p, i) => {
-          const pct = (p.score! - min) / range;
-          const barH = Math.max(6, Math.round(pct * (h - 10)) + 10);
-          const color = scoreColor(p.score);
-          return (
-            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 4 }}
-              title={`${p.score} — ${fmtShort(p.date)}`}
-            >
-              <div style={{ fontSize: 10, color: "var(--dim)" }}>{p.score}</div>
-              <div style={{ width: "100%", height: barH, background: color, borderRadius: "3px 3px 0 0", opacity: i === valid.length - 1 ? 1 : 0.55 }} />
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--dim)" }}>
-        <span>{fmtShort(valid[0].date)}</span>
-        <span>{fmtShort(valid[valid.length - 1].date)}</span>
-      </div>
-    </div>
   );
 }
 
@@ -370,17 +320,43 @@ function StudentDetailPanel({
               />
             </div>
 
-            {/* Score history + Dimensions */}
+            {/* Charts — score line, latest breakdown, averages, trends */}
             <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-
-              <AdvisorCard title="Score history">
-                <ScoreSparkline history={d.score_history} />
+              <AdvisorCard title="Score history" description="Overall score across every analysis run">
+                <ScoreLineChart history={d.score_history} />
               </AdvisorCard>
 
-              <AdvisorCard title="Average by dimension">
-                {Object.entries(DIM_LABELS).map(([k, label]) => (
-                  <DimRow key={k} label={label} value={d.dim_avgs[k as keyof DimAvgs]} />
-                ))}
+              <AdvisorCard title="Latest run breakdown" description="Category scores from the most recent analysis">
+                <ScoreBarChart
+                  entries={buildBarEntries(d.latest_category_scores, DIM_LABELS, Object.keys(DIM_LABELS))}
+                  emptyMessage="No category scores on the latest run."
+                />
+              </AdvisorCard>
+
+              <AdvisorCard title="Average by dimension" description="Mean score per category across all runs">
+                <ScoreBarChart
+                  entries={Object.entries(DIM_LABELS).map(([key, label]) => ({
+                    key,
+                    label,
+                    value: d.dim_avgs[key as keyof DimAvgs],
+                  }))}
+                  emptyMessage="No dimension averages yet."
+                />
+              </AdvisorCard>
+
+              <AdvisorCard
+                title="Dimension trends"
+                description="Weakest categories over time (needs 2+ analyses)"
+              >
+                <DimensionTrendChart
+                  history={d.category_history ?? []}
+                  dimLabels={DIM_LABELS}
+                  focusKeys={weakestDimKeys(
+                    Object.fromEntries(
+                      Object.entries(DIM_LABELS).map(([k]) => [k, d.dim_avgs[k as keyof DimAvgs]]),
+                    ),
+                  )}
+                />
               </AdvisorCard>
             </div>
 
