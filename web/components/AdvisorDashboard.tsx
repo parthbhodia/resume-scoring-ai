@@ -700,11 +700,17 @@ export default function AdvisorDashboard() {
   useEffect(() => {
     const supabase = getSupabaseClient();
     let cancelled = false;
-    supabase.auth.getUser().then(({ data: d }) => {
-      if (cancelled) return;
-      setUserEmail(d.user?.email ?? null);
-      setAuthChecked(true);
-    });
+    supabase.auth.getUser()
+      .then(({ data: d }) => {
+        if (cancelled) return;
+        setUserEmail(d.user?.email ?? null);
+        setAuthChecked(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setUserEmail(null);
+        setAuthChecked(true);
+      });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserEmail(session?.user?.email ?? null);
       setAuthChecked(true);
@@ -826,7 +832,21 @@ export default function AdvisorDashboard() {
     </Card>
   );
 
-  if (!data) return null;
+  if (!data) return (
+    <Card className="mx-auto mt-24 max-w-[520px]">
+      <CardHeader>
+        <Badge variant="outline" className="w-fit">No dashboard data yet</Badge>
+        <CardDescription>
+          We could not load advisor cohort data for this view yet. This can happen briefly when switching tabs while auth/session checks are still settling.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={() => userEmail && void load()}>
+          Try again
+        </Button>
+      </CardContent>
+    </Card>
+  );
 
   if (selectedId) {
     return (

@@ -198,6 +198,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 
 ## Recent changes (running log — newest first; **append after every commit**)
 
+- **Advisor auth resiliency guardrail (`uncommitted`)** — `web/components/AdvisorDashboard.tsx` now treats `supabase.auth.getUser()` as fallible and still marks auth as checked on failure, preventing the view from stalling in an indeterminate state. Also replaced the silent `if (!data) return null` branch with a user-visible fallback card + retry action so transient cohort-fetch/auth timing issues surface as recoverable UI instead of a blank pane.
+
 - **Free-scan onboarding banner + scan-limit import hardening (`1f48b7b`)** — Added a top-of-shell `FreeScanWelcomeBanner` for signed-in non-UMBC users to clearly communicate the 5 free resume scans/day policy and persist dismissal per user in localStorage. Also made `resume_gui/routes/analyze.py` import `_scan_limit_status_for_user` directly from `services.scan_limits` instead of relying on `_shared` wildcard exports, preventing runtime `NameError` drift in scan-limit enforcement paths.
 
 - **Analyze-upload scanned PDF recovery + scan limits (`b7fcd78`)** — `resume_gui/routes/analyze.py` now avoids early 422 for PDFs with empty markdown extraction: textless PDFs continue into vision extraction, and only return the scanned-PDF error when both text extraction and vision-synthesized text are unavailable. This fixes `/api/analyze-upload` false negatives where scanned/image-only resumes previously failed before vision could recover them. The same commit also enforces daily scan limits in `/api/analyze-upload` and `/api/analyze` with `429` + `{code:"daily_scan_limit_reached", limit, used, resetAt}` metadata.
