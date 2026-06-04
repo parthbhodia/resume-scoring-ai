@@ -27,6 +27,10 @@ const CSS = `
 @keyframes chipIn   { from { opacity:0; transform:scale(0.8) } to { opacity:1; transform:scale(1) } }
 @keyframes scanLine { 0%{ transform:translateY(-100%) } 100%{ transform:translateY(400%) } }
 @keyframes appear   { from { opacity:0 } to { opacity:1 } }
+@keyframes heroOrb  { 0%,100%{ transform:translate(0,0) scale(1) } 50%{ transform:translate(6px,-8px) scale(1.06) } }
+@keyframes scoreArc { from { stroke-dashoffset:226 } to { stroke-dashoffset:59 } }
+@keyframes barShine { 0%{ transform:translateX(-120%) } 100%{ transform:translateX(220%) } }
+@keyframes chipPop  { from { opacity:0; transform:translateY(6px) scale(0.92) } to { opacity:1; transform:none } }
 `;
 
 function useInView(ref: React.RefObject<Element | null>) {
@@ -96,25 +100,343 @@ function VariantShell({
    A — Auto-scanning score reveal
    Score counts up, then bars fill one-by-one
 ══════════════════════════════════════════════════════════ */
+const HERO_BARS = [
+  { l: "Readability", v: 88, c: G },
+  { l: "ATS Safety", v: 72, c: A },
+  { l: "Quantification", v: 55, c: AM },
+  { l: "Achievement", v: 63, c: AM },
+] as const;
+
+const SHOWCASE_BARS = [
+  { l: "Readability", v: 88, c: G },
+  { l: "ATS Safety", v: 72, c: A },
+  { l: "Quantification", v: 55, c: AM },
+  { l: "Achievement Quality", v: 63, c: AM },
+  { l: "Language Quality", v: 81, c: G },
+  { l: "Section Structure", v: 76, c: A },
+] as const;
+
+function VariantAHeroCard({ seen, score }: { seen: boolean; score: number }) {
+  const ringSize = 92;
+  const r = 36;
+  const cx = ringSize / 2;
+  const scoreColor = score < 30 ? R : score < 60 ? AM : G;
+
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      {/* Ambient glow orbs */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: -28,
+          right: -20,
+          width: 140,
+          height: 140,
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(37,99,235,0.35) 0%, transparent 70%)",
+          filter: "blur(2px)",
+          animation: seen ? "heroOrb 5s ease-in-out infinite" : "none",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          bottom: -36,
+          left: -24,
+          width: 120,
+          height: 120,
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(217,119,6,0.28) 0%, transparent 70%)",
+          filter: "blur(2px)",
+          animation: seen ? "heroOrb 6.5s ease-in-out 1.2s infinite" : "none",
+          pointerEvents: "none",
+        }}
+      />
+
+      <div
+        style={{
+          position: "relative",
+          borderRadius: 22,
+          padding: 1,
+          background: "linear-gradient(135deg, rgba(37,99,235,0.55) 0%, rgba(217,119,6,0.4) 45%, rgba(5,150,105,0.35) 100%)",
+          boxShadow:
+            "0 4px 6px rgba(15,23,42,0.04), 0 24px 48px rgba(37,99,235,0.14), 0 48px 96px rgba(13,17,23,0.1)",
+        }}
+      >
+        <div
+          style={{
+            borderRadius: 21,
+            overflow: "hidden",
+            background: "linear-gradient(165deg, #ffffff 0%, #f8fafc 52%, #f1f5f9 100%)",
+          }}
+        >
+          {/* Chrome */}
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              padding: "11px 16px",
+              background: "linear-gradient(90deg, #0f172a 0%, #1e293b 55%, #0f172a 100%)",
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            {["#ff5f57", "#febc2e", "#28c840"].map((c) => (
+              <div key={c} style={{ width: 10, height: 10, borderRadius: "50%", background: c }} />
+            ))}
+            <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 8, fontWeight: 500 }}>
+              Resunova · Live analysis
+            </span>
+            {seen && (
+              <span
+                style={{
+                  marginLeft: "auto",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "3px 10px",
+                  borderRadius: 99,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#fbbf24",
+                  background: "rgba(251,191,36,0.12)",
+                  border: "1px solid rgba(251,191,36,0.25)",
+                  animation: "pulse 2s infinite",
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "#fbbf24",
+                    boxShadow: "0 0 8px #fbbf24",
+                  }}
+                />
+                Scanning
+              </span>
+            )}
+          </div>
+
+          {/* Mini résumé scan strip */}
+          <div
+            style={{
+              position: "relative",
+              margin: "14px 16px 0",
+              padding: "12px 14px",
+              borderRadius: 12,
+              background: "rgba(15,23,42,0.04)",
+              border: "1px solid rgba(15,23,42,0.06)",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ fontSize: 9, fontWeight: 700, color: MUT, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
+              Extracting · PDF
+            </div>
+            {[
+              { w: "72%", h: 7, o: 0.9 },
+              { w: "88%", h: 5, o: 0.55 },
+              { w: "64%", h: 5, o: 0.4 },
+            ].map((line, i) => (
+              <div
+                key={i}
+                style={{
+                  height: line.h,
+                  width: line.w,
+                  borderRadius: 4,
+                  background: `linear-gradient(90deg, ${BOR} 0%, #cbd5e1 100%)`,
+                  marginBottom: i < 2 ? 6 : 0,
+                  opacity: line.o,
+                  animation: seen ? `fadeIn 0.5s ease ${0.1 + i * 0.08}s both` : "none",
+                }}
+              />
+            ))}
+            {seen && (
+              <div
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  height: 2,
+                  background: "linear-gradient(90deg, transparent, rgba(37,99,235,0.7), transparent)",
+                  animation: "scanLine 2.8s ease-in-out infinite",
+                  pointerEvents: "none",
+                }}
+              />
+            )}
+          </div>
+
+          <div style={{ padding: "18px 16px 20px" }}>
+            <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+              {/* SVG score ring */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                <div style={{ position: "relative", width: ringSize, height: ringSize }}>
+                  <svg width={ringSize} height={ringSize} style={{ transform: "rotate(-90deg)" }} aria-hidden>
+                    <circle cx={cx} cy={cx} r={r} fill="none" stroke="#e2e8f0" strokeWidth={7} />
+                    <circle
+                      cx={cx}
+                      cy={cx}
+                      r={r}
+                      fill="none"
+                      stroke="url(#heroScoreGrad)"
+                      strokeWidth={7}
+                      strokeLinecap="round"
+                      strokeDasharray={226}
+                      strokeDashoffset={seen ? 59 : 226}
+                      style={{
+                        animation: seen ? "scoreArc 1.4s cubic-bezier(0.34,1.2,0.64,1) 0.2s both" : "none",
+                        filter: `drop-shadow(0 0 6px ${scoreColor}55)`,
+                      }}
+                    />
+                    <defs>
+                      <linearGradient id="heroScoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor={AM} />
+                        <stop offset="55%" stopColor={A} />
+                        <stop offset="100%" stopColor={G} />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 26,
+                        fontWeight: 800,
+                        color: INK,
+                        lineHeight: 1,
+                        letterSpacing: "-0.04em",
+                        animation: seen ? "countUp 0.3s ease both" : "none",
+                      }}
+                    >
+                      {score}
+                    </span>
+                    <span style={{ fontSize: 10, color: MUT, fontWeight: 600 }}>/ 100</span>
+                  </div>
+                </div>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: AM,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.6,
+                    padding: "3px 10px",
+                    borderRadius: 99,
+                    background: `${AM}14`,
+                    border: `1px solid ${AM}30`,
+                  }}
+                >
+                  Needs work
+                </span>
+              </div>
+
+              {/* Bars */}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 11, paddingTop: 2, minWidth: 0 }}>
+                {HERO_BARS.map((b, i) => (
+                  <div
+                    key={b.l}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      animation: seen ? `fadeIn 0.45s ease ${0.35 + i * 0.1}s both` : "none",
+                    }}
+                  >
+                    <span style={{ fontSize: 11, color: MUT, width: 96, flexShrink: 0, fontWeight: 500 }}>{b.l}</span>
+                    <div style={{ flex: 1, height: 7, borderRadius: 99, background: BG2, overflow: "hidden", position: "relative" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          borderRadius: 99,
+                          background: `linear-gradient(90deg, ${b.c}cc, ${b.c})`,
+                          boxShadow: `0 0 12px ${b.c}44`,
+                          animation: seen ? `fillBar 0.9s cubic-bezier(0.34,1.1,0.64,1) ${0.55 + i * 0.1}s both` : "none",
+                          width: seen ? `${b.v}%` : "0%",
+                          position: "relative",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {seen && (
+                          <div
+                            aria-hidden
+                            style={{
+                              position: "absolute",
+                              inset: 0,
+                              background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent)",
+                              animation: `barShine 1.2s ease ${0.9 + i * 0.1}s both`,
+                            }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: b.c, width: 22, textAlign: "right" }}>{b.v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Insight chips */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
+              {[
+                { label: "Top fix", value: "Quantification", color: AM, delay: 0.95 },
+                { label: "Bullets flagged", value: "5", color: R, delay: 1.05 },
+                { label: "Potential gain", value: "+12 pts", color: G, delay: 1.15 },
+              ].map((chip) => (
+                <div
+                  key={chip.label}
+                  style={{
+                    flex: "1 1 auto",
+                    minWidth: 100,
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    background: SUR,
+                    border: `1px solid ${chip.color}22`,
+                    boxShadow: `0 2px 8px ${chip.color}10`,
+                    animation: seen ? `chipPop 0.45s cubic-bezier(0.34,1.2,0.64,1) ${chip.delay}s both` : "none",
+                  }}
+                >
+                  <div style={{ fontSize: 9, fontWeight: 700, color: MUT, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>
+                    {chip.label}
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: chip.color }}>{chip.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function VariantA({ embedded = false }: VariantProps = {}) {
   const ref = useRef<HTMLDivElement>(null);
   const seen = useInView(ref);
   const score = useCountUp(74, seen);
-  const bars = embedded
-    ? [
-        { l:"Readability", v:88, c:G },
-        { l:"ATS Safety", v:72, c:A },
-        { l:"Quantification", v:55, c:AM },
-        { l:"Achievement", v:63, c:AM },
-      ]
-    : [
-        { l:"Readability", v:88, c:G },
-        { l:"ATS Safety", v:72, c:A },
-        { l:"Quantification", v:55, c:AM },
-        { l:"Achievement Quality", v:63, c:AM },
-        { l:"Language Quality", v:81, c:G },
-        { l:"Section Structure", v:76, c:A },
-      ];
+  const bars = embedded ? HERO_BARS : SHOWCASE_BARS;
+
+  if (embedded) {
+    return (
+      <VariantShell embedded shellRef={ref}>
+        <VariantAHeroCard seen={seen} score={score} />
+      </VariantShell>
+    );
+  }
+
   return (
     <VariantShell
       embedded={embedded}
@@ -123,15 +445,14 @@ export function VariantA({ embedded = false }: VariantProps = {}) {
       label={<Label id="A" name="Score Reveal" desc="Score counts up from 0 on scroll-in. Progress bars fill sequentially with a stagger delay." />}
     >
       <div style={{
-        maxWidth: embedded ? "100%" : 680,
+        maxWidth: 680,
         margin:"0 auto",
         background:SUR,
-        borderRadius: embedded ? 20 : 20,
+        borderRadius: 20,
         border:`1px solid ${BOR}`,
         overflow:"hidden",
-        boxShadow: embedded ? "0 32px 80px rgba(13,17,23,0.12)" : "0 12px 48px rgba(0,0,0,0.08)",
+        boxShadow: "0 12px 48px rgba(0,0,0,0.08)",
       }}>
-        {/* Chrome */}
         <div style={{ display:"flex", gap:6, alignItems:"center", padding:"10px 16px",
           borderBottom:`1px solid ${BOR}`, background:BG2 }}>
           {["#ff5f57","#febc2e","#28c840"].map(c=><div key={c} style={{ width:10,height:10,borderRadius:"50%",background:c }}/>)}
@@ -140,17 +461,16 @@ export function VariantA({ embedded = false }: VariantProps = {}) {
             animation:"pulse 2s infinite" }}>● ANALYZING</span>}
         </div>
         <div style={{
-          padding: embedded ? "22px 20px 24px" : "32px 36px 36px",
+          padding:"32px 36px 36px",
           display:"flex",
-          gap: embedded ? 18 : 32,
+          gap: 32,
           alignItems:"flex-start",
-          flexDirection: embedded ? "column" : "row",
+          flexDirection: "row",
         }}>
-          {/* Score ring */}
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, flexShrink:0 }}>
             <div style={{
-              width: embedded ? 80 : 96,
-              height: embedded ? 80 : 96,
+              width: 96,
+              height: 96,
               borderRadius:"50%",
               border:`6px solid ${score < 30 ? R : score < 60 ? AM : G}`,
               background:SUR, display:"flex", flexDirection:"column",
@@ -158,7 +478,7 @@ export function VariantA({ embedded = false }: VariantProps = {}) {
               transition:"border-color 0.4s",
               animation: seen ? "glow 2.4s ease infinite" : "none" }}>
               <span style={{
-                fontSize: embedded ? 24 : 28,
+                fontSize: 28,
                 fontWeight:800,
                 color:INK,
                 lineHeight:1,
@@ -169,12 +489,11 @@ export function VariantA({ embedded = false }: VariantProps = {}) {
             <span style={{ fontSize:10, fontWeight:700, color:AM,
               textTransform:"uppercase", letterSpacing:0.5 }}>Needs work</span>
           </div>
-          {/* Bars */}
           <div style={{ flex:1, display:"flex", flexDirection:"column", gap:12, paddingTop:4 }}>
             {bars.map((b, i) => (
               <div key={b.l} style={{ display:"flex", alignItems:"center", gap:10,
                 animation: seen ? `fadeIn 0.4s ease ${0.3 + i * 0.12}s both` : "none" }}>
-                <span style={{ fontSize:12, color:MUT, width: embedded ? 108 : 150, flexShrink:0 }}>{b.l}</span>
+                <span style={{ fontSize:12, color:MUT, width: 150, flexShrink:0 }}>{b.l}</span>
                 <div style={{ flex:1, height:5, borderRadius:3, background:BG2 }}>
                   <div style={{ height:"100%", borderRadius:3, background:b.c,
                     animation: seen ? `fillBar 0.8s ease ${0.5 + i * 0.12}s both` : "none",

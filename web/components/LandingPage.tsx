@@ -359,18 +359,27 @@ export default function LandingPage() {
           className="lp-hero-preview"
           style={{
             transform: "rotate(1.5deg)",
-            animation: "cardSlide 0.8s cubic-bezier(0.34,1.36,0.64,1) 0.3s both",
+            animation: "cardSlide 0.8s cubic-bezier(0.34,1.36,0.64,1) 0.3s both, heroFloat 6s ease-in-out 1.1s infinite",
             transformOrigin: "center top",
             position: "relative",
           }}
         >
           <div style={{
-            position: "absolute", top: -12, right: 20, zIndex: 2,
-            background: T.blue, color: "#fff",
-            fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
-            padding: "4px 10px", borderRadius: 20, textTransform: "uppercase",
-            boxShadow: `0 2px 8px ${T.blueGlow}`,
-          }}>Live Preview</div>
+            position: "absolute", top: -14, right: 18, zIndex: 2,
+            display: "inline-flex", alignItems: "center", gap: 6,
+            background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
+            color: "#fff",
+            fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+            padding: "5px 12px", borderRadius: 20, textTransform: "uppercase",
+            boxShadow: "0 4px 16px rgba(37,99,235,0.35), 0 0 0 1px rgba(255,255,255,0.15) inset",
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "#4ade80", boxShadow: "0 0 8px #4ade80",
+              animation: "pulse 2s infinite",
+            }} />
+            Live analysis
+          </div>
           <VariantA embedded />
         </div>
       </section>
@@ -670,6 +679,7 @@ export default function LandingPage() {
         @keyframes barFill   { from { width: 0; } to { width: var(--w); } }
         @keyframes ringDraw  { from { stroke-dashoffset: var(--full); } to { stroke-dashoffset: var(--off); } }
         @keyframes cardSlide { from { opacity: 0; transform: translateY(32px) rotate(1.5deg); } to { opacity: 1; transform: rotate(1.5deg); } }
+        @keyframes heroFloat { 0%, 100% { transform: rotate(1.5deg) translateY(0); } 50% { transform: rotate(1.5deg) translateY(-6px); } }
         @media (max-width: 860px) {
           .lp-hero-grid { grid-template-columns: 1fr !important; }
           .lp-hero-preview { transform: none !important; max-width: 420px; margin: 0 auto; }
