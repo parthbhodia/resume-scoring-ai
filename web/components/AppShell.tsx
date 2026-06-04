@@ -13,7 +13,6 @@ import { signOutAndReturnHome } from "@/lib/authSignOut";
 import { getSupabaseClient } from "@/lib/supabase";
 import { apiUrl } from "@/lib/utils";
 import { isUmbcUser } from "@/lib/userDomainDetection";
-import { UmbcWelcomeBanner } from "./UmbcWelcomeBanner";
 import ResumeSidebar from "./ResumeSidebar";
 import { useAppBreakpoints } from "@/hooks/useAppBreakpoints";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -24,6 +23,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppSidebar } from "./app-shell/AppSidebar";
 import { AppBottomNav } from "./app-shell/AppBottomNav";
 import { AppShellSidebarBridge } from "./app-shell/AppShellSidebarBridge";
+import { FreeScanWelcomeBanner } from "./FreeScanWelcomeBanner";
 import {
   readSidebarCollapsed,
   writeSidebarCollapsed,
@@ -140,11 +140,28 @@ export default function AppShell({ children }: { children: ReactNode }) {
       }
     };
 
+    const syncInstitutionStudent = async (
+      email?: string | null,
+      accessToken?: string | null,
+    ) => {
+      if (!accessToken) return;
+      if (!isUmbcUser(email)) return;
+      try {
+        await fetch(apiUrl("/api/sync-institution-student"), {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+      } catch {
+        // Best-effort sync only; never block shell render/auth UX.
+      }
+    };
+
     supabase.auth.getSession().then(({ data }) => {
       const currentUser = data.session?.user ?? null;
       setUser(currentUser);
       setIsUmbc(isUmbcUser(currentUser?.email));
       void syncAdvisorAccess(data.session?.access_token);
+      void syncInstitutionStudent(currentUser?.email, data.session?.access_token);
     });
     const {
       data: { subscription },
@@ -153,6 +170,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       setUser(currentUser);
       setIsUmbc(isUmbcUser(currentUser?.email));
       void syncAdvisorAccess(s?.access_token);
+      void syncInstitutionStudent(currentUser?.email, s?.access_token);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -238,7 +256,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               key={active}
               className="app-shell-main app-shell-view-pane min-h-0 flex-1 flex-col overflow-hidden pb-14 md:pb-0"
             >
-              <UmbcWelcomeBanner />
+              <FreeScanWelcomeBanner userId={user?.id ?? null} isUmbc={isUmbc} />
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
             </SidebarInset>
 

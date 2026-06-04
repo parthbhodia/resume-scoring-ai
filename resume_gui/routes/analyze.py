@@ -5,6 +5,7 @@ import io
 
 from resume_gui.routes._shared import *  # noqa: F403
 from resume_gui.analysis.constants import _CATEGORY_DISPLAY_NAMES
+from resume_gui.services.scan_limits import _scan_limit_status_for_user
 
 # Lazy imports for requirement matching — only used when a JD is present.
 # Wrapped in a try/except so a missing dep never breaks the import chain.
