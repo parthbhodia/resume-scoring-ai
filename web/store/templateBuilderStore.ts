@@ -1,11 +1,12 @@
 "use client";
 import { create } from "zustand";
 import type {
-  TBResumeData, TBWorkExperience, TBEducation, TBProject, TBProfile, TBCustomization, TBSkills, TBContentSection,
+  TBResumeData, TBWorkExperience, TBEducation, TBProject, TBProfile, TBCustomization, TBSkills,
+  TBCustomSection, TBSectionSlot,
 } from "@/components/TemplateBuilder/types";
 import {
   DEFAULT_RESUME, DEFAULT_CUSTOMIZATION, DEFAULT_WORK, DEFAULT_EDU, DEFAULT_PROJECT, DEFAULT_SKILLS, DEMO_RESUME,
-  normalizeTbSectionOrder,
+  DEFAULT_CUSTOM_SECTION, customSectionSlot, normalizeSectionOrder,
 } from "@/components/TemplateBuilder/types";
 
 const STORAGE_KEY = "rn_template_builder";
@@ -39,7 +40,8 @@ function safeLoad(): TBResumeData {
       ...parsed,
       skills,
       customization: { ...DEFAULT_CUSTOMIZATION, ...(parsed.customization ?? {}) },
-      sectionOrder: normalizeTbSectionOrder(parsed.sectionOrder),
+      customSections: Array.isArray(parsed.customSections) ? parsed.customSections : [],
+      sectionOrder: normalizeSectionOrder(parsed.sectionOrder, parsed.customSections ?? []),
       hiddenSections: Array.isArray(parsed.hiddenSections) ? parsed.hiddenSections : [],
     };
   } catch {
@@ -74,7 +76,10 @@ export interface TemplateBuilderStore {
   setSkillDescriptions: (value: string) => void;
   setCustomization: (field: keyof TBCustomization, value: string) => void;
   reorderSection: (fromIdx: number, toIdx: number) => void;
-  toggleSectionHidden: (section: TBContentSection) => void;
+  toggleSectionHidden: (slot: TBSectionSlot) => void;
+  addCustomSection: (title?: string) => string;
+  removeCustomSection: (id: string) => void;
+  setCustomSection: (id: string, field: keyof TBCustomSection, value: string) => void;
   reset: () => void;
 }
 
@@ -88,9 +93,11 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
   },
 
   replaceData: (data) => {
+    const customSections = Array.isArray(data.customSections) ? data.customSections : [];
     const normalized: TBResumeData = {
       ...data,
-      sectionOrder: normalizeTbSectionOrder(data.sectionOrder),
+      customSections,
+      sectionOrder: normalizeSectionOrder(data.sectionOrder, customSections),
       hiddenSections: Array.isArray(data.hiddenSections) ? data.hiddenSections : [],
     };
     safeSave(normalized);
@@ -299,12 +306,55 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
     });
   },
 
-  toggleSectionHidden: (section) => {
+  toggleSectionHidden: (slot) => {
     set((s) => {
       const hidden = new Set(s.data.hiddenSections);
-      if (hidden.has(section)) hidden.delete(section);
-      else hidden.add(section);
+      if (hidden.has(slot)) hidden.delete(slot);
+      else hidden.add(slot);
       const data = { ...s.data, hiddenSections: [...hidden] };
+      safeSave(data);
+      return { data };
+    });
+  },
+
+  addCustomSection: (title) => {
+    const section = DEFAULT_CUSTOM_SECTION();
+    if (title?.trim()) section.title = title.trim();
+    const slot = customSectionSlot(section.id);
+    set((s) => {
+      const data = {
+        ...s.data,
+        customSections: [...s.data.customSections, section],
+        sectionOrder: [...s.data.sectionOrder, slot],
+      };
+      safeSave(data);
+      return { data };
+    });
+    return section.id;
+  },
+
+  removeCustomSection: (id) => {
+    const slot = customSectionSlot(id);
+    set((s) => {
+      const data = {
+        ...s.data,
+        customSections: s.data.customSections.filter((c) => c.id !== id),
+        sectionOrder: s.data.sectionOrder.filter((x) => x !== slot),
+        hiddenSections: s.data.hiddenSections.filter((x) => x !== slot),
+      };
+      safeSave(data);
+      return { data };
+    });
+  },
+
+  setCustomSection: (id, field, value) => {
+    set((s) => {
+      const data = {
+        ...s.data,
+        customSections: s.data.customSections.map((c) =>
+          c.id === id ? { ...c, [field]: value } : c
+        ),
+      };
       safeSave(data);
       return { data };
     });

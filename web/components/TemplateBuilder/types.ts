@@ -61,16 +61,37 @@ export interface TBSkills {
   descriptions: string; // newline-separated category lines, e.g. "Languages: Python, Go"
 }
 
-/** Résumé body sections (header/contact always renders first). */
+/** Built-in résumé body sections (header/contact always renders first). */
 export type TBContentSection = "summary" | "experience" | "education" | "projects" | "skills";
 
-export const DEFAULT_SECTION_ORDER: TBContentSection[] = [
+/** Slot id in sectionOrder: core key or `custom:<uuid>`. */
+export type TBSectionSlot = string;
+
+export interface TBCustomSection {
+  id: string;
+  title: string;
+  lines: string; // newline-separated bullets or lines
+}
+
+export const CUSTOM_SECTION_PRESETS = [
+  "Certifications",
+  "Awards & Honors",
+  "Volunteering",
+  "Publications",
+  "Languages",
+  "Leadership & Activities",
+] as const;
+
+export const DEFAULT_CORE_SECTION_ORDER: TBContentSection[] = [
   "summary",
   "experience",
   "education",
   "projects",
   "skills",
 ];
+
+/** @deprecated use DEFAULT_CORE_SECTION_ORDER */
+export const DEFAULT_SECTION_ORDER = DEFAULT_CORE_SECTION_ORDER;
 
 export const TB_SECTION_LABELS: Record<TBContentSection, string> = {
   summary: "Professional Summary",
@@ -80,7 +101,7 @@ export const TB_SECTION_LABELS: Record<TBContentSection, string> = {
   skills: "Skills & Interests",
 };
 
-const SECTION_ALIASES: Record<string, TBContentSection> = {
+const CORE_ALIASES: Record<string, TBContentSection> = {
   summary: "summary",
   experience: "experience",
   work: "experience",
@@ -91,25 +112,67 @@ const SECTION_ALIASES: Record<string, TBContentSection> = {
   skill: "skills",
 };
 
-/** Coerce persisted/prefill section order; append any missing keys. */
-export function normalizeTbSectionOrder(raw?: TBContentSection[] | null): TBContentSection[] {
-  const out: TBContentSection[] = [];
-  for (const key of raw ?? []) {
-    const mapped = SECTION_ALIASES[String(key).toLowerCase()];
-    if (mapped && !out.includes(mapped)) out.push(mapped);
+export function customSectionSlot(id: string): string {
+  return `custom:${id}`;
+}
+
+export function parseCustomSectionId(slot: string): string | null {
+  return slot.startsWith("custom:") ? slot.slice(7) : null;
+}
+
+export function isCoreSectionSlot(slot: string): slot is TBContentSection {
+  return Object.prototype.hasOwnProperty.call(TB_SECTION_LABELS, slot);
+}
+
+export function sectionSlotLabel(slot: string, customSections: TBCustomSection[]): string {
+  const customId = parseCustomSectionId(slot);
+  if (customId) {
+    return customSections.find((c) => c.id === customId)?.title?.trim() || "Custom section";
   }
-  for (const key of DEFAULT_SECTION_ORDER) {
+  if (isCoreSectionSlot(slot)) return TB_SECTION_LABELS[slot];
+  return slot;
+}
+
+export const DEFAULT_CUSTOM_SECTION = (): TBCustomSection => ({
+  id: crypto.randomUUID(),
+  title: "",
+  lines: "",
+});
+
+/** Coerce section order; append missing core keys; keep valid custom slots. */
+export function normalizeSectionOrder(
+  raw: TBSectionSlot[] | null | undefined,
+  customSections: TBCustomSection[] = [],
+): TBSectionSlot[] {
+  const validCustom = new Set(customSections.map((c) => customSectionSlot(c.id)));
+  const out: TBSectionSlot[] = [];
+  for (const slot of raw ?? []) {
+    const s = String(slot).trim();
+    if (!s || out.includes(s)) continue;
+    if (isCoreSectionSlot(s)) {
+      out.push(s);
+      continue;
+    }
+    if (validCustom.has(s)) out.push(s);
+  }
+  for (const key of DEFAULT_CORE_SECTION_ORDER) {
     if (!out.includes(key)) out.push(key);
   }
   return out;
 }
 
-export function mapStructuredSectionOrder(order?: string[]): TBContentSection[] {
+/** @deprecated */
+export const normalizeTbSectionOrder = normalizeSectionOrder;
+
+export function mapStructuredCoreSectionOrder(order?: string[]): TBContentSection[] {
   const mapped = (order ?? [])
-    .map((s) => SECTION_ALIASES[String(s).toLowerCase()])
+    .map((s) => CORE_ALIASES[String(s).toLowerCase()])
     .filter((s): s is TBContentSection => !!s);
-  return normalizeTbSectionOrder(mapped.length ? mapped : undefined);
+  return normalizeSectionOrder(mapped.length ? mapped : undefined).filter(isCoreSectionSlot);
 }
+
+/** @deprecated */
+export const mapStructuredSectionOrder = mapStructuredCoreSectionOrder;
 
 export interface TBResumeData {
   profile: TBProfile;
@@ -118,10 +181,12 @@ export interface TBResumeData {
   projects: TBProject[];
   skills: TBSkills;
   customization: TBCustomization;
-  /** Order of body sections in preview/PDF (after name + contact). */
-  sectionOrder: TBContentSection[];
+  /** Order of body sections in preview/PDF (core keys + `custom:<id>`). */
+  sectionOrder: TBSectionSlot[];
   /** Sections hidden from preview/export; data is kept for re-enable. */
-  hiddenSections: TBContentSection[];
+  hiddenSections: TBSectionSlot[];
+  /** Certifications, awards, volunteering, and other free-form sections. */
+  customSections: TBCustomSection[];
 }
 
 export const DEFAULT_CUSTOMIZATION: TBCustomization = {
@@ -161,15 +226,17 @@ export const DEFAULT_RESUME: TBResumeData = {
   projects: [DEFAULT_PROJECT()],
   skills: DEFAULT_SKILLS(),
   customization: DEFAULT_CUSTOMIZATION,
-  sectionOrder: [...DEFAULT_SECTION_ORDER],
+  sectionOrder: [...DEFAULT_CORE_SECTION_ORDER],
   hiddenSections: [],
+  customSections: [],
 };
 
 // Prefilled demo resume — shown to first-time users so the preview is never blank
 export const DEMO_RESUME: TBResumeData = {
   customization: DEFAULT_CUSTOMIZATION,
-  sectionOrder: [...DEFAULT_SECTION_ORDER],
+  sectionOrder: [...DEFAULT_CORE_SECTION_ORDER],
   hiddenSections: [],
+  customSections: [],
   profile: {
     name: "Alex Johnson",
     email: "alex.johnson@email.com",

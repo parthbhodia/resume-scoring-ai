@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import type { TBResumeData, TBContentSection } from "./types";
+import type { TBResumeData, TBContentSection, TBCustomSection } from "./types";
+import { isCoreSectionSlot, parseCustomSectionId } from "./types";
 import type { ResumeLayoutContext } from "@/lib/resumeLayout";
 import {
   resumeBulletStyle,
@@ -146,4 +147,34 @@ export function renderTbContentSection(
     default:
       return null;
   }
+}
+
+function renderCustomSection(section: TBCustomSection, ctx: ResumeLayoutContext): ReactNode {
+  const title = section.title.trim();
+  const lines = section.lines.split("\n").map((l) => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
+  if (!title && !lines.length) return null;
+  return (
+    <>
+      <div style={resumeSectionTitleStyle(ctx)}>{title || "Additional"}</div>
+      {lines.map((line, i) => (
+        <div key={i} style={resumeBulletStyle(ctx)}>• {line}</div>
+      ))}
+    </>
+  );
+}
+
+export function renderSectionSlot(
+  slot: string,
+  data: TBResumeData,
+  ctx: ResumeLayoutContext,
+): ReactNode {
+  const customId = parseCustomSectionId(slot);
+  if (customId) {
+    const section = data.customSections.find((c) => c.id === customId);
+    return section ? renderCustomSection(section, ctx) : null;
+  }
+  if (isCoreSectionSlot(slot)) {
+    return renderTbContentSection(slot, data, ctx);
+  }
+  return null;
 }

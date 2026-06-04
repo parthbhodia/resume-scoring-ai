@@ -3,8 +3,14 @@
 import { useRef, useState } from "react";
 import type { TemplateBuilderStore } from "@/store/templateBuilderStore";
 import {
+  CUSTOM_SECTION_PRESETS,
   TB_SECTION_LABELS,
+  isCoreSectionSlot,
+  parseCustomSectionId,
+  sectionSlotLabel,
+  type TBCustomSection,
   type TBContentSection,
+  type TBSectionSlot,
 } from "./types";
 
 type EditTab = "profile" | "experience" | "education" | "projects" | "skills";
@@ -19,9 +25,9 @@ const SECTION_EDIT_TAB: Record<TBContentSection, EditTab> = {
 
 const rowStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "22px 1fr auto auto",
+  gridTemplateColumns: "22px 1fr auto auto auto",
   alignItems: "center",
-  gap: 8,
+  gap: 6,
   padding: "10px 11px",
   borderRadius: 8,
   border: "1.5px solid var(--border)",
@@ -41,20 +47,67 @@ const iconBtn: React.CSSProperties = {
   lineHeight: 1,
 };
 
+const inputBase: React.CSSProperties = {
+  width: "100%",
+  padding: "8px 11px",
+  borderRadius: 6,
+  border: "1.5px solid var(--border)",
+  background: "var(--bg)",
+  color: "var(--text)",
+  fontSize: 13,
+  fontFamily: "inherit",
+  boxSizing: "border-box",
+};
+
+const textareaBase: React.CSSProperties = {
+  ...inputBase,
+  resize: "vertical",
+  minHeight: 72,
+  lineHeight: 1.5,
+};
+
+const addBtnStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  background: "none",
+  border: "1.5px dashed var(--border)",
+  borderRadius: 7,
+  color: "var(--accent)",
+  fontSize: 12,
+  fontWeight: 600,
+  padding: "8px 14px",
+  cursor: "pointer",
+  width: "100%",
+  marginTop: 10,
+  fontFamily: "inherit",
+};
+
 export default function TemplateBuilderSectionsPanel({
   store,
   sectionOrder,
   hiddenSections,
+  customSections,
   onEditSection,
+  editingCustomId,
+  onEditCustomSection,
 }: {
   store: TemplateBuilderStore;
-  sectionOrder: TBContentSection[];
-  hiddenSections: TBContentSection[];
+  sectionOrder: TBSectionSlot[];
+  hiddenSections: TBSectionSlot[];
+  customSections: TBCustomSection[];
   onEditSection: (tab: EditTab) => void;
+  editingCustomId: string | null;
+  onEditCustomSection: (id: string | null) => void;
 }) {
   const dragFrom = useRef<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const hidden = new Set(hiddenSections);
+
+  const editingCustom = editingCustomId
+    ? customSections.find((c) => c.id === editingCustomId) ?? null
+    : null;
 
   return (
     <>
@@ -62,15 +115,17 @@ export default function TemplateBuilderSectionsPanel({
         Section order
       </h3>
       <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 14px", lineHeight: 1.5 }}>
-        Drag rows to reorder sections in the preview and PDF. Name and contact always stay at the top.
+        Drag to reorder. Add certifications, awards, volunteering, and more. Name + contact stay at the top.
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {sectionOrder.map((section, idx) => {
-          const isHidden = hidden.has(section);
+        {sectionOrder.map((slot, idx) => {
+          const isHidden = hidden.has(slot);
           const over = dragOver === idx;
+          const customId = parseCustomSectionId(slot);
+          const isCustom = !!customId;
           return (
             <div
-              key={section}
+              key={slot}
               draggable
               onDragStart={() => { dragFrom.current = idx; }}
               onDragEnd={() => {
@@ -94,7 +149,7 @@ export default function TemplateBuilderSectionsPanel({
               style={{
                 ...rowStyle,
                 opacity: isHidden ? 0.55 : 1,
-                borderColor: over ? "var(--accent)" : "var(--border)",
+                borderColor: over ? "var(--accent)" : editingCustomId === customId ? "var(--accent)" : "var(--border)",
                 background: over ? "color-mix(in srgb, var(--accent) 6%, var(--bg))" : "var(--bg)",
               }}
             >
@@ -105,31 +160,122 @@ export default function TemplateBuilderSectionsPanel({
               >
                 ⋮⋮
               </span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-                {TB_SECTION_LABELS[section]}
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", minWidth: 0 }}>
+                {sectionSlotLabel(slot, customSections)}
               </span>
               <button
                 type="button"
                 style={iconBtn}
                 title={isHidden ? "Show in preview" : "Hide from preview"}
-                onClick={() => store.toggleSectionHidden(section)}
+                onClick={() => store.toggleSectionHidden(slot)}
               >
                 {isHidden ? "👁‍🗨" : "👁"}
               </button>
               <button
                 type="button"
                 style={iconBtn}
-                title="Edit section fields"
-                onClick={() => onEditSection(SECTION_EDIT_TAB[section])}
+                title="Edit section"
+                onClick={() => {
+                  if (isCustom && customId) {
+                    onEditCustomSection(editingCustomId === customId ? null : customId);
+                  } else if (isCoreSectionSlot(slot)) {
+                    onEditCustomSection(null);
+                    onEditSection(SECTION_EDIT_TAB[slot]);
+                  }
+                }}
               >
                 ✎
               </button>
+              {isCustom && customId ? (
+                <button
+                  type="button"
+                  style={{ ...iconBtn, color: "var(--red, #ef4444)" }}
+                  title="Remove section"
+                  onClick={() => {
+                    store.removeCustomSection(customId);
+                    if (editingCustomId === customId) onEditCustomSection(null);
+                  }}
+                >
+                  ✕
+                </button>
+              ) : (
+                <span style={{ width: 22 }} />
+              )}
             </div>
           );
         })}
       </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+        {CUSTOM_SECTION_PRESETS.map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            onClick={() => {
+              const id = store.addCustomSection(preset);
+              onEditCustomSection(id);
+            }}
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: "5px 9px",
+              borderRadius: 6,
+              border: "1px solid var(--border)",
+              background: "var(--surface2)",
+              color: "var(--text)",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            + {preset}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        style={addBtnStyle}
+        onClick={() => {
+          const id = store.addCustomSection("Custom Section");
+          onEditCustomSection(id);
+        }}
+      >
+        + Add custom section
+      </button>
+
+      {editingCustom ? (
+        <div style={{
+          marginTop: 16,
+          padding: 14,
+          borderRadius: 8,
+          border: "1px solid var(--border)",
+          background: "var(--surface2)",
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 10 }}>
+            Edit: {editingCustom.title || "Custom section"}
+          </div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>
+            Section title
+          </label>
+          <input
+            style={{ ...inputBase, marginBottom: 10 }}
+            value={editingCustom.title}
+            onChange={(e) => store.setCustomSection(editingCustom.id, "title", e.target.value)}
+            placeholder="Certifications"
+          />
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>
+            Content (one line per bullet)
+          </label>
+          <textarea
+            style={textareaBase}
+            value={editingCustom.lines}
+            onChange={(e) => store.setCustomSection(editingCustom.id, "lines", e.target.value)}
+            placeholder={"AWS Solutions Architect — 2024\nPMP — Project Management Institute"}
+          />
+        </div>
+      ) : null}
+
       <p style={{ fontSize: 11, color: "var(--dim)", margin: "14px 0 0", lineHeight: 1.45 }}>
-        Hidden sections keep your data — turn them back on anytime.
+        Built-in sections: {Object.values(TB_SECTION_LABELS).join(", ")}. Custom sections import from Analyze when present on your résumé.
       </p>
     </>
   );

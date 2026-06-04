@@ -7,9 +7,12 @@ import {
   DEFAULT_PROJECT,
   DEFAULT_RESUME,
   DEFAULT_WORK,
-  mapStructuredSectionOrder,
-  normalizeTbSectionOrder,
+  customSectionSlot,
+  DEFAULT_CUSTOM_SECTION,
+  mapStructuredCoreSectionOrder,
+  normalizeSectionOrder,
   type TBResumeData,
+  type TBCustomSection,
 } from "@/components/TemplateBuilder/types";
 import {
   normalizeStructuredResume,
@@ -17,6 +20,27 @@ import {
 } from "@/store/resumeAnalyzeStore";
 
 const TEMPLATE_BUILDER_STRUCTURED_PREFILL_KEY = "rn_template_builder_structured_prefill";
+
+/** Per-company tech stacks are rendered under jobs in Analyze — skip as standalone sections. */
+const COMPANY_TECH_EXTRA_RE = /^technologies?\s*[\(\-:]/i;
+
+function mapExtraSections(structured: StructuredResume): TBCustomSection[] {
+  const out: TBCustomSection[] = [];
+  for (const extra of structured.extra_sections ?? []) {
+    const title = (extra.title ?? "").trim();
+    if (!title || COMPANY_TECH_EXTRA_RE.test(title)) continue;
+    const lines = (Array.isArray(extra.lines) ? extra.lines : [])
+      .map((l) => String(l).trim())
+      .filter(Boolean);
+    if (!lines.length && !title) continue;
+    out.push({
+      ...DEFAULT_CUSTOM_SECTION(),
+      title,
+      lines: lines.join("\n"),
+    });
+  }
+  return out;
+}
 
 function splitDateRange(raw: string): { startDate: string; endDate: string; current: boolean } {
   const text = (raw ?? "").trim();
@@ -119,7 +143,15 @@ function mapStructuredResumeToTemplateData(structured: StructuredResume): TBResu
       descriptions: descriptionLines.join("\n"),
     },
     customization: DEFAULT_CUSTOMIZATION,
-    sectionOrder: mapStructuredSectionOrder(structured.section_order),
+    ...(() => {
+      const customs = mapExtraSections(structured);
+      const core = mapStructuredCoreSectionOrder(structured.section_order);
+      const customSlots = customs.map((c) => customSectionSlot(c.id));
+      return {
+        customSections: customs,
+        sectionOrder: normalizeSectionOrder([...core, ...customSlots], customs),
+      };
+    })(),
     hiddenSections: [],
   };
 }
@@ -164,9 +196,11 @@ export function consumeTemplateBuilderStructuredPrefill(): TBResumeData | null {
     sessionStorage.removeItem(TEMPLATE_BUILDER_STRUCTURED_PREFILL_KEY);
     const parsed = JSON.parse(raw) as { version?: number; data?: TBResumeData };
     if (parsed.version !== 1 || !parsed.data) return null;
+    const customSections = Array.isArray(parsed.data.customSections) ? parsed.data.customSections : [];
     return {
       ...parsed.data,
-      sectionOrder: normalizeTbSectionOrder(parsed.data.sectionOrder),
+      customSections,
+      sectionOrder: normalizeSectionOrder(parsed.data.sectionOrder, customSections),
       hiddenSections: Array.isArray(parsed.data.hiddenSections) ? parsed.data.hiddenSections : [],
     };
   } catch {

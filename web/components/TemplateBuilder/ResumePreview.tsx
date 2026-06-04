@@ -1,7 +1,7 @@
 "use client";
 import { forwardRef } from "react";
 import type { TBResumeData } from "./types";
-import { renderTbContentSection } from "./renderResumeSections";
+import { renderSectionSlot } from "./renderResumeSections";
 import {
   resolveResumeLayout,
   resumeContactStyle,
@@ -35,9 +35,9 @@ const ResumePreview = forwardRef<HTMLDivElement, { data: TBResumeData }>(functio
         ))}
       </div>
 
-      {sectionOrder.map((section) => {
-        if (hidden.has(section)) return null;
-        return <div key={section}>{renderTbContentSection(section, data, ctx)}</div>;
+      {sectionOrder.map((slot) => {
+        if (hidden.has(slot)) return null;
+        return <div key={slot}>{renderSectionSlot(slot, data, ctx)}</div>;
       })}
     </div>
   );

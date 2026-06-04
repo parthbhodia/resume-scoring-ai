@@ -247,6 +247,7 @@ export default function TemplateBuilderClient() {
   const store = useTemplateBuilderStore();
   const { data, loaded } = store;
   const [activeTab, setActiveTab] = useState<SectionKey>("profile");
+  const [editingCustomId, setEditingCustomId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const { exportPdf: exportHtmlPdf, exporting: isGenerating, error: htmlPdfError } = useHtmlPdfExport();
@@ -394,7 +395,13 @@ export default function TemplateBuilderClient() {
                 store={store}
                 sectionOrder={data.sectionOrder}
                 hiddenSections={data.hiddenSections}
-                onEditSection={(tab) => setActiveTab(tab)}
+                customSections={data.customSections}
+                editingCustomId={editingCustomId}
+                onEditCustomSection={setEditingCustomId}
+                onEditSection={(tab) => {
+                  setEditingCustomId(null);
+                  setActiveTab(tab);
+                }}
               />
             )}
             {activeTab === "profile" && (
