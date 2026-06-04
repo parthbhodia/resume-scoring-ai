@@ -380,6 +380,17 @@ async def api_analyze(request: Request):
     resume_for_rating = (
         _resume_json_for_rating(structured_dict) if structured_dict else candidate_profile
     )
+    # Deterministic verification/match layers should read the same structured source
+    # of truth when available (not potentially stale flat text).
+    resume_for_match = candidate_profile
+    if structured_dict:
+        try:
+            structured_doc = _resume_doc_from_parsed(structured_dict)
+            synthesized = _synthesize_text_from_resume_doc(structured_doc).strip()
+            if synthesized:
+                resume_for_match = synthesized
+        except Exception as exc:
+            logger.warning("api_analyze: structured synthesize for match failed: %s", exc)
 
     try:
         ratings_future = loop.run_in_executor(
@@ -411,7 +422,7 @@ async def api_analyze(request: Request):
     if addressed_gaps:
         ratings = apply_gap_workflow(
             ratings,
-            candidate_profile,
+            resume_for_match,
             addressed_gaps,
             job_description=job_description,
         )
@@ -435,12 +446,12 @@ async def api_analyze(request: Request):
 
     # ── JD requirement match (deterministic layer) ───────────────────────────
     # job_description is always non-empty here (required field checked above).
-    # Use candidate_profile as the resume text — it's the synthesized clean
-    # text the tailor flow passes in.  Failure is non-fatal.
+    # Use structured-synthesized text when available to keep deterministic matching
+    # aligned with the same source-of-truth used for scoring.
     jd_scoring = await loop.run_in_executor(
         None,
         _run_jd_match_pipeline,
-        candidate_profile,
+        resume_for_match,
         job_description,
     )
     payload.update(jd_scoring)
