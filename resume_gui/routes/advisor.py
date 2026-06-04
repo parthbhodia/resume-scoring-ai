@@ -112,6 +112,63 @@ async def api_sync_institution_student(request: Request):
         "user_email": normalized_email,
     })
 
+def _empty_roster_entry(uid_str: str, email: str | None = None) -> dict:
+    return {
+        "user_id": uid_str,
+        "user_email": email,
+        "latest_score": None,
+        "first_score": None,
+        "latest_at": None,
+        "analysis_count": 0,
+        "score_delta": None,
+    }
+
+
+def _merge_scoped_students_into_roster(
+    seen: dict,
+    scope: dict | None,
+    student_ids: list[str],
+) -> None:
+    """Include institution-mapped students even when they have zero analyses."""
+    for row in (scope or {}).get("student_rows") or []:
+        uid_str = str(row.get("student_user_id") or "")
+        if not uid_str or uid_str in seen:
+            continue
+        email = str(row.get("student_email") or "").strip() or None
+        seen[uid_str] = _empty_roster_entry(uid_str, email)
+    for uid in student_ids:
+        uid_str = str(uid)
+        if not uid_str or uid_str in seen:
+            continue
+        seen[uid_str] = _empty_roster_entry(uid_str)
+
+
+def _finalize_roster_entries(seen: dict) -> list[dict]:
+    missing_email_ids = [
+        uid for uid, entry in seen.items() if not str(entry.get("user_email") or "").strip()
+    ]
+    if missing_email_ids:
+        email_map = _email_by_user_id(missing_email_ids)
+        for uid_str, entry in seen.items():
+            if not str(entry.get("user_email") or "").strip():
+                entry["user_email"] = email_map.get(uid_str)
+    for entry in seen.values():
+        first = entry.get("first_score")
+        latest = entry.get("latest_score")
+        if isinstance(first, (int, float)) and isinstance(latest, (int, float)):
+            entry["score_delta"] = latest - first
+        else:
+            entry["score_delta"] = None
+    return sorted(
+        seen.values(),
+        key=lambda x: (
+            x.get("latest_score") is None,
+            -(x.get("latest_score") or 0),
+            str(x.get("user_email") or "").lower(),
+        ),
+    )
+
+
 async def api_cohort_stats(request: Request):
     """GET /api/cohort-stats — aggregate analysis stats across all students.
 
@@ -163,8 +220,11 @@ async def api_cohort_stats(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
     if not rows:
+        seen: dict = {}
+        _merge_scoped_students_into_roster(seen, scope, student_ids)
+        student_roster = _finalize_roster_entries(seen)
         return JSONResponse({
-            "student_count": 0,
+            "student_count": len(seen),
             "analysis_count": 0,
             "tailored_resume_count": 0,
             "avg_overall": None,
@@ -172,7 +232,7 @@ async def api_cohort_stats(request: Request):
             "dimension_avgs": empty_dim_avgs,
             "weakest_dims": [],
             "top_issues": [],
-            "student_roster": [],
+            "student_roster": student_roster,
             "institutions": (scope or {}).get("institutions") or [],
             "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
         })
@@ -241,18 +301,8 @@ async def api_cohort_stats(request: Request):
         if r.get("score") is not None:
             entry["first_score"] = r.get("score")
 
-    email_map = _email_by_user_id(list(seen.keys()))
-    for uid_str, entry in seen.items():
-        if not (entry.get("user_email") or "").strip():
-            entry["user_email"] = email_map.get(uid_str)
-        first = entry.get("first_score")
-        latest = entry.get("latest_score")
-        if isinstance(first, (int, float)) and isinstance(latest, (int, float)):
-            entry["score_delta"] = latest - first
-        else:
-            entry["score_delta"] = None
-
-    student_roster = sorted(seen.values(), key=lambda x: x.get("latest_score") or 0)
+    _merge_scoped_students_into_roster(seen, scope, student_ids)
+    student_roster = _finalize_roster_entries(seen)
 
     weakest_dims = sorted(
         [(dk, dim_avgs[dk]) for dk in dim_keys if dim_avgs[dk] is not None],
