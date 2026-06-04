@@ -10,12 +10,10 @@ import {
   bulletBelongsToCategory,
   bulletMatchesAnalysisCategory,
   countBulletsInCategory,
-  filterIssuesForCategory,
   getRewriteForCategory,
   inferPrimaryCategoryFromBullet,
   isLanguageQualityMicroRewrite,
   isTrivialRewrite,
-  CATEGORY_REWRITE_HINTS,
   type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
 import { apiUrl } from "@/lib/utils";
@@ -200,6 +198,15 @@ const CATEGORY_LABELS: Array<{ key: keyof AnalysisResult["categoryScores"]; labe
   { key: "languageQuality", label: "Language" },
   { key: "technicalBranding", label: "Field & depth" },
 ];
+
+function flaggedBulletFixChip(
+  activeCategory: keyof AnalysisResult["categoryScores"] | null,
+  isLanguageMicroEdit: boolean,
+): string {
+  if (isLanguageMicroEdit) return "Proofreading";
+  if (!activeCategory) return "Fix";
+  return CATEGORY_LABELS.find(c => c.key === activeCategory)?.label ?? "Fix";
+}
 
 // Category icons (SVG paths)
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -2307,10 +2314,10 @@ export default function AnalyzeResume() {
                       && activeCategory === "languageQuality"
                       && isLanguageQualityMicroRewrite(bullet.originalBullet, categoryRewriteBase);
                     const draft = rewriteEdits[safeIdx] ?? categoryRewriteBase;
-                    const bulletIssues = Array.isArray(bullet.issues) ? bullet.issues : [];
-                    const categoryIssues = activeCategory
-                      ? filterIssuesForCategory(bulletIssues, activeCategory)
-                      : bulletIssues;
+                    const fixChipLabel = flaggedBulletFixChip(
+                      activeCategory as keyof AnalysisResult["categoryScores"] | null,
+                      isLanguageMicroEdit,
+                    );
                     const previewMain = previewLineOverrides[safeIdx] ?? bullet.originalBullet;
                     const editorDraft = hasTrustedRewrite
                       ? draft
@@ -2405,6 +2412,18 @@ export default function AnalyzeResume() {
                             <span title="Applied to preview." style={{ marginLeft: 6, color: "var(--green)", fontSize: 10, fontWeight: 800 }}>✓</span>
                           )}
                         </span>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          padding: "3px 8px",
+                          borderRadius: 20,
+                          flexShrink: 0,
+                          background: isLanguageMicroEdit ? "rgba(99,102,241,0.14)" : bBg,
+                          color: isLanguageMicroEdit ? "var(--accent)" : bColor,
+                          border: `1px solid ${isLanguageMicroEdit ? "rgba(99,102,241,0.28)" : bBorderSoft}`,
+                        }}>
+                          {fixChipLabel}
+                        </span>
                         <svg
                           width="18"
                           height="18"
@@ -2423,46 +2442,24 @@ export default function AnalyzeResume() {
                       </button>
                       {isFlaggedAccordionOpen && (
                         <div style={{ padding: "0 14px 14px 14px" }}>
-                      {categoryIssues.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
-                          {categoryIssues.map((iss, j) => (
-                            <span key={j} style={{
-                              fontSize: 10, fontWeight: 500, padding: "2px 8px", borderRadius: 10,
-                              background: "rgba(248,113,113,0.10)", color: "var(--red)",
-                            }}>
-                              {iss}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {/* Only show the generic category hint when there's an
-                          actual rewrite to accompany it — otherwise it reads as
-                          a misleading "fix" on a bullet that has none. */}
-                      {activeCategory && CATEGORY_REWRITE_HINTS[activeCategory]
-                        && hasTrustedRewrite && (
+                      {!hasTrustedRewrite && (
                         <p style={{
                           fontSize: 12,
                           color: "var(--muted)",
-                          lineHeight: 1.55,
+                          lineHeight: 1.5,
                           margin: "0 0 10px",
-                          padding: "8px 10px",
-                          borderRadius: 8,
-                          background: "var(--surface2)",
-                          borderLeft: "3px solid var(--accent)",
                         }}>
-                          {CATEGORY_REWRITE_HINTS[activeCategory]}
+                          No auto-rewrite for this bullet — score still reflects the issue. Edit below or apply your own wording to the preview.
                         </p>
                       )}
                       {hasTrustedRewrite ? (
                         <BulletImprovedEditor
+                          variant="compact"
                           layout="card"
                           value={draft}
                           onChange={v => patchBulletRewrite(safeIdx, v)}
                           onReset={() => patchBulletRewrite(safeIdx, null)}
                           canReset={rewriteEdits[safeIdx] !== undefined}
-                          eyebrow={isLanguageMicroEdit ? "Proofreading" : "AI Improved"}
-                          helperText={isLanguageMicroEdit ? "Tense, spelling, or punctuation" : "Edit below"}
-                          accentColor={isLanguageMicroEdit ? "var(--accent)" : "var(--green)"}
                           minHeight={64}
                           previewLineApplied={previewLineAppliedHere}
                           onReplaceInPreview={() => patchPreviewLine(safeIdx, draft.trim())}
@@ -2478,44 +2475,29 @@ export default function AnalyzeResume() {
                               }}
                               style={{
                                 display: "inline-flex", alignItems: "center", gap: 5,
-                                padding: "4px 11px", borderRadius: 7,
+                                padding: "5px 10px", borderRadius: 7,
                                 border: `1px solid ${copiedBullet === safeIdx ? "rgba(52,211,153,0.5)" : "rgba(52,211,153,0.3)"}`,
                                 background: copiedBullet === safeIdx ? "rgba(52,211,153,0.15)" : "rgba(52,211,153,0.08)",
-                                color: "var(--green)", fontSize: 11, fontWeight: 600,
+                                color: "var(--green)", fontSize: 10.5, fontWeight: 600,
                                 cursor: "pointer", fontFamily: "inherit",
                                 transition: "all 0.15s",
                               }}
                             >
-                              {copiedBullet === safeIdx ? (
-                                <>
-                                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-                                    <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                                  </svg>
-                                  Copied!
-                                </>
-                              ) : (
-                                <>
-                                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-                                    <rect x="4" y="1" width="7" height="8" rx="1" stroke="currentColor" strokeWidth="1.2"/>
-                                    <rect x="1" y="3" width="7" height="8" rx="1" stroke="currentColor" strokeWidth="1.2"/>
-                                  </svg>
-                                  Copy improved
-                                </>
-                              )}
+                              {copiedBullet === safeIdx ? "Copied!" : "Copy"}
                             </button>
                           )}
                         />
                       ) : (
                         <BulletImprovedEditor
+                          variant="compact"
                           layout="card"
+                          suggestionLabel="Your line"
+                          defaultEditing
                           value={editorDraft}
                           onChange={v => patchBulletRewrite(safeIdx, v)}
                           onReset={() => patchBulletRewrite(safeIdx, null)}
                           canReset={rewriteEdits[safeIdx] !== undefined}
-                          eyebrow="Manual edit"
-                          helperText="Start from the original"
                           resetLabel="Reset to original"
-                          accentColor="var(--amber)"
                           minHeight={64}
                           previewLineApplied={previewLineAppliedHere}
                           onReplaceInPreview={() => patchPreviewLine(safeIdx, editorDraft.trim())}
@@ -2531,15 +2513,15 @@ export default function AnalyzeResume() {
                               }}
                               style={{
                                 display: "inline-flex", alignItems: "center", gap: 5,
-                                padding: "4px 11px", borderRadius: 7,
+                                padding: "5px 10px", borderRadius: 7,
                                 border: `1px solid ${copiedBullet === safeIdx ? "rgba(251,191,36,0.55)" : "rgba(251,191,36,0.34)"}`,
                                 background: copiedBullet === safeIdx ? "rgba(251,191,36,0.16)" : "rgba(251,191,36,0.08)",
-                                color: "var(--amber)", fontSize: 11, fontWeight: 600,
+                                color: "var(--amber)", fontSize: 10.5, fontWeight: 600,
                                 cursor: "pointer", fontFamily: "inherit",
                                 transition: "all 0.15s",
                               }}
                             >
-                              {copiedBullet === safeIdx ? "Copied!" : "Copy draft"}
+                              {copiedBullet === safeIdx ? "Copied!" : "Copy"}
                             </button>
                           )}
                         />
