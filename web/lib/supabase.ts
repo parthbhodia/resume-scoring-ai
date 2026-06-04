@@ -1,7 +1,9 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import type { TBResumeData } from "@/components/TemplateBuilder/types";
 import type { ResumeRecord, Criterion, RatingsData } from "./types";
 import { type ProfileFormState, EMPTY_PROFILE } from "./profileStorage";
 import { dispatchResumeLibraryChanged } from "./resumeLibraryEvents";
+import { coerceTemplateBuilderData } from "./coerceTemplateBuilderData";
 
 /* ── Analyze-history types ───────────────────────────────────── */
 // result is typed as Record<string,unknown> here because the DB stores raw
@@ -39,7 +41,26 @@ export type LibraryItem =
       createdAt: string;
       isDefault: false;
       analysis: AnalyzeRecord;
+    }
+  | {
+      kind: "builder";
+      key: string;
+      id: string;
+      title: string;
+      subtitle: string;
+      score: null;
+      createdAt: string;
+      isDefault: false;
+      builder: BuilderResumeRecord;
     };
+
+export interface BuilderResumeRecord {
+  id: string;
+  label: string;
+  data: TBResumeData;
+  createdAt: string;
+  updatedAt: string;
+}
 
 // Lazy singleton — avoids crashing at build time when env vars aren't set
 let _client: SupabaseClient | null = null;
@@ -408,11 +429,110 @@ export async function deleteAnalysis(id: string): Promise<void> {
   if (error) throw error;
 }
 
+/* ── Template Builder cloud saves ────────────────────────────── */
+
+export async function fetchBuilderResumes(limit = 50): Promise<BuilderResumeRecord[]> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.user?.id) return [];
+
+  const { data, error } = await db
+    .from("template_builder_resumes")
+    .select("id, label, data, created_at, updated_at")
+    .eq("user_id", session.user.id)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+
+  const out: BuilderResumeRecord[] = [];
+  for (const row of data ?? []) {
+    const coerced = coerceTemplateBuilderData(row.data);
+    if (!coerced) continue;
+    out.push({
+      id: row.id as string,
+      label: (row.label as string) || "Untitled résumé",
+      data: coerced,
+      createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string,
+    });
+  }
+  return out;
+}
+
+export async function fetchBuilderResumeById(id: string): Promise<BuilderResumeRecord | null> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.user?.id) return null;
+
+  const { data, error } = await db
+    .from("template_builder_resumes")
+    .select("id, label, data, created_at, updated_at")
+    .eq("user_id", session.user.id)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  const coerced = coerceTemplateBuilderData(data.data);
+  if (!coerced) return null;
+
+  return {
+    id: data.id as string,
+    label: (data.label as string) || "Untitled résumé",
+    data: coerced,
+    createdAt: data.created_at as string,
+    updatedAt: data.updated_at as string,
+  };
+}
+
+/** Insert or update a Template Builder draft. Returns row id. */
+export async function upsertBuilderResume(
+  label: string,
+  data: TBResumeData,
+  id?: string | null,
+): Promise<string | null> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.user?.id) return null;
+
+  const now = new Date().toISOString();
+  const row: Record<string, unknown> = {
+    user_id: session.user.id,
+    label: label.trim() || "Untitled résumé",
+    data: data as unknown as Record<string, unknown>,
+    updated_at: now,
+  };
+  if (id) row.id = id;
+
+  const { data: saved, error } = await db
+    .from("template_builder_resumes")
+    .upsert(row, { onConflict: "id" })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  dispatchResumeLibraryChanged();
+  return saved.id as string;
+}
+
+export async function deleteBuilderResume(id: string): Promise<void> {
+  const db = getSupabaseClient();
+  const { error } = await db
+    .from("template_builder_resumes")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+  dispatchResumeLibraryChanged();
+}
+
 /** Unified Library feed: generated/tailored artifacts plus saved Analyze runs. */
 export async function fetchLibraryItems(): Promise<LibraryItem[]> {
-  const [resumes, analyses] = await Promise.all([
+  const [resumes, analyses, builders] = await Promise.all([
     fetchResumes(),
     fetchAnalyses(50),
+    fetchBuilderResumes(50),
   ]);
 
   const tailored: LibraryItem[] = resumes.map((record) => ({
@@ -439,7 +559,19 @@ export async function fetchLibraryItems(): Promise<LibraryItem[]> {
     analysis,
   }));
 
-  return [...tailored, ...analyzed].sort((a, b) => {
+  const builderItems: LibraryItem[] = builders.map((builder) => ({
+    kind: "builder",
+    key: `builder:${builder.id}`,
+    id: builder.id,
+    title: builder.label,
+    subtitle: "Template Builder",
+    score: null,
+    createdAt: builder.updatedAt,
+    isDefault: false,
+    builder,
+  }));
+
+  return [...tailored, ...analyzed, ...builderItems].sort((a, b) => {
     const d = Number(b.isDefault) - Number(a.isDefault);
     if (d !== 0) return d;
     return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");

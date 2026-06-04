@@ -13,7 +13,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import LibraryResumeDetailPanel from "./LibraryResumeDetailPanel";
 import { stashTailorPrefillFromLibrary } from "@/lib/tailorPrefill";
 import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
-import { fetchLibraryItems, getSupabaseClient, type LibraryItem } from "@/lib/supabase";
+import { deleteBuilderResume, fetchLibraryItems, getSupabaseClient, type LibraryItem } from "@/lib/supabase";
 import { RESUME_LIBRARY_CHANGED_EVENT } from "@/lib/resumeLibraryEvents";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
 import { stashTemplateBuilderStructuredPrefillFromAnalysisResult } from "@/lib/templateBuilderPrefill";
@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type SortKey = "recent" | "score" | "name";
-type FilterKey = "all" | "analyzed" | "tailored" | "default";
+type FilterKey = "all" | "analyzed" | "tailored" | "builder" | "default";
 
 /** Aligns with Analyze bullet bands: strong ≥70, improvable 55–69, weak &lt;55 */
 function matchScoreBand(score: number): "strong" | "mid" | "weak" {
@@ -66,6 +66,7 @@ export default function ResumeLibrary({ onUseAsBase }: {
   const searchParams = useSearchParams();
   const selectedFolder = (searchParams?.get("resume") ?? "").trim();
   const selectedAnalysisId = (searchParams?.get("analysis") ?? "").trim();
+  const selectedBuilderId = (searchParams?.get("builder") ?? "").trim();
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -144,17 +145,21 @@ export default function ResumeLibrary({ onUseAsBase }: {
     if (selectedAnalysisId) {
       return items.find(item => item.kind === "analyzed" && item.id === selectedAnalysisId) ?? null;
     }
+    if (selectedBuilderId) {
+      return items.find(item => item.kind === "builder" && item.id === selectedBuilderId) ?? null;
+    }
     if (selectedFolder) {
       return items.find(item => item.kind === "tailored" && item.record.folder === selectedFolder) ?? null;
     }
     return null;
-  }, [items, selectedAnalysisId, selectedFolder]);
+  }, [items, selectedAnalysisId, selectedBuilderId, selectedFolder]);
 
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase();
     let arr = items.filter(item => {
       if (kindFilter === "analyzed" && item.kind !== "analyzed") return false;
       if (kindFilter === "tailored" && item.kind !== "tailored") return false;
+      if (kindFilter === "builder" && item.kind !== "builder") return false;
       if (kindFilter === "default" && !item.isDefault) return false;
       if (!f) return true;
       const issueText = item.kind === "analyzed" ? getAnalysisIssues(item).join(" ") : "";
@@ -173,6 +178,10 @@ export default function ResumeLibrary({ onUseAsBase }: {
   const openItem = (item: LibraryItem) => {
     if (item.kind === "analyzed") {
       router.push(`/?view=library&analysis=${encodeURIComponent(item.id)}`);
+      return;
+    }
+    if (item.kind === "builder") {
+      router.push(`/?view=library&builder=${encodeURIComponent(item.id)}`);
       return;
     }
     router.push(`/?view=library&resume=${encodeURIComponent(item.record.folder)}`);
@@ -217,6 +226,25 @@ export default function ResumeLibrary({ onUseAsBase }: {
       // ignore and still route to builder
     }
     router.push("/template-builder/");
+  };
+
+  const openBuilderDraft = (item: LibraryItem) => {
+    if (item.kind !== "builder") return;
+    router.push(`/template-builder/?builder=${encodeURIComponent(item.id)}`);
+  };
+
+  const deleteBuilderItem = async (item: LibraryItem) => {
+    if (item.kind !== "builder") return;
+    if (!window.confirm(`Delete “${item.title}” from Resume Hub?`)) return;
+    try {
+      await deleteBuilderResume(item.id);
+      setItems(prev => prev.filter(i => i.key !== item.key));
+      if (selectedBuilderId === item.id) {
+        router.push("/?view=library");
+      }
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -494,6 +522,7 @@ export default function ResumeLibrary({ onUseAsBase }: {
                 <option value="all">All</option>
                 <option value="analyzed">Analyzed</option>
                 <option value="tailored">Tailored</option>
+                <option value="builder">Builder drafts</option>
                 <option value="default">Default</option>
               </select>
               <select
@@ -538,7 +567,9 @@ export default function ResumeLibrary({ onUseAsBase }: {
                     isSelected={
                       item.kind === "analyzed"
                         ? selectedAnalysisId === item.id
-                        : selectedFolder === item.record.folder
+                        : item.kind === "builder"
+                          ? selectedBuilderId === item.id
+                          : selectedFolder === item.record.folder
                     }
                     stagger={Math.min(i % 5, 4)}
                     onOpen={() => openItem(item)}
@@ -546,6 +577,7 @@ export default function ResumeLibrary({ onUseAsBase }: {
                     onOpenAnalysis={() => openAnalysis(item)}
                     onTailorAnalysis={() => tailorFromAnalysis(item)}
                     onEditInTemplateBuilder={() => editAnalysisInTemplateBuilder(item)}
+                    onOpenInBuilder={() => openBuilderDraft(item)}
                   />
                 ))}
               </div>
@@ -553,7 +585,7 @@ export default function ResumeLibrary({ onUseAsBase }: {
           </div>
         </div>
 
-        {selectedFolder || selectedAnalysisId ? (
+        {selectedFolder || selectedAnalysisId || selectedBuilderId ? (
           <LibraryResumeDetailPanel
             item={selectedItem}
             loading={loading}
@@ -570,6 +602,12 @@ export default function ResumeLibrary({ onUseAsBase }: {
             }}
             onEditInTemplateBuilder={() => {
               if (selectedItem) editAnalysisInTemplateBuilder(selectedItem);
+            }}
+            onOpenInBuilder={() => {
+              if (selectedItem) openBuilderDraft(selectedItem);
+            }}
+            onDeleteBuilder={() => {
+              if (selectedItem) void deleteBuilderItem(selectedItem);
             }}
           />
         ) : null}
@@ -633,6 +671,7 @@ function ResumeCard({
   onOpenAnalysis,
   onTailorAnalysis,
   onEditInTemplateBuilder,
+  onOpenInBuilder,
 }: {
   item: LibraryItem;
   isSelected?: boolean;
@@ -642,6 +681,7 @@ function ResumeCard({
   onOpenAnalysis: () => void;
   onTailorAnalysis: () => void;
   onEditInTemplateBuilder: () => void;
+  onOpenInBuilder: () => void;
 }) {
   const displayPdf = useMemo(
     () => item.kind === "tailored" ? displayPdfUrlForResume(item.record) : null,
@@ -686,13 +726,29 @@ function ResumeCard({
         onClick={e => {
           e.stopPropagation();
           if (item.kind === "analyzed") onOpenAnalysis();
+          else if (item.kind === "builder") onOpenInBuilder();
           else onOpen();
         }}
         style={actionBtnPrimary}
       >
-        {item.kind === "analyzed" ? "Open analysis" : "Details"}
+        {item.kind === "analyzed"
+          ? "Open analysis"
+          : item.kind === "builder"
+            ? "Open in Builder"
+            : "Details"}
       </Button>
-      {item.kind === "analyzed" ? (
+      {item.kind === "builder" ? (
+        <Button
+          type="button"
+          onClick={e => {
+            e.stopPropagation();
+            onOpen();
+          }}
+          style={actionBtnGhost}
+        >
+          Details
+        </Button>
+      ) : item.kind === "analyzed" ? (
         <>
           <Button
             type="button"
@@ -778,10 +834,33 @@ function ResumeCard({
           onOpen();
         }
       }}
-      aria-label={`${item.title}, ${item.subtitle}. Open ${item.kind === "analyzed" ? "analysis" : "resume"}.`}
+      aria-label={`${item.title}, ${item.subtitle}. Open ${item.kind === "analyzed" ? "analysis" : item.kind === "builder" ? "builder draft" : "resume"}.`}
     >
       <div className="library-card-preview">
-        {item.kind === "analyzed" ? (
+        {item.kind === "builder" ? (
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              padding: 18,
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              background:
+                "radial-gradient(circle at top right, rgba(196,121,58,0.14), transparent 45%), linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)",
+            }}
+          >
+            <Badge variant="secondary" style={kindBadgeBuilder}>Builder draft</Badge>
+            <div style={{ display: "grid", gap: 6 }}>
+              <div style={{ height: 6, width: "70%", borderRadius: 99, background: "var(--border)" }} />
+              <div style={{ height: 6, width: "88%", borderRadius: 99, background: "var(--border)" }} />
+              <div style={{ height: 6, width: "52%", borderRadius: 99, background: "var(--border)" }} />
+            </div>
+            <Badge variant="outline" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              Editable layout
+            </Badge>
+          </div>
+        ) : item.kind === "analyzed" ? (
           <div
             style={{
               width: "100%",
@@ -853,7 +932,13 @@ function ResumeCard({
 
       <div className="library-card-body">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-          {item.kind === "analyzed" ? <Badge variant="secondary" style={kindBadgeAnalyzed}>Analyzed</Badge> : scoreBadge}
+          {item.kind === "analyzed" ? (
+            <Badge variant="secondary" style={kindBadgeAnalyzed}>Analyzed</Badge>
+          ) : item.kind === "builder" ? (
+            <Badge variant="secondary" style={kindBadgeBuilder}>Builder</Badge>
+          ) : (
+            scoreBadge
+          )}
           <time dateTime={item.createdAt} style={{ fontSize: 11, color: "var(--dim)", whiteSpace: "nowrap", flexShrink: 0 }}>
             {dateStr}
           </time>
@@ -919,6 +1004,17 @@ const kindBadgeAnalyzed: CSSProperties = {
   fontWeight: 800,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
+  background: "var(--accent-bg)",
+  color: "var(--accent)",
+};
+
+const kindBadgeBuilder: CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  padding: "4px 10px",
+  borderRadius: "var(--radius-pill, 99px)",
   background: "var(--accent-bg)",
   color: "var(--accent)",
 };

@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTemplateBuilderStore } from "@/store/templateBuilderStore";
+import { getSupabaseClient, fetchBuilderResumeById, upsertBuilderResume } from "@/lib/supabase";
 import type { TemplateBuilderStore } from "@/store/templateBuilderStore";
 import { useHtmlPdfExport } from "@/hooks/useHtmlPdfExport";
 import ResumePreview from "./ResumePreview";
@@ -244,19 +246,96 @@ const TABS: { key: SectionKey; label: string; icon: string }[] = [
 ];
 
 export default function TemplateBuilderClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const store = useTemplateBuilderStore();
   const { data, loaded } = store;
   const [activeTab, setActiveTab] = useState<SectionKey>("profile");
   const [editingCustomId, setEditingCustomId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [savedBuilderId, setSavedBuilderId] = useState<string | null>(null);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [cloudLoadError, setCloudLoadError] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const { exportPdf: exportHtmlPdf, exporting: isGenerating, error: htmlPdfError } = useHtmlPdfExport();
+
+  const builderIdFromUrl = (searchParams?.get("builder") ?? "").trim();
+
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      setSignedIn(!!session?.user?.id);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSignedIn(!!session?.user?.id);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     store.loadFromStorage();
     const prefill = consumeTemplateBuilderStructuredPrefill();
     if (prefill) store.replaceData(prefill);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!loaded || !builderIdFromUrl) return;
+    let cancelled = false;
+    setCloudLoadError(null);
+    void fetchBuilderResumeById(builderIdFromUrl)
+      .then((row) => {
+        if (cancelled) return;
+        if (!row) {
+          setCloudLoadError("Saved résumé not found or you are signed out.");
+          return;
+        }
+        store.replaceData(row.data);
+        setSavedBuilderId(row.id);
+        setSaveMessage(`Loaded “${row.label}” from Resume Hub`);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setCloudLoadError(e instanceof Error ? e.message : String(e));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [loaded, builderIdFromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSaveToLibrary = useCallback(async () => {
+    setSaveError(null);
+    setSaveMessage(null);
+    if (signedIn === false) {
+      setSaveError("Sign in to save this résumé to Resume Hub.");
+      return;
+    }
+    const defaultLabel = data.profile.name?.trim() || "My résumé";
+    const label = typeof window !== "undefined"
+      ? window.prompt("Name for Resume Hub", defaultLabel)?.trim()
+      : defaultLabel;
+    if (!label) return;
+
+    setSaveBusy(true);
+    try {
+      const existingId = savedBuilderId ?? (builderIdFromUrl || undefined);
+      const id = await upsertBuilderResume(label, data, existingId);
+      if (!id) {
+        setSaveError("Sign in to save this résumé to Resume Hub.");
+        return;
+      }
+      setSavedBuilderId(id);
+      setSaveMessage("Saved to Resume Hub");
+      if (builderIdFromUrl !== id) {
+        router.replace(`/template-builder/?builder=${encodeURIComponent(id)}`);
+      }
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaveBusy(false);
+    }
+  }, [signedIn, data, savedBuilderId, builderIdFromUrl, router]);
 
   const handleDownload = useCallback(() => {
     setDownloadError(null);
@@ -301,13 +380,41 @@ export default function TemplateBuilderClient() {
             Free
           </span>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {(saveMessage || saveError || cloudLoadError) && (
+            <span
+              style={{
+                fontSize: 11,
+                color: saveError || cloudLoadError ? "var(--red, #ef4444)" : "var(--green, #047857)",
+                maxWidth: 220,
+              }}
+            >
+              {saveError || cloudLoadError || saveMessage}
+            </span>
+          )}
           <button
             onClick={store.reset}
             title="Restore example resume"
             style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: "5px 11px", cursor: "pointer" }}
           >
             Load Example
+          </button>
+          <button
+            onClick={() => void handleSaveToLibrary()}
+            disabled={saveBusy || signedIn === false}
+            title={signedIn === false ? "Sign in to save to Resume Hub" : savedBuilderId ? "Update saved copy in Resume Hub" : "Save to Resume Hub"}
+            style={{
+              fontSize: 12,
+              color: signedIn === false ? "var(--dim)" : "var(--text)",
+              background: "var(--surface2)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "5px 11px",
+              cursor: saveBusy || signedIn === false ? "not-allowed" : "pointer",
+              opacity: saveBusy ? 0.7 : 1,
+            }}
+          >
+            {saveBusy ? "Saving…" : savedBuilderId ? "Update in Hub" : "Save to Hub"}
           </button>
           {(downloadError || htmlPdfError) && (
             <span style={{ fontSize: 11, color: "var(--red, #ef4444)", maxWidth: 200 }}>{downloadError || htmlPdfError}</span>

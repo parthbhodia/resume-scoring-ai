@@ -61,6 +61,8 @@ export default function LibraryResumeDetailPanel({
   onOpenAnalysis,
   onTailorAnalysis,
   onEditInTemplateBuilder,
+  onOpenInBuilder,
+  onDeleteBuilder,
 }: {
   item: LibraryItem | null;
   loading: boolean;
@@ -70,6 +72,8 @@ export default function LibraryResumeDetailPanel({
   onOpenAnalysis: () => void;
   onTailorAnalysis: () => void;
   onEditInTemplateBuilder: () => void;
+  onOpenInBuilder: () => void;
+  onDeleteBuilder: () => void;
 }) {
   const [user, setUser] = useState<User | null>(null);
 
@@ -80,6 +84,7 @@ export default function LibraryResumeDetailPanel({
 
   const meta = item?.kind === "tailored" ? item.record : null;
   const analysis = item?.kind === "analyzed" ? item.analysis : null;
+  const builder = item?.kind === "builder" ? item.builder : null;
   const analysisJson = analysis?.result && typeof analysis.result === "object"
     ? analysis.result as Record<string, unknown>
     : {};
@@ -96,7 +101,7 @@ export default function LibraryResumeDetailPanel({
     ? new Date(createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
     : "—";
 
-  const titleShort = item?.kind === "analyzed"
+  const titleShort = item?.kind === "analyzed" || item?.kind === "builder"
     ? item.title
     : meta
     ? `${meta.company}${meta.role ? ` · ${abbrevRole(meta.role)}` : ""}`
@@ -130,7 +135,11 @@ export default function LibraryResumeDetailPanel({
       >
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-            {item?.kind === "analyzed" ? "Analysis details" : "Résumé details"}
+            {item?.kind === "analyzed"
+              ? "Analysis details"
+              : item?.kind === "builder"
+                ? "Builder draft"
+                : "Résumé details"}
           </div>
           <h2
             style={{
@@ -170,6 +179,16 @@ export default function LibraryResumeDetailPanel({
           <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, margin: 0 }}>
             This résumé is not in your library. It may have been removed or the link is outdated.
           </p>
+        )}
+
+        {!loading && !notFound && item?.kind === "builder" && builder && (
+          <BuilderDraftDetails
+            title={item.title}
+            updatedAt={dateShort}
+            profileName={builder.data.profile?.name?.trim() || "—"}
+            onOpenInBuilder={onOpenInBuilder}
+            onDelete={onDeleteBuilder}
+          />
         )}
 
         {!loading && !notFound && item?.kind === "analyzed" && analysis && (
@@ -335,6 +354,56 @@ export default function LibraryResumeDetailPanel({
         )}
       </div>
     </aside>
+  );
+}
+
+function BuilderDraftDetails({
+  title,
+  updatedAt,
+  profileName,
+  onOpenInBuilder,
+  onDelete,
+}: {
+  title: string;
+  updatedAt: string;
+  profileName: string;
+  onOpenInBuilder: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <>
+      <div
+        style={{
+          borderRadius: 12,
+          border: "1px solid var(--border)",
+          background: "var(--surface2)",
+          padding: 14,
+          marginBottom: 16,
+        }}
+      >
+        <Badge variant="secondary" style={{ marginBottom: 10 }}>Template Builder</Badge>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "var(--text)", lineHeight: 1.3 }}>{title}</h3>
+        <p style={{ margin: "5px 0 0", fontSize: 12, color: "var(--muted)" }}>Last updated {updatedAt}</p>
+      </div>
+
+      <div style={{ marginBottom: 18, display: "grid", gap: 12 }}>
+        <MetaRow label="Name on résumé" value={profileName} />
+        <MetaRow label="Type" value="Editable builder draft" />
+      </div>
+
+      <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, margin: "0 0 16px" }}>
+        Opens in Template Builder with your saved sections, entries, and style. Download PDF from the builder when you are ready.
+      </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <Button type="button" onClick={onOpenInBuilder} size="lg" style={{ width: "100%" }}>
+          Open in Builder
+        </Button>
+        <Button type="button" onClick={onDelete} variant="outline" size="lg" style={{ width: "100%", color: "var(--red)" }}>
+          Delete from Hub
+        </Button>
+      </div>
+    </>
   );
 }
 
