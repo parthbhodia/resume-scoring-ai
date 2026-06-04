@@ -256,13 +256,31 @@ export default function TemplateBuilderClient() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [savedBuilderId, setSavedBuilderId] = useState<string | null>(null);
   const [saveBusy, setSaveBusy] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [cloudLoadError, setCloudLoadError] = useState<string | null>(null);
+  const [savedLabel, setSavedLabel] = useState<string | null>(null);
+  const [saveFlash, setSaveFlash] = useState(false);
+  const [feedbackToast, setFeedbackToast] = useState<{
+    kind: "success" | "error" | "info";
+    message: string;
+  } | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const { exportPdf: exportHtmlPdf, exporting: isGenerating, error: htmlPdfError } = useHtmlPdfExport();
 
   const builderIdFromUrl = (searchParams?.get("builder") ?? "").trim();
+
+  const showFeedback = useCallback((kind: "success" | "error" | "info", message: string) => {
+    setFeedbackToast({ kind, message });
+    if (kind === "success") {
+      setSaveFlash(true);
+      window.setTimeout(() => setSaveFlash(false), 2500);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!feedbackToast) return;
+    const ms = feedbackToast.kind === "error" ? 8000 : 5200;
+    const t = window.setTimeout(() => setFeedbackToast(null), ms);
+    return () => window.clearTimeout(t);
+  }, [feedbackToast]);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -284,58 +302,66 @@ export default function TemplateBuilderClient() {
   useEffect(() => {
     if (!loaded || !builderIdFromUrl) return;
     let cancelled = false;
-    setCloudLoadError(null);
     void fetchBuilderResumeById(builderIdFromUrl)
       .then((row) => {
         if (cancelled) return;
         if (!row) {
-          setCloudLoadError("Saved résumé not found or you are signed out.");
+          showFeedback("error", "Saved résumé not found, or you need to sign in.");
           return;
         }
         store.replaceData(row.data);
         setSavedBuilderId(row.id);
-        setSaveMessage(`Loaded “${row.label}” from Resume Hub`);
+        setSavedLabel(row.label);
+        showFeedback("info", `Loaded “${row.label}” from Resume Hub`);
       })
       .catch((e: unknown) => {
         if (!cancelled) {
-          setCloudLoadError(e instanceof Error ? e.message : String(e));
+          showFeedback("error", e instanceof Error ? e.message : String(e));
         }
       });
     return () => { cancelled = true; };
-  }, [loaded, builderIdFromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loaded, builderIdFromUrl, showFeedback]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSaveToLibrary = useCallback(async () => {
-    setSaveError(null);
-    setSaveMessage(null);
     if (signedIn === false) {
-      setSaveError("Sign in to save this résumé to Resume Hub.");
+      showFeedback("error", "Sign in to save this résumé to Resume Hub.");
       return;
     }
-    const defaultLabel = data.profile.name?.trim() || "My résumé";
+    const defaultLabel = savedLabel?.trim() || data.profile.name?.trim() || "My résumé";
     const label = typeof window !== "undefined"
       ? window.prompt("Name for Resume Hub", defaultLabel)?.trim()
       : defaultLabel;
-    if (!label) return;
+    if (!label) {
+      showFeedback("info", "Save cancelled — no name entered.");
+      return;
+    }
 
+    const isUpdate = !!(savedBuilderId ?? builderIdFromUrl);
     setSaveBusy(true);
     try {
       const existingId = savedBuilderId ?? (builderIdFromUrl || undefined);
       const id = await upsertBuilderResume(label, data, existingId);
       if (!id) {
-        setSaveError("Sign in to save this résumé to Resume Hub.");
+        showFeedback("error", "Sign in to save this résumé to Resume Hub.");
         return;
       }
       setSavedBuilderId(id);
-      setSaveMessage("Saved to Resume Hub");
+      setSavedLabel(label);
+      showFeedback(
+        "success",
+        isUpdate
+          ? `Updated “${label}” in Resume Hub`
+          : `Saved “${label}” to Resume Hub`,
+      );
       if (builderIdFromUrl !== id) {
         router.replace(`/template-builder/?builder=${encodeURIComponent(id)}`);
       }
     } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : String(e));
+      showFeedback("error", e instanceof Error ? e.message : String(e));
     } finally {
       setSaveBusy(false);
     }
-  }, [signedIn, data, savedBuilderId, builderIdFromUrl, router]);
+  }, [signedIn, data, savedBuilderId, savedLabel, builderIdFromUrl, router, showFeedback]);
 
   const handleDownload = useCallback(() => {
     setDownloadError(null);
@@ -358,8 +384,48 @@ export default function TemplateBuilderClient() {
 
   const c = data.customization;
 
+  const toastBg =
+    feedbackToast?.kind === "success"
+      ? "rgba(4, 120, 87, 0.96)"
+      : feedbackToast?.kind === "error"
+        ? "rgba(185, 28, 28, 0.96)"
+        : "rgba(30, 41, 59, 0.96)";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, overflow: "hidden" }}>
+      {feedbackToast ? (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 18,
+            zIndex: 1200,
+            maxWidth: "min(440px, calc(100vw - 32px))",
+            padding: "12px 16px",
+            borderRadius: 12,
+            background: toastBg,
+            border: "1px solid rgba(255,255,255,0.12)",
+            boxShadow: "0 14px 30px rgba(2,6,23,0.35)",
+            color: "#f8fafc",
+            fontSize: 13,
+            fontWeight: 600,
+            lineHeight: 1.45,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+          }}
+        >
+          {feedbackToast.kind === "success" ? (
+            <svg width="18" height="18" viewBox="0 0 12 12" fill="none" aria-hidden style={{ flexShrink: 0, marginTop: 1 }}>
+              <path d="M2 6.5 4.5 9 10 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : null}
+          <span>{feedbackToast.message}</span>
+        </div>
+      ) : null}
+
       {/* ── Top Bar ─────────────────────────────────────────── */}
       <div style={{
         display: "flex",
@@ -381,17 +447,28 @@ export default function TemplateBuilderClient() {
           </span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {(saveMessage || saveError || cloudLoadError) && (
+          {saveFlash ? (
             <span
+              role="status"
               style={{
-                fontSize: 11,
-                color: saveError || cloudLoadError ? "var(--red, #ef4444)" : "var(--green, #047857)",
-                maxWidth: 220,
+                fontSize: 12,
+                color: "var(--green-ink, #047857)",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
               }}
             >
-              {saveError || cloudLoadError || saveMessage}
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+                <path d="M2 6.5 4.5 9 10 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Saved
             </span>
-          )}
+          ) : savedLabel && savedBuilderId ? (
+            <span style={{ fontSize: 11, color: "var(--muted)", maxWidth: 160 }} title="Cloud copy in Resume Hub">
+              Hub: {savedLabel}
+            </span>
+          ) : null}
           <button
             onClick={store.reset}
             title="Restore example resume"
@@ -414,7 +491,7 @@ export default function TemplateBuilderClient() {
               opacity: saveBusy ? 0.7 : 1,
             }}
           >
-            {saveBusy ? "Saving…" : savedBuilderId ? "Update in Hub" : "Save to Hub"}
+            {saveBusy ? "Saving…" : saveFlash ? "Saved ✓" : savedBuilderId ? "Update in Hub" : "Save to Hub"}
           </button>
           {(downloadError || htmlPdfError) && (
             <span style={{ fontSize: 11, color: "var(--red, #ef4444)", maxWidth: 200 }}>{downloadError || htmlPdfError}</span>
