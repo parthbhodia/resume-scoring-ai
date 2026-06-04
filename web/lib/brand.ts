@@ -5,6 +5,15 @@
 
 export type BrandVariant = "resunova" | "umbc";
 
+/** UMBC institutional colors — https://styleguide.umbc.edu/umbc-colors/ */
+export const UMBC_BRAND = {
+  gold: "#fdb515",
+  black: "#000000",
+  white: "#ffffff",
+  /** Slightly deeper gold for gradients only (still on-brand family). */
+  goldDeep: "#e5a000",
+} as const;
+
 /** Public site + legal pages */
 export const SITE_URL       = "https://www.resunova.io";
 export const CONTACT_EMAIL  = "contact@resunova.io";

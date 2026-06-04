@@ -1,5 +1,6 @@
 "use client";
 import type { CSSProperties } from "react";
+import { UMBC_BRAND } from "@/lib/brand";
 /**
  * BrandLogo — shared logo primitives used by LandingPage + AppShell.
  *
@@ -15,7 +16,7 @@ interface LogoMarkProps {
 }
 
 export function LogoMark({ size = 28, variant = "resunova" }: LogoMarkProps) {
-  const markColor = variant === "umbc" ? "#b8860b" : "#c4793a";
+  const markColor = variant === "umbc" ? UMBC_BRAND.gold : "#c4793a";
   return (
     <svg
       width={size}
