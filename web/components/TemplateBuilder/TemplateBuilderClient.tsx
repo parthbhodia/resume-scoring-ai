@@ -7,6 +7,7 @@ import ResumePreview from "./ResumePreview";
 import type { TBFont } from "./types";
 import { PAGE_WIDTH_OPTIONS, STYLE_PRESETS } from "./templateStyles";
 import { apiUrl } from "@/lib/utils";
+import { consumeTemplateBuilderStructuredPrefill } from "@/lib/templateBuilderPrefill";
 
 /* ── Shared style helpers ──────────────────────────────────────── */
 const inputBase: React.CSSProperties = {
@@ -83,6 +84,17 @@ const removeBtnStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: "2px 4px",
   borderRadius: 4,
+};
+
+const orderBtnStyle: React.CSSProperties = {
+  background: "var(--surface2)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
+  fontSize: 11,
+  cursor: "pointer",
+  padding: "2px 6px",
+  borderRadius: 4,
+  lineHeight: 1.2,
 };
 
 const dividerStyle: React.CSSProperties = {
@@ -238,6 +250,8 @@ export default function TemplateBuilderClient() {
 
   useEffect(() => {
     store.loadFromStorage();
+    const prefill = consumeTemplateBuilderStructuredPrefill();
+    if (prefill) store.replaceData(prefill);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDownload = useCallback(() => {
@@ -497,9 +511,27 @@ function ExperienceSection({ store, data }: { store: StoreType; data: StoreType[
           {idx > 0 && <hr style={dividerStyle} />}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span style={ENTRY_LABEL_STYLE}>{w.company || w.jobTitle || `Position ${idx + 1}`}</span>
-            {data.workExperiences.length > 1 && (
-              <button style={removeBtnStyle} onClick={() => store.removeWork(w.id)}>✕ Remove</button>
-            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                style={{ ...orderBtnStyle, opacity: idx === 0 ? 0.45 : 1 }}
+                onClick={() => store.moveWork(idx, idx - 1)}
+                disabled={idx === 0}
+                title="Move up"
+              >
+                ↑
+              </button>
+              <button
+                style={{ ...orderBtnStyle, opacity: idx === data.workExperiences.length - 1 ? 0.45 : 1 }}
+                onClick={() => store.moveWork(idx, idx + 1)}
+                disabled={idx === data.workExperiences.length - 1}
+                title="Move down"
+              >
+                ↓
+              </button>
+              {data.workExperiences.length > 1 && (
+                <button style={removeBtnStyle} onClick={() => store.removeWork(w.id)}>✕ Remove</button>
+              )}
+            </div>
           </div>
           <Row>
             <Field label="Job Title" half>
@@ -563,9 +595,27 @@ function EducationSection({ store, data }: { store: StoreType; data: StoreType["
           {idx > 0 && <hr style={dividerStyle} />}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span style={ENTRY_LABEL_STYLE}>{e.school || `School ${idx + 1}`}</span>
-            {data.educations.length > 1 && (
-              <button style={removeBtnStyle} onClick={() => store.removeEducation(e.id)}>✕ Remove</button>
-            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                style={{ ...orderBtnStyle, opacity: idx === 0 ? 0.45 : 1 }}
+                onClick={() => store.moveEducation(idx, idx - 1)}
+                disabled={idx === 0}
+                title="Move up"
+              >
+                ↑
+              </button>
+              <button
+                style={{ ...orderBtnStyle, opacity: idx === data.educations.length - 1 ? 0.45 : 1 }}
+                onClick={() => store.moveEducation(idx, idx + 1)}
+                disabled={idx === data.educations.length - 1}
+                title="Move down"
+              >
+                ↓
+              </button>
+              {data.educations.length > 1 && (
+                <button style={removeBtnStyle} onClick={() => store.removeEducation(e.id)}>✕ Remove</button>
+              )}
+            </div>
           </div>
           <FieldWrap>
             <Field label="School / University">
@@ -622,9 +672,27 @@ function ProjectsSection({ store, data }: { store: StoreType; data: StoreType["d
           {idx > 0 && <hr style={dividerStyle} />}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span style={ENTRY_LABEL_STYLE}>{p.name || `Project ${idx + 1}`}</span>
-            {data.projects.length > 1 && (
-              <button style={removeBtnStyle} onClick={() => store.removeProject(p.id)}>✕ Remove</button>
-            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                style={{ ...orderBtnStyle, opacity: idx === 0 ? 0.45 : 1 }}
+                onClick={() => store.moveProject(idx, idx - 1)}
+                disabled={idx === 0}
+                title="Move up"
+              >
+                ↑
+              </button>
+              <button
+                style={{ ...orderBtnStyle, opacity: idx === data.projects.length - 1 ? 0.45 : 1 }}
+                onClick={() => store.moveProject(idx, idx + 1)}
+                disabled={idx === data.projects.length - 1}
+                title="Move down"
+              >
+                ↓
+              </button>
+              {data.projects.length > 1 && (
+                <button style={removeBtnStyle} onClick={() => store.removeProject(p.id)}>✕ Remove</button>
+              )}
+            </div>
           </div>
           <Row>
             <Field label="Project Name" half>

@@ -53,16 +53,20 @@ export interface TemplateBuilderStore {
   data: TBResumeData;
   loaded: boolean;
   loadFromStorage: () => void;
+  replaceData: (data: TBResumeData) => void;
   setProfile: (field: keyof TBProfile, value: string) => void;
   setWork: (id: string, field: keyof TBWorkExperience, value: string | boolean) => void;
   addWork: () => void;
   removeWork: (id: string) => void;
+  moveWork: (fromIdx: number, toIdx: number) => void;
   setEducation: (id: string, field: keyof TBEducation, value: string) => void;
   addEducation: () => void;
   removeEducation: (id: string) => void;
+  moveEducation: (fromIdx: number, toIdx: number) => void;
   setProject: (id: string, field: keyof TBProject, value: string) => void;
   addProject: () => void;
   removeProject: (id: string) => void;
+  moveProject: (fromIdx: number, toIdx: number) => void;
   setFeaturedSkill: (idx: number, skill: string, rating: number) => void;
   setSkillDescriptions: (value: string) => void;
   setCustomization: (field: keyof TBCustomization, value: string) => void;
@@ -75,6 +79,11 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
 
   loadFromStorage: () => {
     const data = safeLoad();
+    set({ data, loaded: true });
+  },
+
+  replaceData: (data) => {
+    safeSave(data);
     set({ data, loaded: true });
   },
 
@@ -115,6 +124,26 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
     });
   },
 
+  moveWork: (fromIdx, toIdx) => {
+    set((s) => {
+      const arr = [...s.data.workExperiences];
+      if (
+        fromIdx < 0 ||
+        toIdx < 0 ||
+        fromIdx >= arr.length ||
+        toIdx >= arr.length ||
+        fromIdx === toIdx
+      ) {
+        return s;
+      }
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      const data = { ...s.data, workExperiences: arr };
+      safeSave(data);
+      return { data };
+    });
+  },
+
   setEducation: (id, field, value) => {
     set((s) => {
       const data = {
@@ -144,6 +173,26 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
     });
   },
 
+  moveEducation: (fromIdx, toIdx) => {
+    set((s) => {
+      const arr = [...s.data.educations];
+      if (
+        fromIdx < 0 ||
+        toIdx < 0 ||
+        fromIdx >= arr.length ||
+        toIdx >= arr.length ||
+        fromIdx === toIdx
+      ) {
+        return s;
+      }
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      const data = { ...s.data, educations: arr };
+      safeSave(data);
+      return { data };
+    });
+  },
+
   setProject: (id, field, value) => {
     set((s) => {
       const data = {
@@ -168,6 +217,26 @@ export const useTemplateBuilderStore = create<TemplateBuilderStore>((set) => ({
   removeProject: (id) => {
     set((s) => {
       const data = { ...s.data, projects: s.data.projects.filter((p) => p.id !== id) };
+      safeSave(data);
+      return { data };
+    });
+  },
+
+  moveProject: (fromIdx, toIdx) => {
+    set((s) => {
+      const arr = [...s.data.projects];
+      if (
+        fromIdx < 0 ||
+        toIdx < 0 ||
+        fromIdx >= arr.length ||
+        toIdx >= arr.length ||
+        fromIdx === toIdx
+      ) {
+        return s;
+      }
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      const data = { ...s.data, projects: arr };
       safeSave(data);
       return { data };
     });

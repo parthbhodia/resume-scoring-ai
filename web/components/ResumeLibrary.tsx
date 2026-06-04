@@ -16,6 +16,7 @@ import { displayPdfUrlForResume } from "@/lib/displayResumePdfUrl";
 import { fetchLibraryItems, getSupabaseClient, type LibraryItem } from "@/lib/supabase";
 import { RESUME_LIBRARY_CHANGED_EVENT } from "@/lib/resumeLibraryEvents";
 import { RN_BUILDER_LAYOUT_ONLY_KEY } from "@/lib/resumeTemplateStudioPrefs";
+import { stashTemplateBuilderStructuredPrefillFromAnalysisResult } from "@/lib/templateBuilderPrefill";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -205,6 +206,17 @@ export default function ResumeLibrary({ onUseAsBase }: {
       sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
     } catch { /* ignore */ }
     router.push("/?view=builder&flow=tailor&fromAnalyze=1");
+  };
+
+  const editAnalysisInTemplateBuilder = (item: LibraryItem) => {
+    if (item.kind !== "analyzed") return;
+    try {
+      stashTemplateBuilderStructuredPrefillFromAnalysisResult(item.analysis.result);
+      sessionStorage.removeItem(RN_BUILDER_LAYOUT_ONLY_KEY);
+    } catch {
+      // ignore and still route to builder
+    }
+    router.push("/template-builder/");
   };
 
   return (
@@ -533,6 +545,7 @@ export default function ResumeLibrary({ onUseAsBase }: {
                     onUseAsBase={() => useAsBase(item)}
                     onOpenAnalysis={() => openAnalysis(item)}
                     onTailorAnalysis={() => tailorFromAnalysis(item)}
+                    onEditInTemplateBuilder={() => editAnalysisInTemplateBuilder(item)}
                   />
                 ))}
               </div>
@@ -554,6 +567,9 @@ export default function ResumeLibrary({ onUseAsBase }: {
             }}
             onTailorAnalysis={() => {
               if (selectedItem) tailorFromAnalysis(selectedItem);
+            }}
+            onEditInTemplateBuilder={() => {
+              if (selectedItem) editAnalysisInTemplateBuilder(selectedItem);
             }}
           />
         ) : null}
@@ -616,6 +632,7 @@ function ResumeCard({
   onUseAsBase,
   onOpenAnalysis,
   onTailorAnalysis,
+  onEditInTemplateBuilder,
 }: {
   item: LibraryItem;
   isSelected?: boolean;
@@ -624,6 +641,7 @@ function ResumeCard({
   onUseAsBase: () => void;
   onOpenAnalysis: () => void;
   onTailorAnalysis: () => void;
+  onEditInTemplateBuilder: () => void;
 }) {
   const displayPdf = useMemo(
     () => item.kind === "tailored" ? displayPdfUrlForResume(item.record) : null,
@@ -680,12 +698,12 @@ function ResumeCard({
             type="button"
             onClick={e => {
               e.stopPropagation();
-              onOpenAnalysis();
+              onEditInTemplateBuilder();
             }}
-            title="Reopen with saved preview edits if available in this browser"
+            title="Open this analyzed resume in Template Builder with structured prefill"
             style={actionBtnGhost}
           >
-            Continue edits
+            Edit in Builder
           </Button>
           <Button
             type="button"

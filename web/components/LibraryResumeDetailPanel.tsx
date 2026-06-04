@@ -60,6 +60,7 @@ export default function LibraryResumeDetailPanel({
   onTailorNewJob,
   onOpenAnalysis,
   onTailorAnalysis,
+  onEditInTemplateBuilder,
 }: {
   item: LibraryItem | null;
   loading: boolean;
@@ -68,6 +69,7 @@ export default function LibraryResumeDetailPanel({
   onTailorNewJob: () => void;
   onOpenAnalysis: () => void;
   onTailorAnalysis: () => void;
+  onEditInTemplateBuilder: () => void;
 }) {
   const [user, setUser] = useState<User | null>(null);
 
@@ -178,6 +180,7 @@ export default function LibraryResumeDetailPanel({
             result={analysisJson}
             onOpenAnalysis={onOpenAnalysis}
             onTailorAnalysis={onTailorAnalysis}
+            onEditInTemplateBuilder={onEditInTemplateBuilder}
           />
         )}
 
@@ -340,6 +343,7 @@ function AnalyzedDetails({
   result,
   onOpenAnalysis,
   onTailorAnalysis,
+  onEditInTemplateBuilder,
 }: {
   title: string;
   score: number | null;
@@ -347,6 +351,7 @@ function AnalyzedDetails({
   result: Record<string, unknown>;
   onOpenAnalysis: () => void;
   onTailorAnalysis: () => void;
+  onEditInTemplateBuilder: () => void;
 }) {
   const topIssues = listFromJson(result.topIssues).slice(0, 3);
   const topStrengths = listFromJson(result.topStrengths).slice(0, 3);
@@ -451,8 +456,8 @@ function AnalyzedDetails({
         <Button type="button" onClick={onOpenAnalysis} size="lg" style={{ width: "100%" }}>
           Open analysis
         </Button>
-        <Button type="button" onClick={onOpenAnalysis} variant="outline" size="lg" style={{ width: "100%" }}>
-          Continue edits
+        <Button type="button" onClick={onEditInTemplateBuilder} variant="outline" size="lg" style={{ width: "100%" }}>
+          Edit in Template Builder
         </Button>
         <Button type="button" onClick={onTailorAnalysis} variant="outline" size="lg" style={{ width: "100%" }}>
           Tailor to a job
