@@ -220,14 +220,28 @@ async def api_cohort_stats(request: Request):
     seen: dict = {}
     for r in rows:
         uid = r.get("user_id")
-        if uid and uid not in seen:
-            seen[uid] = {
-                "user_id":        uid,
-                "user_email":     r.get("user_email"),
+        if not uid:
+            continue
+        uid_str = str(uid)
+        if uid_str not in seen:
+            seen[uid_str] = {
+                "user_id":        uid_str,
+                "user_email":     None,
                 "latest_score":   r.get("score"),
                 "latest_at":      r.get("created_at"),
-                "analysis_count": sum(1 for x in rows if x.get("user_id") == uid),
+                "analysis_count": 0,
             }
+        entry = seen[uid_str]
+        entry["analysis_count"] += 1
+        row_email = str(r.get("user_email") or "").strip()
+        if row_email and not entry.get("user_email"):
+            entry["user_email"] = row_email
+
+    email_map = _email_by_user_id(list(seen.keys()))
+    for uid_str, entry in seen.items():
+        if not (entry.get("user_email") or "").strip():
+            entry["user_email"] = email_map.get(uid_str)
+
     student_roster = sorted(seen.values(), key=lambda x: x.get("latest_score") or 0)
 
     weakest_dims = sorted(
@@ -347,9 +361,19 @@ async def api_student_detail(request: Request):
     latest_score = analyses[-1].get("score") if analyses else None
     delta = (latest_score - first_score) if (first_score is not None and latest_score is not None) else None
 
+    resolved_email = None
+    if analyses:
+        for row in analyses:
+            em = str(row.get("user_email") or "").strip()
+            if em:
+                resolved_email = em
+                break
+    if not resolved_email:
+        resolved_email = _email_by_user_id([student_id]).get(student_id)
+
     return JSONResponse({
         "student_id":     student_id,
-        "user_email":     (analyses[0].get("user_email") if analyses else None),
+        "user_email":     resolved_email,
         "analysis_count": len(analyses),
         "first_score":    first_score,
         "latest_score":   latest_score,

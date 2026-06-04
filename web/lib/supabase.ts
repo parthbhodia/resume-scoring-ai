@@ -376,6 +376,7 @@ export async function insertAnalysis(
     .from("resume_analyses")
     .insert({
       user_id: session.user.id,
+      user_email: session.user.email ?? null,
       label,
       score:   result.overallScore,
       result,

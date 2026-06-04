@@ -82,6 +82,68 @@ def _value_from_obj(obj: Any, key: str) -> Optional[str]:
     return str(value).strip() if value is not None and str(value).strip() else None
 
 
+def _email_by_user_id(user_ids: list[str]) -> dict[str, str]:
+    """Resolve canonical login emails for user ids (auth.users + institution_students)."""
+    wanted = {str(uid) for uid in user_ids if uid}
+    if not wanted:
+        return {}
+
+    emails: dict[str, str] = {}
+
+    student_table = _supabase_table("institution_students")
+    if student_table is not None:
+        try:
+            resp = (
+                student_table
+                .select("student_user_id,student_email")
+                .in_("student_user_id", sorted(wanted))
+                .execute()
+            )
+            for row in (resp.data or []):
+                uid = str(row.get("student_user_id") or "")
+                em = str(row.get("student_email") or "").strip().lower()
+                if uid and em:
+                    emails[uid] = em
+        except Exception as exc:
+            logger.warning("email lookup via institution_students failed: %s", exc)
+
+    missing = wanted - set(emails.keys())
+    if not missing:
+        return emails
+
+    client = _supabase_client_for_service_role()
+    if client is None:
+        return emails
+
+    try:
+        page = 1
+        while page <= 20 and missing:
+            listed = client.auth.admin.list_users(page=page, per_page=1000)
+            users = getattr(listed, "users", None)
+            if users is None and isinstance(listed, dict):
+                users = listed.get("users")
+            users = users or []
+            if not users:
+                break
+            for user in users:
+                if isinstance(user, dict):
+                    uid = str(user.get("id") or "")
+                    em = str(user.get("email") or "").strip().lower()
+                else:
+                    uid = str(getattr(user, "id", "") or "")
+                    em = str(getattr(user, "email", "") or "").strip().lower()
+                if uid in missing and em:
+                    emails[uid] = em
+                    missing.discard(uid)
+            if len(users) < 1000:
+                break
+            page += 1
+    except Exception as exc:
+        logger.warning("email lookup via auth.users failed: %s", exc)
+
+    return emails
+
+
 def _authenticated_supabase_user(request: Request) -> Tuple[Optional[str], Optional[str]]:
     """Verify the browser's Supabase JWT and return (user_id, email)."""
     token = _bearer_token_from_request(request)

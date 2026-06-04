@@ -34,6 +34,7 @@ from resume_gui.analysis.rewrite_validators import _validate_rewrite_against_ori
 from resume_gui.auth.supabase import (
     _advisor_scope_for_request,
     _authenticated_supabase_user,
+    _email_by_user_id,
     _gen_shortid,
     _load_template_tex_from_supabase,
     _share_table,
@@ -168,6 +169,7 @@ __all__ = [
     "_analyze_resume_comprehensive",
     "_apply_accepted_edits_to_doc",
     "_authenticated_supabase_user",
+    "_email_by_user_id",
     "_build_docx_bytes_from_structured",
     "_build_ratings_payload",
     "_clean_model_text",
