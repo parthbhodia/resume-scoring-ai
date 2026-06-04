@@ -1236,10 +1236,17 @@ export default function AnalyzeResume() {
                         ? `${affectedCount} bullet${affectedCount === 1 ? "" : "s"} flagged in this category`
                         : "No flagged bullets in this category"}
                     >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
-                        <circle cx="6" cy="6" r="5" fill="rgba(52,211,153,0.15)" stroke="var(--green)" strokeWidth="1.2"/>
-                        <path d="M3.5 6l2 2 3-3" stroke="var(--green)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                      <span
+                        style={{
+                          color: isActive ? "#1565c0" : "var(--green-ink, var(--green))",
+                          flexShrink: 0,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        {CATEGORY_ICONS[key]}
+                      </span>
                       <span style={{ flex: 1, fontSize: 11.5, fontWeight: 500, color: "var(--muted)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {label}
                       </span>
@@ -1962,7 +1969,6 @@ export default function AnalyzeResume() {
               onBulletLinkedSelect={handleBulletSelectFromPreview}
               presentationOnly
               restoredResumeNoPdfHint={historyRestoreActive}
-              jd={jd}
               categoryAssignmentOpts={categoryAssignmentOpts}
             />
             </div>

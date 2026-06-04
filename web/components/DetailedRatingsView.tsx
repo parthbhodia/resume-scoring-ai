@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import type { AddressedGapAction, RatingsData, DetailedRatingItem } from "@/lib/types";
 import { isDetailedRatings } from "@/lib/types";
 import { scoreColor } from "./ratings/scoreColor";
@@ -24,15 +25,55 @@ const IMPACT_COLOR: Record<Impact, { color: string; bg: string }> = {
   LOW:    { color: "#64748b", bg: "rgba(100,116,139,0.1)" },
 };
 
-const SECTION_ICON: Record<Tab, string> = {
-  overall:          "📊",
-  job_title:        "💼",
-  qualifications:   "🎓",
-  responsibilities: "📋",
-  keywords:         "🔑",
-  interview:        "🎤",
-  gapfix:           "⚡",
-  fixes:            "✨",
+const SECTION_ICON: Record<Tab, ReactNode> = {
+  overall: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2.5 13V3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M6 13V7.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M9.5 13V5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M13 13V9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  ),
+  job_title: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="5" width="12" height="8.5" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M6 5V3.5C6 2.95 6.45 2.5 7 2.5H9C9.55 2.5 10 2.95 10 3.5V5" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  ),
+  qualifications: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M1.8 6.2L8 3l6.2 3.2L8 9.4 1.8 6.2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M4.5 8v2.2c0 .9 1.6 2 3.5 2s3.5-1.1 3.5-2V8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
+  responsibilities: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M6 4h7M6 8h7M6 12h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M2.3 4.1l1 .9 1.4-1.6M2.3 8.1l1 .9 1.4-1.6M2.3 12.1l1 .9 1.4-1.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  keywords: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="6.2" cy="6.2" r="3.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8.8 8.8l4.2 4.2M11.8 11.8l1.2-1.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
+  interview: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="6" y="2.2" width="4" height="7.2" rx="2" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M4 7.5c0 2.2 1.8 4 4 4s4-1.8 4-4M8 11.5V14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
+  gapfix: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M8.9 1.8L4.4 8h3l-.3 6.2L11.6 8h-3l.3-6.2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  ),
+  fixes: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M8 2l1.5 3 3.3.5-2.4 2.3.6 3.2L8 9.4 5 11l.6-3.2L3.2 5.5l3.3-.5L8 2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  ),
 };
 
 const SECTION_IMPACT: Record<Tab, Impact> = {
@@ -162,9 +203,9 @@ function useTailorRatingsState({
       color: (interviewQuestions?.length ?? 0) > 0 || (strategicTips?.length ?? 0) > 0 ? "#f59e0b" : "var(--dim)",
     },
     ...(gapFixPanel
-      ? [{ id: "gapfix" as Tab, label: "⚡ Gap fix", score: `${gapFixPanel.suggestions.length}`, color: "#818cf8" }]
+      ? [{ id: "gapfix" as Tab, label: "Gap fix", score: `${gapFixPanel.suggestions.length}`, color: "#818cf8" }]
       : []),
-    ...(hasSuggestions ? [{ id: "fixes" as Tab, label: "✨ Fixes", score: "Review", color: "#818cf8" }] : []),
+    ...(hasSuggestions ? [{ id: "fixes" as Tab, label: "Fixes", score: "Review", color: "#818cf8" }] : []),
   ];
 
   const tabIdx = tabOrder.indexOf(activeTab);
@@ -295,13 +336,30 @@ export function TailorMatchSidebar({
                   position: "relative",
                 }}
               >
-                <span style={{
-                  fontSize: 13,
-                  fontWeight: isActive ? 600 : 500,
-                  color: (tab.id === "fixes" || tab.id === "gapfix") ? "#818cf8" : (isActive ? "var(--text)" : "var(--muted)"),
-                  textAlign: "left",
-                }}>
-                  {tab.label}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: (tab.id === "fixes" || tab.id === "gapfix") ? "#818cf8" : (isActive ? "var(--text)" : "var(--dim)"),
+                      flexShrink: 0,
+                    }}
+                  >
+                    {SECTION_ICON[tab.id]}
+                  </span>
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: isActive ? 600 : 500,
+                    color: (tab.id === "fixes" || tab.id === "gapfix") ? "#818cf8" : (isActive ? "var(--text)" : "var(--muted)"),
+                    textAlign: "left",
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}>
+                    {tab.label}
+                  </span>
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: isLow ? tab.color : "var(--muted)", flexShrink: 0, marginLeft: 8 }}>
                   {tab.score}
