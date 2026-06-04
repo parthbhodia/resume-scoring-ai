@@ -33,7 +33,12 @@ def _analysis_model() -> str:
     return (os.environ.get("ANALYSIS_MODEL") or "grok-4").strip()
 
 
-def _llm_json_call(prompt: str, *, model_override: Optional[str] = None) -> Optional[dict]:
+def _llm_json_call(
+    prompt: str,
+    *,
+    model_override: Optional[str] = None,
+    temperature: float = 0.2,
+) -> Optional[dict]:
     """Call Grok (primary when configured) or Gemini for a JSON response.
 
     Pass ``model_override`` to force a specific model (e.g. the reasoning tier
@@ -58,7 +63,7 @@ def _llm_json_call(prompt: str, *, model_override: Optional[str] = None) -> Opti
             r = xai.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
+                temperature=temperature,
                 response_format={"type": "json_object"},
             )
             text = (r.choices[0].message.content or "").strip()
@@ -79,7 +84,7 @@ def _llm_json_call(prompt: str, *, model_override: Optional[str] = None) -> Opti
             client = _genai.Client(api_key=google_key)
             cfg = _gtypes.GenerateContentConfig(
                 response_mime_type="application/json",
-                temperature=0.2,
+                temperature=temperature,
             )
             r = client.models.generate_content(
                 model=(model_name or primary_gemini_flash_model()).strip(),

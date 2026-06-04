@@ -199,7 +199,10 @@ def extract_requirements_from_jd(
     try:
         from resume_gui.llm.client import _llm_json_call  # local import avoids circular deps
 
-        raw_response = _llm_json_call(prompt)  # uses GROK_MODEL (non-reasoning) by default
+        # temperature=0 → the JD requirement set (and thus the weighted-score
+        # denominators) is stable across re-checks, so the sidebar counts don't
+        # drift when the user re-scores after applying fixes.
+        raw_response = _llm_json_call(prompt, temperature=0)
     except Exception as exc:  # noqa: BLE001
         logger.warning("jd_extractor: LLM call failed: %s", exc)
         return []
