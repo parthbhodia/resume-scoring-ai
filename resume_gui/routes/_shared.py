@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -253,6 +254,7 @@ __all__ = [
     "storage_status",
     "stream_latex_resume",
     "structured_ratings_from_ats",
+    "threading",
     "upload_pdf",
     "upload_tex",
     "uuid4",
