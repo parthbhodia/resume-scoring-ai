@@ -208,9 +208,9 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 
 - **Analyze flagged-bullet compact UX (`bd4fda6`)** — Category sidebar “Flagged Bullets” cards use `BulletImprovedEditor` `variant="compact"`: collapsed header adds a fix-type chip (e.g. Proofreading / Achievement); expanded body drops per-bullet issue tags + `CATEGORY_REWRITE_HINTS` blockquote, shows readable “Suggested” text with **Apply to preview** / **Copy** / **Edit** (textarea only when Edit). Preview-panel / Tailor paths keep default editor layout. **Invariant:** bullet card teaches fix via suggestion + apply, not triple category copy.
 
-- **Quant 75% target + required placeholder rewrites (`pending`)** — Analysis prompt requires `categoryRewrites.quantification` / `improvedBullet` with `[X%]`/`[$Y]` when flagging quant bullets; recruiter bar ~75% metric coverage. `normalize` treats bracket placeholders as quant support and backfills `improvedBullet` from `categoryRewrites.quantification`. UI copy + `TARGET_QUANTIFIED_BULLET_SHARE=0.75`.
+- **Quant 75% target + required placeholder rewrites (`668de41`)** — Analysis prompt requires `categoryRewrites.quantification` / `improvedBullet` with `[X%]`/`[$Y]` when flagging quant bullets; recruiter bar ~75% metric coverage. `normalize` treats bracket placeholders as quant support and backfills `improvedBullet` from `categoryRewrites.quantification`. UI copy + `TARGET_QUANTIFIED_BULLET_SHARE=0.75`.
 
-- **Deterministic topIssues gated to LLM-fallback only (`pending`)** — Normal analyze skips `inject_deterministic_insights`; frontend hides `source: "deterministic"` topIssues. Quantification UX = LLM rationales + flagged bullet rewrites only.
+- **Deterministic topIssues gated to LLM-fallback only (`668de41`)** — Normal analyze skips `inject_deterministic_insights`; frontend hides `source: "deterministic"` topIssues. Quantification UX = LLM rationales + flagged bullet rewrites only.
 
 - **Deterministic recruiter insights + universal-filler buzzwords (`0f1e0df`)** — `deterministic_insights.py` + narrowed `_BUZZWORDS`; inject originally ran post-LLM (reverted for UX). `test_deterministic_insights.py`. Optional `pyspellchecker` dep.
 
