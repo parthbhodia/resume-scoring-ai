@@ -1,7 +1,10 @@
 """Analyze upload and scoring routes."""
 from __future__ import annotations
 
+import io
+
 from resume_gui.routes._shared import *  # noqa: F403
+from resume_gui.analysis.constants import _CATEGORY_DISPLAY_NAMES
 
 # Lazy imports for requirement matching — only used when a JD is present.
 # Wrapped in a try/except so a missing dep never breaks the import chain.
@@ -110,6 +113,19 @@ async def api_analyze_upload(request: Request):
             return JSONResponse({"error": "Empty file"}, status_code=400)
         filename = getattr(upload, "filename", None) or "resume.pdf"
         content_type = getattr(upload, "content_type", None)
+        auth_user_id, auth_user_email = _authenticated_supabase_user(request)
+        scan_limit = _scan_limit_status_for_user(auth_user_id, auth_user_email)
+        if scan_limit.get("enforced") and not scan_limit.get("allowed"):
+            return JSONResponse(
+                {
+                    "error": "Daily scan limit reached. Upgrade for unlimited scans or try again tomorrow.",
+                    "code": "daily_scan_limit_reached",
+                    "limit": scan_limit.get("limit"),
+                    "used": scan_limit.get("used"),
+                    "resetAt": scan_limit.get("resetAt"),
+                },
+                status_code=429,
+            )
 
         from resume_upload_parse import (  # type: ignore
             extract_upload_markdown,
@@ -137,6 +153,10 @@ async def api_analyze_upload(request: Request):
                 except Exception as exc:
                     logger.warning("pdfplumber fallback failed: %s", exc)
             if outcome.empty_reason:
+                # For PDFs, allow the request to continue so the vision extract
+                # path can still recover scanned/image-only resumes.
+                if filename.lower().endswith(".pdf"):
+                    return ""
                 raise ValueError(message_for_empty_resume_extract(outcome.empty_reason))
             return ""
 
@@ -145,7 +165,7 @@ async def api_analyze_upload(request: Request):
         except ValueError as ve:
             return JSONResponse({"error": str(ve)}, status_code=422)
 
-        if not text.strip():
+        if not text.strip() and not filename.lower().endswith(".pdf"):
             return JSONResponse(
                 {"error": "Could not extract text from the uploaded file"},
                 status_code=422,
@@ -178,6 +198,11 @@ async def api_analyze_upload(request: Request):
                         "(%d → %d chars) for analysis + preview",
                         len(text), len(synthesized),
                     )
+            if not analysis_input_text.strip():
+                return JSONResponse(
+                    {"error": "No text could be extracted from this PDF. It is often a scanned (image-only) résumé. Upload a PDF with selectable text, or use a .docx export, or run OCR first."},
+                    status_code=422,
+                )
             result = await loop.run_in_executor(
                 None, _analyze_resume_comprehensive, analysis_input_text, jd,
             )
@@ -233,7 +258,6 @@ async def api_analyze_upload(request: Request):
         # Persist analysis result for student history + cohort analytics (best-effort).
         # Prefer the verified Supabase session over form fields; advisor institution
         # membership is derived from this email, so client-supplied email is not enough.
-        auth_user_id, auth_user_email = _authenticated_supabase_user(request)
         user_id = auth_user_id or (form.get("user_id") or "").strip()
         user_email = auth_user_email or ""
         if user_id and isinstance(result, dict):
@@ -351,6 +375,19 @@ async def api_analyze(request: Request):
         return JSONResponse({"error": "candidate_profile is required"}, status_code=400)
     if not job_description:
         return JSONResponse({"error": "job_description is required"}, status_code=400)
+    auth_user_id, auth_user_email = _authenticated_supabase_user(request)
+    scan_limit = _scan_limit_status_for_user(auth_user_id, auth_user_email)
+    if scan_limit.get("enforced") and not scan_limit.get("allowed"):
+        return JSONResponse(
+            {
+                "error": "Daily scan limit reached. Upgrade for unlimited scans or try again tomorrow.",
+                "code": "daily_scan_limit_reached",
+                "limit": scan_limit.get("limit"),
+                "used": scan_limit.get("used"),
+                "resetAt": scan_limit.get("resetAt"),
+            },
+            status_code=429,
+        )
 
     model = str(body.get("model") or "").strip() or primary_llm_model_for_resume_workloads()
     include_bullets = bool(body.get("include_bullet_analysis"))
