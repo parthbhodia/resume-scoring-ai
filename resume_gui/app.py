@@ -34,7 +34,9 @@ from resume_gui.routes import all_routes  # noqa: E402
 # ── Re-exports for tests and scripts (backward compatibility) ───────────────
 from resume_gui.analysis import (  # noqa: E402
     _CATEGORY_SCORE_KEYS,
+    _bullet_leads_with_strong_ownership_verb,
     _filter_bullet_rewrites,
+    _is_participial_noun_phrase_lead,
     _normalize_analysis,
     _normalize_bullet_categories,
     _resume_numeral_count,

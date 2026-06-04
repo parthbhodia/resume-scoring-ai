@@ -22,7 +22,9 @@ import pytest  # noqa: E402
 
 from resume_gui.app import (  # noqa: E402
     _CATEGORY_SCORE_KEYS,
+    _bullet_leads_with_strong_ownership_verb,
     _filter_bullet_rewrites,
+    _is_participial_noun_phrase_lead,
     _normalize_analysis,
     _normalize_bullet_categories,
     _resume_numeral_count,
@@ -194,6 +196,67 @@ class TestAchievementQualityDimension:
         }
         result = _validate_analysis_against_resume(raw, WEAK_RESUME)
         assert len(result["topIssues"]) == 1
+
+    def test_participial_testing_lead_not_strong(self):
+        line = (
+            "• Automated testing and feature deployments, ensuring reliable "
+            "and efficient workflows."
+        )
+        assert _is_participial_noun_phrase_lead(line)
+        assert not _bullet_leads_with_strong_ownership_verb(line)
+
+    def test_participial_cicd_lead_is_strong(self):
+        line = "• Automated CI/CD pipelines across 12 services, cutting deploy time 40%."
+        assert not _is_participial_noun_phrase_lead(line)
+        assert _bullet_leads_with_strong_ownership_verb(line)
+
+    def test_achievement_rewrite_same_opening_rejected(self):
+        orig = (
+            "Automated testing and feature deployments, ensuring reliable "
+            "and efficient workflows."
+        )
+        improved = (
+            "Automated testing and feature deployments for production releases, "
+            "ensuring reliable workflows and reducing manual deployment errors."
+        )
+        kept_imp, kept_cr, _ = _filter_bullet_rewrites(
+            orig,
+            improved,
+            {},
+            ["duty phrasing"],
+            primary_category="achievementQuality",
+        )
+        assert kept_imp == ""
+        assert kept_cr == {}
+
+    def test_achievement_rewrite_strong_opening_kept(self):
+        orig = (
+            "Automated testing and feature deployments, ensuring reliable "
+            "and efficient workflows."
+        )
+        improved = (
+            "Built automated testing and deployment pipelines for production "
+            "releases, reducing manual deployment errors."
+        )
+        kept_imp, _, _ = _filter_bullet_rewrites(
+            orig,
+            improved,
+            {},
+            ["duty phrasing"],
+            primary_category="achievementQuality",
+        )
+        assert kept_imp == improved
+
+    def test_duty_tag_dropped_when_bullet_already_strong_verb(self):
+        """Weak-verb issue tags on Built/Designed bullets are contradictions."""
+        raw = {
+            "bulletAnalysis": [{
+                "originalBullet": "• Built payment APIs on AWS Lambda.",
+                "issues": ["weak action verb", "duty-only"],
+            }],
+        }
+        result = _validate_analysis_against_resume(raw, STRONG_RESUME)
+        assert result["bulletAnalysis"][0]["issues"] == []
 
 
 # ══════════════════════════════════════════════════════════════════════════════

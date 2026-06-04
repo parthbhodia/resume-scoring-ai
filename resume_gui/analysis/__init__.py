@@ -1,5 +1,9 @@
 """Analyze pipeline: validators, evidence checks, score normalization."""
-from resume_gui.analysis.constants import _CATEGORY_SCORE_KEYS
+from resume_gui.analysis.constants import (
+    _CATEGORY_SCORE_KEYS,
+    _bullet_leads_with_strong_ownership_verb,
+    _is_participial_noun_phrase_lead,
+)
 from resume_gui.analysis.evidence_validator import (
     _resume_numeral_count,
     _resume_strong_verb_share,
@@ -14,6 +18,8 @@ from resume_gui.analysis.rewrite_validators import (
 
 __all__ = [
     "_CATEGORY_SCORE_KEYS",
+    "_bullet_leads_with_strong_ownership_verb",
+    "_is_participial_noun_phrase_lead",
     "_filter_bullet_rewrites",
     "_normalize_analysis",
     "_normalize_bullet_categories",

@@ -5,7 +5,12 @@ import logging
 import re
 from typing import Any, List, Optional, Tuple
 
-from resume_gui.analysis.constants import _NUMERAL_RE, _PROPER_NOUN_RE
+from resume_gui.analysis.constants import (
+    _NUMERAL_RE,
+    _PROPER_NOUN_RE,
+    _bullet_leads_with_strong_ownership_verb,
+    _first_word_token,
+)
 
 logger = logging.getLogger("resume_gui")
 
@@ -171,11 +176,27 @@ def _salvage_language_quality_rewrite(
     )
 
 
+def _validate_achievement_rewrite(original: str, rewrite: str) -> Tuple[bool, str]:
+    """Achievement rewrites must change the opening word and fix duty-style leads."""
+    r = (rewrite or "").strip()
+    if not r:
+        return True, ""
+    o_first = _first_word_token(original)
+    r_first = _first_word_token(rewrite)
+    if o_first and r_first and o_first == r_first:
+        return False, "achievement rewrite must change opening word"
+    if not _bullet_leads_with_strong_ownership_verb(rewrite):
+        return False, "achievement rewrite still uses participial duty-style lead"
+    return True, ""
+
+
 def _filter_bullet_rewrites(
     original: str,
     improved: str,
     category_rewrites: Optional[dict],
     issues: Optional[List[Any]] = None,
+    *,
+    primary_category: Optional[str] = None,
 ) -> Tuple[str, dict, List[Any]]:
     """Drop any rewrite that fails _validate_rewrite_against_original, drop
     no-op rewrites that are byte-equal (after whitespace/punctuation normalize)
@@ -190,6 +211,20 @@ def _filter_bullet_rewrites(
     orig_norm = _normalize_for_rewrite_diff(original)
     pending_lq_salvage: Optional[str] = None
 
+    def _reject_achievement(candidate: str, *, slot: str, force: bool = False) -> bool:
+        if not candidate.strip():
+            return False
+        if not force and (primary_category or "").lower() != "achievementquality":
+            return False
+        ok, why = _validate_achievement_rewrite(original, candidate)
+        if not ok:
+            logger.info(
+                "rewrite-validator dropped %s: %s  | orig=%r  | rewrite=%r",
+                slot, why, original[:80], candidate[:80],
+            )
+            return True
+        return False
+
     if kept_improved:
         ok, why = _validate_rewrite_against_original(original, kept_improved)
         if not ok:
@@ -197,6 +232,8 @@ def _filter_bullet_rewrites(
                 "rewrite-validator dropped improvedBullet: %s  | orig=%r  | rewrite=%r",
                 why, original[:80], kept_improved[:80],
             )
+            kept_improved = ""
+        elif _reject_achievement(kept_improved, slot="improvedBullet"):
             kept_improved = ""
         elif _normalize_for_rewrite_diff(kept_improved) == orig_norm:
             logger.info(
@@ -223,6 +260,13 @@ def _filter_bullet_rewrites(
     if isinstance(category_rewrites, dict):
         for cat, txt in category_rewrites.items():
             if not isinstance(txt, str) or not txt.strip():
+                continue
+            cat_key = str(cat)
+            if _reject_achievement(
+                txt,
+                slot=f"categoryRewrites.{cat_key}",
+                force=cat_key.lower() == "achievementquality",
+            ):
                 continue
             ok, why = _validate_rewrite_against_original(original, txt, category=str(cat))
             if not ok:

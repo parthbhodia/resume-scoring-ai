@@ -177,8 +177,10 @@ Gemini fallback chain kicks in when Grok hits quota or errors. Slugs: `GEMINI_RE
 8. **The Analyze "Download PDF" matches the preview.** Goes through Chromium, not LaTeX.
 9. **The backend owns bullet category bucketing.** Each `bulletAnalysis` item carries `primaryCategory` + `issueCategories` (validated by `_normalize_bullet_categories` against `_CATEGORY_SCORE_KEYS`). The frontend trusts them verbatim; it does NOT re-derive categories with regex when they're present. A bullet's `primaryCategory` must be a category it can offer a rewrite for, and "quantification" never appears in either field without a numeral-adding rewrite. The `guessIssueCategory`/`inferBaseCategory` heuristics survive only as a fallback for legacy restored-history payloads.
 10. **Display uses `issueCategories`; rewrites use `primaryCategory` only.** `bulletBelongsToCategory()` (frontend) checks `issueCategories` for filtering, preview highlights, sidebar badge counts, and `categoryHasActionableContent`. `getRewriteForCategory()` still keys off `primaryCategory` so the UI never surfaces a rewrite for the wrong fix target. Preview banner is red only when `flaggedCount > 0` for the active category.
+11. **Strong-verb detection distinguishes verb+object from participle+duty-noun.** `_bullet_leads_with_strong_ownership_verb()` in `analysis/constants.py` rejects leads like `Automated testing…` (participle + activity noun) while keeping `Automated CI/CD pipelines…`. Used for résumé-wide share, evidence validator per-bullet checks, and achievement rewrite filtering.
+12. **`achievementQuality` rewrites must change the opening and fix the lead.** `_validate_achievement_rewrite` in `rewrite_validators.py` drops `improvedBullet` / `categoryRewrites.achievementQuality` when the first token is unchanged or the rewrite still opens with a participial duty-style phrase.
 
-The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_experience_tenure.py` defend invariants 1–10. Full algorithm notes: [`docs/ANALYSIS_ALGORITHM.md`](docs/ANALYSIS_ALGORITHM.md).
+The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_experience_tenure.py` defend invariants 1–12. Full algorithm notes: [`docs/ANALYSIS_ALGORITHM.md`](docs/ANALYSIS_ALGORITHM.md).
 
 ```bash
 .venv/bin/python -m pytest resume_gui/tests/test_analyze_dimensions.py resume_gui/tests/test_experience_tenure.py -v
@@ -197,6 +199,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 ---
 
 ## Recent changes (running log — newest first; **append after every commit**)
+
+- **Participial duty-lead detection + achievement rewrite validator (`uncommitted`)** — `analysis/constants.py` adds `_bullet_leads_with_strong_ownership_verb()` so `Automated testing…` no longer counts as a strong lead while `Automated CI/CD pipelines…` still does; résumé share + evidence validator per-bullet weak-verb drops use it. `rewrite_validators._validate_achievement_rewrite` rejects `achievementQuality` `improvedBullet` / `categoryRewrites.achievementQuality` when the opening word is unchanged or the rewrite still opens with a participial duty phrase (fixes the "same Automated…" false improvement). `normalize._filter_bullet_rewrites` passes `primaryCategory`. +5 tests (76 in `test_analyze_dimensions.py`). Invariants #11–12.
 
 - **App sidebar Contact nav (`71467c4`)** — `/contact` (mailto + Gmail compose to `contact@resunova.io`) was public and in the landing footer but missing from `AppShell`. Added footer menu item + footer text link in `AppSidebar`. **Invariant:** support/legal routes discoverable from signed-in shell, not only marketing footer.
 

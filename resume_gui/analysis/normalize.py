@@ -156,6 +156,7 @@ def _normalize_analysis(raw: dict) -> dict:
                     ba.get("improvedBullet", ""),
                     ba.get("categoryRewrites"),
                     ba.get("issues"),
+                    primary_category=ba.get("primaryCategory"),
                 )
                 ba["improvedBullet"] = kept_improved
                 if kept_cr:

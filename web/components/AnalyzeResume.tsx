@@ -2338,7 +2338,7 @@ export default function AnalyzeResume() {
                           <span aria-hidden style={{ color: "var(--muted)", fontWeight: 700, marginRight: "0.35em" }}>•</span>
                           {displayBulletLine}
                           {previewLineAppliedHere && (
-                            <span title="Replaced for this Analyze session’s preview." style={{ marginLeft: 6, color: "#fbbf24", fontSize: 10, fontWeight: 800 }}>✓</span>
+                            <span title="Applied to preview." style={{ marginLeft: 6, color: "var(--green)", fontSize: 10, fontWeight: 800 }}>✓</span>
                           )}
                         </span>
                         <svg

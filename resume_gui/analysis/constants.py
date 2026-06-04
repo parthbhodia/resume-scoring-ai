@@ -95,6 +95,85 @@ _STRONG_VERB_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Past-participles that often lead duty-style noun phrases ("Automated testing…")
+# rather than verb + object ("Automated CI/CD pipelines…"). When the second token
+# is a process/activity noun, the line is NOT treated as a strong-verb lead.
+_PARTICIPIAL_ADJECTIVE_LEADS = frozenset({
+    "automated", "streamlined", "optimized", "optimised",
+    "configured", "integrated", "orchestrated", "coordinated",
+    "facilitated", "standardized", "standardised", "modernized", "modernised",
+    "enhanced", "established", "implemented", "developed", "engineered",
+    "designed", "deployed", "migrated", "provisioned", "generated", "produced",
+    "created", "composed", "executed", "introduced", "instituted",
+})
+
+_DUTY_STYLE_SECOND_TOKENS = frozenset({
+    "testing", "test", "tests",
+    "development", "developing",
+    "monitoring", "reporting", "documentation", "documenting",
+    "support", "supporting", "maintenance", "maintaining",
+    "operations", "operational",
+    "processes", "processing",
+    "workflows", "workflow",
+    "tasks", "task",
+    "activities", "activity",
+    "coordination", "coordinating",
+    "collaboration", "collaborating",
+    "analysis", "analyzing", "analysing",
+    "research", "researching",
+    "deployments", "deployment", "features", "feature",
+    "communication", "communications",
+    "meetings", "meeting",
+    "training", "scheduling", "planning", "tracking", "logging",
+    "validation", "validating", "verification", "verifying",
+    "preparation", "organization", "organisation",
+    "administration", "management", "managing",
+    "optimization", "optimisation",
+    "data", "entry", "efforts", "initiatives",
+    "procedures", "compliance", "practices",
+})
+
+_BULLET_GLYPH_PREFIX_RE = re.compile(r"^[\s•\-\*▪▸–—]+")
+_BULLET_LINE_LEAD_RE = re.compile(r"^[•\-\*▪▸]\s*(?=\w)")
+_TOKEN_RE = re.compile(r"\b[a-zA-Z][a-zA-Z0-9/-]*\b")
+
+
+def _bullet_body_after_glyph(line: str) -> str:
+    """Strip leading bullet glyphs / whitespace from a bullet line."""
+    return _BULLET_GLYPH_PREFIX_RE.sub("", (line or "").strip())
+
+
+def _first_word_token(line: str) -> str:
+    """First alphabetic token of a bullet (lowercase), or ""."""
+    body = _bullet_body_after_glyph(line)
+    words = _TOKEN_RE.findall(body)
+    if not words:
+        return ""
+    return words[0].lower().rstrip(".,;:")
+
+
+def _is_participial_noun_phrase_lead(body: str) -> bool:
+    """True when the line opens like 'Automated testing…' (participle + duty noun)."""
+    body = (body or "").strip()
+    if not body or not _STRONG_VERB_RE.match(body):
+        return False
+    words = _TOKEN_RE.findall(body)
+    if len(words) < 2:
+        return False
+    lead = words[0].lower()
+    second = words[1].lower().rstrip(".,;:")
+    if lead not in _PARTICIPIAL_ADJECTIVE_LEADS:
+        return False
+    return second in _DUTY_STYLE_SECOND_TOKENS
+
+
+def _bullet_leads_with_strong_ownership_verb(line: str) -> bool:
+    """True when a bullet line opens with an ownership verb, not a duty-style participle phrase."""
+    body = _bullet_body_after_glyph(line)
+    if not body or not _STRONG_VERB_RE.match(body):
+        return False
+    return not _is_participial_noun_phrase_lead(body)
+
 _MISSING_METRICS_CLAIM_RE = re.compile(
     # No trailing \b — the right-hand tokens (metric, number, quantif, result)
     # often appear pluralized or suffixed (metrics / numbers / quantifiable /
@@ -152,9 +231,8 @@ def _resume_strong_verb_share(text: str) -> Tuple[int, int]:
         if not BULLET_LEAD.match(ln):
             continue
         # Drop the leading glyph + any whitespace before matching the verb.
-        body = BULLET_LEAD.sub("", ln, count=1)
         total += 1
-        if _STRONG_VERB_RE.search(body):
+        if _bullet_leads_with_strong_ownership_verb(ln):
             strong += 1
     return strong, total
 

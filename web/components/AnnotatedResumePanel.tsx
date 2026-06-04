@@ -102,6 +102,15 @@ function scoreBg(score: number): string {
   return "rgba(248,113,113,0.12)";
 }
 
+/** Thick left callout when the user applied a preview-line rewrite. */
+function mirrorAppliedStyles(): { bar: string; bg: string; shadow: string } {
+  return {
+    bar: "rgba(52, 211, 153, 0.92)",
+    bg: "rgba(52, 211, 153, 0.14)",
+    shadow: "0 0 20px rgba(52, 211, 153, 0.22)",
+  };
+}
+
 /** Thick left callout on the preview mirror — aligned with score tier (strong / fair / weak). */
 function mirrorToneStyles(score: number): { bar: string; bg: string; shadow: string } {
   if (score >= 75) {
@@ -427,7 +436,8 @@ export default function AnnotatedResumePanel({
     const height = elRect.height + pad;
     const bullet = bulletAnalysis[idx];
     const score = bullet?.score ?? 60;
-    const tone = mirrorToneStyles(score);
+    const previewApplied = previewLineOverrides[idx] !== undefined;
+    const tone = previewApplied ? mirrorAppliedStyles() : mirrorToneStyles(score);
     setMirrorBox({ top, height, opacity: 1, ...tone });
   }, [presentationOnly, selectedBulletIndex, bulletAnalysis, effectiveExtracted, previewLineOverrides]);
 
@@ -1070,7 +1080,9 @@ export default function AnnotatedResumePanel({
 
             let bgColor = "var(--surface2)";
 
-            if (activeCategory && isHighlighted) {
+            if (previewLineApplied) {
+              bgColor = "var(--green-bg)";
+            } else if (activeCategory && isHighlighted) {
               bgColor = "var(--red-bg)";
             } else if (!activeCategory && hasIssues) {
               bgColor = bullet.score < 50
@@ -1133,8 +1145,8 @@ export default function AnnotatedResumePanel({
                   }}>
                     {highlightMetricSpans(previewLine)}
                     {!presentationOnly && previewLineApplied && (
-                      <span title="Preview line updated for this session." style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, verticalAlign: "super", color: "var(--amber)", letterSpacing: 0.2 }}>
-                        ●
+                      <span title="Suggestion applied to preview." style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, verticalAlign: "super", color: "var(--green)", letterSpacing: 0.2 }}>
+                        ✓
                       </span>
                     )}
                   </span>

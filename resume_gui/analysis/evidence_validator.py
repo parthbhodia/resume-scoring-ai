@@ -3,54 +3,20 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Optional
 
 from resume_gui.analysis.constants import (
     _MISSING_METRICS_CLAIM_RE,
     _NON_ISSUE_ATS_WARNING_RE,
     _NUMERAL_PLENTY_MIN,
-    _NUMERAL_RE,
     _STRONG_VERB_MAJORITY_SHARE,
-    _STRONG_VERB_RE,
     _WEAK_VERB_CLAIM_RE,
+    _bullet_leads_with_strong_ownership_verb,
+    _resume_numeral_count,
+    _resume_strong_verb_share,
 )
 
 logger = logging.getLogger("resume_gui")
-
-def _resume_numeral_count(text: str) -> int:
-    """Number of distinct numeral tokens in the résumé text (CGPA 9.266 counts as 1)."""
-    return len(_NUMERAL_RE.findall(text or ""))
-
-
-def _resume_strong_verb_share(text: str) -> Tuple[int, int]:
-    """Return (strong_verb_lead_lines, total_bullet_like_lines) over the résumé.
-
-    Denominator is strict — only lines that start with an actual bullet glyph
-    (• – * ▪ ▸) count as bullets. Tech-stack lines like 'Python · Django · …'
-    or section / project headers must NOT inflate the denominator, otherwise
-    the strong-verb majority floor never fires on real résumés.
-    """
-    if not text:
-        return 0, 0
-    # Optional whitespace after the glyph — bullets in real PDFs sometimes
-    # come out as `•managed` with no space, e.g. when extract_words collapses
-    # the glyph and first token. Require a real word char after the glyph so
-    # standalone "•" lines aren't counted.
-    BULLET_LEAD = re.compile(r"^[•\-\*▪▸]\s*(?=\w)")
-    strong = 0
-    total = 0
-    for raw in text.splitlines():
-        ln = raw.strip()
-        if not ln:
-            continue
-        if not BULLET_LEAD.match(ln):
-            continue
-        # Drop the leading glyph + any whitespace before matching the verb.
-        body = BULLET_LEAD.sub("", ln, count=1)
-        total += 1
-        if _STRONG_VERB_RE.search(body):
-            strong += 1
-    return strong, total
 
 
 def _issue_text_blob(item: dict) -> str:
@@ -73,13 +39,6 @@ def _issue_contradicts_resume(
     if has_strong_verb_majority and _WEAK_VERB_CLAIM_RE.search(blob):
         return "claims weak/duty verbs but most bullets lead with strong ownership verbs"
     return None
-
-
-# Thresholds. Tuned for typical 1-page résumés: ≥6 numerals is "plenty" and
-# ≥60% strong-verb bullets is a "strong-verb majority". Both are conservative
-# (only drop when the contradiction is overwhelming).
-_NUMERAL_PLENTY_MIN = 6
-_STRONG_VERB_MAJORITY_SHARE = 0.6
 
 
 # Phrasings the LLM emits as atsWarnings that are actually GOOD facts about
@@ -204,7 +163,7 @@ def _validate_analysis_against_resume(raw: dict, resume_text: str) -> dict:
             if not orig:
                 continue
             bullet_nums = _resume_numeral_count(orig)
-            bullet_has_strong_verb = bool(_STRONG_VERB_RE.search(orig.lstrip(" \t•-*▪▸")))
+            bullet_has_strong_verb = _bullet_leads_with_strong_ownership_verb(orig)
             issue_tags = ba.get("issues")
             if not isinstance(issue_tags, list):
                 continue

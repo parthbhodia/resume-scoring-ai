@@ -937,6 +937,10 @@ const TAILOR_APPLIED_HIGHLIGHT: CSSProperties = {
   transition: "background 0.3s, border-color 0.3s",
 };
 
+/** Analyze/Tailor preview — user approved "Replace line in preview". */
+const PREVIEW_LINE_APPLIED_BG = "rgba(52,211,153,0.14)";
+const PREVIEW_LINE_APPLIED_BAR = "3px solid rgb(34, 197, 94)";
+
 function tailorHighlightKind(
   line: string,
   gapFixHighlights: string[],
@@ -1405,20 +1409,29 @@ export default function AnalyzeLiveResumeBody({
                 highlightsEnabled && presentationOnly && gapFixTargetBulletIndices.includes(bulletIdx);
               const isGapFixApplied =
                 highlightsEnabled && presentationOnly && tailorAppliedBulletIndices.has(bulletIdx);
+              const isPreviewLineApplied = highlightsEnabled && previewLineApplied;
 
-              let bgTint = scoreBgTint(bullet.score, isHighlighted, presentationOnly, highlightsEnabled);
-              let leftBar = highlightsEnabled && activeCategory && isHighlighted
+              let bgTint = scoreBgTint(
+                bullet.score,
+                isHighlighted && !isPreviewLineApplied,
+                presentationOnly,
+                highlightsEnabled,
+              );
+              let leftBar = highlightsEnabled && activeCategory && isHighlighted && !isPreviewLineApplied
                 ? "4px solid rgba(248, 113, 113, 0.95)"
                 : highlightsEnabled
                   ? `3px solid ${scoreBorderColor(bullet.score)}`
                   : "none";
 
               if (highlightsEnabled && presentationOnly && isGapFixApplied) {
-                bgTint = "rgba(52,211,153,0.14)";
-                leftBar = "3px solid rgb(34, 197, 94)";
+                bgTint = PREVIEW_LINE_APPLIED_BG;
+                leftBar = PREVIEW_LINE_APPLIED_BAR;
               } else if (highlightsEnabled && presentationOnly && isGapFixTarget) {
                 bgTint = "rgba(139,92,246,0.12)";
                 leftBar = "3px solid #8b5cf6";
+              } else if (isPreviewLineApplied) {
+                bgTint = PREVIEW_LINE_APPLIED_BG;
+                leftBar = PREVIEW_LINE_APPLIED_BAR;
               }
 
               return (
