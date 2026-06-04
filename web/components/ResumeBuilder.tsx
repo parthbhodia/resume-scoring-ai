@@ -2031,6 +2031,16 @@ export default function ResumeBuilder({
       });
     }
     setGapFixPanel(null);
+    // Clearing gapFixPanel removes the "gapfix" tab from the nav — if it was the
+    // active tab, the detail panel would render blank. Switch back to the gap's
+    // originating category (or Overall) so the user lands on real content.
+    setResultsActiveTab((prev) => {
+      if (prev !== "gapfix") return prev;
+      if (gapType === "responsibility") return "responsibilities";
+      if (gapType === "keyword") return "keywords";
+      if (gapType === "qualification") return "qualifications";
+      return "overall";
+    });
 
     setGapApplyBusy(true);
     try {

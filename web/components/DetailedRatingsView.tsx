@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AddressedGapAction, RatingsData, DetailedRatingItem } from "@/lib/types";
 import { isDetailedRatings } from "@/lib/types";
 import { scoreColor } from "./ratings/scoreColor";
@@ -326,6 +326,14 @@ export function TailorMatchDetail(props: SharedProps) {
     activeTab: props.activeTab,
     onActiveTabChange: props.onActiveTabChange,
   });
+  // The "gapfix" tab only exists while gapFixPanel is set. If the panel is
+  // cleared (fix applied or dismissed) while it's the active tab, the detail
+  // panel would render blank — fall back to Overall.
+  useEffect(() => {
+    if (props.activeTab === "gapfix" && !props.gapFixPanel) {
+      props.onActiveTabChange?.("overall");
+    }
+  }, [props.activeTab, props.gapFixPanel, props.onActiveTabChange]);
   if (!state) return null;
 
   const {
