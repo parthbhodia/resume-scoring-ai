@@ -247,6 +247,45 @@ class TestAchievementQualityDimension:
         )
         assert kept_imp == improved
 
+    def test_section_feedback_pronoun_claim_stripped(self):
+        """PROJECTS feedback must not claim pronouns when section has none."""
+        resume = (
+            "PROJECTS\n"
+            "Nutri AI Scan | Vue Js, REST API, Mongo DB\n"
+            "• Won 2nd place at the CBIC Entrepreneurship at UMBC out of 25+ teams by "
+            "developing a progressive web app using OCR to identify allergens and harmful "
+            "ingredients and provide healthiness ratings for food products."
+        )
+        raw = {
+            "sectionFeedback": [{
+                "section": "PROJECTS",
+                "score": 60,
+                "feedback": (
+                    "Split the single bullet or rephrase to remove the personal pronoun "
+                    "and keep to 1-2 achievement bullets."
+                ),
+            }],
+        }
+        result = _validate_analysis_against_resume(raw, resume)
+        fb = result["sectionFeedback"][0]["feedback"].lower()
+        assert "pronoun" not in fb
+        assert "1-2" in fb or "split" in fb
+
+    def test_section_feedback_kept_when_pronoun_present(self):
+        resume = (
+            "EXPERIENCE\n"
+            "• I led a team of 5 engineers and delivered APIs on AWS."
+        )
+        raw = {
+            "sectionFeedback": [{
+                "section": "Experience",
+                "score": 55,
+                "feedback": "Remove personal pronouns and use strong verbs.",
+            }],
+        }
+        result = _validate_analysis_against_resume(raw, resume)
+        assert "pronoun" in result["sectionFeedback"][0]["feedback"].lower()
+
     def test_duty_tag_dropped_when_bullet_already_strong_verb(self):
         """Weak-verb issue tags on Built/Designed bullets are contradictions."""
         raw = {

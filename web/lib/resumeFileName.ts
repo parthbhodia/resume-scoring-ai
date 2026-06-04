@@ -1,5 +1,7 @@
 /** Mirrors backend ``username_company_role`` folder / PDF stem in resume_library.py. */
 
+import type { StructuredResume } from "@/store/resumeAnalyzeStore";
+
 export function slugToken(part: string, fallback = "x"): string {
   const token = (part || "").trim().replace(/[^\w]/g, "");
   return token || fallback;
@@ -65,4 +67,44 @@ export function buildResumeFileStem(
   const comp = slugToken(company, "Company");
   const rol = slugToken(role, "Role");
   return `${user}_${comp}_${rol}`;
+}
+
+/** Role slug for exports — JD/target role wins, else latest job on structured résumé. */
+export function roleSlugForExport(
+  roleLabel?: string | null,
+  structured?: StructuredResume | null,
+): string {
+  const explicit = (roleLabel || "").trim();
+  if (explicit) return slugToken(explicit, "Resume");
+  const exp = structured?.experience?.[0]?.role?.trim();
+  if (exp) return slugToken(exp, "Resume");
+  const headline = structured?.headline?.trim();
+  if (headline) return slugToken(headline, "Resume");
+  return "Resume";
+}
+
+/** Download stem: ``Name_Role`` (e.g. ``JohnDoe_SoftwareEngineer``). */
+export function buildNameRoleExportBasename(
+  candidateProfile?: string | null,
+  roleLabel?: string | null,
+  structured?: StructuredResume | null,
+): string {
+  const profileText =
+    candidateProfile?.trim()
+    || structured?.full_name?.trim()
+    || "";
+  const name = ownerSlugFromProfile(profileText);
+  const role = roleSlugForExport(roleLabel, structured);
+  return `${name}_${role}`;
+}
+
+export function buildNameRoleExportFilename(
+  candidateProfile?: string | null,
+  roleLabel?: string | null,
+  structured?: StructuredResume | null,
+  ext: "pdf" | "docx" = "pdf",
+): string {
+  const stem = buildNameRoleExportBasename(candidateProfile, roleLabel, structured);
+  if (stem === "User_Resume") return `resume.${ext}`;
+  return `${stem}.${ext}`;
 }

@@ -179,8 +179,9 @@ Gemini fallback chain kicks in when Grok hits quota or errors. Slugs: `GEMINI_RE
 10. **Display uses `issueCategories`; rewrites use `primaryCategory` only.** `bulletBelongsToCategory()` (frontend) checks `issueCategories` for filtering, preview highlights, sidebar badge counts, and `categoryHasActionableContent`. `getRewriteForCategory()` still keys off `primaryCategory` so the UI never surfaces a rewrite for the wrong fix target. Preview banner is red only when `flaggedCount > 0` for the active category.
 11. **Strong-verb detection distinguishes verb+object from participle+duty-noun.** `_bullet_leads_with_strong_ownership_verb()` in `analysis/constants.py` rejects leads like `Automated testing…` (participle + activity noun) while keeping `Automated CI/CD pipelines…`. Used for résumé-wide share, evidence validator per-bullet checks, and achievement rewrite filtering.
 12. **`achievementQuality` rewrites must change the opening and fix the lead.** `_validate_achievement_rewrite` in `rewrite_validators.py` drops `improvedBullet` / `categoryRewrites.achievementQuality` when the first token is unchanged or the rewrite still opens with a participial duty-style phrase.
+13. **Pronoun advice must match the text.** `_sanitize_pronoun_claims_in_text_fields` strips unsupported "remove personal pronoun" clauses from `sectionFeedback` (per-section scope) and from `topIssues` / `categoryRationales` / `finalRecommendations` when the full résumé has no pronouns. Always-on (not gated on numerals/strong-verb thresholds).
 
-The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_experience_tenure.py` defend invariants 1–12. Full algorithm notes: [`docs/ANALYSIS_ALGORITHM.md`](docs/ANALYSIS_ALGORITHM.md).
+The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_experience_tenure.py` defend invariants 1–13. Full algorithm notes: [`docs/ANALYSIS_ALGORITHM.md`](docs/ANALYSIS_ALGORITHM.md).
 
 ```bash
 .venv/bin/python -m pytest resume_gui/tests/test_analyze_dimensions.py resume_gui/tests/test_experience_tenure.py -v
@@ -199,6 +200,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 ---
 
 ## Recent changes (running log — newest first; **append after every commit**)
+
+- **Section-feedback pronoun claim sanitizer (`uncommitted`)** — `evidence_validator._sanitize_pronoun_claims_in_text_fields` always runs after ATS non-issue strip: strips "remove personal pronoun" clauses from `sectionFeedback` when that section has no pronouns (Nutri AI / PROJECTS case), and from `topIssues` / `categoryRationales` / `finalRecommendations` when the whole résumé has none. +2 tests (78 in `test_analyze_dimensions.py`). Invariant #13.
 
 - **Participial duty-lead detection + achievement rewrite validator (`uncommitted`)** — `analysis/constants.py` adds `_bullet_leads_with_strong_ownership_verb()` so `Automated testing…` no longer counts as a strong lead while `Automated CI/CD pipelines…` still does; résumé share + evidence validator per-bullet weak-verb drops use it. `rewrite_validators._validate_achievement_rewrite` rejects `achievementQuality` `improvedBullet` / `categoryRewrites.achievementQuality` when the opening word is unchanged or the rewrite still opens with a participial duty phrase (fixes the "same Automated…" false improvement). `normalize._filter_bullet_rewrites` passes `primaryCategory`. +5 tests (76 in `test_analyze_dimensions.py`). Invariants #11–12.
 

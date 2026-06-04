@@ -65,6 +65,7 @@ export default function TailorPreviewPane({
       gapFixTargetBulletIndices={gapFixTargetBulletIndices}
       tailorGapFixHighlights={tailorGapFixHighlights}
       tailorAppliedBulletIndices={tailorAppliedBulletIndices}
+      exportRoleLabel={role}
       onExportDocx={exportDocxEnabled ? handleExportDocx : undefined}
       exportDocxEnabled={exportDocxEnabled && !docxExportBusy}
       exportingResume={docxExportBusy}

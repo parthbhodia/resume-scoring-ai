@@ -15,7 +15,7 @@ import {
 } from "@/lib/analysisCategoryMatch";
 import { useHtmlPdfExport } from "@/hooks/useHtmlPdfExport";
 import { useResumeAnalyzeStore, type StructuredResume } from "@/store/resumeAnalyzeStore";
-import { ownerSlugFromProfile } from "@/lib/resumeFileName";
+import { buildNameRoleExportFilename } from "@/lib/resumeFileName";
 
 // Re-export for legacy imports from this file path
 export { CATEGORY_ISSUE_KEYWORDS } from "@/lib/analysisCategoryMatch";
@@ -88,6 +88,8 @@ interface Props {
   gapFixTargetBulletIndices?: number[];
   /** Brief green flash on applied bullet indices after gap apply. */
   tailorAppliedBulletIndices?: ReadonlySet<number>;
+  /** Target role for export filenames (Tailor JD title); falls back to structured experience. */
+  exportRoleLabel?: string;
 }
 
 function scoreColor(score: number): string {
@@ -276,6 +278,7 @@ export default function AnnotatedResumePanel({
   tailorAppliedHighlights = [],
   gapFixTargetBulletIndices = [],
   tailorAppliedBulletIndices = new Set<number>(),
+  exportRoleLabel = "",
 }: Props) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -299,12 +302,17 @@ export default function AnnotatedResumePanel({
   // the lossy LaTeX renderer.
   const { exportPdf: exportHtmlPdf, exporting: htmlPdfExporting, error: htmlPdfError } = useHtmlPdfExport();
   const candidateProfile = useResumeAnalyzeStore((s) => s.extractedText);
-  const htmlPdfFilename = useMemo(() => {
-    // Derive a stable filename stem from the candidate's name in the
-    // preview. Falls back to "resume" if name detection misses.
-    const owner = ownerSlugFromProfile(candidateProfile || extractedText || "");
-    return owner === "User" ? "resume.pdf" : `${owner}_resume.pdf`;
-  }, [candidateProfile, extractedText]);
+  const structuredFromStore = useResumeAnalyzeStore((s) => s.structuredResume);
+  const effectiveStructured = structuredResume ?? structuredFromStore;
+  const htmlPdfFilename = useMemo(
+    () => buildNameRoleExportFilename(
+      candidateProfile || extractedText || "",
+      exportRoleLabel,
+      effectiveStructured,
+      "pdf",
+    ),
+    [candidateProfile, extractedText, exportRoleLabel, effectiveStructured],
+  );
   const handleHtmlPdfDownload = useCallback(() => {
     if (!paperRef.current) return;
     void exportHtmlPdf(paperRef.current, htmlPdfFilename, { highlightsEnabled });
@@ -618,13 +626,14 @@ export default function AnnotatedResumePanel({
         flexShrink: 0,
       }}>
         <div style={{
-          padding: "10px 16px",
+          padding: presentationOnly ? "8px 12px" : "10px 16px",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          justifyContent: presentationOnly ? "flex-end" : "space-between",
           gap: 10,
           flexWrap: "wrap",
         }}>
+          {!presentationOnly ? (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <div style={{
                 fontSize: 10,
@@ -639,10 +648,11 @@ export default function AnnotatedResumePanel({
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
                   <path d="M3 14V3a1 1 0 011-1h8a1 1 0 011 1v11l-2.5-1.5L8 14l-2.5-1.5L3 14z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"/>
                 </svg>
-                {presentationOnly ? "Résumé" : useLiveDoc ? "Edit" : "Analyzed lines"}
+                {useLiveDoc ? "Edit" : "Analyzed lines"}
               </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginLeft: "auto" }}>
+          ) : null}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginLeft: presentationOnly ? 0 : "auto" }}>
           {activeCategory ? (
             <div style={{
               fontSize: 11,

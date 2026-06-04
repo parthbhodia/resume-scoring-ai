@@ -191,6 +191,20 @@ _MISSING_METRICS_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+_PRONOUN_RE = re.compile(r"\b(I|[Mm]e|[Mm]y|[Ww]e|[Oo]ur|[Uu]s)\b")
+
+# LLM advice that claims pronouns are a problem (not the pronouns themselves).
+_PRONOUN_CLAIM_RE = re.compile(
+    r"\b(?:"
+    r"personal\s+pronouns?|first[- ]?person|"
+    r"remove\s+(?:all\s+)?(?:the\s+)?pronouns?|"
+    r"rephrase\s+to\s+remove\s+(?:the\s+)?personal\s+pronoun|"
+    r"avoid\s+(?:using\s+)?personal\s+pronouns?|"
+    r"no\s+personal\s+pronouns?"
+    r")\b",
+    re.IGNORECASE,
+)
+
 _WEAK_VERB_CLAIM_RE = re.compile(
     r"\b(?:"
     r"weak\s+(?:action\s+)?verb|weak\s+verb|"

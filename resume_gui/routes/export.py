@@ -115,7 +115,10 @@ async def api_export_docx(request: Request):
         logger.exception("export_docx failed")
         return JSONResponse({"error": str(exc)}, status_code=500)
 
-    filename = f"resume-{(structured.get('full_name') or 'export').replace(' ', '_')}.docx"
+    from resume_gui.export.filename import name_role_export_filename
+
+    role_override = (body.get("role") or body.get("exportRole") or "").strip() or None
+    filename = name_role_export_filename(structured, "docx", role_override=role_override)
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

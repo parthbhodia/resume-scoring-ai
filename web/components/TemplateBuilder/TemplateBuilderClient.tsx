@@ -7,6 +7,7 @@ import ResumePreview from "./ResumePreview";
 import type { TBFont } from "./types";
 import { PAGE_WIDTH_OPTIONS, STYLE_PRESETS } from "./templateStyles";
 import { apiUrl } from "@/lib/utils";
+import { buildNameRoleExportFilename } from "@/lib/resumeFileName";
 import { consumeTemplateBuilderStructuredPrefill } from "@/lib/templateBuilderPrefill";
 
 /* ── Shared style helpers ──────────────────────────────────────── */
@@ -260,9 +261,10 @@ export default function TemplateBuilderClient() {
       setDownloadError("Resume preview is not ready yet.");
       return;
     }
-    const filenameStem = data.profile.name.trim().replace(/\s+/g, "_") || "resume";
-    void exportHtmlPdf(previewRef.current, `${filenameStem}.pdf`);
-  }, [data.profile.name, exportHtmlPdf]);
+    const roleLabel = data.workExperiences[0]?.jobTitle?.trim() || "Resume";
+    const filename = buildNameRoleExportFilename(data.profile.name, roleLabel, null, "pdf");
+    void exportHtmlPdf(previewRef.current, filename);
+  }, [data.profile.name, data.workExperiences, exportHtmlPdf]);
 
   if (!loaded) {
     return (

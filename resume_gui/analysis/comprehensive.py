@@ -5,8 +5,9 @@ import logging
 import re
 from typing import Optional
 
-from resume_gui.analysis.normalize import _normalize_analysis
+from resume_gui.analysis.constants import _PRONOUN_RE
 from resume_gui.analysis.evidence_validator import _validate_analysis_against_resume
+from resume_gui.analysis.normalize import _normalize_analysis
 from resume_gui.llm.client import _analysis_model, _llm_json_call
 
 logger = logging.getLogger("resume_gui")
@@ -130,8 +131,7 @@ _ACTION_VERB_START_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
-_PRONOUN_RE  = re.compile(r"\b(I|[Mm]e|[Mm]y|[Ww]e|[Oo]ur|[Uu]s)\b")
-# Note: no IGNORECASE — we need to distinguish "us" from "US" (country code)
+# Note: _PRONOUN_RE lives in constants.py — \b us must not match inside "US".
 _DATE_RE     = re.compile(
     r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
     r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"

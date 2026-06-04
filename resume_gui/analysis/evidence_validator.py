@@ -6,9 +6,12 @@ import re
 from typing import Optional
 
 from resume_gui.analysis.constants import (
+    _CATEGORY_SCORE_KEYS,
     _MISSING_METRICS_CLAIM_RE,
     _NON_ISSUE_ATS_WARNING_RE,
     _NUMERAL_PLENTY_MIN,
+    _PRONOUN_CLAIM_RE,
+    _PRONOUN_RE,
     _STRONG_VERB_MAJORITY_SHARE,
     _WEAK_VERB_CLAIM_RE,
     _bullet_leads_with_strong_ownership_verb,
@@ -60,6 +63,166 @@ _NON_ISSUE_ATS_WARNING_RE = re.compile(
 )
 
 
+_SECTION_HEADING_RE = re.compile(
+    r"^(?:"
+    r"(?:PROFESSIONAL\s+)?(?:WORK\s+)?EXPERIENCE|EMPLOYMENT|"
+    r"EDUCATION|(?:TECHNICAL\s+)?SKILLS?|PROJECTS?|PORTFOLIO|"
+    r"SUMMARY|PROFILE|OBJECTIVE|CERTIFICATIONS?|ACTIVITIES|"
+    r"HONORS?|AWARDS?|PUBLICATIONS?|VOLUNTEER(?:\s+EXPERIENCE)?|"
+    r"LEADERSHIP|RESEARCH"
+    r")\s*:?\s*$",
+    re.IGNORECASE,
+)
+
+_PRONOUN_CLAUSE_STRIP_RE = re.compile(
+    r"(?:,?\s*)?"
+    r"(?:or\s+)?(?:rephrase\s+to\s+)?remove\s+(?:the\s+)?personal\s+pronouns?\b[^.;]*|"
+    r"(?:,?\s*)?remove\s+(?:all\s+)?personal\s+pronouns?\b[^.;]*|"
+    r"(?:,?\s*)?avoid\s+(?:using\s+)?personal\s+pronouns?\b[^.;]*|"
+    r"(?:,?\s*)?(?:no|without)\s+personal\s+pronouns?\b[^.;]*|"
+    r"(?:,?\s*)?(?:do\s+not|don't)\s+use\s+personal\s+pronouns?\b[^.;]*",
+    re.IGNORECASE,
+)
+
+
+def _canonical_section_key(label: str) -> str:
+    t = re.sub(r"[^a-z]+", " ", (label or "").lower()).strip()
+    if "project" in t or "portfolio" in t:
+        return "projects"
+    if "experience" in t or "employment" in t:
+        return "experience"
+    if "education" in t or "academic" in t:
+        return "education"
+    if "skill" in t:
+        return "skills"
+    if "summary" in t or "profile" in t or "objective" in t:
+        return "summary"
+    if "certif" in t:
+        return "certifications"
+    if "activit" in t or "leadership" in t:
+        return "activities"
+    return t.replace(" ", "_") or "general"
+
+
+def _resume_section_blobs(text: str) -> dict[str, str]:
+    """Map canonical section key → body text under that heading."""
+    buckets: dict[str, list[str]] = {}
+    current = "general"
+    for raw in (text or "").splitlines():
+        ln = raw.strip()
+        if not ln:
+            continue
+        if _SECTION_HEADING_RE.match(ln):
+            current = _canonical_section_key(ln)
+            buckets.setdefault(current, [])
+            continue
+        buckets.setdefault(current, []).append(ln)
+    return {k: "\n".join(v) for k, v in buckets.items() if v}
+
+
+def _section_blob_for_label(resume_text: str, section_label: str) -> str:
+    blobs = _resume_section_blobs(resume_text)
+    key = _canonical_section_key(section_label)
+    if key in blobs:
+        return blobs[key]
+    # Fuzzy: PROJECT vs projects
+    for blob_key, blob in blobs.items():
+        if key in blob_key or blob_key in key:
+            return blob
+    return resume_text
+
+
+def _strip_unsupported_pronoun_advice(advice: str) -> tuple[str, bool]:
+    """Remove pronoun-fix clauses from LLM advice (caller ensures scope has no pronouns)."""
+    original = (advice or "").strip()
+    if not original:
+        return original, False
+    if not _PRONOUN_CLAIM_RE.search(original):
+        return original, False
+
+    cleaned = _PRONOUN_CLAUSE_STRIP_RE.sub("", original)
+    cleaned = re.sub(r"\s+or\s+and\s+", " and ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bor\s+and\b", "and", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,;.")
+    if cleaned and cleaned != original:
+        if cleaned[-1] not in ".!?":
+            cleaned += "."
+        return cleaned, True
+
+    return (
+        "Use 1–2 concise achievement bullets with strong opening verbs and outcomes.",
+        True,
+    )
+
+
+def _sanitize_pronoun_claims_in_text_fields(raw: dict, resume_text: str) -> int:
+    """Strip lying pronoun advice from sectionFeedback and other narrative fields."""
+    adjustments = 0
+    resume_has_pronoun = bool(_PRONOUN_RE.search(resume_text or ""))
+
+    section_fb = raw.get("sectionFeedback")
+    if isinstance(section_fb, list):
+        for item in section_fb:
+            if not isinstance(item, dict):
+                continue
+            fb = str(item.get("feedback") or "").strip()
+            if not fb:
+                continue
+            scope = _section_blob_for_label(resume_text, str(item.get("section") or ""))
+            scope_has_pronoun = bool(_PRONOUN_RE.search(scope))
+            if scope_has_pronoun or resume_has_pronoun:
+                continue
+            cleaned, changed = _strip_unsupported_pronoun_advice(fb)
+            if changed:
+                logger.info(
+                    "evidence-validator sanitized sectionFeedback pronoun claim: %s | was=%r | now=%r",
+                    str(item.get("section") or "")[:40],
+                    fb[:80],
+                    cleaned[:80],
+                )
+                item["feedback"] = cleaned
+                adjustments += 1
+
+    if not resume_has_pronoun:
+        for issue in raw.get("topIssues") or []:
+            if not isinstance(issue, dict):
+                continue
+            for field in ("issue", "suggestion", "whyItMatters"):
+                val = str(issue.get(field) or "").strip()
+                if not val:
+                    continue
+                cleaned, changed = _strip_unsupported_pronoun_advice(val)
+                if changed:
+                    issue[field] = cleaned
+                    adjustments += 1
+
+        rationales = raw.get("categoryRationales")
+        if isinstance(rationales, dict):
+            for key in _CATEGORY_SCORE_KEYS:
+                val = str(rationales.get(key) or "").strip()
+                if not val:
+                    continue
+                cleaned, changed = _strip_unsupported_pronoun_advice(val)
+                if changed:
+                    rationales[key] = cleaned
+                    adjustments += 1
+
+        kept_recs: list = []
+        for rec in raw.get("finalRecommendations") or []:
+            t = str(rec or "").strip()
+            if not t:
+                continue
+            cleaned, changed = _strip_unsupported_pronoun_advice(t)
+            if changed:
+                adjustments += 1
+            if cleaned.strip():
+                kept_recs.append(cleaned)
+        if isinstance(raw.get("finalRecommendations"), list):
+            raw["finalRecommendations"] = kept_recs
+
+    return adjustments
+
+
 def _strip_non_issue_ats_warnings(raw: dict) -> None:
     """Drop atsWarnings whose text describes a non-issue (good fact framed as
     a warning). Always-on; doesn't depend on evidence thresholds because these
@@ -98,18 +261,23 @@ def _validate_analysis_against_resume(raw: dict, resume_text: str) -> dict:
     has_plenty_numerals = numeral_count >= _NUMERAL_PLENTY_MIN
     has_strong_majority = total >= 5 and strong_share >= _STRONG_VERB_MAJORITY_SHARE
 
-    # Always-on cleanup that doesn't depend on evidence thresholds: drop
-    # atsWarnings phrased as non-issues. These can fire on any résumé.
+    # Always-on cleanup that doesn't depend on evidence thresholds.
     _strip_non_issue_ats_warnings(raw)
+    adjustments = _sanitize_pronoun_claims_in_text_fields(raw, text)
 
     if not (has_plenty_numerals or has_strong_majority):
-        return raw  # nothing to contradict; let everything through
+        if adjustments >= 2:
+            raw["__validator_adjusted__"] = True
+            logger.info(
+                "evidence-validator: %d adjustments made → LLM overall cap disabled",
+                adjustments,
+            )
+        return raw
 
     # Track whether the validator actually made any changes — when it did,
     # _normalize_analysis should no longer cap the overall at the LLM's
     # (proven-untrustworthy) overallScore. Stored on a private key so it
     # doesn't leak into the API response.
-    adjustments = 0
 
     # 1. topIssues
     issues = raw.get("topIssues")

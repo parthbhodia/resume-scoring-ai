@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { buildNameRoleExportFilename } from "@/lib/resumeFileName";
 import { apiUrl } from "@/lib/utils";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 
 export interface UseAnalyzeExportOptions {
   jd?: string;
+  /** Tailor JD role / explicit export role for ``Name_Role`` filenames. */
+  exportRoleLabel?: string;
 }
 
 export interface UseAnalyzeExportReturn {
@@ -59,15 +62,24 @@ async function downloadBlob(resp: Response, fallbackFilename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function useAnalyzeExport(_opts: UseAnalyzeExportOptions = {}): UseAnalyzeExportReturn {
+export function useAnalyzeExport(opts: UseAnalyzeExportOptions = {}): UseAnalyzeExportReturn {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const structuredResume = useResumeAnalyzeStore((s) => s.structuredResume);
+  const extractedText = useResumeAnalyzeStore((s) => s.extractedText);
   const canExport = structuredResume !== null;
+  const exportRoleLabel = opts.exportRoleLabel ?? "";
 
   const exportDocx = useCallback(async () => {
-    const sr = useResumeAnalyzeStore.getState().structuredResume;
+    const state = useResumeAnalyzeStore.getState();
+    const sr = state.structuredResume;
     if (!sr) { setError("No structured resume available — re-upload your file to enable DOCX export."); return; }
+    const fallbackFilename = buildNameRoleExportFilename(
+      state.extractedText,
+      exportRoleLabel,
+      sr,
+      "docx",
+    );
     setExporting(true);
     setError(null);
     try {
@@ -77,19 +89,20 @@ export function useAnalyzeExport(_opts: UseAnalyzeExportOptions = {}): UseAnalyz
         body: JSON.stringify({
           structuredResume: sr,
           acceptedEdits: buildAcceptedEdits(),
+          role: exportRoleLabel.trim() || undefined,
         }),
       });
       if (!resp.ok) {
         const json = await resp.json().catch(() => ({})) as { error?: string };
         throw new Error(json.error ?? "DOCX export failed");
       }
-      await downloadBlob(resp, "resume_export.docx");
+      await downloadBlob(resp, fallbackFilename);
     } catch (e) {
       setError(e instanceof Error ? e.message : "DOCX export failed");
     } finally {
       setExporting(false);
     }
-  }, []);
+  }, [exportRoleLabel, extractedText]);
 
   return { exportDocx, exporting, error, clearError: () => setError(null), canExport };
 }
