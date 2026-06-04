@@ -36,6 +36,7 @@ import {
 import {
   gapFixTargetBulletIndices,
   matchOriginalToBulletIndex,
+  patchStructuredWithOverrides,
   resolveBulletIndexForGapFix,
   synthesizeProfileWithBulletOverrides,
   type LiveBulletItem,
@@ -1141,10 +1142,10 @@ export default function ResumeBuilder({
     const profile = (candidateProfile ?? "").trim();
     if (!effJd) { setAnalyzeError("Please paste a job description first."); return; }
     if (!profile) { setAnalyzeError("Please upload your résumé first."); return; }
-    const canUseClientStructured = Boolean(
-      tailorStructuredResume
-      && profile === (structuredUpload?.profile ?? "").trim(),
-    );
+    // On the initial analyze, no overrides exist yet — send the structured doc
+    // directly when the profile text still matches the upload (no manual edits).
+    const initialStructured = tailorStructuredResume && profile === (structuredUpload?.profile ?? "").trim()
+      ? tailorStructuredResume : null;
     setAnalyzing(true);
     setAnalyzeError(null);
     setError(null);
@@ -1156,8 +1157,8 @@ export default function ResumeBuilder({
           candidate_profile: profile,
           job_description: effJd,
           include_bullet_analysis: true,
-          include_structured_resume: true,
-          ...(canUseClientStructured ? { structured_resume: tailorStructuredResume } : {}),
+          include_structured_resume: !initialStructured,
+          ...(initialStructured ? { structured_resume: initialStructured } : {}),
         }),
       });
       if (!resp.ok) {
@@ -1245,10 +1246,12 @@ export default function ResumeBuilder({
       )
     ).trim();
     if (!prof || !jd.trim()) return false;
-    const canUseClientStructured = Boolean(
-      tailorStructuredResume
-      && prof === (structuredUpload?.profile ?? "").trim(),
-    );
+    // Always send the structured doc with overrides patched in — even after
+    // gap fixes change bullets. This skips a backend re-extraction round-trip
+    // and ensures the scorer sees exactly the content the user edited.
+    const patchedStructured = tailorStructuredResume
+      ? patchStructuredWithOverrides(tailorStructuredResume, effectiveBullets, effectiveOverrides)
+      : null;
     setTailorRescoring(true);
     try {
       const resp = await fetch(apiUrl("/api/analyze"), {
@@ -1258,8 +1261,8 @@ export default function ResumeBuilder({
           candidate_profile: prof,
           job_description: jd.trim(),
           include_bullet_analysis: true,
-          include_structured_resume: true,
-          ...(canUseClientStructured ? { structured_resume: tailorStructuredResume } : {}),
+          include_structured_resume: !patchedStructured,
+          ...(patchedStructured ? { structured_resume: patchedStructured } : {}),
           addressed_gaps: addressedGapActions,
         }),
       });

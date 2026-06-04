@@ -213,3 +213,74 @@ export function gapFixTargetBulletIndices(
   }
   return [...indices];
 }
+
+// ── Patch structured résumé with applied overrides ────────────────────────
+// When the user applies gap fixes we patch the preview via `previewLineOverrides`,
+// but re-checking the score used to re-extract structure from the patched flat
+// text (slow + imprecise). Instead, apply the overrides directly onto the
+// structured doc and send that — one less LLM call and the structure stays exact.
+
+/** Replace a bullet that fuzzy-matches `originalText` with `newText`.
+ *  Returns true when a replacement was made. */
+function _replaceBulletInList(
+  bullets: string[],
+  originalText: string,
+  newText: string,
+): boolean {
+  const needle = normalizeForMatch(originalText);
+  for (let i = 0; i < bullets.length; i++) {
+    const norm = normalizeForMatch(bullets[i]);
+    if (norm === needle || (needle.length >= 16 && (norm.includes(needle) || needle.includes(norm)))) {
+      // Preserve the leading marker style from the original bullet.
+      const leadingMarker = /^[\s•\-–—*·]+/.exec(bullets[i])?.[0] ?? "";
+      const clean = newText.replace(/^[\s•\-–—*·]+/, "").trim();
+      bullets[i] = leadingMarker + clean;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Deep-clone a structured résumé and apply `tailorLineOverrides` onto its
+ * experience and project bullets.
+ *
+ * `bulletAnalysis[bulletIdx].originalBullet` tells us which bullet was replaced
+ * (fuzzy-matched against each section's bullets[]). Unknown indices or misses
+ * are silently skipped — the worst case is the override only lands in the flat
+ * text, not the structured doc, which is identical to the current behaviour.
+ */
+export function patchStructuredWithOverrides<T extends {
+  experience?: Array<{ bullets?: string[] }>;
+  projects?: Array<{ bullets?: string[] }>;
+}>(
+  structured: T,
+  bulletAnalysis: LiveBulletItem[],
+  overrides: Record<number, string>,
+): T {
+  if (!structured || !Object.keys(overrides).length) return structured;
+
+  // Deep-clone so we don't mutate the stored structured doc.
+  const cloned: T = JSON.parse(JSON.stringify(structured));
+
+  for (const [idxStr, newText] of Object.entries(overrides)) {
+    const idx = Number(idxStr);
+    const original = bulletAnalysis[idx]?.originalBullet;
+    if (!original?.trim() || !newText?.trim()) continue;
+
+    let placed = false;
+    for (const exp of cloned.experience ?? []) {
+      if (_replaceBulletInList(exp.bullets ?? [], original, newText)) {
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      for (const proj of cloned.projects ?? []) {
+        _replaceBulletInList(proj.bullets ?? [], original, newText);
+      }
+    }
+  }
+
+  return cloned;
+}
