@@ -39,6 +39,7 @@ async def api_cohort_stats(request: Request):
         return JSONResponse({
             "student_count": 0,
             "analysis_count": 0,
+            "tailored_resume_count": 0,
             "avg_overall": None,
             "score_tiers": {"low": 0, "mid": 0, "good": 0, "strong": 0},
             "dimension_avgs": empty_dim_avgs,
@@ -50,6 +51,7 @@ async def api_cohort_stats(request: Request):
         })
 
     table = _supabase_table("resume_analyses")
+    resumes_table = _supabase_table("resumes")
     if table is None:
         return JSONResponse({"error": "storage unavailable"}, status_code=503)
 
@@ -71,6 +73,7 @@ async def api_cohort_stats(request: Request):
         return JSONResponse({
             "student_count": 0,
             "analysis_count": 0,
+            "tailored_resume_count": 0,
             "avg_overall": None,
             "score_tiers": {"low": 0, "mid": 0, "good": 0, "strong": 0},
             "dimension_avgs": empty_dim_avgs,
@@ -81,7 +84,7 @@ async def api_cohort_stats(request: Request):
             "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
         })
 
-    from collections import Counter as _Counter
+    from collections import defaultdict
 
     def _avg(vals):
         clean = [v for v in vals if isinstance(v, (int, float))]
@@ -102,13 +105,23 @@ async def api_cohort_stats(request: Request):
         else:            tiers["strong"] += 1
 
     # --- most common issues ---
-    issue_counter: _Counter = _Counter()
+    issue_students: dict[str, set[str]] = defaultdict(set)
     for r in rows:
+        uid = str(r.get("user_id") or "")
+        if not uid:
+            continue
         for issue in ((r.get("result") or {}).get("topIssues") or []):
             title = (issue.get("title") or issue.get("issue")) if isinstance(issue, dict) else str(issue)
             if title:
-                issue_counter[title.strip()] += 1
-    top_issues = [{"issue": k, "count": v} for k, v in issue_counter.most_common(10)]
+                issue_students[title.strip()].add(uid)
+    top_issues = [
+        {"issue": title, "count": len(student_set)}
+        for title, student_set in sorted(
+            issue_students.items(),
+            key=lambda kv: len(kv[1]),
+            reverse=True,
+        )[:10]
+    ]
 
     # --- per-student latest scores (advisor roster) ---
     seen: dict = {}
@@ -129,9 +142,24 @@ async def api_cohort_stats(request: Request):
         key=lambda x: x[1]
     )
 
+    tailored_resume_count = 0
+    if resumes_table is not None:
+        try:
+            rr = (
+                resumes_table
+                .select("user_id")
+                .in_("user_id", student_ids)
+                .limit(5000)
+                .execute()
+            )
+            tailored_resume_count = len(rr.data or [])
+        except Exception as exc:
+            logger.warning("cohort_stats tailored resumes query failed: %s", exc)
+
     return JSONResponse({
         "student_count":   len(seen),
         "analysis_count":  len(rows),
+        "tailored_resume_count": tailored_resume_count,
         "avg_overall":     _avg(overall_scores),
         "score_tiers":     tiers,
         "dimension_avgs":  dim_avgs,
