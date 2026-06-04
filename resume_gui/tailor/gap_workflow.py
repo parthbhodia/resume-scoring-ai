@@ -147,7 +147,7 @@ def _verification_context(match_method: str, matched_text: str | None) -> str:
         return f"Verified in updated résumé (exact: {matched_text or 'match'})"
     if match_method in ("alias", "abbreviation"):
         return f"Verified in updated résumé ({match_method}: {matched_text or 'match'})"
-    return "Fix applied — pending full verification"
+    return "Fix applied — re-check to confirm"
 
 
 def _patch_category(
@@ -204,7 +204,7 @@ def _patch_category(
         row = {
             "id": hit["id"],
             "text": hit.get("text") or label,
-            "context": "Fix applied — pending verification",
+            "context": "Fix applied — re-check to confirm",
             "analysis": hit.get("analysis") or "",
             "status": "resolved_by_user",
             "verification": "user_applied",

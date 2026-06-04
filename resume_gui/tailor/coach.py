@@ -225,14 +225,49 @@ def _parse_focus_gaps(raw: object) -> List[Dict[str, Any]]:
     return out
 
 
+# Non-actionable JD requirement phrases — location / work-authorization,
+# seniority level, and culture/soft-fit preferences. These can't be "fixed" by
+# editing a résumé bullet, so offering a "Fix with AI" on them just injects
+# filler that lowers the real score. We drop them from qualifications /
+# responsibilities so they never become fixable gaps.
+_NON_ACTIONABLE_REQUIREMENT_RE = re.compile(
+    r"\b("
+    r"u\.?s\.?-?based|based in|located in|relocat\w*|on-?site|hybrid|"
+    r"remote-?first|fully remote|remote position|work authorization|authorized to work|"
+    r"visa|sponsorship|citizen\w*|eligible to work|"
+    r"strong plus|nice to have|a plus|preferred location|location preference|"
+    r"location requirement|geographic|candidates? are|"
+    r"mid[- ]to[- ]senior|senior[- ]level|junior[- ]level|entry[- ]level|"
+    r"exceptional drive|self[- ]starter|team player|culture[- ]fit|company culture|"
+    r"engineering culture|passion\w*|strong drive|fast[- ]paced|"
+    r"as the team grows|willingness to|ability to thrive"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _requirement_text(item: object) -> str:
+    if isinstance(item, dict):
+        return str(item.get("text") or "")
+    return str(item or "")
+
+
+def _drop_non_actionable(items: object) -> list:
+    """Remove location/seniority/culture-fit items that can't be fixed by a bullet edit."""
+    if not isinstance(items, list):
+        return []
+    return [it for it in items if not _NON_ACTIONABLE_REQUIREMENT_RE.search(_requirement_text(it))]
+
+
 def _category_with_resolved(raw: object) -> dict:
-    """Ensure detailed category buckets include resolved_by_user."""
+    """Ensure detailed category buckets include resolved_by_user, and strip
+    non-actionable (location / seniority / culture-fit) requirement items."""
     if not isinstance(raw, dict):
         return {"score": 0, "covered": [], "missing": [], "resolved_by_user": []}
     out = dict(raw)
-    out.setdefault("covered", [])
-    out.setdefault("missing", [])
-    out.setdefault("resolved_by_user", [])
+    out["covered"] = _drop_non_actionable(out.get("covered"))
+    out["missing"] = _drop_non_actionable(out.get("missing"))
+    out["resolved_by_user"] = _drop_non_actionable(out.get("resolved_by_user"))
     return out
 
 

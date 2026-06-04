@@ -201,7 +201,7 @@ export function applyOptimisticGapAddressed(
         {
           id: missingItem?.id ?? makeStableGapId(text, gapType),
           text,
-          context: "Fix applied — pending verification",
+          context: "Fix applied — re-check to confirm",
           status: "resolved_by_user",
           verification: "user_applied",
         },

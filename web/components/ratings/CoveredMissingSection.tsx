@@ -135,7 +135,7 @@ export function CoveredMissingSection({
               <span style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700 }}>◐</span>
             </div>
             <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
-              Applied — pending verification ({resolved.length})
+              Applied — re-check to confirm ({resolved.length})
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
