@@ -43,12 +43,14 @@ export interface TBProject {
 export type TBFont = "Helvetica" | "Times-Roman" | "Courier";
 export type TBStylePreset = "executive" | "modern" | "classic";
 export type TBPageWidth = "narrow" | "standard" | "wide";
+export type TBFontSize = "small" | "medium" | "large";
 
 export interface TBCustomization {
   font: TBFont;
   accentColor: string; // hex — used for section title text/rule
   stylePreset: TBStylePreset;
   pageWidth: TBPageWidth;
+  fontSize: TBFontSize;
 }
 
 export interface TBFeaturedSkill {
@@ -194,6 +196,7 @@ export const DEFAULT_CUSTOMIZATION: TBCustomization = {
   accentColor: "#1e3a5f",
   stylePreset: "executive",
   pageWidth: "standard",
+  fontSize: "medium",
 };
 
 export const DEFAULT_PROFILE: TBProfile = {

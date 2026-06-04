@@ -93,6 +93,12 @@ interface AnalysisResult {
     severity: "low" | "medium" | "high";
     whyItMatters: string;
     suggestion: string;
+    /** Explicit categoryScores key (backend-authoritative for deterministic checks). */
+    category?: keyof AnalysisResult["categoryScores"];
+    /** Concrete offending items (bullets, words, phrases) to list under the issue. */
+    items?: string[];
+    /** "deterministic" for rule-based recruiter checks surfaced by the backend. */
+    source?: string;
   }>;
   atsWarnings: Array<{ warning: string; suggestion: string }>;
   keywordAnalysis: {
@@ -248,6 +254,15 @@ function guessIssueCategory(issueText: string): keyof AnalysisResult["categorySc
     if (patterns.some(p => lower.includes(p))) return key;
   }
   return null;
+}
+
+/** Category for a topIssue: trust the backend's explicit `category` (deterministic
+ *  checks set it authoritatively); fall back to the text heuristic for LLM issues. */
+function issueCategoryOf(
+  issue: AnalysisResult["topIssues"][number],
+): keyof AnalysisResult["categoryScores"] | null {
+  if (issue.category) return issue.category;
+  return guessIssueCategory(`${issue.issue} ${issue.whyItMatters} ${issue.suggestion}`);
 }
 
 function getBulletsForCategory(
@@ -845,20 +860,30 @@ export default function AnalyzeResume() {
       categoryAssignmentOpts,
     );
     if (bullets.length > 0) return true;
-    const related = result.topIssues.filter((issue) => {
-      const guessed = guessIssueCategory(
-        `${issue.issue} ${issue.whyItMatters} ${issue.suggestion}`,
-      );
-      return guessed === key;
-    });
+    const related = result.topIssues.filter((issue) => issueCategoryOf(issue) === key);
     return related.length > 0;
+  };
+
+  /** A category has a hard deterministic finding (rule-based, always trustworthy)
+   *  when a backend deterministic issue of medium/high severity maps to it. Such
+   *  categories belong in TOP FIXES regardless of the LLM's category score. */
+  const categoryHasDeterministicFix = (key: string): boolean => {
+    if (!result) return false;
+    return result.topIssues.some(
+      (issue) =>
+        issue.source === "deterministic" &&
+        issue.severity !== "low" &&
+        issueCategoryOf(issue) === key,
+    );
   };
 
   const topFixCategories = result
     ? CATEGORY_LABELS
         .filter(({ key }) => {
           const s = result.categoryScores[key];
-          if (s === null || s === undefined || s >= 70) return false;
+          if (s === null || s === undefined) return false;
+          if (categoryHasDeterministicFix(key)) return true;
+          if (s >= 70) return false;
           return categoryHasActionableContent(key);
         })
         .sort((a, b) => (result.categoryScores[a.key] ?? 100) - (result.categoryScores[b.key] ?? 100))
@@ -868,6 +893,7 @@ export default function AnalyzeResume() {
     ? CATEGORY_LABELS.filter(({ key }) => {
         const s = result.categoryScores[key];
         if (s === null || s === undefined) return false;
+        if (categoryHasDeterministicFix(key)) return false; // belongs in TOP FIXES
         // Score >= 70 OR low-score-with-no-actionable-content (the latter
         // would otherwise be a flagged category the user can't act on).
         return s >= 70 || !categoryHasActionableContent(key);
@@ -885,12 +911,7 @@ export default function AnalyzeResume() {
     ? getBulletsForCategory(activeCategory, result.bulletAnalysis, categoryAssignmentOpts)
     : [];
   const relatedTopIssues = activeCategory && result
-    ? result.topIssues.filter(issue => {
-        const guessed = guessIssueCategory(
-          `${issue.issue} ${issue.whyItMatters} ${issue.suggestion}`,
-        );
-        return guessed === activeCategory;
-      })
+    ? result.topIssues.filter(issue => issueCategoryOf(issue) === activeCategory)
     : [];
 
   // Inline copy + editable AI-suggestion drafts (keyed by bulletAnalysis index)
@@ -2213,6 +2234,43 @@ export default function AnalyzeResume() {
                     <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", lineHeight: 1.55 }}>
                       {issue.suggestion}
                     </p>
+                    {issue.items && issue.items.length > 0 && (() => {
+                      // Short tokens (words/phrases) render as chips; long ones (bullets) as lines.
+                      const isChips = issue.items.every(it => it.length <= 28);
+                      return (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{
+                            fontSize: 11, fontWeight: 700, color: "var(--muted)",
+                            textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6,
+                          }}>
+                            Found in your résumé
+                          </div>
+                          {isChips ? (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {issue.items.map((it, k) => (
+                                <span key={k} style={{
+                                  fontSize: 12.5, padding: "3px 9px", borderRadius: 8,
+                                  background: "var(--red-tint, rgba(248,113,113,0.12))",
+                                  color: "var(--red-ink, var(--red))",
+                                  border: "1px solid rgba(248,113,113,0.25)",
+                                }}>{it}</span>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {issue.items.map((it, k) => (
+                                <div key={k} style={{
+                                  fontSize: 12.5, lineHeight: 1.5, padding: "7px 10px", borderRadius: 8,
+                                  background: "var(--red-tint, rgba(248,113,113,0.10))",
+                                  color: "var(--text)",
+                                  border: "1px solid rgba(248,113,113,0.20)",
+                                }}>{it.replace(/^[•\-–*▪▸]\s*/, "")}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

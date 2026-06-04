@@ -18,6 +18,30 @@ def _rewrite_numerals(text: str) -> set[str]:
     return set(_NUMERAL_RE.findall(text or ""))
 
 
+# Bracketed metric placeholders the prompt instructs the LLM to use when it
+# cannot invent a truthful number: "[X%]", "[$Y]", "[~N]", "[N users]", etc.
+# These contain no literal digit, so `_rewrite_numerals` misses them — which
+# used to make every honest placeholder-quantification rewrite look like a
+# no-op and get rejected. Count them as "added quantification" too.
+_PLACEHOLDER_RE = re.compile(r"\[[^\]]*\]")
+
+
+def _rewrite_placeholders(text: str) -> set[str]:
+    return {m.group(0) for m in _PLACEHOLDER_RE.finditer(text or "")}
+
+
+def _adds_quantification(original: str, rewrite: str) -> bool:
+    """True when the rewrite introduces a numeral OR a metric placeholder that
+    was not present in the original. This is the single source of truth for
+    'did this rewrite actually add quantification' — used by both the rewrite
+    validator and the issue-tag stripper so they can never disagree."""
+    orig_nums = _rewrite_numerals(original)
+    orig_holes = _rewrite_placeholders(original)
+    new_nums = _rewrite_numerals(rewrite) - orig_nums
+    new_holes = _rewrite_placeholders(rewrite) - orig_holes
+    return bool(new_nums or new_holes)
+
+
 def _rewrite_proper_nouns(text: str) -> set[str]:
     return {m.group(0) for m in _PROPER_NOUN_RE.finditer(text or "")}
 
@@ -63,9 +87,8 @@ def _validate_rewrite_against_original(
         return False, f"shrank from {o_wc}→{r_wc} words (>20% drop)"
 
     if category and category.lower() in ("quantification", "quantify_impact"):
-        added_nums = new_nums - orig_nums
-        if not added_nums:
-            return False, "tagged quantification but no new numerals added"
+        if not _adds_quantification(o, r):
+            return False, "tagged quantification but no new numerals/placeholders added"
 
     return True, ""
 
@@ -323,12 +346,11 @@ def _filter_bullet_rewrites(
         quant_keys = {"quantification", "quantify_impact", "quantify"}
         has_quant_tag = any(t in quant_keys for t in lowered)
         if has_quant_tag:
-            orig_nums = _rewrite_numerals(original)
             added_anywhere = False
             for candidate in [kept_improved] + list(kept_cr.values()):
                 if not candidate:
                     continue
-                if _rewrite_numerals(candidate) - orig_nums:
+                if _adds_quantification(original, candidate):
                     added_anywhere = True
                     break
             if not added_anywhere:

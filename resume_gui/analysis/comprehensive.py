@@ -6,6 +6,7 @@ import re
 from typing import Optional
 
 from resume_gui.analysis.constants import _PRONOUN_RE
+from resume_gui.analysis.deterministic_insights import inject_deterministic_insights
 from resume_gui.analysis.evidence_validator import _validate_analysis_against_resume
 from resume_gui.analysis.normalize import _normalize_analysis
 from resume_gui.llm.client import _analysis_model, _llm_json_call
@@ -164,6 +165,158 @@ _BULLET_DATE_LEAD_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+
+# Universal résumé filler — vague self-descriptors and clichés that carry zero
+# concrete meaning in ANY discipline (tech, healthcare, trades, arts, finance…).
+# Deliberately EXCLUDES domain-ambiguous words ("framework", "scalable",
+# "efficient", "reliable", "robust", "leverage", "proven", "driven") because
+# those are legitimate vocabulary in some fields — flagging them violates the
+# discipline-agnostic invariant. (Distinct from _UNNECESSARY, which targets whole
+# boilerplate phrases like "references available".)
+_BUZZWORDS = (
+    "results-driven", "results-oriented", "detail-oriented", "self-motivated",
+    "self-starter", "hardworking", "hard-working", "team player", "go-getter",
+    "go-to", "synergy", "synergies", "synergize", "thought leader", "guru",
+    "ninja", "rockstar", "wizard", "best-of-breed", "best in class",
+    "world-class", "think outside the box", "outside the box", "value-add",
+    "value add", "track record", "proven track record", "strong work ethic",
+    "excellent communication skills", "highly skilled", "fast-paced",
+    "results oriented", "detail oriented", "team-player",
+)
+_BUZZWORD_RE = re.compile(
+    r"\b(" + "|".join(re.escape(b).replace(r"\ ", r"\s+").replace(r"\-", r"[-\s]?") for b in _BUZZWORDS) + r")\b",
+    re.IGNORECASE,
+)
+
+# Portfolio / personal-site / code-host links (separate from LinkedIn). Matches
+# both full URLs and the bare display words résumés often use ("GitHub",
+# "Portfolio") since extracted text frequently keeps the link text, not the href.
+_PORTFOLIO_RE = re.compile(
+    r"\bgithub\b|\bgitlab\b|\bbitbucket\b|\bbehance\b|\bdribbble\b|\bcodepen\b|"
+    r"\bportfolio\b|personal\s+website|"
+    r"\b[a-z0-9-]+\.(?:dev|io|me|tech|page|app)\b|\bwww\.",
+    re.IGNORECASE,
+)
+
+# Section headings that introduce a professional-summary block.
+_SUMMARY_HEADING_RE = re.compile(
+    r"^\s*(professional\s+summary|summary|profile|professional\s+profile|"
+    r"career\s+summary|summary\s+of\s+qualifications|objective|about\s+me)\s*:?\s*$",
+    re.IGNORECASE,
+)
+# Any other section heading (terminates the summary block).
+_GENERIC_HEADING_RE = re.compile(
+    r"^\s*(work\s+experience|experience|employment|education|skills|projects|"
+    r"certifications?|achievements?|awards?|publications?|interests?|"
+    r"technical\s+skills|professional\s+experience|activities|volunteer)\s*:?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _extract_summary_block(text: str) -> str:
+    """Return the text of the professional-summary section, or '' if none.
+    Reads lines after a summary heading until the next section heading."""
+    lines = [l.rstrip() for l in (text or "").splitlines()]
+    out: list[str] = []
+    capturing = False
+    for ln in lines:
+        if _SUMMARY_HEADING_RE.match(ln):
+            capturing = True
+            continue
+        if capturing:
+            if not ln.strip():
+                if out:  # blank line after we've captured content ends the block
+                    break
+                continue
+            if _GENERIC_HEADING_RE.match(ln) or _SUMMARY_HEADING_RE.match(ln):
+                break
+            out.append(ln.strip())
+    return " ".join(out).strip()
+
+
+# Lazy, process-cached spellchecker. Returns None when pyspellchecker is not
+# installed (prod image without the dep) so the check degrades to a no-op.
+_SPELL = None
+_SPELL_INIT = False
+# Tech / résumé vocabulary the generic dictionary doesn't know but is correct.
+_SPELL_ALLOWLIST = {
+    "ai", "ml", "api", "apis", "sql", "nosql", "css", "html", "json", "yaml",
+    "saas", "paas", "iaas", "ci", "cd", "cicd", "devops", "backend", "frontend",
+    "fullstack", "microservices", "kubernetes", "docker", "serverless", "grpc",
+    "graphql", "oauth", "jwt", "redis", "kafka", "nginx", "linux", "ubuntu",
+    "kanban", "scrum", "agile", "etl", "ux", "ui", "sdk", "cli", "url", "uri",
+    "github", "gitlab", "npm", "webpack", "vite", "nextjs", "nodejs", "typescript",
+    "javascript", "pytorch", "tensorflow", "numpy", "pandas", "postgres",
+    "postgresql", "mongodb", "dynamodb", "elasticsearch", "kibana", "rabbitmq",
+    "leaflet", "htmx", "pinecone", "bedrock", "cognito", "lambda", "amplify",
+    "chatbot", "chatbots", "dataset", "datasets", "realtime", "scalable",
+    "onboarding", "roadmap", "stakeholder", "stakeholders", "kpis", "roi",
+    "workflows", "dashboards", "analytics", "geospatial", "vue", "django",
+    "admin", "config", "auth", "async", "boolean", "enum", "regex", "middleware",
+    "runtime", "namespace", "schema", "schemas", "webapp", "webhooks", "webhook",
+    "login", "signup", "frontend", "backend", "fullstack", "codebase", "repo",
+    "repos", "plugin", "plugins", "scalable", "performant", "latency", "throughput",
+}
+
+# Strip tokens that aren't real prose words before spell-scanning: email
+# addresses, URLs, and social handles. These are the dominant source of false
+# positives ("gmail" from an email, "linkedin" from a handle, etc.).
+_SPELL_STRIP_RE = re.compile(
+    r"\S+@\S+|https?://\S+|www\.\S+|\b[a-z0-9.-]+\.(?:com|org|net|io|dev|edu|gov|co)\b"
+    r"|linkedin\S*|github\S*|gitlab\S*",
+    re.IGNORECASE,
+)
+
+
+def _get_spellchecker():
+    global _SPELL, _SPELL_INIT
+    if _SPELL_INIT:
+        return _SPELL
+    _SPELL_INIT = True
+    try:
+        from spellchecker import SpellChecker  # type: ignore
+        _SPELL = SpellChecker(distance=1)
+    except Exception:
+        _SPELL = None
+    return _SPELL
+
+
+def _find_misspellings(text: str) -> list[str]:
+    """Conservative spelling pass: only flag all-lowercase alphabetic words the
+    dictionary doesn't know and that aren't in the tech allowlist. Skips
+    Title-Case (names), ALL-CAPS (acronyms), CamelCase, and tokens with
+    digits/punctuation — those are almost always intentional on a résumé."""
+    spell = _get_spellchecker()
+    if spell is None:
+        return []
+    scrubbed = _SPELL_STRIP_RE.sub(" ", text or "")
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for raw in re.findall(r"[A-Za-z][A-Za-z'-]*", scrubbed):
+        w = raw.strip("'-")
+        if len(w) < 4:
+            continue
+        if w != w.lower():           # has uppercase → name/acronym/CamelCase
+            continue
+        if w in _SPELL_ALLOWLIST:
+            continue
+        if w in seen:
+            continue
+        seen.add(w)
+        candidates.append(w)
+    if not candidates:
+        return []
+    unknown = spell.unknown(candidates)
+    flagged: list[str] = []
+    for w in candidates:
+        if w not in unknown:
+            continue
+        corr = spell.correction(w)
+        if corr and corr != w:
+            flagged.append(f'"{w}" → "{corr}"')
+        if len(flagged) >= 8:
+            break
+    return flagged
 
 
 def _recruiter_checks(text: str) -> dict:
@@ -443,9 +596,22 @@ def _recruiter_checks(text: str) -> dict:
             roles.append((cur_header, cur_bullets))
         return roles
 
+    # Education / certification headers are not work roles — they legitimately
+    # have 0 bullets and no metrics, so they must not count as "thin roles".
+    _EDU_HEADER_RE = re.compile(
+        r"\b(university|college|institute|school|academy|bachelor|master|"
+        r"b\.?s\.?|m\.?s\.?|b\.?tech|m\.?tech|b\.?e\.?|ph\.?d|diploma|"
+        r"certification|certificate|coursework|gpa|cgpa)\b",
+        re.IGNORECASE,
+    )
+
     role_blocks = _parse_role_blocks(lines)
     weak_roles = []
+    work_role_count = 0
     for header, role_bullets in role_blocks:
+        if _EDU_HEADER_RE.search(header):
+            continue
+        work_role_count += 1
         has_numbers  = any(_NUMBER_RE.search(b) for b in role_bullets)
         bullet_count = len(role_bullets)
         if bullet_count < 3 or not has_numbers:
@@ -456,8 +622,8 @@ def _recruiter_checks(text: str) -> dict:
                 reason.append("no quantified results")
             weak_roles.append(f"{header}  [{', '.join(reason)}]")
 
-    if role_blocks:
-        rd_score = max(0, round(10 - len(weak_roles) * (10 / max(len(role_blocks), 1))))
+    if work_role_count:
+        rd_score = max(0, round(10 - len(weak_roles) * (10 / max(work_role_count, 1))))
     else:
         rd_score = 10
     checks.append({
@@ -469,6 +635,70 @@ def _recruiter_checks(text: str) -> dict:
             "Thin roles signal low impact to recruiters — flesh them out with specific achievements."
         ),
         "items": weak_roles[:6],
+    })
+
+    # 14. Buzzwords / filler adjectives
+    buzz_counts: dict[str, int] = {}
+    for m in _BUZZWORD_RE.finditer(text):
+        key = m.group(0).lower()
+        buzz_counts[key] = buzz_counts.get(key, 0) + 1
+    buzz_items = [f"{w} ({n}x)" if n > 1 else w for w, n in buzz_counts.items()]
+    buzz_score = 10 if not buzz_items else max(0, 10 - len(buzz_items) * 2)
+    checks.append({
+        "id": "buzzwords", "name": "Buzzwords",
+        "score": buzz_score, "passed": buzz_score >= 7,
+        "detail": (
+            "Vague filler clichés ('results-driven', 'team player', 'detail-oriented', "
+            "'go-getter') add no concrete information in any field. Replace them with "
+            "specific, measurable accomplishments that show — not tell."
+        ),
+        "items": buzz_items[:8],
+    })
+
+    # 15. Summary section length (the Professional Summary block specifically)
+    # Only flag a summary that is too LONG — a tight one-liner is acceptable, so
+    # we don't penalize short summaries (avoids over-flagging concise résumés).
+    summary_block = _extract_summary_block(text)
+    summary_words = len(summary_block.split()) if summary_block else 0
+    if summary_block and summary_words > 75:
+        sum_score = 5
+        sum_items = [f"Summary is {summary_words} words — condense to 25–75."]
+    else:
+        sum_score, sum_items = 10, []
+    checks.append({
+        "id": "summary_length", "name": "Summary Length",
+        "score": sum_score, "passed": sum_score >= 7,
+        "detail": (
+            "A professional summary reads best at a tight 25–75 words (2–4 lines). "
+            "Much longer and it becomes a paragraph recruiters skip."
+        ),
+        "items": sum_items,
+    })
+
+    # 16. Portfolio / personal site link (separate from LinkedIn)
+    has_portfolio = bool(_PORTFOLIO_RE.search(text))
+    port_score = 10 if has_portfolio else 6
+    checks.append({
+        "id": "portfolio", "name": "Portfolio Link",
+        "score": port_score, "passed": has_portfolio,
+        "detail": (
+            "A portfolio, GitHub, or personal-site link lets recruiters see your work "
+            "directly. For technical and creative fields it's a strong signal."
+        ),
+        "items": [] if has_portfolio else ["No portfolio / GitHub / personal-site link found"],
+    })
+
+    # 17. Spelling (local, conservative — see _find_misspellings)
+    misspellings = _find_misspellings(text)
+    spell_score = 10 if not misspellings else max(0, 10 - len(misspellings) * 2)
+    checks.append({
+        "id": "spelling", "name": "Spelling",
+        "score": spell_score, "passed": not misspellings,
+        "detail": (
+            "Spelling errors are the fastest way to get screened out. "
+            "Proofread carefully — recruiters read typos as carelessness."
+        ),
+        "items": misspellings[:8],
     })
 
     overall = round(sum(c["score"] for c in checks) / len(checks) * 10)
@@ -554,9 +784,14 @@ keyword placement (no stuffing). If no JD: null scores as specified below.
 “worked on”, task lists without impact). Align with results-focused bullet craft. \
 Do NOT fold this into quantification — weak verbs and duty-only wording are achievement problems even when numbers exist.
 5. QUANTIFICATION: %, $, scale, time saved, users, rankings, before/after — reward \
-truthful metrics. Aim for roughly 50% of experience bullets with measurable results (not 100%). \
-Flag only the highest-impact opportunities to add numbers—especially bullets that match the JD or already show strong verbs/outcomes. \
-Do NOT tag every unquantified line for quantification. \
+truthful metrics. Aim for a strong majority (~70%+) of experience bullets to carry a measurable result. \
+This is a high-value dimension: be thorough, not shy. Any experience bullet describing an outcome, \
+build, or improvement WITHOUT a number is a legitimate quantification opportunity — flag it and offer a \
+rewrite that adds a real metric or a "[X%]"/"[$Y]"/"[~N]" placeholder. A bullet like \
+"Built and maintained scalable frontend UIs in Vue.js" or "Engineered a secure login system" has zero \
+metrics and SHOULD be flagged. Prioritize the weakest/highest-impact bullets within your {bullet_analysis_max}-bullet \
+budget, but do not under-report: when many bullets lack numbers, the quantification score should reflect \
+that (low score + several flagged bullets), matching what a rigorous reviewer would say. \
 This is separate from achievement quality: duty-language is achievement; missing metrics on a strong outcome bullet is quantification.
 6. SECTION STRUCTURE: Sections and order aligned with the UMBC checklist above (header, optional Objective/Summary, \
 education, optional certs/research/projects/coursework, skills, professional vs additional experience, honors, activities, \
@@ -586,11 +821,16 @@ Infer the field from the résumé text and score against that field's expectatio
 - Be SPECIFIC, not generic. Tell exactly WHERE and HOW to fix each issue.
 - When rewriting bullets, PRESERVE TRUTHFULNESS. Mark invented metrics \
   as "[X%]", "[$Y]", or "[~N]".
-- For bulletAnalysis: analyze ONLY the {bullet_analysis_max} WEAKEST bullets (lowest-quality ones). \
-  Skip good bullets.
+- For bulletAnalysis: analyze the weakest bullets, up to {bullet_analysis_max} of them. Be thorough — \
+  if the résumé has many bullets that lack metrics or lead with duty phrasing, return MANY (10-15), not \
+  just 2-3. Returning only a couple of bullets when the résumé clearly has more weak ones is an \
+  under-report and the user notices. Skip only the genuinely strong bullets (own a quantified outcome). \
 - For each weak bullet, label issues clearly (quantification vs achievement vs language). \
-  improvedBullet must match the primary weakness. Only ~half of weak bullets should carry a \
-  quantification issue; pick JD-relevant, high-impact lines first. categoryRewrites.quantification and \
+  improvedBullet must match the primary weakness. A bullet that leads with a strong verb (Built, \
+  Engineered, Integrated, Automated, Designed, Implemented, Developed) but contains NO number is a \
+  QUANTIFICATION bullet, not an achievement bullet — its weakness is the missing metric, so \
+  primaryCategory is "quantification" and issueCategories includes "quantification". Reserve \
+  achievementQuality for duty-language / weak-verb / no-ownership bullets. categoryRewrites.quantification and \
   categoryRewrites.achievementQuality must be DIFFERENT rewrites when both weaknesses apply — \
   never paste the same text into both fields.
 - CATEGORY HONESTY (the UI buckets bullets by these fields — get them right): \
@@ -839,7 +1079,10 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
         # otherwise the calibration penalty fires on lies and the overall
         # score gets crushed to 36 on a perfectly fine résumé.
         raw = _validate_analysis_against_resume(raw, text)
-        return _normalize_analysis(raw)
+        normalized = _normalize_analysis(raw)
+        # Surface deterministic recruiter checks the LLM under-reported. Runs
+        # AFTER the honesty pipeline so the evidence validator can't strip them.
+        return inject_deterministic_insights(normalized, struct)
 
     logger.warning("LLM unavailable for comprehensive analysis — using regex fallback")
-    return _regex_to_comprehensive(struct, jd)
+    return inject_deterministic_insights(_regex_to_comprehensive(struct, jd), struct)

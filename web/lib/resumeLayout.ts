@@ -4,9 +4,9 @@
  * entryGap between jobs. Template Builder + AnalyzeLiveResumeBody both consume this module.
  */
 import type { CSSProperties } from "react";
-import type { TBFont, TBPageWidth, TBStylePreset } from "@/components/TemplateBuilder/types";
+import type { TBFont, TBPageWidth, TBStylePreset, TBFontSize } from "@/components/TemplateBuilder/types";
 
-export type { TBFont, TBPageWidth, TBStylePreset };
+export type { TBFont, TBPageWidth, TBStylePreset, TBFontSize };
 
 export interface ResumeStylePresetOption {
   id: TBStylePreset;
@@ -169,17 +169,33 @@ export interface ResumeLayoutContext {
   accent: string;
 }
 
+const FONT_SIZE_SCALE: Record<TBFontSize, number> = {
+  small: 0.92,
+  medium: 1.0,
+  large: 1.10,
+};
+
 export function resolveResumeLayout(opts: {
   stylePreset?: TBStylePreset;
   pageWidth?: TBPageWidth;
   font?: TBFont;
   accentColor?: string;
+  fontSize?: TBFontSize;
 }): ResumeLayoutContext {
   const preset = getResumeStylePreset(opts.stylePreset);
   const page = getResumePageWidth(opts.pageWidth);
   const font = opts.font ?? preset.font;
+  const scale = FONT_SIZE_SCALE[opts.fontSize ?? "medium"] ?? 1.0;
+  const scaledPreset: ResumeStylePresetOption = scale === 1.0 ? preset : {
+    ...preset,
+    baseFont: preset.baseFont * scale,
+    bodyFont: preset.bodyFont * scale,
+    metaFont: preset.metaFont * scale,
+    sectionFont: preset.sectionFont * scale,
+    nameFont: preset.nameFont * scale,
+  };
   return {
-    preset,
+    preset: scaledPreset,
     page,
     fontStack: fontStackFor(font),
     accent: opts.accentColor ?? preset.accentColor,

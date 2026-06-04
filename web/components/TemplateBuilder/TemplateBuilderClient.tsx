@@ -453,6 +453,172 @@ export default function TemplateBuilderClient() {
   );
 }
 
+/* ── Bullet list editor ────────────────────────────────────────── */
+
+function parseBulletsToArray(raw: string): string[] {
+  const lines = raw.split("\n").map((l) => l.replace(/^[•·\-*]\s*/, "").trim());
+  const filtered = lines.filter((l) => l.length > 0);
+  return filtered.length > 0 ? filtered : [""];
+}
+
+function joinBulletsFromArray(items: string[]): string {
+  return items.filter((l) => l.trim()).join("\n");
+}
+
+interface BulletRowProps {
+  value: string;
+  isFirst: boolean;
+  isLast: boolean;
+  context?: { role?: string; company?: string };
+  onChange: (v: string) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}
+
+function BulletRow({ value, isFirst, isLast, context, onChange, onMoveUp, onMoveDown, onRemove }: BulletRowProps) {
+  const [aiLoading, setAiLoading] = useState(false);
+  const [undoVal, setUndoVal] = useState<string | null>(null);
+  const wordCount = value.trim().split(/\s+/).filter(Boolean).length;
+  const showAi = wordCount >= 6;
+
+  const enhance = useCallback(async () => {
+    setAiLoading(true);
+    try {
+      const res = await fetch(apiUrl("/api/tb-enhance"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: value, type: "bullets", context: context ?? {} }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.enhanced) throw new Error(data.error || "AI error");
+      setUndoVal(value);
+      const enhanced = String(data.enhanced).split("\n")[0].replace(/^[•·\-*]\s*/, "").trim();
+      onChange(enhanced);
+    } catch {
+      // silently fail
+    } finally {
+      setAiLoading(false);
+    }
+  }, [value, context, onChange]);
+
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "flex-start", marginBottom: 6 }}>
+      <span style={{ color: "var(--muted)", fontSize: 14, marginTop: 9, flexShrink: 0, userSelect: "none" }}>•</span>
+      <div style={{ flex: 1, position: "relative" }}>
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={2}
+          style={{
+            ...textareaBase,
+            minHeight: 38,
+            resize: "vertical",
+            paddingRight: showAi ? 82 : undefined,
+            lineHeight: 1.45,
+            fontSize: 12.5,
+          }}
+          placeholder="Describe an achievement or responsibility..."
+        />
+        {showAi && (
+          <div style={{ position: "absolute", bottom: 7, right: 7, display: "flex", gap: 4, alignItems: "center" }}>
+            {undoVal !== null && !aiLoading && (
+              <button
+                type="button"
+                onClick={() => { onChange(undoVal); setUndoVal(null); }}
+                style={{
+                  fontSize: 9, color: "var(--muted)", background: "var(--surface2)",
+                  border: "1px solid var(--border)", borderRadius: 4, padding: "2px 5px", cursor: "pointer",
+                }}
+              >↩</button>
+            )}
+            <button
+              type="button"
+              onClick={enhance}
+              disabled={aiLoading}
+              style={{
+                fontSize: 10, fontWeight: 600, padding: "3px 7px", borderRadius: 4, border: "none",
+                background: aiLoading ? "var(--surface2)" : "var(--accent)",
+                color: aiLoading ? "var(--muted)" : "#fff",
+                cursor: aiLoading ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", gap: 3,
+              }}
+            >
+              {aiLoading
+                ? <span style={{ width: 8, height: 8, border: "1.5px solid var(--border)", borderTopColor: "var(--muted)", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
+                : <>✦ AI</>}
+            </button>
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3, flexShrink: 0 }}>
+        <button
+          onClick={onMoveUp}
+          disabled={isFirst}
+          style={{ ...orderBtnStyle, opacity: isFirst ? 0.35 : 1, padding: "1px 5px", fontSize: 10 }}
+          title="Move up"
+        >↑</button>
+        <button
+          onClick={onMoveDown}
+          disabled={isLast}
+          style={{ ...orderBtnStyle, opacity: isLast ? 0.35 : 1, padding: "1px 5px", fontSize: 10 }}
+          title="Move down"
+        >↓</button>
+        <button
+          onClick={onRemove}
+          style={{ ...removeBtnStyle, fontSize: 10, padding: "1px 4px" }}
+          title="Remove bullet"
+        >✕</button>
+      </div>
+    </div>
+  );
+}
+
+function BulletListEditor({ bullets, onChange, context }: {
+  bullets: string;
+  onChange: (v: string) => void;
+  context?: { role?: string; company?: string };
+}) {
+  const items = parseBulletsToArray(bullets);
+
+  const updateItems = (next: string[]) => onChange(joinBulletsFromArray(next));
+
+  return (
+    <div>
+      <label style={{ ...labelStyle, marginBottom: 8 }}>Key Achievements</label>
+      {items.map((item, idx) => (
+        <BulletRow
+          key={idx}
+          value={item}
+          isFirst={idx === 0}
+          isLast={idx === items.length - 1}
+          context={context}
+          onChange={(v) => { const next = [...items]; next[idx] = v; updateItems(next); }}
+          onMoveUp={() => {
+            if (idx === 0) return;
+            const next = [...items];
+            [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+            updateItems(next);
+          }}
+          onMoveDown={() => {
+            if (idx === items.length - 1) return;
+            const next = [...items];
+            [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+            updateItems(next);
+          }}
+          onRemove={() => {
+            const next = items.filter((_, i) => i !== idx);
+            updateItems(next.length > 0 ? next : [""]);
+          }}
+        />
+      ))}
+      <button style={{ ...addBtnStyle, marginTop: 2 }} onClick={() => updateItems([...items, ""])}>
+        + Add Bullet
+      </button>
+    </div>
+  );
+}
+
 /* ── Section sub-components ────────────────────────────────────── */
 
 type StoreType = TemplateBuilderStore;
@@ -586,18 +752,11 @@ function ExperienceSection({ store, data }: { store: StoreType; data: StoreType[
               Currently working here
             </label>
           </div>
-          <FieldWrap>
-            <Field label="Key Achievements (one bullet per line)">
-              <AITextarea
-                type="bullets"
-                context={{ role: w.jobTitle, company: w.company }}
-                value={w.bullets}
-                onChange={(e) => store.setWork(w.id, "bullets", e.target.value)}
-                onEnhanced={(v) => store.setWork(w.id, "bullets", v)}
-                placeholder={"• Led team of 5 engineers to ship feature X\n• Reduced latency by 40% via caching"}
-              />
-            </Field>
-          </FieldWrap>
+          <BulletListEditor
+            bullets={w.bullets}
+            onChange={(v) => store.setWork(w.id, "bullets", v)}
+            context={{ role: w.jobTitle, company: w.company }}
+          />
         </div>
       ))}
       <button style={addBtnStyle} onClick={store.addWork}>+ Add Position</button>
@@ -735,18 +894,11 @@ function ProjectsSection({ store, data }: { store: StoreType; data: StoreType["d
                 onChange={(e) => store.setProject(p.id, "link", e.target.value)} placeholder="github.com/you/project" />
             </Field>
           </FieldWrap>
-          <FieldWrap>
-            <Field label="Description (one bullet per line)">
-              <AITextarea
-                type="bullets"
-                context={{ role: p.name }}
-                value={p.bullets}
-                onChange={(e) => store.setProject(p.id, "bullets", e.target.value)}
-                onEnhanced={(v) => store.setProject(p.id, "bullets", v)}
-                placeholder={"• Built a tool that...\n• Achieved X by doing Y..."}
-              />
-            </Field>
-          </FieldWrap>
+          <BulletListEditor
+            bullets={p.bullets}
+            onChange={(v) => store.setProject(p.id, "bullets", v)}
+            context={{ role: p.name }}
+          />
         </div>
       ))}
       <button style={addBtnStyle} onClick={store.addProject}>+ Add Project</button>
@@ -909,6 +1061,50 @@ function CustomizeSection({ store, c }: { store: StoreType; c: StoreType["data"]
                   opacity: 0.9,
                 }} />
                 <div style={{ fontSize: 11, fontWeight: 700 }}>{option.label}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Font Size */}
+      <div style={{ marginBottom: 20 }}>
+        <label style={labelStyle}>Font Size</label>
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px", lineHeight: 1.5 }}>
+          Controls text size across the entire résumé.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 7 }}>
+          {([
+            { id: "small",  label: "Small",  sub: "Fits more content",   sample: 11 },
+            { id: "medium", label: "Medium", sub: "Default balance",     sample: 13 },
+            { id: "large",  label: "Large",  sub: "Easy to read",        sample: 15 },
+          ] as const).map((opt) => {
+            const active = (c.fontSize ?? "medium") === opt.id;
+            return (
+              <button
+                key={opt.id}
+                onClick={() => store.setCustomization("fontSize", opt.id)}
+                style={{
+                  borderRadius: 8,
+                  border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
+                  background: active ? "color-mix(in srgb, var(--accent) 8%, var(--bg))" : "var(--bg)",
+                  padding: "10px 7px",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  color: active ? "var(--accent)" : "var(--text)",
+                  textAlign: "center",
+                  transition: "border-color 0.15s, background 0.15s",
+                }}
+              >
+                <div style={{
+                  fontSize: opt.sample,
+                  fontWeight: 700,
+                  lineHeight: 1,
+                  marginBottom: 5,
+                  color: active ? "var(--accent)" : "var(--text)",
+                }}>Aa</div>
+                <div style={{ fontSize: 11, fontWeight: 700 }}>{opt.label}</div>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2, lineHeight: 1.3 }}>{opt.sub}</div>
               </button>
             );
           })}

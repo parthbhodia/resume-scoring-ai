@@ -16,6 +16,7 @@ const ResumePreview = forwardRef<HTMLDivElement, { data: TBResumeData }>(functio
     pageWidth: customization?.pageWidth,
     font: customization?.font,
     accentColor: customization?.accentColor,
+    fontSize: customization?.fontSize,
   });
   const hidden = new Set(hiddenSections ?? []);
 

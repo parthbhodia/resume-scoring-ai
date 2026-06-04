@@ -71,6 +71,7 @@ POST /api/analyze-upload  (PDF binary)
         ├── _validate_analysis_against_resume(raw, text)              # evidence validator
         ├── _strip_non_issue_ats_warnings(raw)                        # always-on
         └── _normalize_analysis(raw)                                  # calibration v2 + rewrite filter
+        └── inject_deterministic_insights(normalized, struct)       # failed _recruiter_checks → topIssues
 
 return {
   overallScore, categoryScores, summary, topStrengths, topIssues,
@@ -180,8 +181,10 @@ Gemini fallback chain kicks in when Grok hits quota or errors. Slugs: `GEMINI_RE
 11. **Strong-verb detection distinguishes verb+object from participle+duty-noun.** `_bullet_leads_with_strong_ownership_verb()` in `analysis/constants.py` rejects leads like `Automated testing…` (participle + activity noun) while keeping `Automated CI/CD pipelines…`. Used for résumé-wide share, evidence validator per-bullet checks, and achievement rewrite filtering.
 12. **`achievementQuality` rewrites must change the opening and fix the lead.** `_validate_achievement_rewrite` in `rewrite_validators.py` drops `improvedBullet` / `categoryRewrites.achievementQuality` when the first token is unchanged or the rewrite still opens with a participial duty-style phrase.
 13. **Pronoun advice must match the text.** `_sanitize_pronoun_claims_in_text_fields` strips unsupported "remove personal pronoun" clauses from `sectionFeedback` (per-section scope) and from `topIssues` / `categoryRationales` / `finalRecommendations` when the full résumé has no pronouns. Always-on (not gated on numerals/strong-verb thresholds).
+14. **Buzzword detection is universal-filler only.** `_BUZZWORDS` in `comprehensive.py` flags clichés with zero concrete meaning in any field (`team player`, `results-driven`, …). Domain-ambiguous terms (`framework`, `scalable`, `efficient`, `reliable`, `leverage`, `proven`, …) must never be flagged — they are legitimate vocabulary in some disciplines.
+15. **Deterministic recruiter checks surface after honesty.** `deterministic_insights.inject_deterministic_insights` merges failed `_recruiter_checks` into `topIssues` with `source: "deterministic"` and explicit `category`; injected after `_normalize_analysis` so the evidence validator cannot strip them. Frontend promotes categories with medium/high deterministic issues to TOP FIXES even when the LLM category score is ≥70.
 
-The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_experience_tenure.py` defend invariants 1–13. Full algorithm notes: [`docs/ANALYSIS_ALGORITHM.md`](docs/ANALYSIS_ALGORITHM.md).
+The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_experience_tenure.py` defend invariants 1–13; `test_deterministic_insights.py` defends 14–15. Full algorithm notes: [`docs/ANALYSIS_ALGORITHM.md`](docs/ANALYSIS_ALGORITHM.md).
 
 ```bash
 .venv/bin/python -m pytest resume_gui/tests/test_analyze_dimensions.py resume_gui/tests/test_experience_tenure.py -v
@@ -200,6 +203,8 @@ The dimension tests in `resume_gui/tests/test_analyze_dimensions.py` plus `test_
 ---
 
 ## Recent changes (running log — newest first; **append after every commit**)
+
+- **Deterministic recruiter insights + universal-filler buzzwords (`pending`)** — `analysis/deterministic_insights.py` injects failed `_recruiter_checks` (spelling, portfolio, role depth, summary length, buzzwords, …) into `topIssues` after the honesty pipeline. Buzzword list narrowed to discipline-agnostic clichés only; `framework`/`efficient`/etc. no longer fire. Summary-length check flags only >75 words. `_adds_quantification` counts `[X%]` placeholders. Analyze UI: `issue.category`, `items` chips, TOP FIXES promotion for `source: "deterministic"`. +`test_deterministic_insights.py`. Optional `pyspellchecker` dep.
 
 - **Template Builder custom sections (`uncommitted`)** — `TBResumeData.customSections` + `sectionOrder` slots (`custom:<uuid>`) support certifications, awards, volunteering, and arbitrary extra sections. Sections tab: preset chips, drag reorder, hide, inline editor, remove. Prefill maps `structuredResume.extra_sections` (skips per-company Technologies extras). Analyze preview toolbar already has **Edit in Builder** (`501b50e`). **Invariant:** WYSIWYG export still uses `ResumePreview` + `renderSectionSlot`; header/contact fixed at top.
 
