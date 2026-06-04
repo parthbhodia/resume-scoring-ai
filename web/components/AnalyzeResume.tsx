@@ -221,7 +221,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 };
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
-  quantification:     "Aim for metrics on ~half of experience bullets—prioritize your biggest wins.",
+  quantification:     "Aim for metrics on ~75% of experience bullets—prioritize your biggest wins.",
   achievementQuality: "Outcomes and ownership, not duty lists.",
   languageQuality:    "Active verbs; less passive voice and filler.",
   readability:        "Short, clear bullets recruiters can skim fast.",
@@ -865,6 +865,10 @@ export default function AnalyzeResume() {
   // "No specific issues found" detail view the user shouldn't have to
   // click through. Honesty alignment with the rewrite-validator: if the
   // category has nothing to do, don't list it as a fix.
+  /** Rule-based topIssues are regex-fallback only; hide on LLM runs (incl. saved history). */
+  const isLlmTopIssue = (issue: AnalysisResult["topIssues"][number]) =>
+    issue.source !== "deterministic";
+
   const categoryHasActionableContent = (key: string): boolean => {
     if (!result) return false;
     const bullets = getBulletsForCategory(
@@ -873,21 +877,10 @@ export default function AnalyzeResume() {
       categoryAssignmentOpts,
     );
     if (bullets.length > 0) return true;
-    const related = result.topIssues.filter((issue) => issueCategoryOf(issue) === key);
-    return related.length > 0;
-  };
-
-  /** A category has a hard deterministic finding (rule-based, always trustworthy)
-   *  when a backend deterministic issue of medium/high severity maps to it. Such
-   *  categories belong in TOP FIXES regardless of the LLM's category score. */
-  const categoryHasDeterministicFix = (key: string): boolean => {
-    if (!result) return false;
-    return result.topIssues.some(
-      (issue) =>
-        issue.source === "deterministic" &&
-        issue.severity !== "low" &&
-        issueCategoryOf(issue) === key,
+    const related = result.topIssues.filter(
+      (issue) => isLlmTopIssue(issue) && issueCategoryOf(issue) === key,
     );
+    return related.length > 0;
   };
 
   const topFixCategories = result
@@ -895,7 +888,6 @@ export default function AnalyzeResume() {
         .filter(({ key }) => {
           const s = result.categoryScores[key];
           if (s === null || s === undefined) return false;
-          if (categoryHasDeterministicFix(key)) return true;
           if (s >= 70) return false;
           return categoryHasActionableContent(key);
         })
@@ -906,7 +898,6 @@ export default function AnalyzeResume() {
     ? CATEGORY_LABELS.filter(({ key }) => {
         const s = result.categoryScores[key];
         if (s === null || s === undefined) return false;
-        if (categoryHasDeterministicFix(key)) return false; // belongs in TOP FIXES
         // Score >= 70 OR low-score-with-no-actionable-content (the latter
         // would otherwise be a flagged category the user can't act on).
         return s >= 70 || !categoryHasActionableContent(key);
@@ -924,7 +915,9 @@ export default function AnalyzeResume() {
     ? getBulletsForCategory(activeCategory, result.bulletAnalysis, categoryAssignmentOpts)
     : [];
   const relatedTopIssues = activeCategory && result
-    ? result.topIssues.filter(issue => issueCategoryOf(issue) === activeCategory)
+    ? result.topIssues.filter(
+        issue => isLlmTopIssue(issue) && issueCategoryOf(issue) === activeCategory,
+      )
     : [];
 
   // Inline copy + editable AI-suggestion drafts (keyed by bulletAnalysis index)

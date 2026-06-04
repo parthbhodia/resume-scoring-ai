@@ -1,12 +1,11 @@
-"""Surface deterministic recruiter checks directly as analysis insights.
+"""Surface deterministic recruiter checks as topIssues for regex-fallback analysis only.
 
-`_recruiter_checks()` (comprehensive.py) computes ~17 rule-based checks but the
-normal path only fed them to the LLM as hints — which the LLM under-reports. This
-module converts the FAILED checks into topIssue entries mapped to the existing 8
-categoryScores keys, so the reliable deterministic findings always reach the UI.
+`_recruiter_checks()` always runs; on the normal LLM path its summary is passed
+into the analysis prompt as structural_signals — not copied into topIssues (those
+are generic one-liners with raw line lists, no per-bullet rewrites).
 
-Injected AFTER the honesty pipeline (_normalize_analysis) so the evidence
-validator never strips them — these are ground truth, not LLM claims.
+When the LLM call fails, `_regex_to_comprehensive` + `inject_deterministic_insights`
+provide a minimal UI from rule-based checks instead.
 """
 from __future__ import annotations
 

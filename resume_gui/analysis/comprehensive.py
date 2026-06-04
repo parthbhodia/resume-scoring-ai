@@ -392,7 +392,7 @@ def _recruiter_checks(text: str) -> dict:
         "score": q_score, "passed": q_score >= 7,
         "detail": (
             "Recruiters scan for numbers — percentages, dollar amounts, team sizes, "
-            "timeframes. Bullets without metrics feel vague. Aim for at least 50% of "
+            "timeframes. Bullets without metrics feel vague. Aim for at least 75% of "
             "your bullets to contain a quantified result."
         ),
         "items": unquant[:8],
@@ -784,15 +784,16 @@ keyword placement (no stuffing). If no JD: null scores as specified below.
 “worked on”, task lists without impact). Align with results-focused bullet craft. \
 Do NOT fold this into quantification — weak verbs and duty-only wording are achievement problems even when numbers exist.
 5. QUANTIFICATION: %, $, scale, time saved, users, rankings, before/after — reward \
-truthful metrics. Aim for a strong majority (~70%+) of experience bullets to carry a measurable result. \
-This is a high-value dimension: be thorough, not shy. Any experience bullet describing an outcome, \
-build, or improvement WITHOUT a number is a legitimate quantification opportunity — flag it and offer a \
-rewrite that adds a real metric or a "[X%]"/"[$Y]"/"[~N]" placeholder. A bullet like \
-"Built and maintained scalable frontend UIs in Vue.js" or "Engineered a secure login system" has zero \
-metrics and SHOULD be flagged. Prioritize the weakest/highest-impact bullets within your {bullet_analysis_max}-bullet \
-budget, but do not under-report: when many bullets lack numbers, the quantification score should reflect \
-that (low score + several flagged bullets), matching what a rigorous reviewer would say. \
-This is separate from achievement quality: duty-language is achievement; missing metrics on a strong outcome bullet is quantification.
+truthful metrics. Recruiter target: **~75%** of experience bullets should carry a measurable result \
+(real number or honest bracket placeholder). Score quantification against that bar: if fewer than \
+~75% of experience bullets have metrics, the category score should be in the 60–75 range even when \
+some bullets are strong. This is a high-value dimension: be thorough, not shy. Any experience bullet \
+describing an outcome, build, or improvement WITHOUT a number is a quantification opportunity — flag it \
+in bulletAnalysis and supply categoryRewrites.quantification that adds a real metric OR a bracket \
+placeholder ([X%], [$Y], [~N users], [X ms], [N×]). Never flag "Technologies:" / skills-only lines. \
+Prioritize the weakest/highest-impact bullets within your {bullet_analysis_max}-bullet budget. \
+This is separate from achievement quality: duty-language is achievement; missing metrics on a strong \
+outcome bullet (Built/Engineered/Implemented with no scale) is quantification.
 6. SECTION STRUCTURE: Sections and order aligned with the UMBC checklist above (header, optional Objective/Summary, \
 education, optional certs/research/projects/coursework, skills, professional vs additional experience, honors, activities, \
 service); enforce bullet-count norms where visible (Summary 2–5; Professional 2–5; Additional 1–3; Activities 1–3; \
@@ -854,10 +855,14 @@ Infer the field from the résumé text and score against that field's expectatio
   ownership + scope + outcome, e.g. "Verified Bloomberg and market pricing data across $500M+ AUM \
   hedge-fund portfolios, improving NAV precision and valuation accuracy." If you cannot improve \
   substance, omit improvedBullet/categoryRewrites for that category.
-- QUANTIFICATION TRUTHFULNESS: only emit categoryRewrites.quantification when your rewrite actually \
-  adds a number, percent, scale, or [X]/[%]/[$Y] placeholder that was NOT in the original. If you \
-  cannot add a real or [placeholder] number, omit the quantification rewrite entirely. Never tag a \
-  rewrite as quantification when no new numerals appear.
+- QUANTIFICATION REWRITES (required for quant bullets): when primaryCategory is "quantification" \
+  (or issueCategories includes it and the bullet lacks metrics), you MUST include \
+  categoryRewrites.quantification with at least one new metric or bracket placeholder ([X%], [$Y], \
+  [~N], [X ms], [N×]) not present in originalBullet. Set improvedBullet to that same quant rewrite \
+  when quantification is the primary fix. Example: "Implemented gRPC streaming… reducing latency" → \
+  "Implemented gRPC streaming… cutting end-to-end latency by [~40%] for voice and chat workloads." \
+  Do NOT omit the rewrite and leave only a category rationale — the UI shows Flagged bullets, not \
+  generic lists. If you cannot add a placeholder, do not flag the bullet for quantification.
 - EVIDENCE BEFORE CLAIM (server will drop unsupported claims): never claim "missing impact metrics", \
   "no quantification", or "lacks numbers" as a topIssue / atsWarning / bullet issue / final \
   recommendation when the résumé text contains numerals (digits, %, $, ×, k+, CGPA, GPA, dates, \
@@ -940,9 +945,9 @@ Return ONLY this JSON (no markdown fences, no explanation):
       "primaryCategory": "<the ONE categoryScores key this bullet's improvedBullet addresses: quantification | achievementQuality | languageQuality | sectionStructure | readability | technicalBranding | atsCompatibility | jobMatch>",
       "issueCategories": ["<every categoryScores key this bullet is weak in — superset of primaryCategory, e.g. [\\"quantification\\", \\"languageQuality\\"]>"],
       "issues": ["<issue 1>", "<issue 2>"],
-      "improvedBullet": "<rewrite for the bullet's PRIMARY weakness only>",
+      "improvedBullet": "<rewrite for primaryCategory; REQUIRED when primary is quantification — must add [X%]/[$Y]/[~N] or a real metric>",
       "categoryRewrites": {{
-        "quantification": "<when metrics are missing: add [X%]/[$Y]/[~N] placeholders; do not invent facts>",
+        "quantification": "<REQUIRED when bullet lacks metrics: same as improvedBullet when primary is quantification; always include a new [X%]/[$Y]/[~N] or digit; never empty>",
         "achievementQuality": "<when verbs/duties are weak: strong verb + owned outcome; omit invented metrics unless in original>"
       }}
     }}
@@ -1023,7 +1028,7 @@ def _regex_to_comprehensive(struct: dict, jd: str) -> dict:
         "sectionFeedback":      [],
         "rewriteSuggestions":   [],
         "finalRecommendations": [
-            "Add quantified results (%, $, numbers) to at least 50% of your bullets.",
+            "Add quantified results (%, $, numbers) to at least 75% of your bullets.",
             "Replace weak verbs (helped, assisted, worked on) with strong action verbs.",
             "Ensure every job entry has at least 3 achievement-focused bullets.",
             "Verify contact section includes email, phone, and LinkedIn URL.",
@@ -1080,9 +1085,10 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
         # score gets crushed to 36 on a perfectly fine résumé.
         raw = _validate_analysis_against_resume(raw, text)
         normalized = _normalize_analysis(raw)
-        # Surface deterministic recruiter checks the LLM under-reported. Runs
-        # AFTER the honesty pipeline so the evidence validator can't strip them.
-        return inject_deterministic_insights(normalized, struct)
+        # Deterministic topIssues (generic "add a metric" + raw line lists) are only
+        # surfaced when the LLM path fails — they duplicate categoryRationales and
+        # lack per-bullet rewrites. Structural checks still feed the prompt above.
+        return normalized
 
     logger.warning("LLM unavailable for comprehensive analysis — using regex fallback")
     return inject_deterministic_insights(_regex_to_comprehensive(struct, jd), struct)

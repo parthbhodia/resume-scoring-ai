@@ -887,6 +887,23 @@ class TestBulletCategoryNormalization:
         assert primary == "quantification"
         assert "quantification" in cats
 
+    def test_placeholder_quantification_kept(self):
+        """Bracket placeholders ([X%]) count as quantification support."""
+        primary, cats = _normalize_bullet_categories(
+            "quantification", ["quantification"],
+            original="Implemented gRPC streaming for real-time data transfer.",
+            improved="",
+            category_rewrites={
+                "quantification": (
+                    "Implemented gRPC streaming for real-time data transfer, "
+                    "cutting end-to-end latency by [~40%]."
+                ),
+            },
+            issues=["quantification"],
+        )
+        assert primary == "quantification"
+        assert "quantification" in cats
+
     def test_quantification_primary_rederived_when_unsupported(self):
         """If the LLM made quantification the primaryCategory but no rewrite
         adds a numeral, primary must move to a category we can act on — never

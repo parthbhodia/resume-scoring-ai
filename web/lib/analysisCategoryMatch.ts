@@ -1,7 +1,7 @@
 /**
  * Links sidebar analysis categories to bulletAnalysis rows.
  * Achievement vs quantification are distinct. Quantification flags only
- * high-impact opportunities (~50% target), not every bullet without numbers.
+ * high-impact opportunities (~75% target), not every bullet without numbers.
  */
 
 /** Matches passive/copula patterns mirrored from backend `_PASSIVE_BULLET_RE`. */
@@ -21,8 +21,8 @@ const ACHIEVEMENT_ISSUE_RE =
 const IMPACT_VERB_RE =
   /\b(led|managed|developed|built|designed|implemented|delivered|achieved|increased|reduced|improved|launched|optimized|streamlined|grew|saved|generated)\b/i;
 
-/** Recruiter-style target: roughly half of experience bullets benefit from metrics. */
-export const TARGET_QUANTIFIED_BULLET_SHARE = 0.5;
+/** Recruiter-style target: ~75% of experience bullets should carry metrics. */
+export const TARGET_QUANTIFIED_BULLET_SHARE = 0.75;
 
 export const CATEGORY_ISSUE_KEYWORDS: Record<string, string[]> = {
   quantification: [
@@ -107,7 +107,7 @@ export function bulletIssueList(bullet: CategoryRewriteBullet): string[] {
 export type CategoryAssignmentOptions = {
   /** JD / keyword overlap boosts quant priority on relevant bullets. */
   jdKeywords?: string[];
-  /** Target share of sample bullets to flag for metrics (default 0.5). */
+  /** Target share of sample bullets to flag for metrics (default 0.75). */
   targetQuantShare?: number;
 };
 
@@ -315,7 +315,7 @@ function inferBaseCategory(bullet: CategoryRewriteBullet): string {
 }
 
 /**
- * One primary pillar per bullet. Quantification is capped (~50% of sample) and
+ * One primary pillar per bullet. Quantification is capped (~75% of sample) and
  * prefers JD-relevant, high-impact lines — not every unquantified bullet.
  */
 export function buildBulletPrimaryCategories(

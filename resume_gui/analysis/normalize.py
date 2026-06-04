@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from resume_gui.analysis.constants import _CATEGORY_SCORE_KEYS, _ISSUE_TEXT_CATEGORY_HINTS
 from resume_gui.analysis.rewrite_validators import (
+    _adds_quantification,
     _filter_bullet_rewrites,
-    _rewrite_numerals,
 )
 
 logger = logging.getLogger("resume_gui")
@@ -58,11 +58,10 @@ def _normalize_bullet_categories(
     """
     valid = set(_CATEGORY_SCORE_KEYS)
 
-    # Does any surviving rewrite add a numeral the original lacked?
-    orig_nums = _rewrite_numerals(original)
+    # Does any surviving rewrite add quantification (numeral or [X%] placeholder)?
     quant_supported = False
     for candidate in [improved] + list((category_rewrites or {}).values()):
-        if candidate and (_rewrite_numerals(candidate) - orig_nums):
+        if candidate and _adds_quantification(original, candidate):
             quant_supported = True
             break
 
@@ -151,13 +150,21 @@ def _normalize_analysis(raw: dict) -> dict:
                 # the original ("AI IMPROVED" that produces the same prose).
                 # Also strip a lying "quantification" tag from issues[] when
                 # no rewrite actually adds numerals.
+                orig_bullet = ba.get("originalBullet", "")
                 kept_improved, kept_cr, kept_issues = _filter_bullet_rewrites(
-                    ba.get("originalBullet", ""),
+                    orig_bullet,
                     ba.get("improvedBullet", ""),
                     ba.get("categoryRewrites"),
                     ba.get("issues"),
                     primary_category=ba.get("primaryCategory"),
                 )
+                # Surface quant rewrite in improvedBullet when the LLM only filled categoryRewrites.
+                if not (kept_improved or "").strip():
+                    qrw = ""
+                    if isinstance(kept_cr, dict):
+                        qrw = (kept_cr.get("quantification") or "").strip()
+                    if qrw and _adds_quantification(orig_bullet, qrw):
+                        kept_improved = qrw
                 ba["improvedBullet"] = kept_improved
                 if kept_cr:
                     ba["categoryRewrites"] = kept_cr
