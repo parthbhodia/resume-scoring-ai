@@ -60,6 +60,50 @@ class TestStructuralFlags:
         flags = compute_structural_flags("linkedin.com/in/x\nAcme Corp · San Francisco, CA", {"experience": []})
         assert any("·" in f["issue"] for f in flags)
 
+    def test_state_only_location_flagged_as_missing_city(self):
+        structured = {"experience": [{"company": "Jersey Tech", "role": "UX", "dates": "2025 - Present", "location": "New Jersey, NJ"}]}
+        flags = compute_structural_flags("linkedin.com/in/x", structured)
+        assert any("No city" in f["issue"] for f in flags)
+
+    def test_city_location_not_flagged(self):
+        structured = {"experience": [{"company": "Jersey Tech", "role": "UX", "dates": "2025 - Present", "location": "Newark, NJ"}]}
+        flags = compute_structural_flags("linkedin.com/in/x", structured)
+        assert not any("No city" in f["issue"] for f in flags)
+
+    def test_ambiguous_new_york_not_flagged(self):
+        # "New York, NY" might be NYC — too ambiguous to flag as state-only.
+        structured = {"experience": [{"company": "Acme", "role": "Eng", "dates": "2025 - Present", "location": "New York, NY"}]}
+        flags = compute_structural_flags("linkedin.com/in/x", structured)
+        assert not any("No city" in f["issue"] for f in flags)
+
+    def test_remote_location_not_flagged(self):
+        structured = {"experience": [{"company": "Acme", "role": "Eng", "dates": "2025 - Present", "location": "Remote"}]}
+        flags = compute_structural_flags("linkedin.com/in/x", structured)
+        assert not any("city" in f["issue"].lower() for f in flags)
+
+    def test_emdash_header_separator_flagged(self):
+        raw = "linkedin.com/in/x\nJersey Tech Partners — New Jersey, NJ\nUX Designer | July 2025 - Present"
+        flags = compute_structural_flags(raw, {"experience": []})
+        assert any("—" in f["issue"] and "separator" in f["issue"] for f in flags)
+
+    def test_emdash_in_bullet_prose_not_flagged_as_separator(self):
+        # Long bullet prose with an em-dash must not trip the header-separator check.
+        raw = ("linkedin.com/in/x\n"
+               "• Led discovery and synthesis through clinical research with providers "
+               "— surfacing root-cause pain points that shaped strategy and validated direction")
+        flags = compute_structural_flags(raw, {"experience": []})
+        assert not any("separator" in f["issue"] for f in flags)
+
+    def test_cid_glyph_codes_flag_broken_text_layer(self):
+        raw = "Jane Doe\nlinkedin.com/in/x\n| Jersey | Tech (cid:22) | New | Jersey (cid:21) NJ |\nDesigner (cid:21) 2024"
+        flags = compute_structural_flags(raw, {"experience": []})
+        assert any("extract cleanly" in f["issue"] for f in flags)
+        assert flags[0]["severity"] == "high"  # high sorts first
+
+    def test_clean_text_no_cid_flag(self):
+        flags = compute_structural_flags("linkedin.com/in/x\nAcme Corp, New York, NY", {"experience": []})
+        assert not any("extract cleanly" in f["issue"] for f in flags)
+
     def test_clean_resume_no_flags(self):
         structured = {"experience": [{"company": "Acme", "role": "Eng", "dates": "2023 - Present", "location": "NY"}]}
         flags = compute_structural_flags("linkedin.com/in/jane\nAcme, New York, NY", structured)
