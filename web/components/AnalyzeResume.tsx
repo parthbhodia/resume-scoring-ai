@@ -1935,8 +1935,8 @@ export default function AnalyzeResume() {
             }
             .az-split-resume-slot {
               height: auto !important;
-              min-height: 42vh !important;
-              max-height: 60vh !important;
+              min-height: 54vh !important;
+              max-height: 72vh !important;
               overflow-y: auto !important;
               border-left: none !important;
               border-bottom: 1px solid var(--border) !important;
@@ -1945,6 +1945,24 @@ export default function AnalyzeResume() {
               height: auto !important;
               overflow-y: visible !important;
               padding: 12px 16px 48px !important;
+            }
+            /* Résumé is the focus on small screens — keep the analysis below it
+               compact so it reads as supporting context, not the headline. */
+            .az-overview-stack {
+              gap: 18px !important;
+            }
+            .az-overview-summary > div {
+              padding: 13px 15px !important;
+              border-radius: 12px !important;
+            }
+            .az-overview-summary p {
+              font-size: 13px !important;
+              line-height: 1.5 !important;
+              margin-bottom: 10px !important;
+            }
+            .az-overview-summary span {
+              font-size: 11px !important;
+              padding: 3px 9px !important;
             }
           }
         `}</style>
@@ -2704,10 +2722,10 @@ export default function AnalyzeResume() {
 
         {/* ── Full analysis (shown when no category is active) ── */}
         {!activeCategory && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 32, maxWidth: 760 }}>
+          <div className="az-overview-stack" style={{ display: "flex", flexDirection: "column", gap: 32, maxWidth: 760 }}>
 
             {/* 1. Summary banner */}
-            <section>
+            <section className="az-overview-summary">
               <div style={{
                 background: "var(--surface2)",
                 border: "1px solid var(--border)",
