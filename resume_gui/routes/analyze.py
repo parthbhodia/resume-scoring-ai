@@ -206,11 +206,15 @@ async def api_analyze_upload(request: Request):
                     status_code=422,
                 )
             result = await loop.run_in_executor(
-                None, _analyze_resume_comprehensive, analysis_input_text, jd,
+                None,
+                partial(_analyze_resume_comprehensive, analysis_input_text, jd,
+                        _log_user_id=auth_user_id, _log_email=auth_user_email),
             )
         else:
             analysis_future = loop.run_in_executor(
-                None, _analyze_resume_comprehensive, text, jd,
+                None,
+                partial(_analyze_resume_comprehensive, text, jd,
+                        _log_user_id=auth_user_id, _log_email=auth_user_email),
             )
             extract_future = loop.run_in_executor(
                 None, _llm_extract, text, None,
@@ -477,7 +481,8 @@ async def api_analyze(request: Request):
             tasks.append(
                 loop.run_in_executor(
                     None,
-                    partial(_analyze_resume_comprehensive, candidate_profile, job_description),
+                    partial(_analyze_resume_comprehensive, candidate_profile, job_description,
+                            _log_user_id=auth_user_id, _log_email=auth_user_email),
                 ),
             )
         results = await asyncio.gather(*tasks)

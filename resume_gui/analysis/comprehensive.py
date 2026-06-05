@@ -1047,7 +1047,7 @@ def _regex_to_comprehensive(struct: dict, jd: str) -> dict:
     }
 
 
-def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
+def _analyze_resume_comprehensive(text: str, jd: str = "", *, _log_user_id: str | None = None, _log_email: str | None = None) -> dict:
     """Full resume analysis: structural regex + LLM deep-dive."""
     # Structural checks (fast, always run)
     struct = _recruiter_checks(text)
@@ -1082,7 +1082,13 @@ def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
     # Route the main analysis through the reasoning tier (default grok-4 —
     # same model used for vision-extract). Better quality on bullet-issue
     # tagging + rewrite generation, at ~8-10s extra latency per request.
-    raw = _llm_json_call(prompt, model_override=_analysis_model())
+    raw = _llm_json_call(
+        prompt,
+        model_override=_analysis_model(),
+        _log_user_id=_log_user_id,
+        _log_email=_log_email,
+        _log_tool="analyze",
+    )
     if raw and isinstance(raw, dict):
         # Strip bogus issues / recommendations that contradict the actual
         # résumé text BEFORE _normalize_analysis runs its score calibration —

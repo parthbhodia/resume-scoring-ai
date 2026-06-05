@@ -249,18 +249,44 @@ export type { ResumeEdit, ResumeEditOp, LlmResumePatch } from "@/lib/resumeEdits
 export interface AdminAnalyticsSummary {
   total_runs: number;
   total_tokens: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
   success_runs: number;
   failed_runs: number;
+  failure_rate_pct: number;
   unique_users: number;
   unique_tools: number;
   unique_models: number;
 }
 
+export interface AdminAnalyticsToolRow {
+  tool_name: string;
+  runs: number;
+  tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  tokens_per_run: number;
+}
+
+export interface AdminAnalyticsUserRow {
+  user_id: string;
+  user_email: string | null;
+  runs: number;
+  tokens: number;
+  tools: Record<string, number>;
+}
+
 export interface AdminAnalyticsResponse {
   window_days: number;
   summary: AdminAnalyticsSummary;
-  users: Array<{ user_id: string; user_email: string | null; runs: number; tokens: number; tools: Record<string, number> }>;
-  tools: Array<{ tool_name: string; runs: number; tokens: number }>;
+  users: AdminAnalyticsUserRow[];
+  tools: AdminAnalyticsToolRow[];
   models: Array<{ model: string; runs: number; tokens: number }>;
   daily: Array<{ date: string; runs: number; tokens: number; failures: number }>;
+  activity: {
+    total_analyses: number;
+    unique_users: number;
+    by_user: Array<{ user_id: string; user_email: string | null; analyses: number }>;
+    daily: Array<{ date: string; analyses: number }>;
+  };
 }
