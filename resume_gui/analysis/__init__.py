@@ -7,6 +7,7 @@ from resume_gui.analysis.constants import (
 from resume_gui.analysis.evidence_validator import (
     _resume_numeral_count,
     _resume_strong_verb_share,
+    _strip_bracket_placeholders_from_prose,
     _strip_non_issue_ats_warnings,
     _validate_analysis_against_resume,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "_normalize_bullet_categories",
     "_resume_numeral_count",
     "_resume_strong_verb_share",
+    "_strip_bracket_placeholders_from_prose",
     "_strip_non_issue_ats_warnings",
     "_validate_analysis_against_resume",
     "_validate_rewrite_against_original",

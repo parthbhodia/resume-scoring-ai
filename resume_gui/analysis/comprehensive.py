@@ -863,6 +863,11 @@ Infer the field from the résumé text and score against that field's expectatio
   "Implemented gRPC streaming… cutting end-to-end latency by [~40%] for voice and chat workloads." \
   Do NOT omit the rewrite and leave only a category rationale — the UI shows Flagged bullets, not \
   generic lists. If you cannot add a placeholder, do not flag the bullet for quantification.
+- BRACKETS ARE FOR REWRITES ONLY: bracket placeholders ([X%], [$Y], [~N]) may appear ONLY inside \
+  bulletAnalysis improvedBullet / categoryRewrites. In summary, topIssues (issue/whyItMatters/suggestion), \
+  atsWarnings, finalRecommendations, sectionFeedback, and categoryRationales, write plain prose with NO \
+  brackets — say "add a real percentage or count", never "add [X%]" or "such as [X stakeholders]". \
+  Bracketed advice text reads as AI-written and tells the candidate to literally paste brackets.
 - EVIDENCE BEFORE CLAIM (server will drop unsupported claims): never claim "missing impact metrics", \
   "no quantification", or "lacks numbers" as a topIssue / atsWarning / bullet issue / final \
   recommendation when the résumé text contains numerals (digits, %, $, ×, k+, CGPA, GPA, dates, \

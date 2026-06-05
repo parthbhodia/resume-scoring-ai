@@ -41,6 +41,7 @@ from resume_gui.analysis import (  # noqa: E402
     _normalize_bullet_categories,
     _resume_numeral_count,
     _resume_strong_verb_share,
+    _strip_bracket_placeholders_from_prose,
     _strip_non_issue_ats_warnings,
     _validate_analysis_against_resume,
     _validate_rewrite_against_original,

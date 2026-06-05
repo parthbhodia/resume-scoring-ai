@@ -31,6 +31,7 @@ from resume_gui.app import (  # noqa: E402
     _resume_strong_verb_share,
     _split_collapsed_education_entries,
     _stitch_wrapped_bullets,
+    _strip_bracket_placeholders_from_prose,
     _strip_non_issue_ats_warnings,
     _synthesize_text_from_resume_doc,
     _validate_analysis_against_resume,
@@ -992,3 +993,59 @@ class TestCategoryRationales:
     def test_normalize_analysis_defaults_empty_rationales(self):
         result = _normalize_analysis({"overallScore": 70, "categoryScores": _category_scores()})
         assert result["categoryRationales"] == {}
+
+
+class TestBracketPlaceholderProseScrub:
+    """Bracket placeholders ([X%], [X stakeholders]) read as "written by AI" and
+    tell the candidate to paste brackets — they must never survive in advice
+    prose. They stay only in bulletAnalysis rewrites (frontend materializes them)."""
+
+    def test_scrubs_topissue_suggestion(self):
+        raw = {
+            "topIssues": [{
+                "issue": "Insufficient quantification",
+                "severity": "high",
+                "whyItMatters": "Recruiters skim for results.",
+                "suggestion": "Add specific numbers or [placeholders] such as "
+                              "[X stakeholders], [Y% improvement], or [~N prototypes].",
+            }],
+        }
+        n = _strip_bracket_placeholders_from_prose(raw)
+        s = raw["topIssues"][0]["suggestion"]
+        assert "[" not in s and "]" not in s
+        assert "a number" in s and "a percentage" in s
+        assert n >= 1
+
+    def test_scrubs_final_recommendations(self):
+        raw = {"finalRecommendations": ["Quantify outcomes, e.g. [X%] faster.", "Add a portfolio link."]}
+        _strip_bracket_placeholders_from_prose(raw)
+        assert raw["finalRecommendations"][0] == "Quantify outcomes, e.g. a percentage faster."
+        assert raw["finalRecommendations"][1] == "Add a portfolio link."
+
+    def test_scrubs_summary_and_rationales_and_money_multiple(self):
+        raw = {
+            "summary": "Strong resume, but add [$Y] revenue impact and [N×] scale.",
+            "categoryRationales": {"quantification": "Only 1 bullet has a metric; add [X%]."},
+        }
+        _strip_bracket_placeholders_from_prose(raw)
+        assert "[" not in raw["summary"]
+        assert "a dollar figure" in raw["summary"] and "a multiple" in raw["summary"]
+        assert "[" not in raw["categoryRationales"]["quantification"]
+
+    def test_leaves_bullet_rewrites_untouched(self):
+        # The frontend materializes these; the backend must NOT scrub them.
+        raw = {
+            "bulletAnalysis": [{
+                "originalBullet": "Built the pipeline.",
+                "improvedBullet": "Built the pipeline, cutting runtime by [~40%].",
+                "categoryRewrites": {"quantification": "Built the pipeline, cutting runtime by [~40%]."},
+            }],
+        }
+        _strip_bracket_placeholders_from_prose(raw)
+        assert raw["bulletAnalysis"][0]["improvedBullet"] == "Built the pipeline, cutting runtime by [~40%]."
+        assert "[~40%]" in raw["bulletAnalysis"][0]["categoryRewrites"]["quantification"]
+
+    def test_noop_when_no_brackets(self):
+        raw = {"summary": "Clean, quantified resume with strong verbs."}
+        assert _strip_bracket_placeholders_from_prose(raw) == 0
+        assert raw["summary"] == "Clean, quantified resume with strong verbs."

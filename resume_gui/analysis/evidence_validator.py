@@ -246,6 +246,83 @@ def _strip_non_issue_ats_warnings(raw: dict) -> None:
     raw["atsWarnings"] = kept
 
 
+_PROSE_BRACKET_RE = re.compile(r"\[[^\]]{0,24}\]")
+
+
+def _placeholder_phrase(token: str) -> str:
+    """Plain-English stand-in for a bracket placeholder in advice prose."""
+    inner = token[1:-1].strip().lower()
+    if "%" in inner or "percent" in inner:
+        return "a percentage"
+    if "$" in inner or "usd" in inner or "dollar" in inner or "revenue" in inner or "cost" in inner:
+        return "a dollar figure"
+    if "×" in inner or "fold" in inner or "times" in inner or inner == "x" or inner.endswith("x"):
+        return "a multiple"
+    if "placeholder" in inner:
+        return "real figures"
+    return "a number"
+
+
+def _strip_bracket_placeholders_from_prose(raw: dict) -> int:
+    """Replace AI bracket placeholders ([X%], [~N users], [placeholders]) with
+    plain words in narrative / advice fields. In prose they read as "written by
+    AI" and literally tell the student to put brackets in their résumé. Bracket
+    placeholders stay ONLY in bulletAnalysis rewrites (improvedBullet /
+    categoryRewrites), which the frontend turns into concrete example figures.
+    Always-on; the bracket convention is wrong in advice prose on any résumé."""
+    if not isinstance(raw, dict):
+        return 0
+    adjustments = 0
+
+    def _clean(val):
+        nonlocal adjustments
+        if not isinstance(val, str) or "[" not in val:
+            return val
+        new = _PROSE_BRACKET_RE.sub(lambda m: _placeholder_phrase(m.group(0)), val)
+        new = re.sub(r"\s{2,}", " ", new).strip()
+        if new != val:
+            adjustments += 1
+        return new
+
+    if isinstance(raw.get("summary"), str):
+        raw["summary"] = _clean(raw["summary"])
+
+    for issue in raw.get("topIssues") or []:
+        if isinstance(issue, dict):
+            for field in ("issue", "whyItMatters", "suggestion"):
+                if field in issue:
+                    issue[field] = _clean(issue.get(field))
+
+    for warn in raw.get("atsWarnings") or []:
+        if isinstance(warn, dict):
+            for field in ("warning", "suggestion"):
+                if field in warn:
+                    warn[field] = _clean(warn.get(field))
+
+    rationales = raw.get("categoryRationales")
+    if isinstance(rationales, dict):
+        for key in list(rationales.keys()):
+            rationales[key] = _clean(rationales.get(key))
+
+    for item in raw.get("sectionFeedback") or []:
+        if isinstance(item, dict) and "feedback" in item:
+            item["feedback"] = _clean(item.get("feedback"))
+
+    keyword_analysis = raw.get("keywordAnalysis")
+    if isinstance(keyword_analysis, dict) and isinstance(keyword_analysis.get("suggestions"), list):
+        keyword_analysis["suggestions"] = [_clean(s) for s in keyword_analysis["suggestions"]]
+
+    if isinstance(raw.get("finalRecommendations"), list):
+        raw["finalRecommendations"] = [_clean(r) for r in raw["finalRecommendations"]]
+
+    if adjustments:
+        logger.info(
+            "evidence-validator scrubbed %d bracket placeholder(s) from advice prose",
+            adjustments,
+        )
+    return adjustments
+
+
 def _validate_analysis_against_resume(raw: dict, resume_text: str) -> dict:
     """Drop topIssues, atsWarnings, bullet issue tags, and finalRecommendations
     whose claim contradicts what the résumé actually shows. Runs BEFORE
@@ -263,6 +340,7 @@ def _validate_analysis_against_resume(raw: dict, resume_text: str) -> dict:
 
     # Always-on cleanup that doesn't depend on evidence thresholds.
     _strip_non_issue_ats_warnings(raw)
+    _strip_bracket_placeholders_from_prose(raw)
     adjustments = _sanitize_pronoun_claims_in_text_fields(raw, text)
 
     if not (has_plenty_numerals or has_strong_majority):
