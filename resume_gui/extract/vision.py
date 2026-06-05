@@ -60,9 +60,15 @@ CRITICAL RULES:
 Return ONLY the JSON object, no markdown fences, no commentary."""
 
 def _render_pdf_pages_to_b64_pngs(
-    pdf_bytes: bytes, *, dpi: int = 200, max_pages: int = 2
+    pdf_bytes: bytes, *, dpi: int = 200, max_pages: int = 4
 ) -> List[str]:
-    """Render the first ``max_pages`` of a PDF to base64-encoded PNGs."""
+    """Render the first ``max_pages`` of a PDF to base64-encoded PNGs.
+
+    Cap is 4 (not 2): most résumés are 1–2 pages, but design / academic / senior
+    résumés run to 3–4, and a 2-page cap silently dropped whole trailing sections
+    (e.g. an Education block on page 3), which then surfaced as a hallucinated
+    "missing Education" issue. Short PDFs only render their actual pages, so the
+    higher cap costs nothing for the common case."""
     try:
         import fitz  # type: ignore  # PyMuPDF
     except Exception as exc:
