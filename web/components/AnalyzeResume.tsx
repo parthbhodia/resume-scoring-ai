@@ -128,6 +128,8 @@ interface AnalysisResult {
   sectionFeedback: Array<{ section: string; score: number; feedback: string }>;
   rewriteSuggestions: Array<{ before: string; after: string; reason: string }>;
   finalRecommendations: string[];
+  /** Deterministic document-level ATS / structural flags (LinkedIn, open dates, misclassified sections, separators). */
+  structuralFlags?: Array<{ issue: string; risk: string; severity?: "high" | "medium" | "low" }>;
   /** When analysis used a library folder (TeX on disk), persisted so history restore can reopen Builder with `base=`. */
   libraryFolder?: string | null;
   /** Merged professional tenure from structuredResume.experience dates. */
@@ -2874,6 +2876,41 @@ export default function AnalyzeResume() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </section>
+            )}
+
+            {/* 2b. Structural Flags — deterministic ATS / formatting checks */}
+            {Array.isArray(result.structuralFlags) && result.structuralFlags.length > 0 && (
+              <section>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", margin: "0 0 4px" }}>
+                  Structural Flags
+                </h2>
+                <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px", lineHeight: 1.5 }}>
+                  Formatting and completeness issues an ATS or a quick recruiter scan can trip on, separate from your bullet wording.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {result.structuralFlags.map((flag, i) => {
+                    const sev = flag.severity ?? "low";
+                    const dot = sev === "high" ? "var(--red)" : sev === "medium" ? "#f59e0b" : "var(--dim)";
+                    return (
+                      <div key={i} style={{
+                        border: "1px solid var(--border)", borderRadius: 12,
+                        padding: "14px 16px", background: "var(--surface)",
+                        display: "flex", gap: 12, alignItems: "flex-start",
+                      }}>
+                        <span aria-hidden style={{ width: 8, height: 8, borderRadius: "50%", background: dot, marginTop: 6, flexShrink: 0 }} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", lineHeight: 1.4, marginBottom: 3 }}>
+                            {flag.issue}
+                          </div>
+                          <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                            {flag.risk}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
             )}

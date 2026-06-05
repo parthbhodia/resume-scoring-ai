@@ -5,6 +5,7 @@ import io
 
 from resume_gui.routes._shared import *  # noqa: F403
 from resume_gui.analysis.constants import _CATEGORY_DISPLAY_NAMES
+from resume_gui.analysis.structural_flags import compute_structural_flags
 from resume_gui.services.scan_limits import _scan_limit_status_for_user
 
 # Lazy imports for requirement matching — only used when a JD is present.
@@ -229,6 +230,10 @@ async def api_analyze_upload(request: Request):
             structured_dict = _resume_doc_to_dict(structured)
             result["structuredResume"] = structured_dict
             result["bulletMap"]        = bullet_map
+            # Document-level ATS / structural flags (LinkedIn, open dates,
+            # misclassified sections, separators) from the ORIGINAL text + the
+            # structured doc — shown as a dedicated panel, not bullet topIssues.
+            result["structuralFlags"] = compute_structural_flags(text, structured_dict)
             try:
                 from resume_gui.experience_tenure import compute_experience_summary_from_structured
                 result["experienceSummary"] = compute_experience_summary_from_structured(structured_dict)
