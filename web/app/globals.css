@@ -903,10 +903,25 @@ select option { background: var(--surface); }
 .az-edit-textarea:focus { border-color: var(--accent, #3b82f6); }
 .az-edit-textarea::placeholder { color: var(--muted); font-style: italic; font-family: system-ui, sans-serif; font-size: 10px; }
 
-/* ── Metric highlight ────────────────────────────────────────────────────── */
+/* ── Metric numbers ──────────────────────────────────────────────────────────
+   Render as normal résumé text — no yellow highlight or emphasis. `<mark>` has a
+   default yellow background in browsers, so we explicitly clear it. "Highlights"
+   is for flagged issues to fix, not for painting numbers the candidate already
+   has (that just clutters the preview, which is also the PDF download base). */
 .az-metric {
-  font-weight: 700;
-  color: var(--az-fair-text);
+  font-weight: inherit;
+  color: inherit;
+  background: transparent;
+}
+
+/* On phones/tablets, let the résumé paper fill the screen instead of sitting in
+   a ~3/4-width column — drop the scroll gutter so the document is full-bleed.
+   (The slot still leaves a hairline margin so the card edge isn't clipped.) */
+@media (max-width: 1024px) {
+  .az-resume-scroll {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
 }
 
 /* ── Accepted bullet row ─────────────────────────────────────────────────── */

@@ -1108,6 +1108,7 @@ export default function AnnotatedResumePanel({
       {/* Document preview with score highlights */}
       <div
         ref={scrollRef}
+        className="az-resume-scroll"
         style={{
           flex: 1,
           minHeight: 0,

@@ -476,11 +476,13 @@ export default function AnalyzeResume() {
       setLoadingTipIdx(0);
       return;
     }
-    const maxSteps = jd.trim() ? ANALYZE_LOADER_STEPS.length + 1 : ANALYZE_LOADER_STEPS.length;
-    const stepIv = setInterval(() => setLoadingMsg((m) => (m + 1) % maxSteps), 3200);
-    const tipIv = setInterval(() => setLoadingTipIdx((t) => (t + 1) % ANALYZE_COACH_TIPS.length), 4500);
+    // Step delays (ms from start): reading fast, ATS medium, AI scoring slow, then hold at last step.
+    // With JD a 5th "keyword matching" step is appended.
+    const stepDelays = jd.trim() ? [5000, 13000, 25000, 38000] : [5000, 13000, 26000];
+    const stepTimers = stepDelays.map((delay, i) => setTimeout(() => setLoadingMsg(i + 1), delay));
+    const tipIv = setInterval(() => setLoadingTipIdx((t) => (t + 1) % ANALYZE_COACH_TIPS.length), 7000);
     return () => {
-      clearInterval(stepIv);
+      stepTimers.forEach(clearTimeout);
       clearInterval(tipIv);
     };
   }, [loading, jd]);
@@ -2012,14 +2014,11 @@ export default function AnalyzeResume() {
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                 <ScoreRing score={result.overallScore} size={80} label="" />
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, fontFamily: "var(--font-sans), Inter, system-ui, sans-serif", marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--amber)", textTransform: "uppercase", letterSpacing: 0.8, fontFamily: "var(--font-sans), Inter, system-ui, sans-serif", marginBottom: 6 }}>
                     Resume Score
                   </div>
-                  <div style={{ fontSize: 32, fontWeight: 700, color: scoreColor(result.overallScore), lineHeight: 1 }}>
-                    {result.overallScore}
-                    <span style={{ fontSize: 14, fontWeight: 400, color: "var(--dim)" }}>/100</span>
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: scoreColor(result.overallScore), marginTop: 2 }}>
+                  {/* Number already lives inside the ScoreRing — show the verdict here, not a duplicate score. */}
+                  <div style={{ fontSize: 22, fontWeight: 700, color: scoreColor(result.overallScore), lineHeight: 1.1 }}>
                     {scoreLabel(result.overallScore)}
                   </div>
                 </div>
@@ -2051,10 +2050,47 @@ export default function AnalyzeResume() {
                 const score = result.categoryScores[key];
                 const color = scoreColor(score);
                 const pct = score !== null ? score : 0;
+                const isActive = activeCategory === key;
+                const clickable = score !== null; // Job Match with no JD has nothing to open
                 return (
-                  <div key={key}>
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={!clickable}
+                    aria-pressed={isActive}
+                    onClick={() => {
+                      if (!clickable) return;
+                      setSelectedBulletIndex(null);
+                      setActiveCategory(isActive ? null : key);
+                      if (!isActive) {
+                        // On mobile the category detail renders in the work slot BELOW
+                        // the résumé, so scroll it up just under the sticky head — without
+                        // this the tap would silently change content off-screen.
+                        setTimeout(() => {
+                          const main = document.querySelector(".az-main") as HTMLElement | null;
+                          const work = document.querySelector(".az-split-work-slot") as HTMLElement | null;
+                          const head = document.querySelector(".az-mobile-sticky-head") as HTMLElement | null;
+                          if (main && work) {
+                            const headH = head ? head.getBoundingClientRect().height : 0;
+                            const top = work.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - headH - 8;
+                            main.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+                          }
+                        }, 60);
+                      }
+                    }}
+                    style={{
+                      display: "block", width: "100%", textAlign: "left",
+                      border: "none", borderRadius: 8, font: "inherit",
+                      background: isActive ? "rgba(33,150,243,0.10)" : "transparent",
+                      boxShadow: isActive ? "inset 0 0 0 1px rgba(33,150,243,0.32)" : "none",
+                      padding: "6px 8px", margin: "-6px -8px",
+                      cursor: clickable ? "pointer" : "default",
+                      WebkitTapHighlightColor: "transparent",
+                      transition: "background 0.15s",
+                    }}
+                  >
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                      <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>{label}</span>
+                      <span style={{ fontSize: 11, color: isActive ? "var(--accent)" : "var(--muted)", fontWeight: isActive ? 700 : 500 }}>{label}</span>
                       <span style={{ fontSize: 11, fontWeight: 700, color: score === null ? "var(--dim)" : color }}>
                         {score === null ? "–" : score}
                       </span>
@@ -2062,7 +2098,7 @@ export default function AnalyzeResume() {
                     <div style={{ height: 3, borderRadius: 2, background: "var(--surface2)", overflow: "hidden" }}>
                       <div style={{ height: "100%", borderRadius: 2, width: `${pct}%`, background: score === null ? "var(--border)" : color, transition: "width 0.9s cubic-bezier(0.16,1,0.3,1)" }} />
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
