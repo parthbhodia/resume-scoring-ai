@@ -23,6 +23,10 @@ type Props = {
   /** default: eyebrow + textarea; compact: readable suggestion + actions, textarea behind Edit */
   variant?: BulletImprovedEditorVariant;
   suggestionLabel?: string;
+  /** compact: small caption under the label (e.g. "example numbers — swap in yours"). */
+  suggestionNote?: string;
+  /** compact: substrings in the read-only suggestion to highlight as fill-ins (example figures). */
+  highlightTerms?: string[];
   applyLabel?: string;
   /** compact: open textarea immediately (e.g. manual edit with no AI rewrite) */
   defaultEditing?: boolean;
@@ -66,6 +70,32 @@ const layoutStyle = (layout: BulletImprovedEditorLayout, variant: BulletImproved
   };
 };
 
+/** Render `text` with any `terms` substrings wrapped in an amber "fill-in" mark. */
+function renderWithHighlights(text: string, terms?: string[]): ReactNode {
+  const uniq = [...new Set((terms ?? []).filter(t => t && t.trim().length > 0))];
+  if (!uniq.length) return text;
+  const esc = uniq.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`(${esc.join("|")})`, "g");
+  return text.split(re).map((part, i) =>
+    uniq.includes(part) ? (
+      <mark
+        key={i}
+        style={{
+          background: "rgba(251,191,36,0.26)",
+          color: "var(--amber-ink, var(--amber))",
+          padding: "0 3px",
+          borderRadius: 4,
+          fontWeight: 700,
+        }}
+      >
+        {part}
+      </mark>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  );
+}
+
 const actionBtnBase: CSSProperties = {
   fontSize: 10.5,
   fontWeight: 600,
@@ -92,6 +122,8 @@ export default function BulletImprovedEditor({
   layout = "card",
   variant = "default",
   suggestionLabel = "Suggested",
+  suggestionNote,
+  highlightTerms,
   applyLabel = "Apply to preview",
   defaultEditing = false,
   onReplaceInPreview,
@@ -119,10 +151,20 @@ export default function BulletImprovedEditor({
               color: "var(--dim)",
               textTransform: "uppercase",
               letterSpacing: 0.45,
-              marginBottom: 6,
+              marginBottom: suggestionNote ? 3 : 6,
             }}>
               {suggestionLabel}
             </div>
+            {suggestionNote && (
+              <div style={{
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: "var(--amber-ink, var(--amber))",
+                marginBottom: 6,
+              }}>
+                {suggestionNote}
+              </div>
+            )}
             <p style={{
               margin: 0,
               fontSize: 13,
@@ -133,9 +175,9 @@ export default function BulletImprovedEditor({
               background: "var(--surface2)",
               border: "1px solid var(--border)",
             }}>
-              {value.trim() || (
-                <span style={{ color: "var(--muted)", fontStyle: "italic" }}>No suggestion text</span>
-              )}
+              {value.trim()
+                ? renderWithHighlights(value.trim(), highlightTerms)
+                : <span style={{ color: "var(--muted)", fontStyle: "italic" }}>No suggestion text</span>}
             </p>
           </div>
         )}
@@ -258,7 +300,7 @@ export default function BulletImprovedEditor({
             color: "var(--dim)",
             lineHeight: 1.45,
           }}>
-            Preview only — not your uploaded PDF. Use Résumé Builder for full edits.
+            Preview only, not your uploaded PDF. Use Résumé Builder for full edits.
           </p>
         )}
       </div>
@@ -394,7 +436,7 @@ export default function BulletImprovedEditor({
             color: "var(--dim)",
             lineHeight: 1.45,
           }}>
-            Preview column only—not your uploaded PDF file. Use Résumé Builder for full edits.
+            Preview column only, not your uploaded PDF file. Use Résumé Builder for full edits.
           </span>
         </div>
       )}

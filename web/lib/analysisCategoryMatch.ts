@@ -450,6 +450,96 @@ export function filterIssuesForCategory(issues: string[] | undefined | null, cat
   return filtered.length > 0 ? filtered : list;
 }
 
+/**
+ * A real résumé bullet never contains a square-bracket token. So any `[X]`,
+ * `[X%]`, `[$Y]`, `[~12]`, `[number]`, etc. is an AI fill-in-the-blank — an
+ * obvious "this was written by AI" tell that must never reach a recruiter.
+ */
+const AI_PLACEHOLDER_RE = /\[[^\]]*\]/;
+const AI_PLACEHOLDER_RE_G = /\[[^\]]*\]/g;
+
+export function containsAiPlaceholder(text: string | null | undefined): boolean {
+  return typeof text === "string" && AI_PLACEHOLDER_RE.test(text);
+}
+
+/**
+ * A concrete, obviously-round *example* value for a bracketed placeholder, so the
+ * student sees the shape of the figure to add (e.g. "20%", "$10K", "3x", "12")
+ * instead of a robotic "[X%]". They replace it with their own real number.
+ */
+function exampleForPlaceholder(token: string): string {
+  const inner = token.replace(/^\[|\]$/g, "").trim();
+  const low = inner.toLowerCase();
+  const num = inner.match(/(\d[\d,.]*)/);
+  const hasPct = /%|percent/.test(low);
+  const hasMoney = /\$|usd|dollar|revenue|cost|budget|sales|arr|mrr/.test(low);
+  const hasMult = /\d\s*x|times|fold|multipl/.test(low);
+  if (num) {
+    if (hasPct) return num[1] + "%";
+    if (hasMoney) return "$" + num[1];
+    if (hasMult) return num[1] + "x";
+    return num[1];
+  }
+  if (hasPct) return "20%";
+  if (hasMoney) return "$10K";
+  if (hasMult) return "3x";
+  if (/hour|day|week|month|year|time|faster|quicker/.test(low)) return "30%";
+  return "10";
+}
+
+/**
+ * Replace every bracketed placeholder in a rewrite with a concrete example
+ * value, returning the clean (bracket-free) text plus the list of example
+ * figures inserted (so the UI can highlight them and tell the student to swap
+ * in their own numbers). Real bullets have no brackets, so this never touches
+ * legitimate text.
+ */
+export function materializePlaceholders(
+  text: string | null | undefined,
+): { text: string; examples: string[] } {
+  const src = typeof text === "string" ? text : "";
+  if (!src) return { text: "", examples: [] };
+  const examples: string[] = [];
+  const out = src.replace(AI_PLACEHOLDER_RE_G, (tok) => {
+    const ex = exampleForPlaceholder(tok);
+    examples.push(ex);
+    return ex;
+  });
+  return { text: out, examples };
+}
+
+/**
+ * Replace em-dashes (—, U+2014) — a heavy AI-writing tell — with commas, so a
+ * suggestion the tool emits never adds an "AI wrote this" fingerprint to the
+ * résumé. Deliberately leaves hyphens ("human-centered") and en-dash ranges
+ * ("2024–2025", "July–Present") untouched.
+ */
+export function scrubEmDashes(text: string | null | undefined): string {
+  const src = typeof text === "string" ? text : "";
+  if (src.indexOf("—") === -1) return src;
+  return src
+    .replace(/\s*—\s*/g, ", ")   // " — " / "—" → ", "
+    .replace(/,\s*,/g, ", ")          // collapse doubled commas
+    .replace(/\s+([,.;:])/g, "$1")    // no space before punctuation
+    .replace(/,\s*\./g, ".")          // ", ." → "."
+    .replace(/^\s*,\s*/, "")          // no leading comma
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * Full clean-up for any rewrite the tool surfaces or applies: turn bracket
+ * placeholders into concrete example figures AND strip em-dashes. The single
+ * entry point so suggestions, the Edit box, Copy, and Apply-to-preview all get
+ * identical, recruiter-safe text.
+ */
+export function cleanAiArtifacts(
+  text: string | null | undefined,
+): { text: string; examples: string[] } {
+  const mat = materializePlaceholders(text);
+  return { text: scrubEmDashes(mat.text), examples: mat.examples };
+}
+
 /** Rewrite text for the active category. */
 export function getRewriteForCategory(
   bullet: CategoryRewriteBullet,

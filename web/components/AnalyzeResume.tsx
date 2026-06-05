@@ -11,6 +11,7 @@ import {
   bulletMatchesAnalysisCategory,
   countBulletsInCategory,
   getRewriteForCategory,
+  cleanAiArtifacts,
   inferPrimaryCategoryFromBullet,
   isLanguageQualityMicroRewrite,
   isTrivialRewrite,
@@ -209,6 +210,63 @@ function flaggedBulletFixChip(
   return CATEGORY_LABELS.find(c => c.key === activeCategory)?.label ?? "Fix";
 }
 
+/**
+ * Plain-language coaching for a flagged bullet, written for a new grad who has
+ * never built a résumé. Each entry answers the three questions a confused
+ * student actually has: why is this weak, what do I do, and what does good
+ * look like? Keyed by the analysis category the bullet was flagged under.
+ */
+type CategoryCoach = { why: string; how: string; example: string };
+
+const CATEGORY_COACH: Partial<Record<keyof AnalysisResult["categoryScores"], CategoryCoach>> = {
+  achievementQuality: {
+    why: "Right now this says what you were responsible for, not what changed because of you. Recruiters skim for results, not duties.",
+    how: "Start with a strong action verb and end with the outcome: what got better, faster, cheaper, or bigger?",
+    example: "“Responsible for onboarding design” → “Redesigned onboarding, cutting setup time ~40% for 500+ new users.”",
+  },
+  quantification: {
+    why: "Numbers make a line believable and easy to skim. “Improved the flow” is vague; “cut it from 3 weeks to 1” sticks.",
+    how: "Add any real figure: people, %, time, money, or scale. No exact number? A rough count or range still helps.",
+    example: "“Grew community engagement” → “Grew engagement 40% across 2 social channels.”",
+  },
+  sectionStructure: {
+    why: "This line tries to do too much at once, or it’s the only bullet for the role. Recruiters scan fast, so each line should carry one clear idea.",
+    how: "Split it into 2–4 short bullets for the job, each leading with an action and ending with a result.",
+    example: "One long line → “Led UX for the AI Automation team.” + “Shipped 3 product flows now used across 4 product teams.”",
+  },
+  languageQuality: {
+    why: "Small wording slips like the wrong tense, passive voice, or filler make a line read less confident than you are.",
+    how: "Use past tense for past roles, start with the action, and cut empty words like “responsible for” or “various.”",
+    example: "“Was responsible for various design tasks” → “Designed and shipped the team’s design system.”",
+  },
+  readability: {
+    why: "Long, dense lines are hard to skim, and a recruiter spends only seconds on each résumé.",
+    how: "Keep every bullet to one or two lines. Put the important part first and trim the rest.",
+    example: "A 3-line run-on → one tight line that leads with the result.",
+  },
+  technicalBranding: {
+    why: "This line doesn’t show the specific tools or methods that prove you can actually do the work in your field.",
+    how: "Name the real tools, methods, or systems you used, the ones a hiring manager in your field looks for.",
+    example: "“Did user research” → “Ran 12 usability tests in Figma + Maze, turning findings into a service blueprint.”",
+  },
+};
+
+const COACH_LABEL_STYLE: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  color: "var(--dim)",
+  textTransform: "uppercase",
+  letterSpacing: 0.45,
+  marginBottom: 4,
+};
+
+const COACH_BODY_STYLE: React.CSSProperties = {
+  fontSize: 12.5,
+  lineHeight: 1.55,
+  color: "var(--muted)",
+  margin: 0,
+};
+
 // Category icons (SVG paths)
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   quantification:     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 12h2v2H2zM6 9h2v5H6zM10 6h2v8h-2zM14 3h-2v11h2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
@@ -222,7 +280,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 };
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
-  quantification:     "Aim for metrics on ~75% of experience bullets—prioritize your biggest wins.",
+  quantification:     "Aim for metrics on ~75% of experience bullets, prioritizing your biggest wins.",
   achievementQuality: "Outcomes and ownership, not duty lists.",
   languageQuality:    "Active verbs; less passive voice and filler.",
   readability:        "Short, clear bullets recruiters can skim fast.",
@@ -347,6 +405,9 @@ export default function AnalyzeResume() {
   const [loadingTipIdx, setLoadingTipIdx] = useState(0);
   const [expandedBullets, setExpandedBullets] = useState<Record<number, boolean>>({});
   const [historyOpen, setHistoryOpen]   = useState(false);
+  // Mobile/tablet: the score + category header collapses to a slim bar by
+  // default so the résumé preview isn't pushed off-screen. Tap to expand.
+  const [mobileHeadExpanded, setMobileHeadExpanded] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   /** Accordion for category-detail flagged bullets (`bulletAnalysis` index, or null = all collapsed). */
   const [expandedFlaggedBulletIdx, setExpandedFlaggedBulletIdx] = useState<number | null>(null);
@@ -1188,7 +1249,7 @@ export default function AnalyzeResume() {
               <path d="M6 5.5v3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
               <circle cx="6" cy="4" r="0.6" fill="currentColor"/>
             </svg>
-            Click a category or a bullet — they stay in sync. Copy improved text into your résumé.
+            Click a category or a bullet; they stay in sync. Copy improved text into your résumé.
           </div>
 
           {/* TOP FIXES */}
@@ -1471,7 +1532,7 @@ export default function AnalyzeResume() {
           -webkit-overflow-scrolling: touch;
           padding-top: 4px;
         }
-        @media (min-width: 768px) {
+        @media (min-width: 1025px) {
           .az-sidebar {
             max-height: 100vh;
             max-height: 100dvh;
@@ -1565,7 +1626,7 @@ export default function AnalyzeResume() {
           text-transform: uppercase;
           letter-spacing: 0.06em;
         }
-        @media (min-width: 768px) {
+        @media (min-width: 1025px) {
           .az-sidebar-restore-fab.is-visible {
             display: inline-flex;
           }
@@ -1576,7 +1637,7 @@ export default function AnalyzeResume() {
 
         /* Mobile: keep slide-over overlay (screen too narrow for inline) */
         .az-sidebar-scrim-mobile { display: none; }
-        @media (max-width: 767px) {
+        @media (max-width: 1024px) {
           .az-sidebar-scrim-mobile {
             display: block;
             position: fixed;
@@ -1637,7 +1698,7 @@ export default function AnalyzeResume() {
           align-items: center;
           justify-content: center;
         }
-        @media (min-width: 768px) {
+        @media (min-width: 1025px) {
           .az-desktop-sidebar-toggle { display: inline-flex; }
         }
 
@@ -1647,7 +1708,7 @@ export default function AnalyzeResume() {
         }
 
         /* Desktop workspace: main area height-bounded so only the work column scrolls */
-        @media (min-width: 768px) {
+        @media (min-width: 1025px) {
           .az-shell.az-shell-workspace-split {
             flex: 1 1 0%;
             min-height: 0;
@@ -1656,7 +1717,7 @@ export default function AnalyzeResume() {
           }
         }
         .az-mobile-only { display: flex; }
-        @media (min-width: 768px) { .az-mobile-only { display: none !important; } }
+        @media (min-width: 1025px) { .az-mobile-only { display: none !important; } }
       `}</style>
       <aside className={`az-sidebar${historyOpen ? " open" : ""}`}>
         {result && (
@@ -1705,7 +1766,7 @@ export default function AnalyzeResume() {
               type="button"
               className="az-desktop-sidebar-toggle"
               onClick={() => setImprovementPlanVisible(false)}
-              title="Hide improvement plan — more space to read"
+              title="Hide improvement plan for more space"
               style={{
                 width: 24, height: 24, borderRadius: 6,
                 border: "none", background: "var(--surface2)",
@@ -1750,7 +1811,7 @@ export default function AnalyzeResume() {
         type="button"
         className={`az-sidebar-restore-fab${!improvementPlanVisible ? " is-visible" : ""}`}
         onClick={() => setImprovementPlanVisible(true)}
-        title="Open improvement plan — scores, fixes, and past analyses"
+        title="Open improvement plan: scores, fixes, and past analyses"
         aria-label="Open improvement plan and analysis history"
         onMouseEnter={e => {
           e.currentTarget.style.background = "var(--surface2)";
@@ -1823,7 +1884,7 @@ export default function AnalyzeResume() {
 
         <style>{`
           .az-mobile-sticky-head { display: none; }
-          @media (max-width: 767px) {
+          @media (max-width: 1024px) {
             .az-mobile-sticky-head {
               display: flex !important;
               flex-direction: column;
@@ -1841,7 +1902,7 @@ export default function AnalyzeResume() {
               padding: 16px 14px 60px !important;
             }
           }
-          @media (min-width: 768px) {
+          @media (min-width: 1025px) {
             .az-main.az-main-workspace-split {
               height: 100%;
               max-height: 100%;
@@ -1854,7 +1915,7 @@ export default function AnalyzeResume() {
               min-height: 0 !important;
             }
           }
-          @media (max-width: 767px) {
+          @media (max-width: 1024px) {
             .az-main.az-main-workspace-split {
               display: flex !important;
               flex-direction: column !important;
@@ -1892,6 +1953,38 @@ export default function AnalyzeResume() {
         {(result || azHistory.length > 0) && (
           <div className="az-mobile-sticky-head">
             {result ? (
+          <>
+            {/* Slim collapsed bar — always visible; frees vertical space for the résumé */}
+            <button
+              type="button"
+              onClick={() => setMobileHeadExpanded((v) => !v)}
+              aria-expanded={mobileHeadExpanded}
+              aria-label={mobileHeadExpanded ? "Hide score details" : "Show score details"}
+              style={{
+                display: "flex", alignItems: "center", gap: 9, width: "100%",
+                padding: "8px 12px", borderRadius: 10, boxSizing: "border-box",
+                border: "1px solid var(--border)", background: "var(--surface)",
+                cursor: "pointer", fontFamily: "inherit",
+                marginBottom: mobileHeadExpanded ? 10 : 0,
+              }}
+            >
+              <span style={{ fontSize: 18, fontWeight: 800, color: scoreColor(result.overallScore), lineHeight: 1 }}>
+                {result.overallScore}
+                <span style={{ fontSize: 11, fontWeight: 500, color: "var(--dim)" }}>/100</span>
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: scoreColor(result.overallScore) }}>
+                {scoreLabel(result.overallScore)}
+              </span>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>· Resume score</span>
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--dim)" }}>
+                {mobileHeadExpanded ? "Hide" : "Details"}
+              </span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden style={{ color: "var(--dim)", transform: mobileHeadExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
+                <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {mobileHeadExpanded && (
           <div className="az-mobile-score" style={{ marginBottom: 0 }}>
             {/* Score row */}
             <div style={{
@@ -1956,8 +2049,10 @@ export default function AnalyzeResume() {
               })}
             </div>
           </div>
+            )}
+          </>
             ) : null}
-            {azHistory.length > 0 ? (
+            {azHistory.length > 0 && (!result || mobileHeadExpanded) ? (
           <div className="az-history-bar" style={{ marginBottom: 0 }}>
             <button
               type="button"
@@ -2296,7 +2391,7 @@ export default function AnalyzeResume() {
                   {activeBullets.map((bullet, i) => {
                     const gi = result.bulletAnalysis.indexOf(bullet);
                     const safeIdx = gi >= 0 ? gi : i;
-                    const categoryRewriteBase = activeCategory
+                    const rawCategoryRewrite = activeCategory
                       ? getRewriteForCategory(
                           bullet,
                           activeCategory,
@@ -2306,6 +2401,14 @@ export default function AnalyzeResume() {
                           categoryAssignmentOpts,
                         )
                       : (bullet.improvedBullet ?? "");
+                    // Strip the two big "written by AI" tells from anything we
+                    // surface: turn "[X%]" placeholders into concrete example
+                    // figures the student swaps for their own, and replace
+                    // em-dashes with commas. Never a bracket, never a "—".
+                    const { text: categoryRewriteBase, examples: referenceFigures } =
+                      cleanAiArtifacts(rawCategoryRewrite);
+                    const hasReferenceFigures = referenceFigures.length > 0;
+                    const isFirstFlaggedCard = i === 0;
                     const hasTrustedRewrite = categoryRewriteBase.trim().length > 0;
                     const isLanguageMicroEdit = hasTrustedRewrite
                       && activeCategory === "languageQuality"
@@ -2315,6 +2418,9 @@ export default function AnalyzeResume() {
                       activeCategory as keyof AnalysisResult["categoryScores"] | null,
                       isLanguageMicroEdit,
                     );
+                    const coach = activeCategory
+                      ? CATEGORY_COACH[activeCategory as keyof AnalysisResult["categoryScores"]] ?? null
+                      : null;
                     const previewMain = previewLineOverrides[safeIdx] ?? bullet.originalBullet;
                     const editorDraft = hasTrustedRewrite
                       ? draft
@@ -2440,19 +2546,48 @@ export default function AnalyzeResume() {
                       {isFlaggedAccordionOpen && (
                         <div style={{ padding: "0 14px 14px 14px" }}>
                       {!hasTrustedRewrite && (
-                        <p style={{
-                          fontSize: 12,
-                          color: "var(--muted)",
-                          lineHeight: 1.5,
-                          margin: "0 0 10px",
+                        <div style={{
+                          marginBottom: 12,
+                          padding: "12px 14px",
+                          borderRadius: 10,
+                          background: "var(--surface2)",
+                          border: "1px solid var(--border)",
+                          borderLeft: "3px solid var(--accent)",
                         }}>
-                          No auto-rewrite for this bullet — score still reflects the issue. Edit below or apply your own wording to the preview.
+                          {coach ? (
+                            <>
+                              <div style={COACH_LABEL_STYLE}>Why this scored low</div>
+                              <p style={COACH_BODY_STYLE}>{coach.why}</p>
+                              <div style={{ ...COACH_LABEL_STYLE, marginTop: 11 }}>How to make it stronger</div>
+                              <p style={COACH_BODY_STYLE}>{coach.how}</p>
+                              <p style={{ ...COACH_BODY_STYLE, marginTop: 8, color: "var(--text)" }}>
+                                <span style={{ fontWeight: 700, color: "var(--accent)" }}>Example&nbsp;&nbsp;</span>
+                                {coach.example}
+                              </p>
+                            </>
+                          ) : (
+                            <p style={COACH_BODY_STYLE}>
+                              Edit the line below to make it stronger, then Apply to preview.
+                            </p>
+                          )}
+                          <p style={{ ...COACH_BODY_STYLE, marginTop: 11, fontSize: 11, color: "var(--dim)" }}>
+                            We didn’t auto-write this one. It’s a judgment call only you can make (your real numbers, your wording). Edit below, then Apply to preview.
+                          </p>
+                        </div>
+                      )}
+                      {hasTrustedRewrite && coach && !isLanguageMicroEdit && isFirstFlaggedCard && (
+                        <p style={{ ...COACH_BODY_STYLE, marginBottom: 10 }}>
+                          <span style={{ fontWeight: 700, color: "var(--accent)" }}>Why&nbsp;&nbsp;</span>
+                          {coach.why}
                         </p>
                       )}
                       {hasTrustedRewrite ? (
                         <BulletImprovedEditor
                           variant="compact"
                           layout="card"
+                          suggestionLabel={hasReferenceFigures ? "Suggested · example numbers" : "Suggested"}
+                          suggestionNote={hasReferenceFigures ? "Figures below are examples. Swap in your real numbers." : undefined}
+                          highlightTerms={hasReferenceFigures ? referenceFigures : undefined}
                           value={draft}
                           onChange={v => patchBulletRewrite(safeIdx, v)}
                           onReset={() => patchBulletRewrite(safeIdx, null)}
@@ -2557,7 +2692,7 @@ export default function AnalyzeResume() {
                     <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
                       {activeCategoryRationale || explainingCategory === activeCategory
                         ? `The ${activeCategoryScore}/100 score is explained above.`
-                        : `Scored ${activeCategoryScore ?? "–"}/100 — generating an explanation above.`}
+                        : `Scored ${activeCategoryScore ?? "–"}/100. Generating an explanation above.`}
                     </div>
                   </>
                 )}
@@ -2609,6 +2744,38 @@ export default function AnalyzeResume() {
                 )}
               </div>
             </section>
+
+            {/* 1b. Light "reads AI-written" nudge — only when em-dashes are heavy */}
+            {(() => {
+              const emCount = (result.extractedText || "").split("—").length - 1;
+              if (emCount < 4) return null;
+              return (
+                <section>
+                  <div style={{
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "flex-start",
+                    background: "var(--surface2)",
+                    border: "1px solid var(--border)",
+                    borderLeft: "3px solid var(--accent)",
+                    borderRadius: 12,
+                    padding: "14px 16px",
+                  }}>
+                    <span aria-hidden style={{ fontSize: 16, lineHeight: 1.4 }}>✍️</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 3 }}>
+                        Reads a little AI-written
+                      </div>
+                      <p style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--muted)", margin: 0 }}>
+                        Your résumé uses the em-dash (—) {emCount} times. It&rsquo;s a common AI-writing
+                        tell that many recruiters notice. Swapping most of them for commas or periods
+                        makes it read more like you. (The fixes this tool suggests already avoid it.)
+                      </p>
+                    </div>
+                  </div>
+                </section>
+              );
+            })()}
 
             {/* 2. Top Issues */}
             {sortedIssues.length > 0 && (
@@ -2742,7 +2909,7 @@ export default function AnalyzeResume() {
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {result.keywordAnalysis.missingKeywords.length === 0 ? (
-                        <span style={{ fontSize: 12, color: "var(--dim)" }}>None — great coverage!</span>
+                        <span style={{ fontSize: 12, color: "var(--dim)" }}>None. Great coverage!</span>
                       ) : result.keywordAnalysis.missingKeywords.map((kw, i) => (
                         <span key={i} style={{
                           fontSize: 11, fontWeight: 500, padding: "3px 9px",
@@ -2777,7 +2944,7 @@ export default function AnalyzeResume() {
             {result.bulletAnalysis.length > 0 && (
               <section>
                 <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", margin: "0 0 14px" }}>
-                  Weakest Bullets — AI Rewrites
+                  Weakest Bullets · AI Rewrites
                 </h2>
                 <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
                   {result.bulletAnalysis.map((bullet, i) => {
