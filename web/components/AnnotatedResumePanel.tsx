@@ -143,26 +143,16 @@ function mirrorToneStyles(score: number): { bar: string; bg: string; shadow: str
 type PreviewStyleId = "classic" | "modern" | "compact";
 
 import {
-  RESUME_FONT_SIZE_OPTIONS,
   resumeLayoutCssVarsForPreviewStyle,
-  type ResumePreviewStyleId,
   type TBFontSize,
+  type TBPageWidth,
+  type TBFont,
 } from "@/lib/resumeLayout";
 
-const PREVIEW_STYLE_LABEL: Record<ResumePreviewStyleId, string> = {
-  classic: "Classic",
-  modern: "Modern",
-  compact: "Executive",
-};
-
-const PREVIEW_STYLE_OPTIONS: Array<{ id: PreviewStyleId; label: string }> = (
-  ["classic", "modern", "compact"] as ResumePreviewStyleId[]
-).map((id) => ({
-  id,
-  label: PREVIEW_STYLE_LABEL[id],
-}));
 
 const PREVIEW_FONT_SIZE_STORAGE_KEY = "rn_preview_font_size";
+const PREVIEW_PAGE_WIDTH_STORAGE_KEY = "rn_preview_page_width";
+const PREVIEW_FONT_STORAGE_KEY = "rn_preview_font";
 
 function readStoredPreviewFontSize(): TBFontSize {
   if (typeof window === "undefined") return "medium";
@@ -175,11 +165,104 @@ function readStoredPreviewFontSize(): TBFontSize {
   return "medium";
 }
 
-const PREVIEW_ACCENTS = [
-  { label: "Blue", value: "#0969da" },
-  { label: "Slate", value: "#334155" },
-  { label: "Emerald", value: "#047857" },
-  { label: "Amber", value: "#b45309" },
+function readStoredPreviewPageWidth(): TBPageWidth {
+  if (typeof window === "undefined") return "standard";
+  try {
+    const raw = localStorage.getItem(PREVIEW_PAGE_WIDTH_STORAGE_KEY);
+    if (raw === "narrow" || raw === "standard" || raw === "wide") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "standard";
+}
+
+function readStoredPreviewFont(): TBFont {
+  if (typeof window === "undefined") return "Helvetica";
+  try {
+    const raw = localStorage.getItem(PREVIEW_FONT_STORAGE_KEY);
+    if (raw === "Helvetica" || raw === "Times-Roman" || raw === "Courier") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "Helvetica";
+}
+
+/** Compact segmented icon control for the preview toolbar (width / size / font). */
+function PreviewSegControl<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ id: T; title: string; icon: React.ReactNode }>;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      title={label}
+      style={{
+        display: "inline-flex",
+        alignItems: "stretch",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        overflow: "hidden",
+        background: "var(--surface)",
+        flexShrink: 0,
+      }}
+    >
+      {options.map((o, i) => {
+        const active = value === o.id;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            title={o.title}
+            aria-label={`${label}: ${o.title}`}
+            aria-pressed={active}
+            onClick={() => onChange(o.id)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minWidth: 30,
+              height: 28,
+              padding: 0,
+              border: "none",
+              borderLeft: i === 0 ? "none" : "1px solid var(--border)",
+              cursor: "pointer",
+              background: active ? "var(--accent)" : "transparent",
+              color: active ? "#fff" : "var(--muted)",
+              transition: "background 0.12s, color 0.12s",
+            }}
+          >
+            {o.icon}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const PREVIEW_WIDTH_SEG: ReadonlyArray<{ id: TBPageWidth; title: string; icon: React.ReactNode }> = [
+  { id: "narrow", title: "Narrow", icon: <span style={{ display: "block", width: 7, height: 13, border: "1.5px solid currentColor", borderRadius: 1.5 }} /> },
+  { id: "standard", title: "Standard", icon: <span style={{ display: "block", width: 11, height: 13, border: "1.5px solid currentColor", borderRadius: 1.5 }} /> },
+  { id: "wide", title: "Wide", icon: <span style={{ display: "block", width: 15, height: 13, border: "1.5px solid currentColor", borderRadius: 1.5 }} /> },
+];
+
+const PREVIEW_FONT_SIZE_SEG: ReadonlyArray<{ id: TBFontSize; title: string; icon: React.ReactNode }> = [
+  { id: "small", title: "Small", icon: <span style={{ fontSize: 9, fontWeight: 800, lineHeight: 1 }}>A</span> },
+  { id: "medium", title: "Medium", icon: <span style={{ fontSize: 12, fontWeight: 800, lineHeight: 1 }}>A</span> },
+  { id: "large", title: "Large", icon: <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1 }}>A</span> },
+];
+
+const PREVIEW_FONT_SEG: ReadonlyArray<{ id: TBFont; title: string; icon: React.ReactNode }> = [
+  { id: "Helvetica", title: "Helvetica (sans-serif)", icon: <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1, fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif" }}>Aa</span> },
+  { id: "Times-Roman", title: "Times Roman (serif)", icon: <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1, fontFamily: "'Times New Roman', Georgia, serif" }}>Aa</span> },
+  { id: "Courier", title: "Courier (monospace)", icon: <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1, fontFamily: "'Courier New', Courier, monospace" }}>Aa</span> },
 ];
 
 /** When the API omits `extractedText`, rebuild a minimal "page" from bullets + section headers.
@@ -300,9 +383,12 @@ export default function AnnotatedResumePanel({
 }: Props) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-  const [previewStyleId, setPreviewStyleId] = useState<PreviewStyleId>("classic");
-  const [previewAccent, setPreviewAccent] = useState(PREVIEW_ACCENTS[0].value);
+  // Style preset selector removed from the toolbar — the preview uses a fixed
+  // default preset; users adjust width / size / font via the icon controls.
+  const previewStyleId: PreviewStyleId = "classic";
+  const [previewPageWidth, setPreviewPageWidth] = useState<TBPageWidth>(() => readStoredPreviewPageWidth());
   const [previewFontSize, setPreviewFontSize] = useState<TBFontSize>(() => readStoredPreviewFontSize());
+  const [previewFont, setPreviewFont] = useState<TBFont>(() => readStoredPreviewFont());
   const [highlightsEnabled, setHighlightsEnabled] = useState(() => {
     if (typeof window === "undefined") return true;
     try {
@@ -427,17 +513,36 @@ export default function AnnotatedResumePanel({
   const previewStyleVars = useMemo(
     () => resumeLayoutCssVarsForPreviewStyle(
       previewStyleId,
-      "standard",
-      previewAccent,
+      previewPageWidth,
+      undefined,           // accent follows the style preset (no separate color picker)
       previewFontSize,
+      previewFont,
     ) as CSSProperties,
-    [previewStyleId, previewAccent, previewFontSize],
+    [previewStyleId, previewPageWidth, previewFontSize, previewFont],
   );
 
   const setPreviewFontSizePersisted = useCallback((size: TBFontSize) => {
     setPreviewFontSize(size);
     try {
       localStorage.setItem(PREVIEW_FONT_SIZE_STORAGE_KEY, size);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const setPreviewPageWidthPersisted = useCallback((width: TBPageWidth) => {
+    setPreviewPageWidth(width);
+    try {
+      localStorage.setItem(PREVIEW_PAGE_WIDTH_STORAGE_KEY, width);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const setPreviewFontPersisted = useCallback((font: TBFont) => {
+    setPreviewFont(font);
+    try {
+      localStorage.setItem(PREVIEW_FONT_STORAGE_KEY, font);
     } catch {
       /* ignore */
     }
@@ -713,83 +818,26 @@ export default function AnnotatedResumePanel({
                 display: "flex",
                 alignItems: "center",
                 gap: 6,
-                padding: "3px 6px",
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                background: "var(--surface2)",
               }}
             >
-              <span style={{
-                fontSize: 10,
-                fontWeight: 800,
-                color: "var(--dim)",
-                textTransform: "uppercase",
-                letterSpacing: 0.45,
-              }}>
-                Style
-              </span>
-              <select
-                value={previewStyleId}
-                onChange={(event) => setPreviewStyleId(event.target.value as PreviewStyleId)}
-                aria-label="Preview resume style"
-                style={{
-                  width: "auto",
-                  minWidth: 92,
-                  height: 28,
-                  padding: "3px 24px 3px 8px",
-                  borderRadius: 8,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  background: "var(--surface)",
-                }}
-              >
-                {PREVIEW_STYLE_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id}>{option.label}</option>
-                ))}
-              </select>
-              <select
+              <PreviewSegControl
+                label="PDF width"
+                value={previewPageWidth}
+                onChange={setPreviewPageWidthPersisted}
+                options={PREVIEW_WIDTH_SEG}
+              />
+              <PreviewSegControl
+                label="Font size"
                 value={previewFontSize}
-                onChange={(event) => setPreviewFontSizePersisted(event.target.value as TBFontSize)}
-                aria-label="Preview font size"
-                title="Font size"
-                style={{
-                  width: "auto",
-                  minWidth: 56,
-                  height: 28,
-                  padding: "3px 22px 3px 8px",
-                  borderRadius: 8,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  background: "var(--surface)",
-                }}
-              >
-                {RESUME_FONT_SIZE_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id}>{option.label}</option>
-                ))}
-              </select>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                {PREVIEW_ACCENTS.map((accent) => {
-                  const active = previewAccent === accent.value;
-                  return (
-                    <button
-                      key={accent.value}
-                      type="button"
-                      aria-label={`${accent.label} accent`}
-                      title={`${accent.label} accent`}
-                      onClick={() => setPreviewAccent(accent.value)}
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 999,
-                        border: active ? "2px solid var(--text)" : "1px solid var(--border-h)",
-                        background: accent.value,
-                        boxShadow: active ? `0 0 0 2px ${accent.value}33` : "none",
-                        cursor: "pointer",
-                      }}
-                    />
-                  );
-                })}
-              </div>
+                onChange={setPreviewFontSizePersisted}
+                options={PREVIEW_FONT_SIZE_SEG}
+              />
+              <PreviewSegControl
+                label="Font"
+                value={previewFont}
+                onChange={setPreviewFontPersisted}
+                options={PREVIEW_FONT_SEG}
+              />
             </div>
           ) : null}
           {useLiveDoc ? (
