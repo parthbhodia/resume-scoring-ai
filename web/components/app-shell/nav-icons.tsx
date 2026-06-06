@@ -74,6 +74,24 @@ export const NAV_ICONS = {
       <path d="M2 8h12" stroke="currentColor" strokeWidth="1.3" />
     </svg>
   ),
+  interviewPrep: (
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M8 2.5 14.5 5.5 8 8.5 1.5 5.5 8 2.5z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4 7v3.5c0 .9 1.8 2 4 2s4-1.1 4-2V7"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M14.5 5.5v3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
   "cover-letter": (
     <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
       <path

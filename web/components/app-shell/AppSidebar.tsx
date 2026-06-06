@@ -43,6 +43,7 @@ import {
 export type AppSidebarProps = {
   active: AppView;
   onTemplateBuilderPage: boolean;
+  onInterviewPrepPage: boolean;
   builderActive: boolean;
   builderOpen: boolean;
   onBuilderOpenChange: (open: boolean) => void;
@@ -99,6 +100,7 @@ function NavItem({
 export function AppSidebar({
   active,
   onTemplateBuilderPage,
+  onInterviewPrepPage,
   builderActive,
   builderOpen,
   onBuilderOpenChange,
@@ -167,14 +169,14 @@ export function AppSidebar({
             <SidebarMenu className="group-data-[collapsible=icon]:items-center">
               <NavItem
                 view="analyze"
-                isActive={!onTemplateBuilderPage && active === "analyze"}
+                isActive={!onTemplateBuilderPage && !onInterviewPrepPage && active === "analyze"}
                 onClick={() => onSwitchView("analyze")}
                 showLabels={showLabels}
               />
 
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  isActive={builderActive}
+                  isActive={builderActive && !onInterviewPrepPage}
                   tooltip={VIEW_LABELS.builder}
                   className={cn(NAV_MENU_BTN_CLASS, NAV_ACTIVE_CLASS, "w-full")}
                   onClick={handleBuilderClick}
@@ -229,34 +231,50 @@ export function AppSidebar({
                 ) : null}
               </SidebarMenuItem>
 
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={onInterviewPrepPage}
+                  tooltip="Interview Prep"
+                  className={cn(NAV_MENU_BTN_CLASS, NAV_ACTIVE_CLASS)}
+                  onClick={() => router.push("/interview-prep")}
+                >
+                  <span className="app-nav-icon" aria-hidden>
+                    {NAV_ICONS.interviewPrep}
+                  </span>
+                  {showLabels ? (
+                    <span className="app-nav-label">Interview Prep</span>
+                  ) : null}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+
               <NavItem
                 view="library"
-                isActive={!onTemplateBuilderPage && active === "library"}
+                isActive={!onTemplateBuilderPage && !onInterviewPrepPage && active === "library"}
                 onClick={() => onSwitchView("library")}
                 showLabels={showLabels}
               />
               <NavItem
                 view="cover-letter"
-                isActive={!onTemplateBuilderPage && active === "cover-letter"}
+                isActive={!onTemplateBuilderPage && !onInterviewPrepPage && active === "cover-letter"}
                 onClick={() => onSwitchView("cover-letter")}
                 showLabels={showLabels}
               />
               <NavItem
                 view="jobs"
-                isActive={!onTemplateBuilderPage && active === "jobs"}
+                isActive={!onTemplateBuilderPage && !onInterviewPrepPage && active === "jobs"}
                 onClick={() => onSwitchView("jobs")}
                 showLabels={showLabels}
               />
               <NavItem
                 view="profile"
-                isActive={!onTemplateBuilderPage && active === "profile"}
+                isActive={!onTemplateBuilderPage && !onInterviewPrepPage && active === "profile"}
                 onClick={() => onSwitchView("profile")}
                 showLabels={showLabels}
               />
               {advisorAllowed ? (
                 <NavItem
                   view="advisor"
-                  isActive={!onTemplateBuilderPage && active === "advisor"}
+                  isActive={!onTemplateBuilderPage && !onInterviewPrepPage && active === "advisor"}
                   onClick={() => onSwitchView("advisor")}
                   showLabels={showLabels}
                 />
