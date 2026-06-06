@@ -241,20 +241,43 @@ export default function LandingPage() {
             ["Approach", "approach"],
             ...(SHOW_HOW_SECTION ? [["How it works", "how"]] as const : []),
             ["Reviews", "reviews"],
+            ["Privacy", "privacy-nav"],
           ].map(([lbl, id]) => (
-            <button
-              key={id}
-              type="button"
-              className="lp-nav-section"
-              onClick={() => scrollTo(id)}
-              style={{
-                background: "none", border: "none", color: C.muted,
-                fontSize: 13.5, cursor: "pointer", fontFamily: "inherit",
-                fontWeight: 500, letterSpacing: -0.2, padding: 0, transition: "color 0.15s",
-              }}
-              onMouseEnter={e => { (e.target as HTMLElement).style.color = C.ink; }}
-              onMouseLeave={e => { (e.target as HTMLElement).style.color = C.muted; }}
-            >{lbl}</button>
+            id === "privacy-nav" ? (
+              <Link
+                key={id}
+                href="/privacy/"
+                prefetch={false}
+                className="lp-nav-section"
+                style={{
+                  color: C.muted,
+                  fontSize: 13.5,
+                  fontFamily: "inherit",
+                  fontWeight: 500,
+                  letterSpacing: -0.2,
+                  textDecoration: "none",
+                  transition: "color 0.15s",
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.ink; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.muted; }}
+              >
+                {lbl}
+              </Link>
+            ) : (
+              <button
+                key={id}
+                type="button"
+                className="lp-nav-section"
+                onClick={() => scrollTo(id)}
+                style={{
+                  background: "none", border: "none", color: C.muted,
+                  fontSize: 13.5, cursor: "pointer", fontFamily: "inherit",
+                  fontWeight: 500, letterSpacing: -0.2, padding: 0, transition: "color 0.15s",
+                }}
+                onMouseEnter={e => { (e.target as HTMLElement).style.color = C.ink; }}
+                onMouseLeave={e => { (e.target as HTMLElement).style.color = C.muted; }}
+              >{lbl}</button>
+            )
           ))}
 
           {/* Theme toggle */}
@@ -317,6 +340,9 @@ export default function LandingPage() {
             {" "}
             <strong style={{ color: C.ink, fontWeight: 600 }}>Completely free</strong>
             {" "}for students and the community, without paywalls or surprise charges.
+            {" "}Sign in with Google to save analyses — we only receive your email, name, and profile picture (
+            <Link href="/privacy/" prefetch={false} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>Privacy Policy</Link>
+            ).
           </p>
 
           {/* CTA row */}

@@ -33,6 +33,13 @@ function isPublicPath(pathname: string | null): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
+/** App shell lives at `/` (query params only). Marketing must render without waiting on auth. */
+function isHomePath(pathname: string | null): boolean {
+  if (!pathname) return true;
+  const trimmed = pathname.replace(/\/$/, "");
+  return trimmed === "" || trimmed === "/";
+}
+
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const publicRoute = isPublicPath(pathname);
@@ -69,7 +76,22 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (publicRoute) return <>{children}</>;
 
-  // Still checking — show spinner to avoid flashing the landing page for returning users.
+  const isHome = isHomePath(pathname);
+
+  // Local dev: allow the app without login, unless the user explicitly signed out.
+  if (DEV_BYPASS && !forceLanding) {
+    if (!isHome || checked) {
+      if (!session) return <>{children}</>;
+    }
+  }
+
+  // Homepage: always ship marketing HTML first (Google OAuth reviewers, bots, signed-out users).
+  // Do not show an auth spinner on `/` — static export would contain only the spinner otherwise.
+  if (isHome) {
+    if (forceLanding || !session) return <LandingPage />;
+    return <>{children}</>;
+  }
+
   if (!checked) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "var(--bg)" }}>
@@ -78,12 +100,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Local dev: allow the app without login, unless the user explicitly signed out.
-  if (DEV_BYPASS && !session && !forceLanding) {
-    return <>{children}</>;
-  }
-
-  // Confirmed no session — show landing page (also the SSG/crawler path).
   if (!session) return <LandingPage />;
 
   return <>{children}</>;
