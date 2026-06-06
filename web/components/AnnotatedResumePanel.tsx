@@ -153,6 +153,7 @@ import {
 const PREVIEW_FONT_SIZE_STORAGE_KEY = "rn_preview_font_size";
 const PREVIEW_PAGE_WIDTH_STORAGE_KEY = "rn_preview_page_width";
 const PREVIEW_FONT_STORAGE_KEY = "rn_preview_font";
+const PREVIEW_HEADER_ALIGN_STORAGE_KEY = "rn_preview_header_align";
 
 function readStoredPreviewFontSize(): TBFontSize {
   if (typeof window === "undefined") return "medium";
@@ -185,6 +186,19 @@ function readStoredPreviewFont(): TBFont {
     /* ignore */
   }
   return "Helvetica";
+}
+
+type PreviewHeaderAlign = "left" | "center";
+
+function readStoredPreviewHeaderAlign(): PreviewHeaderAlign {
+  if (typeof window === "undefined") return "left";
+  try {
+    const raw = localStorage.getItem(PREVIEW_HEADER_ALIGN_STORAGE_KEY);
+    if (raw === "left" || raw === "center") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "left";
 }
 
 /** Compact segmented icon control for the preview toolbar (width / size / font). */
@@ -263,6 +277,19 @@ const PREVIEW_FONT_SEG: ReadonlyArray<{ id: TBFont; title: string; icon: React.R
   { id: "Helvetica", title: "Helvetica (sans-serif)", icon: <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1, fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif" }}>Aa</span> },
   { id: "Times-Roman", title: "Times Roman (serif)", icon: <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1, fontFamily: "'Times New Roman', Georgia, serif" }}>Aa</span> },
   { id: "Courier", title: "Courier (monospace)", icon: <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1, fontFamily: "'Courier New', Courier, monospace" }}>Aa</span> },
+];
+
+const PREVIEW_HEADER_ALIGN_SEG: ReadonlyArray<{ id: PreviewHeaderAlign; title: string; icon: React.ReactNode }> = [
+  { id: "left", title: "Left-aligned header", icon: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M2 4h12M2 8h7M2 12h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  ) },
+  { id: "center", title: "Centered header", icon: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M2 4h12M4.5 8h7M3 12h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  ) },
 ];
 
 /** When the API omits `extractedText`, rebuild a minimal "page" from bullets + section headers.
@@ -389,6 +416,7 @@ export default function AnnotatedResumePanel({
   const [previewPageWidth, setPreviewPageWidth] = useState<TBPageWidth>(() => readStoredPreviewPageWidth());
   const [previewFontSize, setPreviewFontSize] = useState<TBFontSize>(() => readStoredPreviewFontSize());
   const [previewFont, setPreviewFont] = useState<TBFont>(() => readStoredPreviewFont());
+  const [previewHeaderAlign, setPreviewHeaderAlign] = useState<PreviewHeaderAlign>(() => readStoredPreviewHeaderAlign());
   const [highlightsEnabled, setHighlightsEnabled] = useState(() => {
     if (typeof window === "undefined") return true;
     try {
@@ -511,14 +539,20 @@ export default function AnnotatedResumePanel({
         : "none";
   const useLiveDoc = extractKind !== "none";
   const previewStyleVars = useMemo(
-    () => resumeLayoutCssVarsForPreviewStyle(
-      previewStyleId,
-      previewPageWidth,
-      undefined,           // accent follows the style preset (no separate color picker)
-      previewFontSize,
-      previewFont,
-    ) as CSSProperties,
-    [previewStyleId, previewPageWidth, previewFontSize, previewFont],
+    () => ({
+      ...resumeLayoutCssVarsForPreviewStyle(
+        previewStyleId,
+        previewPageWidth,
+        undefined,           // accent follows the style preset (no separate color picker)
+        previewFontSize,
+        previewFont,
+      ),
+      // Header (name + contact) alignment — cascades to AnalyzeLiveResumeBody's
+      // header block; captured on paperRef so the Chromium export matches.
+      "--az-resume-header-align": previewHeaderAlign,
+      "--az-resume-header-justify": previewHeaderAlign === "center" ? "center" : "flex-start",
+    }) as CSSProperties,
+    [previewStyleId, previewPageWidth, previewFontSize, previewFont, previewHeaderAlign],
   );
 
   const setPreviewFontSizePersisted = useCallback((size: TBFontSize) => {
@@ -543,6 +577,15 @@ export default function AnnotatedResumePanel({
     setPreviewFont(font);
     try {
       localStorage.setItem(PREVIEW_FONT_STORAGE_KEY, font);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const setPreviewHeaderAlignPersisted = useCallback((align: PreviewHeaderAlign) => {
+    setPreviewHeaderAlign(align);
+    try {
+      localStorage.setItem(PREVIEW_HEADER_ALIGN_STORAGE_KEY, align);
     } catch {
       /* ignore */
     }
@@ -837,6 +880,12 @@ export default function AnnotatedResumePanel({
                 value={previewFont}
                 onChange={setPreviewFontPersisted}
                 options={PREVIEW_FONT_SEG}
+              />
+              <PreviewSegControl
+                label="Header"
+                value={previewHeaderAlign}
+                onChange={setPreviewHeaderAlignPersisted}
+                options={PREVIEW_HEADER_ALIGN_SEG}
               />
             </div>
           ) : null}

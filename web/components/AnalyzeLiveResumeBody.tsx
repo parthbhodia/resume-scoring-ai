@@ -1203,7 +1203,7 @@ export default function AnalyzeLiveResumeBody({
           }
 
           return (
-            <div key={bi} style={{ textAlign: "left", marginBottom: "var(--az-resume-contact-margin-bottom, 16px)" }}>
+            <div key={bi} style={{ textAlign: "var(--az-resume-header-align, left)" as CSSProperties["textAlign"], marginBottom: "var(--az-resume-contact-margin-bottom, 16px)" }}>
               {nameLine && (
                 <div style={{
                   fontSize: "var(--az-resume-name-size, 22px)",
@@ -1220,7 +1220,7 @@ export default function AnalyzeLiveResumeBody({
                 <div style={{
                   display: "flex",
                   flexWrap: "wrap",
-                  justifyContent: "flex-start",
+                  justifyContent: "var(--az-resume-header-justify, flex-start)" as CSSProperties["justifyContent"],
                   alignItems: "center",
                   gap: 4,
                   fontSize: "calc(var(--az-resume-body-font-size, 10px) + 0.3px)",
