@@ -20,6 +20,7 @@ import {
   weakestDimKeys,
   type CategoryHistoryPoint,
 } from "@/components/advisor/AdvisorCharts";
+import AdminAnalyticsPanel from "@/components/AdminAnalyticsPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -653,6 +654,7 @@ function CohortOverview({
   onSelectStudent: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"cohort" | "analytics">("cohort");
   const { score_tiers: tiers } = data;
   const tierTotal = tiers.low + tiers.mid + tiers.good + tiers.strong;
   const needAttentionCount = data.student_roster.filter(s => {
@@ -681,7 +683,7 @@ function CohortOverview({
 
   return (
     <div className="mx-auto max-w-[1060px] px-8 py-10 pb-24">
-      <div className="mb-9 flex flex-wrap items-start justify-between gap-4">
+      <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
         <div>
           <Badge variant="outline" className="mb-3">
             {globalAdmin ? "Platform admin" : "UMBC Advisor View"}
@@ -689,15 +691,41 @@ function CohortOverview({
           <h1 className="m-0 text-2xl font-medium tracking-[-0.04em] text-foreground">Advisor Dashboard</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             {globalAdmin
-              ? "Cohort analytics across all institutions. Bug reports are admin-only."
+              ? "Cohort analytics across all institutions."
               : "Resume insights based on UMBC Career Center guidelines."}
           </p>
           <div className="mt-2 text-xs text-muted-foreground">Updated {fmt(data.generated_at)}</div>
         </div>
-        <Button onClick={onRefresh} variant="outline" size="sm">
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {globalAdmin && (
+            <div className="flex rounded-lg border border-border overflow-hidden text-sm">
+              <button
+                onClick={() => setActiveTab("cohort")}
+                className={`px-4 py-1.5 transition-colors ${activeTab === "cohort" ? "bg-foreground text-background" : "bg-background text-muted-foreground hover:text-foreground"}`}
+              >
+                Cohort
+              </button>
+              <button
+                onClick={() => setActiveTab("analytics")}
+                className={`px-4 py-1.5 transition-colors ${activeTab === "analytics" ? "bg-foreground text-background" : "bg-background text-muted-foreground hover:text-foreground"}`}
+              >
+                Token Usage
+              </button>
+            </div>
+          )}
+          {activeTab === "cohort" && (
+            <Button onClick={onRefresh} variant="outline" size="sm">Refresh</Button>
+          )}
+        </div>
       </div>
+
+      {/* ── Platform Analytics tab (global admins only) ── */}
+      {globalAdmin && activeTab === "analytics" && (
+        <AdminAnalyticsPanel getAuthHeaders={advisorAuthHeaders} />
+      )}
+
+      {/* ── Cohort tab ── */}
+      {activeTab === "cohort" && (<>
 
       <div className="mb-7 grid grid-cols-1 gap-3 md:grid-cols-5">
         <KpiCard
@@ -885,6 +913,7 @@ function CohortOverview({
       <div className="mt-6 text-[11px] leading-relaxed text-muted-foreground">
         Dashboard flow: overview → trend hotspots → students needing review → student roster lookup.
       </div>
+    </>)}
     </div>
   );
 }
