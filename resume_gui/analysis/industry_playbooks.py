@@ -76,8 +76,10 @@ PLAYBOOKS: dict[str, IndustryPlaybook] = {
         action_verbs=("drafted", "researched", "reviewed", "summarized", "coordinated", "filed", "analyzed", "supported"),
         weak_patterns=("helped lawyers", "did legal research", "worked on cases", "handled paperwork"),
         rewrite_examples=(
-            "Drafted [N] research memos on [legal issue] to support counsel strategy for [case/matter type].",
-            "Reviewed [N] contracts for [risk/compliance issue], flagging exceptions against [policy/regulation].",
+            "Researched and summarized [~N] IP cases for project tracking and recent developments in IP law; "
+            "drafted notes on sand mining regulations, trademark distinctiveness objections, and contracts.",
+            "Reviewed [N] service, technology, and trademark license agreements; screened promotional material "
+            "for IP clearance and drafted guidelines on avoiding copyright infringement in advertisements.",
         ),
         keywords=(
             "legal", "law", "paralegal", "attorney", "counsel", "case", "court", "filing", "brief", "memo",

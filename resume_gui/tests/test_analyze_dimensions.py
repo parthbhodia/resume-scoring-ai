@@ -1100,7 +1100,7 @@ class TestReadabilityRewriteShortening:
         ok, _ = _validate_rewrite_against_original(self.ORIG, self.SHORT, category="achievementQuality")
         assert not ok
 
-    def test_quantification_placeholder_rewrite_allows_tighter_line(self):
+    def test_quantification_placeholder_rewrite_rejects_dropped_responsibilities(self):
         orig = (
             "Drafted service agreements, technology and trademark license agreements. "
             "Reviewed company's privacy policy and researched updates on data "
@@ -1110,6 +1110,51 @@ class TestReadabilityRewriteShortening:
         rewrite = (
             "Drafted [4] service, technology, and trademark license agreements; "
             "screened promotional material for IP clearance."
+        )
+        ok, why = _validate_rewrite_against_original(orig, rewrite, category="quantification")
+        assert not ok
+        assert any(kw in why.lower() for kw in ("shrank", "substantive", "drop"))
+
+    def test_quantification_placeholder_rewrite_keeps_listed_work(self):
+        orig = (
+            "Researched and summarized IP cases for project tracking recent developments in IP law. "
+            "Researched and drafted notes on sand mining regulations, objections related to "
+            "distinctiveness in trademark applications, and contracts."
+        )
+        rewrite = (
+            "Researched and summarized [~12] IP cases for project tracking and recent developments "
+            "in IP law; drafted notes on sand mining regulations, trademark distinctiveness "
+            "objections, and contracts."
+        )
+        ok, why = _validate_rewrite_against_original(orig, rewrite, category="quantification")
+        assert ok, why
+
+    def test_quantification_yum_brands_rewrite_rejected(self):
+        orig = (
+            "Yum! operates the brands KFC, Pizza Hut and Taco Bell. Drafted service agreements, "
+            "technology and trademark license agreements. Reviewed company's privacy policy and "
+            "researched updates on data protection laws. Screened promotional material for IP clearance "
+            "and drafted guidelines on avoiding copyright infringement in advertisements."
+        )
+        rewrite = (
+            "Drafted [4] service and trademark license agreements; "
+            "screened promotional material for IP clearance."
+        )
+        ok, why = _validate_rewrite_against_original(orig, rewrite, category="quantification")
+        assert not ok
+        assert any(kw in why.lower() for kw in ("shrank", "substantive", "drop", "proper"))
+
+    def test_quantification_yum_brands_rewrite_keeps_context(self):
+        orig = (
+            "Yum! operates the brands KFC, Pizza Hut and Taco Bell. Drafted service agreements, "
+            "technology and trademark license agreements. Reviewed company's privacy policy and "
+            "researched updates on data protection laws. Screened promotional material for IP clearance "
+            "and drafted guidelines on avoiding copyright infringement in advertisements."
+        )
+        rewrite = (
+            "Yum! operates KFC, Pizza Hut, and Taco Bell; drafted [4] service, technology, and "
+            "trademark license agreements; reviewed privacy policy and data-protection updates; "
+            "screened promotional material for IP clearance and drafted copyright guidelines for ads."
         )
         ok, why = _validate_rewrite_against_original(orig, rewrite, category="quantification")
         assert ok, why

@@ -7,13 +7,14 @@ import re
 _NUMERAL_RE = re.compile(r"\d[\d.,]*")
 
 # Tokens we treat as concrete proper nouns / named technologies — Title Case,
-# all-caps acronyms, CamelCase, or slashed/dotted product names. These are
-# the recruiter Ctrl-F targets that must survive any rewrite.
+# all-caps acronyms, CamelCase, multi-word brands, or slashed/dotted product names.
+# These are recruiter Ctrl-F targets that must survive any rewrite.
 _PROPER_NOUN_RE = re.compile(
     r"\b(?:"
-    r"[A-Z]{2,}(?:[/.][A-Z]{2,})*"          # ALL-CAPS / CI/CD / AWS
-    r"|[A-Z][a-z]+(?:[A-Z][a-z]+)+"          # CamelCase / PostgreSQL / GraphQL
-    r"|[A-Z][a-zA-Z0-9]+(?:\.[a-z]+)+"       # node.js, asp.net
+    r"[A-Z]{2,}(?:[/.][A-Z]{2,})*"              # ALL-CAPS / CI/CD / AWS / KFC
+    r"|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+"          # Multi-word names: Pizza Hut, Taco Bell
+    r"|[A-Z][a-z]+(?:[A-Z][a-z]+)+"             # CamelCase / PostgreSQL / GraphQL
+    r"|[A-Z][a-zA-Z0-9]+(?:\.[a-z]+)+"          # node.js, asp.net
     r")\b"
 )
 

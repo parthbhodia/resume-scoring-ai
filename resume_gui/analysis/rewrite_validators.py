@@ -14,6 +14,74 @@ from resume_gui.analysis.constants import (
 
 logger = logging.getLogger("resume_gui")
 
+# Content words used to detect when a rewrite drops listed responsibilities.
+_SUBSTANTIVE_STOPWORDS = frozenset({
+    "about", "across", "after", "also", "among", "been", "being", "both", "each",
+    "from", "have", "into", "more", "most", "other", "over", "some", "such", "than",
+    "that", "their", "them", "then", "there", "these", "they", "this", "those",
+    "through", "under", "very", "were", "what", "when", "where", "which", "while",
+    "with", "within", "without", "your", "helped", "worked", "using", "used",
+    "including", "related", "recent", "various", "multiple", "several", "different",
+    "gaining", "hands", "experience", "prestigious", "institution", "responsible",
+})
+
+
+def _substantive_tokens(text: str) -> set[str]:
+    """Meaning-bearing tokens for content-preservation checks."""
+    return {
+        w
+        for w in re.findall(r"\b[a-z]{4,}\b", (text or "").lower())
+        if w not in _SUBSTANTIVE_STOPWORDS
+    }
+
+
+def _is_multi_clause_bullet(text: str) -> bool:
+    """True when the bullet lists several distinct responsibilities."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    sentences = [s.strip() for s in re.split(r"[.!?]+", t) if s.strip()]
+    if len(sentences) >= 2:
+        return True
+    if ";" in t:
+        return True
+    if len(t.split()) >= 28:
+        return True
+    # Two+ comma/and-separated verb phrases (e.g. "drafted X, reviewed Y, and screened Z").
+    verb_hits = len(re.findall(
+        r"\b(researched|summarized|drafted|reviewed|prepared|analyzed|supported|"
+        r"coordinated|filed|screened|authored|maintained|conducted|developed|"
+        r"implemented|designed|built|led|managed|created|tracked|assisted)\b",
+        t,
+        flags=re.I,
+    ))
+    return verb_hits >= 3
+
+
+def _substantive_preservation_ok(original: str, rewrite: str, *, category: str) -> Tuple[bool, str]:
+    """Multi-clause bullets must keep most listed deliverables/topics."""
+    cat = (category or "").lower()
+    if cat in ("readability", "sectionstructure"):
+        return True, ""
+    if not _is_multi_clause_bullet(original):
+        return True, ""
+    orig = _substantive_tokens(original)
+    if len(orig) < 8:
+        return True, ""
+    rev = _substantive_tokens(rewrite)
+    kept = len(orig & rev)
+    keep_ratio = kept / len(orig)
+    # Dense legal/intern bullets often enumerate 3+ deliverables — do not merge them away.
+    min_keep = 0.72 if len(orig) >= 12 else 0.65
+    if keep_ratio < min_keep:
+        dropped = sorted(orig - rev)[:8]
+        return False, (
+            f"dropped substantive content ({kept}/{len(orig)} kept, need ≥{min_keep:.0%}): "
+            f"{dropped}"
+        )
+    return True, ""
+
+
 def _rewrite_numerals(text: str) -> set[str]:
     return set(_NUMERAL_RE.findall(text or ""))
 
@@ -97,18 +165,24 @@ def _validate_rewrite_against_original(
     cat = (category or "").lower()
     is_conciseness = cat in ("readability", "sectionstructure")
     adds_example_scale = _adds_quantification(o, r)
+    multi_clause = _is_multi_clause_bullet(o)
     if is_conciseness:
         shrink_floor = 0.32
     elif cat in ("quantification", "quantify_impact") and adds_example_scale:
-        shrink_floor = 0.35
+        # Quant fixes add scale — they must not delete listed work to fit one line.
+        shrink_floor = 0.75 if multi_clause else 0.65
     elif cat == "achievementquality" and adds_example_scale:
-        shrink_floor = 0.5
+        shrink_floor = 0.65 if multi_clause else 0.5
     else:
         shrink_floor = 0.8
     o_wc = len(o.split())
     r_wc = len(r.split())
     if o_wc >= 8 and r_wc < int(o_wc * shrink_floor):
         return False, f"shrank from {o_wc}→{r_wc} words (floor {shrink_floor})"
+
+    ok_sub, why_sub = _substantive_preservation_ok(o, r, category=cat)
+    if not ok_sub:
+        return False, why_sub
 
     if category and category.lower() in ("quantification", "quantify_impact"):
         if not _adds_quantification(o, r):

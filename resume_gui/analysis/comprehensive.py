@@ -861,7 +861,14 @@ Infer the field from the résumé text and score against that field's expectatio
   "language quality" is a lie — keep every fact. \
   Most rewrites should be the same length or longer than the original — the ONE exception is a \
   readability/conciseness fix (see READABILITY REWRITES below), which is deliberately SHORTER: it \
-  removes filler words, never numerals or proper nouns.
+  removes filler words, never numerals or proper nouns. \
+  CONTENT PRESERVATION (critical): when the original lists multiple responsibilities, deliverables, \
+  document types, legal topics, tools, or stakeholders, the rewrite MUST keep every listed item. \
+  Add [N]/[X%] scale by weaving counts into the existing list — do NOT merge, summarize away, or \
+  delete listed work to produce a shorter one-liner. A bullet covering IP research AND regulations AND \
+  contracts must still mention all three after the rewrite. \
+  Never drop brand names, product lines, employer context, or client-facing names (e.g. KFC, Pizza Hut, \
+  Taco Bell, Yum!) when they appear in the original — keep the full brand list and opening context line.
 - SUBSTANTIVE REWRITES ONLY: a rewrite that only changes tense, plurality, punctuation, or one weak \
   verb form is NOT an improvedBullet. "Conduct price verification..." → "Conducted price verification..." \
   is invalid. For duty phrasing / achievementQuality / languageQuality, rewrite the bullet into \
@@ -874,10 +881,14 @@ Infer the field from the résumé text and score against that field's expectatio
   (or issueCategories includes it and the bullet lacks metrics), you MUST include \
   categoryRewrites.quantification with at least one new metric or bracket placeholder ([X%], [$Y], \
   [~N], [X ms], [N×]) not present in originalBullet. Set improvedBullet to that same quant rewrite \
-  when quantification is the primary fix. Example: "Implemented gRPC streaming… reducing latency" → \
-  "Implemented gRPC streaming… cutting end-to-end latency by [~40%] for voice and chat workloads." \
-  Do NOT omit the rewrite and leave only a category rationale — the UI shows Flagged bullets, not \
-  generic lists. If you cannot add a placeholder, do not flag the bullet for quantification.
+  when quantification is the primary fix. ADD scale to the existing bullet — preserve every distinct \
+  task, deliverable, and domain topic already listed; never replace a multi-item bullet with a shorter \
+  summary that drops contracts, filings, regulations, tools, or other substantive work. Example: \
+  "Researched IP cases… drafted notes on sand mining regulations, trademark objections, and contracts" → \
+  "Researched and summarized [~N] IP cases for project tracking; drafted notes on sand mining regulations, \
+  trademark distinctiveness objections, and contracts." Do NOT omit the rewrite and leave only a category \
+  rationale — the UI shows Flagged bullets, not generic lists. If you cannot add a placeholder without \
+  deleting listed work, keep the full bullet and insert [N]/[~N] counts inline instead.
 - READABILITY REWRITES (required for run-on bullets): when primaryCategory is "readability" — the bullet \
   is a long run-on, crams several ideas into one line, or is hard to skim in a few seconds — you MUST \
   include categoryRewrites.readability that CONDENSES it into one tight, skimmable line that is SHORTER \
