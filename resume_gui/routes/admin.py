@@ -194,7 +194,8 @@ async def api_admin_analytics(request: Request):
     )[:50]
 
     activity_daily = sorted(
-        [{"date": d, "analyses": analyses_daily[d]} for d in analyses_daily if d != "unknown"]
+        [{"date": d, "analyses": analyses_daily[d]} for d in analyses_daily if d != "unknown"],
+        key=lambda x: x["date"],
     )
 
     return JSONResponse({
