@@ -57,7 +57,12 @@ def _validate_rewrite_against_original(
       - it preserves every concrete proper noun / acronym / CamelCase tech
         name from the original
       - it does not shrink dramatically in length (a clear sign of dropped
-        content) — allow a small trim (≥ 80% of original word count)
+        content) — allow a small trim (≥ 80% of original word count). EXCEPT
+        for conciseness categories (readability / sectionStructure), where
+        shortening IS the fix, and for metric/example rewrites that add
+        bracketed scale. There we allow a tighter line as long as every
+        numeral and proper noun is preserved (the real honesty guard is the
+        fact checks above, not the word count).
       - if category == "quantification", at least one numeral that was not
         in the original must appear in the rewrite (otherwise the badge is
         a lie)
@@ -81,10 +86,29 @@ def _validate_rewrite_against_original(
     if dropped_props:
         return False, f"dropped proper nouns: {sorted(dropped_props)[:5]}"
 
+    # Readability / structure fixes condense run-on bullets, so a big word-count
+    # drop is the goal — not dishonesty (facts are already protected above).
+    #
+    # Quantification rewrites with bracketed example scale also tend to convert
+    # dense duty blobs into a single recruiter-friendly line. If we keep the
+    # 80% floor there, the model can produce useful "[N matters]" examples and
+    # the UI still shows "no auto-write". Preserve concrete facts, but allow the
+    # suggested line to be tighter.
+    cat = (category or "").lower()
+    is_conciseness = cat in ("readability", "sectionstructure")
+    adds_example_scale = _adds_quantification(o, r)
+    if is_conciseness:
+        shrink_floor = 0.32
+    elif cat in ("quantification", "quantify_impact") and adds_example_scale:
+        shrink_floor = 0.35
+    elif cat == "achievementquality" and adds_example_scale:
+        shrink_floor = 0.5
+    else:
+        shrink_floor = 0.8
     o_wc = len(o.split())
     r_wc = len(r.split())
-    if o_wc >= 8 and r_wc < int(o_wc * 0.8):
-        return False, f"shrank from {o_wc}→{r_wc} words (>20% drop)"
+    if o_wc >= 8 and r_wc < int(o_wc * shrink_floor):
+        return False, f"shrank from {o_wc}→{r_wc} words (floor {shrink_floor})"
 
     if category and category.lower() in ("quantification", "quantify_impact"):
         if not _adds_quantification(o, r):
@@ -249,7 +273,9 @@ def _filter_bullet_rewrites(
         return False
 
     if kept_improved:
-        ok, why = _validate_rewrite_against_original(original, kept_improved)
+        ok, why = _validate_rewrite_against_original(
+            original, kept_improved, category=primary_category,
+        )
         if not ok:
             logger.info(
                 "rewrite-validator dropped improvedBullet: %s  | orig=%r  | rewrite=%r",

@@ -248,6 +248,30 @@ class TestAchievementQualityDimension:
         )
         assert kept_imp == improved
 
+    def test_legal_achievement_rewrite_with_example_placeholders_kept(self):
+        orig = (
+            "Prepared research notes on domain name cybersquatting, copyright and "
+            "trademark infringements. Assisted in filing interim injunction in "
+            "trademark infringement suit. Prepared summary of exemptions available "
+            "under Indian patent law regime."
+        )
+        improved = (
+            "Authored [N] research memos on domain name cybersquatting, "
+            "copyright, and trademark infringements; supported interim-injunction "
+            "filing in a trademark infringement suit and summarized exemptions "
+            "available under Indian patent law regime to inform litigation strategy."
+        )
+        kept_imp, kept_cr, kept_issues = _filter_bullet_rewrites(
+            orig,
+            improved,
+            {"achievementQuality": improved},
+            ["achievementQuality", "quantification"],
+            primary_category="achievementQuality",
+        )
+        assert kept_imp == improved
+        assert kept_cr["achievementQuality"] == improved
+        assert "quantification" in kept_issues
+
     def test_section_feedback_pronoun_claim_stripped(self):
         """PROJECTS feedback must not claim pronouns when section has none."""
         resume = (
@@ -1049,3 +1073,62 @@ class TestBracketPlaceholderProseScrub:
         raw = {"summary": "Clean, quantified resume with strong verbs."}
         assert _strip_bracket_placeholders_from_prose(raw) == 0
         assert raw["summary"] == "Clean, quantified resume with strong verbs."
+
+
+class TestReadabilityRewriteShortening:
+    """Readability fixes condense run-on bullets, so the shrink guard must allow
+    shortening for the readability category while still protecting facts."""
+
+    ORIG = (
+        "Maintained UCLA's Art website for visitor engagement, wrote pieces "
+        "highlighting contributions, and conducted interviews with alumni, students "
+        "and patrons for insights, gaining hands-on experience in communications, "
+        "marketing, journalism, and content management within the prestigious institution."
+    )
+    SHORT = (
+        "Maintained UCLA's Art website and authored feature pieces; interviewed "
+        "alumni, students, and patrons to source stories for communications and marketing."
+    )
+
+    def test_readability_rewrite_allows_shortening(self):
+        ok, why = _validate_rewrite_against_original(self.ORIG, self.SHORT, category="readability")
+        assert ok, why
+
+    def test_same_shortening_rejected_for_non_conciseness_category(self):
+        # The strict ≥80% floor still applies to achievement rewrites that do
+        # not add example scale.
+        ok, _ = _validate_rewrite_against_original(self.ORIG, self.SHORT, category="achievementQuality")
+        assert not ok
+
+    def test_quantification_placeholder_rewrite_allows_tighter_line(self):
+        orig = (
+            "Drafted service agreements, technology and trademark license agreements. "
+            "Reviewed company's privacy policy and researched updates on data "
+            "protection laws. Screened promotional material for IP clearance and "
+            "drafted guidelines on avoiding copyright infringement in advertisements."
+        )
+        rewrite = (
+            "Drafted [4] service, technology, and trademark license agreements; "
+            "screened promotional material for IP clearance."
+        )
+        ok, why = _validate_rewrite_against_original(orig, rewrite, category="quantification")
+        assert ok, why
+
+    def test_readability_rewrite_still_rejects_dropped_numeral(self):
+        orig = "Led 12 volunteers across 3 events to raise funds for the campus food bank each year."
+        short = "Led volunteers across events to raise funds for the campus food bank."
+        ok, why = _validate_rewrite_against_original(orig, short, category="readability")
+        assert not ok and "numeral" in why
+
+    def test_filter_keeps_readability_improved_bullet(self):
+        kept_improved, _kept_cr, _kept_issues = _filter_bullet_rewrites(
+            self.ORIG, self.SHORT, {}, ["readability"], primary_category="readability",
+        )
+        assert kept_improved == self.SHORT
+
+    def test_filter_keeps_category_readability_rewrite(self):
+        _kept_improved, kept_cr, _ = _filter_bullet_rewrites(
+            self.ORIG, "", {"readability": self.SHORT}, ["readability"],
+            primary_category="readability",
+        )
+        assert kept_cr.get("readability") == self.SHORT

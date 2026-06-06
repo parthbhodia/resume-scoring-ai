@@ -820,12 +820,17 @@ CRITICAL RULES:
 - The candidate may be in any discipline (STEM, healthcare, business, arts, education, trades, public service, etc.). \
 Infer the field from the résumé text and score against that field's expectations — never assume a software-only audience.
 - Be SPECIFIC, not generic. Tell exactly WHERE and HOW to fix each issue.
-- When rewriting bullets, PRESERVE TRUTHFULNESS. Mark invented metrics \
-  as "[X%]", "[$Y]", or "[~N]".
+- When rewriting bullets, PRESERVE CORE FACTS from the original (names, courts, firms, matters, tools, dates, \
+  existing numbers). It is OK to add example impact/scale when the original lacks it, but mark invented/example \
+  impact as bracket placeholders such as "[X%]", "[$Y]", "[~N matters]", "[N filings]", or "[N-page memo]".
 - For bulletAnalysis: analyze the weakest bullets, up to {bullet_analysis_max} of them. Be thorough — \
   if the résumé has many bullets that lack metrics or lead with duty phrasing, return MANY (10-15), not \
   just 2-3. Returning only a couple of bullets when the résumé clearly has more weak ones is an \
   under-report and the user notices. Skip only the genuinely strong bullets (own a quantified outcome). \
+  If a résumé has 8+ experience bullets and almost none have metrics, include at least 8 bulletAnalysis \
+  items unless those bullets already show clear ownership + outcome. Legal/intern bullets about research, \
+  drafting, filing, review, and client/matter support are valid rewrite targets — use example placeholders \
+  for scale when exact figures are absent instead of leaving improvedBullet blank. \
 - For each weak bullet, label issues clearly (quantification vs achievement vs language). \
   improvedBullet must match the primary weakness. A bullet that leads with a strong verb (Built, \
   Engineered, Integrated, Automated, Designed, Implemented, Developed) but contains NO number is a \
@@ -847,14 +852,18 @@ Infer the field from the résumé text and score against that field's expectatio
   every concrete proper noun (Title-Case names, ALL-CAPS acronyms, CamelCase tech names like PostgreSQL, \
   CI/CD, AWS Lambda, gRPC) that appeared in the originalBullet. Removing "5 refinement cycles", \
   "3 retries", "PostgreSQL", or "AWS Lambda" while calling the change "readability" or \
-  "language quality" is a lie — the rewrite must add JD vocabulary, not strip the original's content. \
-  Rewrites should be the same length or longer than the original.
+  "language quality" is a lie — keep every fact. \
+  Most rewrites should be the same length or longer than the original — the ONE exception is a \
+  readability/conciseness fix (see READABILITY REWRITES below), which is deliberately SHORTER: it \
+  removes filler words, never numerals or proper nouns.
 - SUBSTANTIVE REWRITES ONLY: a rewrite that only changes tense, plurality, punctuation, or one weak \
   verb form is NOT an improvedBullet. "Conduct price verification..." → "Conducted price verification..." \
   is invalid. For duty phrasing / achievementQuality / languageQuality, rewrite the bullet into \
   ownership + scope + outcome, e.g. "Verified Bloomberg and market pricing data across $500M+ AUM \
-  hedge-fund portfolios, improving NAV precision and valuation accuracy." If you cannot improve \
-  substance, omit improvedBullet/categoryRewrites for that category.
+  hedge-fund portfolios, improving NAV precision and valuation accuracy." If exact impact is not stated, \
+  create a plausible example outcome using bracket placeholders rather than omitting the rewrite, e.g. \
+  "Authored [N] IP research memos on cybersquatting and trademark infringement, giving counsel case-ready \
+  analysis for interim-injunction strategy." \
 - QUANTIFICATION REWRITES (required for quant bullets): when primaryCategory is "quantification" \
   (or issueCategories includes it and the bullet lacks metrics), you MUST include \
   categoryRewrites.quantification with at least one new metric or bracket placeholder ([X%], [$Y], \
@@ -863,6 +872,18 @@ Infer the field from the résumé text and score against that field's expectatio
   "Implemented gRPC streaming… cutting end-to-end latency by [~40%] for voice and chat workloads." \
   Do NOT omit the rewrite and leave only a category rationale — the UI shows Flagged bullets, not \
   generic lists. If you cannot add a placeholder, do not flag the bullet for quantification.
+- READABILITY REWRITES (required for run-on bullets): when primaryCategory is "readability" — the bullet \
+  is a long run-on, crams several ideas into one line, or is hard to skim in a few seconds — you MUST \
+  include categoryRewrites.readability that CONDENSES it into one tight, skimmable line that is SHORTER \
+  than the original. Cut filler ("gaining hands-on experience in…", "within the prestigious institution", \
+  "responsible for", redundant adjectives), but keep every numeral and proper noun. Set improvedBullet \
+  to that condensed rewrite when readability is the primary fix. Example: \
+  "Maintained the Art website for visitor engagement, wrote pieces highlighting contributions, and \
+  conducted interviews with alumni, students and patrons for insights, gaining hands-on experience in \
+  communications, marketing, journalism, and content management within the prestigious institution." → \
+  "Maintained UCLA's Art website and authored feature pieces; interviewed alumni, students, and patrons \
+  to source stories for communications and marketing." Do NOT flag a bullet for readability if you cannot \
+  offer a shorter, clearer rewrite.
 - BRACKETS ARE FOR REWRITES ONLY: bracket placeholders ([X%], [$Y], [~N]) may appear ONLY inside \
   bulletAnalysis improvedBullet / categoryRewrites. In summary, topIssues (issue/whyItMatters/suggestion), \
   atsWarnings, finalRecommendations, sectionFeedback, and categoryRationales, write plain prose with NO \
@@ -953,7 +974,8 @@ Return ONLY this JSON (no markdown fences, no explanation):
       "improvedBullet": "<rewrite for primaryCategory; REQUIRED when primary is quantification — must add [X%]/[$Y]/[~N] or a real metric>",
       "categoryRewrites": {{
         "quantification": "<REQUIRED when bullet lacks metrics: same as improvedBullet when primary is quantification; always include a new [X%]/[$Y]/[~N] or digit; never empty>",
-        "achievementQuality": "<when verbs/duties are weak: strong verb + owned outcome; omit invented metrics unless in original>"
+        "achievementQuality": "<when verbs/duties are weak: strong verb + owned outcome; use bracketed example impact/scale when exact figures are absent>",
+        "readability": "<REQUIRED when primary is readability: a SHORTER, skimmable rewrite of a run-on/over-long bullet; cut filler but keep every numeral and proper noun>"
       }}
     }}
   ],
