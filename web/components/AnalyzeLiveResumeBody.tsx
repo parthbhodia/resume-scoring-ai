@@ -7,6 +7,8 @@ import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
   bulletMatchesAnalysisCategory,
+  cleanAiArtifacts,
+  getRewriteForCategory,
   type CategoryAssignmentOptions,
 } from "@/lib/analysisCategoryMatch";
 import { resumeLineMatchesSuggestionOriginal } from "@/lib/suggestionResumeMatch";
@@ -875,12 +877,35 @@ function EntryHeaderLine({ line }: { line: string }) {
     );
   }
 
-  // Year-range line without pipe — treat as date/location
+  // Standalone date/location row (no pipe) — right-align like a job date column.
+  const looksLikeDateOnlyRow =
+    t.length <= 72 &&
+    !/[;]/.test(t) &&
+    !/\b(sitting|examination|exam|passed|for|license|certification|bar)\b/i.test(t) &&
+    (/\b(19|20)\d{2}\s*[–—\-]\s*((19|20)\d{2}|present|current)\b/i.test(t) ||
+      /^\s*[A-Za-z .,'-]{0,48}\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(19|20)\d{2}\s*$/i.test(t));
+
+  if (looksLikeDateOnlyRow) {
+    return (
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontStyle: "italic", fontFamily: RESUME_BODY_FONT, lineHeight: 1.22 }}>
+          {renderInline(t)}
+        </span>
+      </div>
+    );
+  }
+
+  // Narrative line with embedded dates (e.g. bar exam schedule) — keep left-aligned.
   return (
-    <div style={{ display: "flex", justifyContent: "flex-end" }}>
-      <span style={{ color: "var(--resume-paper-muted)", fontSize: 9.5, fontStyle: "italic", fontFamily: RESUME_BODY_FONT, lineHeight: 1.22 }}>
-        {renderInline(t)}
-      </span>
+    <div style={{
+      fontSize: "var(--az-resume-body-font-size, 10px)",
+      color: "var(--resume-paper-ink)",
+      lineHeight: "var(--az-resume-line-height, 1.45)",
+      fontFamily: RESUME_BODY_FONT,
+      overflowWrap: "anywhere",
+      wordBreak: "break-word",
+    }}>
+      {renderInline(t)}
     </div>
   );
 }
@@ -1143,6 +1168,23 @@ export default function AnalyzeLiveResumeBody({
 
   const popupBullet = popup != null ? bulletAnalysis[popup.bulletIdx] : null;
   const popupPreviewApplied = popup != null ? previewLineOverrides[popup.bulletIdx] !== undefined : false;
+
+  const resolveBulletSuggestion = (bulletIdx: number): string => {
+    const bullet = bulletAnalysis[bulletIdx];
+    if (!bullet) return "";
+    const raw = activeCategory
+      ? getRewriteForCategory(
+          bullet,
+          activeCategory,
+          rewriteEdits[bulletIdx],
+          bulletAnalysis,
+          bulletIdx,
+          categoryAssignmentOpts,
+        )
+      : (bullet.improvedBullet ?? "");
+    return cleanAiArtifacts(raw).text;
+  };
+  const popupSuggestionBase = popup != null ? resolveBulletSuggestion(popup.bulletIdx) : "";
 
   return (
     <div
@@ -1449,15 +1491,14 @@ export default function AnalyzeLiveResumeBody({
                     // that's already on the flagged-bullet card on the left.
                     // When no rewrite exists, just route to the card via
                     // onBulletLinkedSelect (parent scrolls / expands it).
-                    const hasRewrite =
-                      typeof bullet.improvedBullet === "string"
-                      && bullet.improvedBullet.trim().length > 0;
+                    const suggested = resolveBulletSuggestion(bulletIdx);
+                    const hasRewrite = suggested.trim().length > 0;
                     if (presentationOnly && hasRewrite) {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                       const popupTop = Math.max(8, Math.min(rect.top, window.innerHeight - 340));
                       const popupLeft = Math.max(8, rect.left - 336);
                       setPopup({ bulletIdx, top: popupTop, left: popupLeft });
-                      setPopupDraft(rewriteEdits[bulletIdx] ?? bullet.improvedBullet ?? "");
+                      setPopupDraft(rewriteEdits[bulletIdx] ?? suggested);
                     } else if (!presentationOnly) {
                       setExpandedIdx((prev) => (prev === bulletIdx ? null : bulletIdx));
                     }
@@ -1702,7 +1743,7 @@ export default function AnalyzeLiveResumeBody({
             </div>
           )}
 
-          {popupBullet.improvedBullet ? (
+          {popupSuggestionBase ? (
             <div style={{ padding: "10px 12px 12px" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
                 Suggested rewrite
@@ -1721,10 +1762,10 @@ export default function AnalyzeLiveResumeBody({
                 onBlur={(e) => { e.target.style.borderColor = "var(--border-h)"; e.target.style.background = "var(--bg)"; }}
               />
               <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
-                {popupDraft !== (popupBullet.improvedBullet ?? "") && (
+                {popupDraft !== popupSuggestionBase && (
                   <button
                     type="button"
-                    onClick={() => { setPopupDraft(popupBullet.improvedBullet ?? ""); patchBulletRewrite(popup.bulletIdx, null); }}
+                    onClick={() => { setPopupDraft(popupSuggestionBase); patchBulletRewrite(popup.bulletIdx, null); }}
                     style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border-h)", background: "var(--surface2)", color: "var(--muted)", cursor: "pointer", fontFamily: "inherit" }}
                   >Reset</button>
                 )}
@@ -1748,9 +1789,7 @@ export default function AnalyzeLiveResumeBody({
                 )}
               </div>
             </div>
-          ) : (
-            <div style={{ padding: "12px", color: "var(--muted)", fontSize: 11 }}>No rewrite suggestion available for this bullet.</div>
-          )}
+          ) : null}
         </div>
       )}
     </div>

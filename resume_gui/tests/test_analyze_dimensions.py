@@ -1177,3 +1177,43 @@ class TestReadabilityRewriteShortening:
             primary_category="readability",
         )
         assert kept_cr.get("readability") == self.SHORT
+
+
+class TestFallbackRewrites:
+    def test_readability_fallback_preserves_sentences(self):
+        from resume_gui.analysis.fallback_rewrites import synthesize_fallback_rewrite
+
+        orig = (
+            "Assisted in breach of contract cases including contracts, remedies, and defenses for breach. "
+            "Analyzed consumer rights for pending consumer litigation. Drafted and reviewed wills."
+        )
+        rewrite, cr = synthesize_fallback_rewrite(orig, "readability", ["readability"])
+        assert rewrite
+        assert "breach of contract" in rewrite.lower()
+        assert "consumer rights" in rewrite.lower()
+        assert "wills" in rewrite.lower()
+        assert cr.get("readability") == rewrite
+
+    def test_normalize_backfills_empty_rewrite(self):
+        from resume_gui.analysis.normalize import _normalize_analysis
+
+        raw = {
+            "overallScore": 60,
+            "categoryScores": {k: 55 for k in (
+                "readability", "atsCompatibility", "jobMatch", "achievementQuality",
+                "quantification", "sectionStructure", "languageQuality", "technicalBranding",
+            )},
+            "bulletAnalysis": [{
+                "originalBullet": "Assisted in breach of contract cases. Analyzed consumer rights.",
+                "score": 38,
+                "primaryCategory": "readability",
+                "issueCategories": ["readability"],
+                "issues": ["run-on list"],
+                "improvedBullet": "",
+                "categoryRewrites": {},
+            }],
+        }
+        result = _normalize_analysis(raw)
+        ba = result["bulletAnalysis"][0]
+        assert (ba.get("improvedBullet") or "").strip()
+        assert ba.get("categoryRewrites")

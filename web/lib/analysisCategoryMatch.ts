@@ -541,6 +541,39 @@ export function cleanAiArtifacts(
 }
 
 /** Rewrite text for the active category. */
+export function buildFallbackRewrite(original: string, category: string): string {
+  const o = (original || "").trim().replace(/\s+/g, " ");
+  if (!o) return o;
+  const sentences = o.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const structured =
+    sentences.length >= 2
+      ? `${sentences.map((s) => s.replace(/[.!?]+$/, "")).join("; ")}.`
+      : o.endsWith(".") || o.endsWith("!") || o.endsWith("?")
+        ? o
+        : `${o}.`;
+
+  const cat = category.toLowerCase();
+  if (cat === "quantification") {
+    if (/\[[^\]]+\]|\d/.test(structured)) return structured;
+    return structured.replace(
+      /\b(cases|matters|briefs|agreements|contracts|filings|memos|documents|notices|properties|clients)\b/i,
+      "[~N] $1",
+    );
+  }
+  if (cat === "achievementquality") {
+    const led = structured.replace(
+      /^(assisted in|helped with|worked on|responsible for|participated in|involved in|supported work on)\s+/i,
+      "Delivered ",
+    );
+    if (/\[[^\]]+\]|\d/.test(led)) return led;
+    return led.replace(
+      /\b(cases|matters|briefs|agreements|contracts|filings|memos|documents|notices|properties|clients)\b/i,
+      "[~N] $1",
+    );
+  }
+  return structured;
+}
+
 export function getRewriteForCategory(
   bullet: CategoryRewriteBullet,
   category: string,
@@ -565,7 +598,7 @@ export function getRewriteForCategory(
   ) {
     return bullet.improvedBullet.trim();
   }
-  return "";
+  return buildFallbackRewrite(bullet.originalBullet ?? "", category);
 }
 
 export const CATEGORY_REWRITE_HINTS: Record<string, string> = {

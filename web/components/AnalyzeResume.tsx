@@ -253,15 +253,6 @@ const CATEGORY_COACH: Partial<Record<keyof AnalysisResult["categoryScores"], Cat
   },
 };
 
-const COACH_LABEL_STYLE: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
-  color: "var(--dim)",
-  textTransform: "uppercase",
-  letterSpacing: 0.45,
-  marginBottom: 4,
-};
-
 const COACH_BODY_STYLE: React.CSSProperties = {
   fontSize: 12.5,
   lineHeight: 1.55,
@@ -2465,8 +2456,7 @@ export default function AnalyzeResume() {
                       cleanAiArtifacts(rawCategoryRewrite);
                     const hasReferenceFigures = referenceFigures.length > 0;
                     const isFirstFlaggedCard = i === 0;
-                    const hasTrustedRewrite = categoryRewriteBase.trim().length > 0;
-                    const isLanguageMicroEdit = hasTrustedRewrite
+                    const isLanguageMicroEdit = categoryRewriteBase.trim().length > 0
                       && activeCategory === "languageQuality"
                       && isLanguageQualityMicroRewrite(bullet.originalBullet, categoryRewriteBase);
                     const draft = rewriteEdits[safeIdx] ?? categoryRewriteBase;
@@ -2478,9 +2468,6 @@ export default function AnalyzeResume() {
                       ? CATEGORY_COACH[activeCategory as keyof AnalysisResult["categoryScores"]] ?? null
                       : null;
                     const previewMain = previewLineOverrides[safeIdx] ?? bullet.originalBullet;
-                    const editorDraft = hasTrustedRewrite
-                      ? draft
-                      : (rewriteEdits[safeIdx] ?? previewMain);
                     const previewLineAppliedHere = previewLineOverrides[safeIdx] !== undefined;
                     const isFlaggedAccordionOpen = expandedFlaggedBulletIdx === safeIdx;
                     const bColor = bullet.score < 50
@@ -2601,119 +2588,49 @@ export default function AnalyzeResume() {
                       </button>
                       {isFlaggedAccordionOpen && (
                         <div style={{ padding: "0 14px 14px 14px" }}>
-                      {!hasTrustedRewrite && (
-                        <div style={{
-                          marginBottom: 12,
-                          padding: "12px 14px",
-                          borderRadius: 10,
-                          background: "var(--surface2)",
-                          border: "1px solid var(--border)",
-                          borderLeft: "3px solid var(--accent)",
-                        }}>
-                          {coach ? (
-                            <>
-                              <div style={COACH_LABEL_STYLE}>Why this scored low</div>
-                              <p style={COACH_BODY_STYLE}>{coach.why}</p>
-                              <div style={{ ...COACH_LABEL_STYLE, marginTop: 11 }}>How to make it stronger</div>
-                              <p style={COACH_BODY_STYLE}>{coach.how}</p>
-                              <p style={{ ...COACH_BODY_STYLE, marginTop: 8, color: "var(--text)" }}>
-                                <span style={{ fontWeight: 700, color: "var(--accent)" }}>Example&nbsp;&nbsp;</span>
-                                {coach.example}
-                              </p>
-                            </>
-                          ) : (
-                            <p style={COACH_BODY_STYLE}>
-                              Edit the line below to make it stronger, then Apply to preview.
-                            </p>
-                          )}
-                          <p style={{ ...COACH_BODY_STYLE, marginTop: 11, fontSize: 11, color: "var(--dim)" }}>
-                            We didn’t auto-write this one. It’s a judgment call only you can make (your real numbers, your wording). Edit below, then Apply to preview.
-                          </p>
-                        </div>
-                      )}
-                      {hasTrustedRewrite && coach && !isLanguageMicroEdit && isFirstFlaggedCard && (
+                      {coach && isFirstFlaggedCard && !isLanguageMicroEdit && (
                         <p style={{ ...COACH_BODY_STYLE, marginBottom: 10 }}>
                           <span style={{ fontWeight: 700, color: "var(--accent)" }}>Why&nbsp;&nbsp;</span>
                           {coach.why}
                         </p>
                       )}
-                      {hasTrustedRewrite ? (
-                        <BulletImprovedEditor
-                          variant="compact"
-                          layout="card"
-                          suggestionLabel={hasReferenceFigures ? "Suggested · example numbers" : "Suggested"}
-                          suggestionNote={hasReferenceFigures ? "Figures below are examples. Swap in your real numbers." : undefined}
-                          highlightTerms={hasReferenceFigures ? referenceFigures : undefined}
-                          value={draft}
-                          onChange={v => patchBulletRewrite(safeIdx, v)}
-                          onReset={() => patchBulletRewrite(safeIdx, null)}
-                          canReset={rewriteEdits[safeIdx] !== undefined}
-                          minHeight={64}
-                          previewLineApplied={previewLineAppliedHere}
-                          onReplaceInPreview={() => patchPreviewLine(safeIdx, draft.trim())}
-                          onRevertPreviewLine={() => patchPreviewLine(safeIdx, null)}
-                          onTextareaFocus={() => onBulletWorkspaceTextareaFocus(safeIdx)}
-                          onTextareaBlur={e => onBulletWorkspaceTextareaBlur(safeIdx, e)}
-                          toolbarRight={(
-                            <button
-                              type="button"
-                              onClick={e => {
-                                e.stopPropagation();
-                                copyBullet(draft, safeIdx);
-                              }}
-                              style={{
-                                display: "inline-flex", alignItems: "center", gap: 5,
-                                padding: "5px 10px", borderRadius: 7,
-                                border: `1px solid ${copiedBullet === safeIdx ? "rgba(52,211,153,0.5)" : "rgba(52,211,153,0.3)"}`,
-                                background: copiedBullet === safeIdx ? "rgba(52,211,153,0.15)" : "rgba(52,211,153,0.08)",
-                                color: "var(--green)", fontSize: 10.5, fontWeight: 600,
-                                cursor: "pointer", fontFamily: "inherit",
-                                transition: "all 0.15s",
-                              }}
-                            >
-                              {copiedBullet === safeIdx ? "Copied!" : "Copy"}
-                            </button>
-                          )}
-                        />
-                      ) : (
-                        <BulletImprovedEditor
-                          variant="compact"
-                          layout="card"
-                          suggestionLabel="Your line"
-                          defaultEditing
-                          value={editorDraft}
-                          onChange={v => patchBulletRewrite(safeIdx, v)}
-                          onReset={() => patchBulletRewrite(safeIdx, null)}
-                          canReset={rewriteEdits[safeIdx] !== undefined}
-                          resetLabel="Reset to original"
-                          minHeight={64}
-                          previewLineApplied={previewLineAppliedHere}
-                          onReplaceInPreview={() => patchPreviewLine(safeIdx, editorDraft.trim())}
-                          onRevertPreviewLine={() => patchPreviewLine(safeIdx, null)}
-                          onTextareaFocus={() => onBulletWorkspaceTextareaFocus(safeIdx)}
-                          onTextareaBlur={e => onBulletWorkspaceTextareaBlur(safeIdx, e)}
-                          toolbarRight={(
-                            <button
-                              type="button"
-                              onClick={e => {
-                                e.stopPropagation();
-                                copyBullet(editorDraft, safeIdx);
-                              }}
-                              style={{
-                                display: "inline-flex", alignItems: "center", gap: 5,
-                                padding: "5px 10px", borderRadius: 7,
-                                border: `1px solid ${copiedBullet === safeIdx ? "rgba(251,191,36,0.55)" : "rgba(251,191,36,0.34)"}`,
-                                background: copiedBullet === safeIdx ? "rgba(251,191,36,0.16)" : "rgba(251,191,36,0.08)",
-                                color: "var(--amber)", fontSize: 10.5, fontWeight: 600,
-                                cursor: "pointer", fontFamily: "inherit",
-                                transition: "all 0.15s",
-                              }}
-                            >
-                              {copiedBullet === safeIdx ? "Copied!" : "Copy"}
-                            </button>
-                          )}
-                        />
-                      )}
+                      <BulletImprovedEditor
+                        variant="compact"
+                        layout="card"
+                        suggestionLabel={hasReferenceFigures ? "Suggested · example numbers" : "Suggested"}
+                        suggestionNote={hasReferenceFigures ? "Figures below are examples. Swap in your real numbers." : undefined}
+                        highlightTerms={hasReferenceFigures ? referenceFigures : undefined}
+                        value={draft}
+                        onChange={v => patchBulletRewrite(safeIdx, v)}
+                        onReset={() => patchBulletRewrite(safeIdx, null)}
+                        canReset={rewriteEdits[safeIdx] !== undefined}
+                        minHeight={64}
+                        previewLineApplied={previewLineAppliedHere}
+                        onReplaceInPreview={() => patchPreviewLine(safeIdx, draft.trim())}
+                        onRevertPreviewLine={() => patchPreviewLine(safeIdx, null)}
+                        onTextareaFocus={() => onBulletWorkspaceTextareaFocus(safeIdx)}
+                        onTextareaBlur={e => onBulletWorkspaceTextareaBlur(safeIdx, e)}
+                        toolbarRight={(
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              copyBullet(draft, safeIdx);
+                            }}
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: 5,
+                              padding: "5px 10px", borderRadius: 7,
+                              border: `1px solid ${copiedBullet === safeIdx ? "rgba(52,211,153,0.5)" : "rgba(52,211,153,0.3)"}`,
+                              background: copiedBullet === safeIdx ? "rgba(52,211,153,0.15)" : "rgba(52,211,153,0.08)",
+                              color: "var(--green)", fontSize: 10.5, fontWeight: 600,
+                              cursor: "pointer", fontFamily: "inherit",
+                              transition: "all 0.15s",
+                            }}
+                          >
+                            {copiedBullet === safeIdx ? "Copied!" : "Copy"}
+                          </button>
+                        )}
+                      />
                         </div>
                       )}
                     </div>

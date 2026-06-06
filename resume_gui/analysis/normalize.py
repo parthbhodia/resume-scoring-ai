@@ -10,6 +10,7 @@ from resume_gui.analysis.rewrite_validators import (
     _adds_quantification,
     _filter_bullet_rewrites,
 )
+from resume_gui.analysis.fallback_rewrites import synthesize_fallback_rewrite
 
 logger = logging.getLogger("resume_gui")
 
@@ -165,6 +166,16 @@ def _normalize_analysis(raw: dict) -> dict:
                         qrw = (kept_cr.get("quantification") or "").strip()
                     if qrw and _adds_quantification(orig_bullet, qrw):
                         kept_improved = qrw
+                # Every flagged bullet must ship with apply-able text.
+                if not (kept_improved or "").strip() and not kept_cr:
+                    fb_imp, fb_cr = synthesize_fallback_rewrite(
+                        orig_bullet,
+                        ba.get("primaryCategory"),
+                        ba.get("issueCategories"),
+                    )
+                    if fb_imp:
+                        kept_improved = fb_imp
+                        kept_cr = fb_cr
                 ba["improvedBullet"] = kept_improved
                 if kept_cr:
                     ba["categoryRewrites"] = kept_cr

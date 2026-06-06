@@ -66,13 +66,34 @@ export function isGapFixEligibleLine(line: string): boolean {
   return true;
 }
 
+/** True when month+year tokens are inline in prose, not a standalone date row. */
+function looksLikeInlineDateNarrative(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  if (/[;]/.test(t)) return true;
+  if (t.length > 72) return true;
+  if (t.split(/\s+/).length > 12) return true;
+  if (
+    /\b(sitting|scheduled|expected|passed|anticipated|pending|examination|exam|license|certification|bar|admitted|eligible|member)\b/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Job/education entry header (title | company | date, or date ranges, etc.). */
 export function looksLikeEntryHeader(line: string): boolean {
   const t = line.trim();
   if (!t || t.length > 200) return false;
   if (t.includes("|")) return true;
-  if (/\b(19|20)\d{2}\s*[–—\-]\s*((19|20)\d{2}|present|current)/i.test(t)) return true;
-  if (/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(19|20)\d{2}/i.test(t)) return true;
+  if (/\b(19|20)\d{2}\s*[–—\-]\s*((19|20)\d{2}|present|current)/i.test(t)) {
+    return !looksLikeInlineDateNarrative(t);
+  }
+  if (/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(19|20)\d{2}/i.test(t)) {
+    return !looksLikeInlineDateNarrative(t);
+  }
   if (t.includes("·") && t.split("·").length >= 2) return true;
   return false;
 }

@@ -837,6 +837,10 @@ Infer the field from the résumé text and score against that field's expectatio
   items unless those bullets already show clear ownership + outcome. Legal/intern bullets about research, \
   drafting, filing, review, and client/matter support are valid rewrite targets — use example placeholders \
   for scale when exact figures are absent instead of leaving improvedBullet blank. \
+  MANDATORY REWRITE RULE: every bulletAnalysis item MUST include a non-empty improvedBullet AND a \
+  categoryRewrites entry for primaryCategory. Never flag a bullet and leave the candidate without \
+  apply-able suggested text — use bracket placeholders ([~N], [N matters], [X%]) and preserve all listed \
+  work. Empty improvedBullet on a flagged bullet is a hard failure.
 - For each weak bullet, label issues clearly (quantification vs achievement vs language). \
   improvedBullet must match the primary weakness. A bullet that leads with a strong verb (Built, \
   Engineered, Integrated, Automated, Designed, Implemented, Developed) but contains NO number is a \
@@ -891,16 +895,17 @@ Infer the field from the résumé text and score against that field's expectatio
   deleting listed work, keep the full bullet and insert [N]/[~N] counts inline instead.
 - READABILITY REWRITES (required for run-on bullets): when primaryCategory is "readability" — the bullet \
   is a long run-on, crams several ideas into one line, or is hard to skim in a few seconds — you MUST \
-  include categoryRewrites.readability that CONDENSES it into one tight, skimmable line that is SHORTER \
-  than the original. Cut filler ("gaining hands-on experience in…", "within the prestigious institution", \
-  "responsible for", redundant adjectives), but keep every numeral and proper noun. Set improvedBullet \
-  to that condensed rewrite when readability is the primary fix. Example: \
+  include categoryRewrites.readability that makes it skimmable WITHOUT deleting listed tasks, deliverables, \
+  or domain topics. Prefer semicolons between distinct responsibilities; keep every substantive clause. \
+  Cut only filler ("gaining hands-on experience in…", "within the prestigious institution", \
+  "responsible for", redundant adjectives), but keep every numeral, proper noun, and listed work item. \
+  Set improvedBullet to that rewrite when readability is the primary fix. Example: \
   "Maintained the Art website for visitor engagement, wrote pieces highlighting contributions, and \
   conducted interviews with alumni, students and patrons for insights, gaining hands-on experience in \
   communications, marketing, journalism, and content management within the prestigious institution." → \
   "Maintained UCLA's Art website and authored feature pieces; interviewed alumni, students, and patrons \
   to source stories for communications and marketing." Do NOT flag a bullet for readability if you cannot \
-  offer a shorter, clearer rewrite.
+  offer a clearer rewrite that still mentions every distinct responsibility.
 - BRACKETS ARE FOR REWRITES ONLY: bracket placeholders ([X%], [$Y], [~N]) may appear ONLY inside \
   bulletAnalysis improvedBullet / categoryRewrites. In summary, topIssues (issue/whyItMatters/suggestion), \
   atsWarnings, finalRecommendations, sectionFeedback, and categoryRationales, write plain prose with NO \
