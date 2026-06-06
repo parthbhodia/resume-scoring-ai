@@ -5,6 +5,7 @@ import logging
 import re
 from typing import Optional
 
+from resume_gui.analysis.analysis_packet import _build_analysis_packet
 from resume_gui.analysis.constants import _PRONOUN_RE
 from resume_gui.analysis.deterministic_insights import inject_deterministic_insights
 from resume_gui.analysis.evidence_validator import _validate_analysis_against_resume
@@ -783,17 +784,19 @@ keyword placement (no stuffing). If no JD: null scores as specified below.
 4. ACHIEVEMENT QUALITY: Outcomes and ownership vs. vague duties (“responsible for”, \
 “worked on”, task lists without impact). Align with results-focused bullet craft. \
 Do NOT fold this into quantification — weak verbs and duty-only wording are achievement problems even when numbers exist.
-5. QUANTIFICATION: %, $, scale, time saved, users, rankings, before/after — reward \
-truthful metrics. Recruiter target: **~75%** of experience bullets should carry a measurable result \
-(real number or honest bracket placeholder). Score quantification against that bar: if fewer than \
-~75% of experience bullets have metrics, the category score should be in the 60–75 range even when \
-some bullets are strong. This is a high-value dimension: be thorough, not shy. Any experience bullet \
-describing an outcome, build, or improvement WITHOUT a number is a quantification opportunity — flag it \
-in bulletAnalysis and supply categoryRewrites.quantification that adds a real metric OR a bracket \
-placeholder ([X%], [$Y], [~N users], [X ms], [N×]). Never flag "Technologies:" / skills-only lines. \
-Prioritize the weakest/highest-impact bullets within your {bullet_analysis_max}-bullet budget. \
-This is separate from achievement quality: duty-language is achievement; missing metrics on a strong \
-outcome bullet (Built/Engineered/Implemented with no scale) is quantification.
+5. QUANTIFICATION / EVIDENCE DEPTH: %, $, scale, time saved, users, rankings, before/after — reward \
+proof of impact, but apply the FIELD FAMILY evidence standard from RESUME INPUT. For tech, sales, finance, \
+ops, and growth roles, expect frequent hard metrics. For legal, healthcare, education, research, creative, \
+public-sector, and early-career resumes, accept credible field proof such as matter type, caseload, patient \
+volume, class size, publication venue, audience/platform, regulated context, artifacts shipped, tools used, \
+or bracket placeholders when exact figures are unavailable. Score this category against field-appropriate \
+evidence density, not a universal percentage quota. Any experience bullet describing an outcome, build, \
+review, filing, care, service, campaign, project, or improvement WITHOUT field proof is an evidence opportunity — \
+flag it in bulletAnalysis and supply categoryRewrites.quantification that adds a real metric, proxy, scope, \
+or bracket placeholder ([X%], [$Y], [~N users], [N matters], [N patients/shift]). Never flag "Technologies:" / \
+skills-only lines. Prioritize the weakest/highest-impact bullets within your {bullet_analysis_max}-bullet budget. \
+This is separate from achievement quality: duty-language is achievement; missing field proof on a strong \
+outcome bullet (Built/Engineered/Implemented/Drafted/Coordinated with no scale or scope) is quantification.
 6. SECTION STRUCTURE: Sections and order aligned with the UMBC checklist above (header, optional Objective/Summary, \
 education, optional certs/research/projects/coursework, skills, professional vs additional experience, honors, activities, \
 service); enforce bullet-count norms where visible (Summary 2–5; Professional 2–5; Additional 1–3; Activities 1–3; \
@@ -817,6 +820,9 @@ SCORING GUIDANCE:
 <40    = Poor; likely to fail ATS and recruiter screens.
 
 CRITICAL RULES:
+- STAGED ANALYSIS POLICY: First identify FIELD FAMILY and EVIDENCE STANDARD from RESUME INPUT. Then score \
+  categories, choose weakest/highest-value bullets, rewrite with the matching playbook examples, and only then \
+  return JSON. Keep this as one JSON-only response; do not reveal the steps.
 - The candidate may be in any discipline (STEM, healthcare, business, arts, education, trades, public service, etc.). \
 Infer the field from the résumé text and score against that field's expectations — never assume a software-only audience.
 - Be SPECIFIC, not generic. Tell exactly WHERE and HOW to fix each issue.
@@ -891,7 +897,7 @@ Infer the field from the résumé text and score against that field's expectatio
   Bracketed advice text reads as AI-written and tells the candidate to literally paste brackets.
 - EVIDENCE BEFORE CLAIM (server will drop unsupported claims): never claim "missing impact metrics", \
   "no quantification", or "lacks numbers" as a topIssue / atsWarning / bullet issue / final \
-  recommendation when the résumé text contains numerals (digits, %, $, ×, k+, CGPA, GPA, dates, \
+  recommendation when the résumé text contains numerals or field-specific proof signals (digits, %, $, ×, k+, CGPA, GPA, dates, \
   counts like "9,000+ records" or "5 refinement cycles"). Count first, then claim. If the résumé \
   has 5+ numerals overall, do NOT add a "missing metrics" topIssue — the right move is to flag \
   SPECIFIC bullets that are weakest, not to claim the whole résumé lacks quantification.
@@ -919,8 +925,8 @@ Infer the field from the résumé text and score against that field's expectatio
 STRUCTURAL SIGNALS (deterministic pre-scan — verify against RESUME TEXT; do not invent problems):
 {structural_signals}
 
-RESUME TEXT:
-{resume_text}
+RESUME INPUT:
+{analysis_packet}
 
 Return ONLY this JSON (no markdown fences, no explanation):
 {{
@@ -1069,7 +1075,14 @@ def _regex_to_comprehensive(struct: dict, jd: str) -> dict:
     }
 
 
-def _analyze_resume_comprehensive(text: str, jd: str = "", *, _log_user_id: str | None = None, _log_email: str | None = None) -> dict:
+def _analyze_resume_comprehensive(
+    text: str,
+    jd: str = "",
+    *,
+    structured_resume: object | None = None,
+    _log_user_id: str | None = None,
+    _log_email: str | None = None,
+) -> dict:
     """Full resume analysis: structural regex + LLM deep-dive."""
     # Structural checks (fast, always run)
     struct = _recruiter_checks(text)
@@ -1094,11 +1107,12 @@ def _analyze_resume_comprehensive(text: str, jd: str = "", *, _log_user_id: str 
         if jd.strip()
         else "\n(No job description provided. Set jobMatch and keywordScore to null.)"
     )
+    analysis_packet = _build_analysis_packet(text, structured_resume)
     prompt = _ANALYSIS_PROMPT.format(
         bullet_analysis_max=_BULLET_ANALYSIS_MAX,
         jd_section=jd_section,
         structural_signals=struct_summary,
-        resume_text=text[:6000],
+        analysis_packet=analysis_packet,
     )
 
     # Route the main analysis through the reasoning tier (default grok-4 —

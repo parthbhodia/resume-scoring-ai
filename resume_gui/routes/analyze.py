@@ -208,6 +208,7 @@ async def api_analyze_upload(request: Request):
             result = await loop.run_in_executor(
                 None,
                 partial(_analyze_resume_comprehensive, analysis_input_text, jd,
+                        structured_resume=structured,
                         _log_user_id=auth_user_id, _log_email=auth_user_email),
             )
         else:
@@ -482,6 +483,7 @@ async def api_analyze(request: Request):
                 loop.run_in_executor(
                     None,
                     partial(_analyze_resume_comprehensive, candidate_profile, job_description,
+                            structured_resume=structured_dict,
                             _log_user_id=auth_user_id, _log_email=auth_user_email),
                 ),
             )
