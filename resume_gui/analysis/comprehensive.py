@@ -1108,7 +1108,14 @@ _ANALYSIS_SCHEMA = {
 }
 
 
-def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
+def _analyze_resume_comprehensive(
+    text: str,
+    jd: str = "",
+    *,
+    structured_resume: object | None = None,
+    _log_user_id: str | None = None,
+    _log_email: str | None = None,
+) -> dict:
     """Full resume analysis: structural regex + LLM deep-dive."""
     # Structural checks (fast, always run)
     struct = _recruiter_checks(text)
