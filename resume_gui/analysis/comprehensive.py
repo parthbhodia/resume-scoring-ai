@@ -794,10 +794,12 @@ placeholder ([X%], [$Y], [~N users], [X ms], [N×]). Never flag "Technologies:" 
 Prioritize the weakest/highest-impact bullets within your {bullet_analysis_max}-bullet budget. \
 This is separate from achievement quality: duty-language is achievement; missing metrics on a strong \
 outcome bullet (Built/Engineered/Implemented with no scale) is quantification.
-6. SECTION STRUCTURE: Sections and order aligned with the UMBC checklist above (header, optional Objective/Summary, \
-education, optional certs/research/projects/coursework, skills, professional vs additional experience, honors, activities, \
-service); enforce bullet-count norms where visible (Summary 2–5; Professional 2–5; Additional 1–3; Activities 1–3; \
-Projects 1–2); flag redundant Objective + Summary when space is tight; coursework over ~3 lines; GPA not per UMBC \
+6. SECTION STRUCTURE: Sections and order aligned with career stage. For students/recent grads: \
+(header, optional Objective/Summary, education, optional certs/research/projects/coursework, skills, \
+professional vs additional experience, honors, activities, service). For experienced professionals \
+(3+ years, multiple roles): education at the bottom is CORRECT — do not flag it. Enforce bullet-count \
+norms where visible (Summary 2–5; Professional 2–5; Additional 1–3; Activities 1–3; Projects 1–2); \
+flag redundant Objective + Summary when space is tight; coursework over ~3 lines; GPA not per UMBC \
 (only if ≥3.0 and stated); research/pubs missing venue or presentation type when items are listed.
 7. LANGUAGE QUALITY: Spelling/grammar; passive voice and buzzwords; tense; clarity over \
 flowery phrasing; minimal unexplained jargon/acronyms.
@@ -877,6 +879,13 @@ Infer the field from the résumé text and score against that field's expectatio
 - NO TAUTOLOGICAL SUGGESTIONS: do not recommend a structural change ("create separate lines for each \
   institution", "add bullets for each role", "move skills to top") when the résumé already has that \
   structure. Read the layout before recommending a layout change.
+- EDUCATION PLACEMENT IS CAREER-STAGE DEPENDENT: For experienced professionals (3+ years, multiple \
+  roles), Education at the bottom of the résumé is CORRECT and industry standard. Do NOT flag \
+  "move education to top", "education should appear earlier", or any similar placement warning for \
+  candidates who clearly have professional experience. Only flag education placement for students or \
+  recent grads (current student, or graduation within the last 1-2 years and no substantial work \
+  history). If the résumé has multiple experience entries spanning several years, education at the \
+  bottom is not an ATS issue — never emit it as an atsWarning or topIssue.
 - For each originalBullet field: copy the wording EXACTLY from RESUME TEXT (including • or -), \
   after normalizing; do not drop the first letters of words.
 - If no JD is provided: set jobMatch in categoryScores to null, set \
