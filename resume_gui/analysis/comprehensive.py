@@ -5,7 +5,6 @@ import logging
 import re
 from typing import Optional
 
-from resume_gui.analysis.analysis_packet import _build_analysis_packet
 from resume_gui.analysis.constants import _PRONOUN_RE
 from resume_gui.analysis.deterministic_insights import inject_deterministic_insights
 from resume_gui.analysis.evidence_validator import _validate_analysis_against_resume
@@ -784,23 +783,23 @@ keyword placement (no stuffing). If no JD: null scores as specified below.
 4. ACHIEVEMENT QUALITY: Outcomes and ownership vs. vague duties (“responsible for”, \
 “worked on”, task lists without impact). Align with results-focused bullet craft. \
 Do NOT fold this into quantification — weak verbs and duty-only wording are achievement problems even when numbers exist.
-5. QUANTIFICATION / EVIDENCE DEPTH: %, $, scale, time saved, users, rankings, before/after — reward \
-proof of impact, but apply the FIELD FAMILY evidence standard from RESUME INPUT. For tech, sales, finance, \
-ops, and growth roles, expect frequent hard metrics. For legal, healthcare, education, research, creative, \
-public-sector, and early-career resumes, accept credible field proof such as matter type, caseload, patient \
-volume, class size, publication venue, audience/platform, regulated context, artifacts shipped, tools used, \
-or bracket placeholders when exact figures are unavailable. Score this category against field-appropriate \
-evidence density, not a universal percentage quota. Any experience bullet describing an outcome, build, \
-review, filing, care, service, campaign, project, or improvement WITHOUT field proof is an evidence opportunity — \
-flag it in bulletAnalysis and supply categoryRewrites.quantification that adds a real metric, proxy, scope, \
-or bracket placeholder ([X%], [$Y], [~N users], [N matters], [N patients/shift]). Never flag "Technologies:" / \
-skills-only lines. Prioritize the weakest/highest-impact bullets within your {bullet_analysis_max}-bullet budget. \
-This is separate from achievement quality: duty-language is achievement; missing field proof on a strong \
-outcome bullet (Built/Engineered/Implemented/Drafted/Coordinated with no scale or scope) is quantification.
-6. SECTION STRUCTURE: Sections and order aligned with the UMBC checklist above (header, optional Objective/Summary, \
-education, optional certs/research/projects/coursework, skills, professional vs additional experience, honors, activities, \
-service); enforce bullet-count norms where visible (Summary 2–5; Professional 2–5; Additional 1–3; Activities 1–3; \
-Projects 1–2); flag redundant Objective + Summary when space is tight; coursework over ~3 lines; GPA not per UMBC \
+5. QUANTIFICATION: %, $, scale, time saved, users, rankings, before/after — reward \
+truthful metrics. Recruiter target: **~75%** of experience bullets should carry a measurable result \
+(real number or honest bracket placeholder). Score quantification against that bar: if fewer than \
+~75% of experience bullets have metrics, the category score should be in the 60–75 range even when \
+some bullets are strong. This is a high-value dimension: be thorough, not shy. Any experience bullet \
+describing an outcome, build, or improvement WITHOUT a number is a quantification opportunity — flag it \
+in bulletAnalysis and supply categoryRewrites.quantification that adds a real metric OR a bracket \
+placeholder ([X%], [$Y], [~N users], [X ms], [N×]). Never flag "Technologies:" / skills-only lines. \
+Prioritize the weakest/highest-impact bullets within your {bullet_analysis_max}-bullet budget. \
+This is separate from achievement quality: duty-language is achievement; missing metrics on a strong \
+outcome bullet (Built/Engineered/Implemented with no scale) is quantification.
+6. SECTION STRUCTURE: Sections and order aligned with career stage. For students/recent grads: \
+(header, optional Objective/Summary, education, optional certs/research/projects/coursework, skills, \
+professional vs additional experience, honors, activities, service). For experienced professionals \
+(3+ years, multiple roles): education at the bottom is CORRECT — do not flag it. Enforce bullet-count \
+norms where visible (Summary 2–5; Professional 2–5; Additional 1–3; Activities 1–3; Projects 1–2); \
+flag redundant Objective + Summary when space is tight; coursework over ~3 lines; GPA not per UMBC \
 (only if ≥3.0 and stated); research/pubs missing venue or presentation type when items are listed.
 7. LANGUAGE QUALITY: Spelling/grammar; passive voice and buzzwords; tense; clarity over \
 flowery phrasing; minimal unexplained jargon/acronyms.
@@ -818,29 +817,24 @@ SCORING GUIDANCE:
 60-74  = Decent but has several missed opportunities.
 40-59  = Weak; needs major restructuring.
 <40    = Poor; likely to fail ATS and recruiter screens.
+atsCompatibility hard anchors: missing email OR phone → score ≤ 55; missing both → score ≤ 40. \
+These are fatal ATS blockers regardless of formatting quality. \
+Over-length (>900 words) → score ≤ 65. Standard formatting with full contact → score may reach 80+.
+languageQuality hard anchors: first-person pronouns (I, me, my, we, our) or duty phrases ("I was responsible for", \
+"I have", "I am") present → score ≤ 50; these are disqualifying language errors in professional résumés. \
+Majority of bullets start with weak duty verbs (was, is, are, responsible, helped, assisted, supported, worked on) \
+without owned outcomes → score ≤ 45. Resume with strong ownership verbs throughout → score may reach 75+.
 
 CRITICAL RULES:
-- STAGED ANALYSIS POLICY: First identify FIELD FAMILY and EVIDENCE STANDARD from RESUME INPUT. Then score \
-  categories, choose weakest/highest-value bullets, rewrite with the matching playbook examples, and only then \
-  return JSON. Keep this as one JSON-only response; do not reveal the steps.
 - The candidate may be in any discipline (STEM, healthcare, business, arts, education, trades, public service, etc.). \
 Infer the field from the résumé text and score against that field's expectations — never assume a software-only audience.
 - Be SPECIFIC, not generic. Tell exactly WHERE and HOW to fix each issue.
-- When rewriting bullets, PRESERVE CORE FACTS from the original (names, courts, firms, matters, tools, dates, \
-  existing numbers). It is OK to add example impact/scale when the original lacks it, but mark invented/example \
-  impact as bracket placeholders such as "[X%]", "[$Y]", "[~N matters]", "[N filings]", or "[N-page memo]".
+- When rewriting bullets, PRESERVE TRUTHFULNESS. Mark invented metrics \
+  as "[X%]", "[$Y]", or "[~N]".
 - For bulletAnalysis: analyze the weakest bullets, up to {bullet_analysis_max} of them. Be thorough — \
   if the résumé has many bullets that lack metrics or lead with duty phrasing, return MANY (10-15), not \
   just 2-3. Returning only a couple of bullets when the résumé clearly has more weak ones is an \
   under-report and the user notices. Skip only the genuinely strong bullets (own a quantified outcome). \
-  If a résumé has 8+ experience bullets and almost none have metrics, include at least 8 bulletAnalysis \
-  items unless those bullets already show clear ownership + outcome. Legal/intern bullets about research, \
-  drafting, filing, review, and client/matter support are valid rewrite targets — use example placeholders \
-  for scale when exact figures are absent instead of leaving improvedBullet blank. \
-  MANDATORY REWRITE RULE: every bulletAnalysis item MUST include a non-empty improvedBullet AND a \
-  categoryRewrites entry for primaryCategory. Never flag a bullet and leave the candidate without \
-  apply-able suggested text — use bracket placeholders ([~N], [N matters], [X%]) and preserve all listed \
-  work. Empty improvedBullet on a flagged bullet is a hard failure.
 - For each weak bullet, label issues clearly (quantification vs achievement vs language). \
   improvedBullet must match the primary weakness. A bullet that leads with a strong verb (Built, \
   Engineered, Integrated, Automated, Designed, Implemented, Developed) but contains NO number is a \
@@ -862,58 +856,25 @@ Infer the field from the résumé text and score against that field's expectatio
   every concrete proper noun (Title-Case names, ALL-CAPS acronyms, CamelCase tech names like PostgreSQL, \
   CI/CD, AWS Lambda, gRPC) that appeared in the originalBullet. Removing "5 refinement cycles", \
   "3 retries", "PostgreSQL", or "AWS Lambda" while calling the change "readability" or \
-  "language quality" is a lie — keep every fact. \
-  Most rewrites should be the same length or longer than the original — the ONE exception is a \
-  readability/conciseness fix (see READABILITY REWRITES below), which is deliberately SHORTER: it \
-  removes filler words, never numerals or proper nouns. \
-  CONTENT PRESERVATION (critical): when the original lists multiple responsibilities, deliverables, \
-  document types, legal topics, tools, or stakeholders, the rewrite MUST keep every listed item. \
-  Add [N]/[X%] scale by weaving counts into the existing list — do NOT merge, summarize away, or \
-  delete listed work to produce a shorter one-liner. A bullet covering IP research AND regulations AND \
-  contracts must still mention all three after the rewrite. \
-  Never drop brand names, product lines, employer context, or client-facing names (e.g. KFC, Pizza Hut, \
-  Taco Bell, Yum!) when they appear in the original — keep the full brand list and opening context line.
+  "language quality" is a lie — the rewrite must add JD vocabulary, not strip the original's content. \
+  Rewrites should be the same length or longer than the original.
 - SUBSTANTIVE REWRITES ONLY: a rewrite that only changes tense, plurality, punctuation, or one weak \
   verb form is NOT an improvedBullet. "Conduct price verification..." → "Conducted price verification..." \
   is invalid. For duty phrasing / achievementQuality / languageQuality, rewrite the bullet into \
   ownership + scope + outcome, e.g. "Verified Bloomberg and market pricing data across $500M+ AUM \
-  hedge-fund portfolios, improving NAV precision and valuation accuracy." If exact impact is not stated, \
-  create a plausible example outcome using bracket placeholders rather than omitting the rewrite, e.g. \
-  "Authored [N] IP research memos on cybersquatting and trademark infringement, giving counsel case-ready \
-  analysis for interim-injunction strategy." \
+  hedge-fund portfolios, improving NAV precision and valuation accuracy." If you cannot improve \
+  substance, omit improvedBullet/categoryRewrites for that category.
 - QUANTIFICATION REWRITES (required for quant bullets): when primaryCategory is "quantification" \
   (or issueCategories includes it and the bullet lacks metrics), you MUST include \
   categoryRewrites.quantification with at least one new metric or bracket placeholder ([X%], [$Y], \
   [~N], [X ms], [N×]) not present in originalBullet. Set improvedBullet to that same quant rewrite \
-  when quantification is the primary fix. ADD scale to the existing bullet — preserve every distinct \
-  task, deliverable, and domain topic already listed; never replace a multi-item bullet with a shorter \
-  summary that drops contracts, filings, regulations, tools, or other substantive work. Example: \
-  "Researched IP cases… drafted notes on sand mining regulations, trademark objections, and contracts" → \
-  "Researched and summarized [~N] IP cases for project tracking; drafted notes on sand mining regulations, \
-  trademark distinctiveness objections, and contracts." Do NOT omit the rewrite and leave only a category \
-  rationale — the UI shows Flagged bullets, not generic lists. If you cannot add a placeholder without \
-  deleting listed work, keep the full bullet and insert [N]/[~N] counts inline instead.
-- READABILITY REWRITES (required for run-on bullets): when primaryCategory is "readability" — the bullet \
-  is a long run-on, crams several ideas into one line, or is hard to skim in a few seconds — you MUST \
-  include categoryRewrites.readability that makes it skimmable WITHOUT deleting listed tasks, deliverables, \
-  or domain topics. Prefer semicolons between distinct responsibilities; keep every substantive clause. \
-  Cut only filler ("gaining hands-on experience in…", "within the prestigious institution", \
-  "responsible for", redundant adjectives), but keep every numeral, proper noun, and listed work item. \
-  Set improvedBullet to that rewrite when readability is the primary fix. Example: \
-  "Maintained the Art website for visitor engagement, wrote pieces highlighting contributions, and \
-  conducted interviews with alumni, students and patrons for insights, gaining hands-on experience in \
-  communications, marketing, journalism, and content management within the prestigious institution." → \
-  "Maintained UCLA's Art website and authored feature pieces; interviewed alumni, students, and patrons \
-  to source stories for communications and marketing." Do NOT flag a bullet for readability if you cannot \
-  offer a clearer rewrite that still mentions every distinct responsibility.
-- BRACKETS ARE FOR REWRITES ONLY: bracket placeholders ([X%], [$Y], [~N]) may appear ONLY inside \
-  bulletAnalysis improvedBullet / categoryRewrites. In summary, topIssues (issue/whyItMatters/suggestion), \
-  atsWarnings, finalRecommendations, sectionFeedback, and categoryRationales, write plain prose with NO \
-  brackets — say "add a real percentage or count", never "add [X%]" or "such as [X stakeholders]". \
-  Bracketed advice text reads as AI-written and tells the candidate to literally paste brackets.
+  when quantification is the primary fix. Example: "Implemented gRPC streaming… reducing latency" → \
+  "Implemented gRPC streaming… cutting end-to-end latency by [~40%] for voice and chat workloads." \
+  Do NOT omit the rewrite and leave only a category rationale — the UI shows Flagged bullets, not \
+  generic lists. If you cannot add a placeholder, do not flag the bullet for quantification.
 - EVIDENCE BEFORE CLAIM (server will drop unsupported claims): never claim "missing impact metrics", \
   "no quantification", or "lacks numbers" as a topIssue / atsWarning / bullet issue / final \
-  recommendation when the résumé text contains numerals or field-specific proof signals (digits, %, $, ×, k+, CGPA, GPA, dates, \
+  recommendation when the résumé text contains numerals (digits, %, $, ×, k+, CGPA, GPA, dates, \
   counts like "9,000+ records" or "5 refinement cycles"). Count first, then claim. If the résumé \
   has 5+ numerals overall, do NOT add a "missing metrics" topIssue — the right move is to flag \
   SPECIFIC bullets that are weakest, not to claim the whole résumé lacks quantification.
@@ -925,6 +886,13 @@ Infer the field from the résumé text and score against that field's expectatio
 - NO TAUTOLOGICAL SUGGESTIONS: do not recommend a structural change ("create separate lines for each \
   institution", "add bullets for each role", "move skills to top") when the résumé already has that \
   structure. Read the layout before recommending a layout change.
+- EDUCATION PLACEMENT IS CAREER-STAGE DEPENDENT: For experienced professionals (3+ years, multiple \
+  roles), Education at the bottom of the résumé is CORRECT and industry standard. Do NOT flag \
+  "move education to top", "education should appear earlier", or any similar placement warning for \
+  candidates who clearly have professional experience. Only flag education placement for students or \
+  recent grads (current student, or graduation within the last 1-2 years and no substantial work \
+  history). If the résumé has multiple experience entries spanning several years, education at the \
+  bottom is not an ATS issue — never emit it as an atsWarning or topIssue.
 - For each originalBullet field: copy the wording EXACTLY from RESUME TEXT (including • or -), \
   after normalizing; do not drop the first letters of words.
 - If no JD is provided: set jobMatch in categoryScores to null, set \
@@ -941,79 +909,14 @@ Infer the field from the résumé text and score against that field's expectatio
 STRUCTURAL SIGNALS (deterministic pre-scan — verify against RESUME TEXT; do not invent problems):
 {structural_signals}
 
-RESUME INPUT:
-{analysis_packet}
+RESUME TEXT:
+{resume_text}
 
-Return ONLY this JSON (no markdown fences, no explanation):
-{{
-  "overallScore": <integer 0-100>,
-  "categoryScores": {{
-    "readability": <0-100>,
-    "atsCompatibility": <0-100>,
-    "jobMatch": <0-100 or null>,
-    "achievementQuality": <0-100>,
-    "quantification": <0-100>,
-    "sectionStructure": <0-100>,
-    "languageQuality": <0-100>,
-    "technicalBranding": <0-100>
-  }},
-  "categoryRationales": {{
-    "readability": "<why this score for this résumé>",
-    "atsCompatibility": "<why>",
-    "jobMatch": "<why, or null when no JD>",
-    "achievementQuality": "<why>",
-    "quantification": "<why>",
-    "sectionStructure": "<why>",
-    "languageQuality": "<why>",
-    "technicalBranding": "<why>"
-  }},
-  "summary": "<2-3 sentence specific overall assessment>",
-  "topStrengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
-  "topIssues": [
-    {{
-      "issue": "<short problem title>",
-      "severity": "<low|medium|high>",
-      "whyItMatters": "<1-2 sentences on impact>",
-      "suggestion": "<concrete actionable fix>"
-    }}
-  ],
-  "atsWarnings": [
-    {{"warning": "<ATS issue>", "suggestion": "<fix>"}}
-  ],
-  "keywordAnalysis": {{
-    "matchedKeywords": ["<keyword>"],
-    "missingKeywords": ["<keyword>"],
-    "keywordScore": <0-100 or null>,
-    "suggestions": ["<where/how to naturally add missing keyword>"]
-  }},
-  "bulletAnalysis": [
-    {{
-      "originalBullet": "<exact bullet text, truncated to 150 chars>",
-      "score": <0-100>,
-      "primaryCategory": "<the ONE categoryScores key this bullet's improvedBullet addresses: quantification | achievementQuality | languageQuality | sectionStructure | readability | technicalBranding | atsCompatibility | jobMatch>",
-      "issueCategories": ["<every categoryScores key this bullet is weak in — superset of primaryCategory, e.g. [\\"quantification\\", \\"languageQuality\\"]>"],
-      "issues": ["<issue 1>", "<issue 2>"],
-      "improvedBullet": "<rewrite for primaryCategory; REQUIRED when primary is quantification — must add [X%]/[$Y]/[~N] or a real metric>",
-      "categoryRewrites": {{
-        "quantification": "<REQUIRED when bullet lacks metrics: same as improvedBullet when primary is quantification; always include a new [X%]/[$Y]/[~N] or digit; never empty>",
-        "achievementQuality": "<when verbs/duties are weak: strong verb + owned outcome; use bracketed example impact/scale when exact figures are absent>",
-        "readability": "<REQUIRED when primary is readability: a SHORTER, skimmable rewrite of a run-on/over-long bullet; cut filler but keep every numeral and proper noun>"
-      }}
-    }}
-  ],
-  "sectionFeedback": [
-    {{"section": "<name>", "score": <0-100>, "feedback": "<specific feedback>"}}
-  ],
-  "rewriteSuggestions": [
-    {{"before": "<weak line>", "after": "<improved line>", "reason": "<why better>"}}
-  ],
-  "finalRecommendations": [
-    "<most impactful action 1>",
-    "<action 2>",
-    "<action 3>",
-    "<action 4>"
-  ]
-}}
+IMPORTANT: bulletAnalysis MUST contain the {bullet_analysis_max} weakest bullets from the resume. \
+Do NOT return fewer than the actual number of weak bullets up to the {bullet_analysis_max} limit. \
+Returning only 2-3 bullets when the resume clearly has more weak ones is an under-report and the user notices.
+
+Return a JSON object matching the provided schema. No markdown fences, no prose outside the JSON.
 """
 
 def _regex_to_comprehensive(struct: dict, jd: str) -> dict:
@@ -1091,14 +994,121 @@ def _regex_to_comprehensive(struct: dict, jd: str) -> dict:
     }
 
 
-def _analyze_resume_comprehensive(
-    text: str,
-    jd: str = "",
-    *,
-    structured_resume: object | None = None,
-    _log_user_id: str | None = None,
-    _log_email: str | None = None,
-) -> dict:
+_ANALYSIS_SCHEMA = {
+    "name": "resume_analysis",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "overallScore": {"type": "integer"},
+            "categoryScores": {
+                "type": "object",
+                "properties": {
+                    "readability":        {"type": "integer"},
+                    "atsCompatibility":   {"type": "integer"},
+                    "jobMatch":           {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "achievementQuality": {"type": "integer"},
+                    "quantification":     {"type": "integer"},
+                    "sectionStructure":   {"type": "integer"},
+                    "languageQuality":    {"type": "integer"},
+                    "technicalBranding":  {"type": "integer"},
+                },
+            },
+            "categoryRationales": {
+                "type": "object",
+                "properties": {
+                    "readability":        {"type": "string"},
+                    "atsCompatibility":   {"type": "string"},
+                    "jobMatch":           {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "achievementQuality": {"type": "string"},
+                    "quantification":     {"type": "string"},
+                    "sectionStructure":   {"type": "string"},
+                    "languageQuality":    {"type": "string"},
+                    "technicalBranding":  {"type": "string"},
+                },
+            },
+            "summary":      {"type": "string"},
+            "topStrengths": {"type": "array", "items": {"type": "string"}},
+            "topIssues": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "issue":        {"type": "string"},
+                        "severity":     {"type": "string", "enum": ["low", "medium", "high"]},
+                        "whyItMatters": {"type": "string"},
+                        "suggestion":   {"type": "string"},
+                    },
+                },
+            },
+            "atsWarnings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "warning":    {"type": "string"},
+                        "suggestion": {"type": "string"},
+                    },
+                },
+            },
+            "keywordAnalysis": {
+                "type": "object",
+                "properties": {
+                    "matchedKeywords": {"type": "array", "items": {"type": "string"}},
+                    "missingKeywords": {"type": "array", "items": {"type": "string"}},
+                    "keywordScore":    {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "suggestions":     {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            "bulletAnalysis": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "originalBullet":   {"type": "string"},
+                        "score":            {"type": "integer"},
+                        "primaryCategory":  {"type": "string"},
+                        "issueCategories":  {"type": "array", "items": {"type": "string"}},
+                        "issues":           {"type": "array", "items": {"type": "string"}},
+                        "improvedBullet":   {"type": "string"},
+                        "categoryRewrites": {
+                            "type": "object",
+                            "properties": {
+                                "quantification":     {"type": "string"},
+                                "achievementQuality": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
+            "sectionFeedback": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "section":  {"type": "string"},
+                        "score":    {"type": "integer"},
+                        "feedback": {"type": "string"},
+                    },
+                },
+            },
+            "rewriteSuggestions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "before": {"type": "string"},
+                        "after":  {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                },
+            },
+            "finalRecommendations": {"type": "array", "items": {"type": "string"}},
+        },
+    },
+}
+
+
+def _analyze_resume_comprehensive(text: str, jd: str = "") -> dict:
     """Full resume analysis: structural regex + LLM deep-dive."""
     # Structural checks (fast, always run)
     struct = _recruiter_checks(text)
@@ -1123,24 +1133,17 @@ def _analyze_resume_comprehensive(
         if jd.strip()
         else "\n(No job description provided. Set jobMatch and keywordScore to null.)"
     )
-    analysis_packet = _build_analysis_packet(text, structured_resume)
     prompt = _ANALYSIS_PROMPT.format(
         bullet_analysis_max=_BULLET_ANALYSIS_MAX,
         jd_section=jd_section,
         structural_signals=struct_summary,
-        analysis_packet=analysis_packet,
+        resume_text=text[:6000],
     )
 
     # Route the main analysis through the reasoning tier (default grok-4 —
     # same model used for vision-extract). Better quality on bullet-issue
     # tagging + rewrite generation, at ~8-10s extra latency per request.
-    raw = _llm_json_call(
-        prompt,
-        model_override=_analysis_model(),
-        _log_user_id=_log_user_id,
-        _log_email=_log_email,
-        _log_tool="analyze",
-    )
+    raw = _llm_json_call(prompt, model_override=_analysis_model(), schema=_ANALYSIS_SCHEMA)
     if raw and isinstance(raw, dict):
         # Strip bogus issues / recommendations that contradict the actual
         # résumé text BEFORE _normalize_analysis runs its score calibration —
