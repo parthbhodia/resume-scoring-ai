@@ -21,6 +21,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppSidebar } from "./app-shell/AppSidebar";
 import { AppBottomNav } from "./app-shell/AppBottomNav";
+import { BugReportDialog } from "./app-shell/BugReportDialog";
 import { AppShellSidebarBridge } from "./app-shell/AppShellSidebarBridge";
 import { FreeScanWelcomeBanner } from "./FreeScanWelcomeBanner";
 import { UmbcWelcomeBanner } from "./UmbcWelcomeBanner";
@@ -102,6 +103,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [builderOpen, setBuilderOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [advisorAllowed, setAdvisorAllowed] = useState(false);
+  const [mobileBugReportOpen, setMobileBugReportOpen] = useState(false);
 
   useEffect(() => {
     setSidebarOpen(!readSidebarCollapsed());
@@ -261,7 +263,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
               builderActive={builderActive}
               onSelect={switchView}
               onBuilder={() => goBuilderFlow("tailor")}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              onHistoryOpen={() => setHistoryOpen(true)}
+              onBugReport={() => setMobileBugReportOpen(true)}
+              onSignOut={onSignOut}
+              userInitial={initial}
             />
+            <BugReportDialog open={mobileBugReportOpen} onOpenChange={setMobileBugReportOpen} />
 
             <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
               <SheetContent
