@@ -199,11 +199,12 @@ export function resolveResumeLayout(opts: {
   const scale = FONT_SIZE_SCALE[opts.fontSize ?? "medium"] ?? 1.0;
   const scaledPreset: ResumeStylePresetOption = scale === 1.0 ? preset : {
     ...preset,
-    baseFont: preset.baseFont * scale,
-    bodyFont: preset.bodyFont * scale,
+    // Floor body/base at 10pt (ATS minimum) and cap name at 14–16pt regardless of scale.
+    baseFont: Math.max(10, preset.baseFont * scale),
+    bodyFont: Math.max(10, preset.bodyFont * scale),
     metaFont: preset.metaFont * scale,
     sectionFont: preset.sectionFont * scale,
-    nameFont: preset.nameFont * scale,
+    nameFont: Math.max(14, Math.min(16, preset.nameFont * scale)),
   };
   return {
     preset: scaledPreset,
