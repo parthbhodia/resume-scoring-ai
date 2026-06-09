@@ -235,6 +235,20 @@ export default function LandingPage() {
 
         {/* Nav */}
         <nav className="lp-nav" style={{ display: "flex", alignItems: "center", gap: 28 }}>
+          {/* Analyze link — always visible, including on mobile */}
+          <button
+            type="button"
+            onClick={signIn}
+            disabled={loading}
+            style={{
+              background: "none", border: "none", color: T.blue,
+              fontSize: 13.5, cursor: "pointer", fontFamily: "inherit",
+              fontWeight: 700, letterSpacing: -0.2, padding: 0, transition: "color 0.15s",
+            }}
+            onMouseEnter={e => { (e.target as HTMLElement).style.color = T.blueHover; }}
+            onMouseLeave={e => { (e.target as HTMLElement).style.color = T.blue; }}
+          >Analyze Resume</button>
+
           {[
             ...(SHOW_LANDING_CARDS ? [["Features", "features"]] as const : []),
             ...(SHOW_LANDING_CARDS ? [["Platform", "platform"]] as const : []),
