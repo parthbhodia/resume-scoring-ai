@@ -23,6 +23,7 @@ type Props = {
   onBugReport: () => void;
   onSignOut: () => void;
   userInitial: string;
+  advisorAllowed?: boolean;
 };
 
 export function AppBottomNav({
@@ -36,6 +37,7 @@ export function AppBottomNav({
   onBugReport,
   onSignOut,
   userInitial,
+  advisorAllowed = false,
 }: Props) {
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -96,6 +98,18 @@ export function AppBottomNav({
           </div>
 
           <div className="flex flex-col py-2">
+            {/* Advisor / Analytics — only for advisors */}
+            {advisorAllowed && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 px-5 py-3.5 text-left text-sm text-[var(--text)] hover:bg-[var(--surface2)] active:bg-[var(--surface2)]"
+                onClick={() => { setMoreOpen(false); onSelect("advisor"); }}
+              >
+                <span className="text-[var(--muted)]">{NAV_ICONS.advisor}</span>
+                Analytics
+              </button>
+            )}
+
             {/* History */}
             <button
               type="button"
