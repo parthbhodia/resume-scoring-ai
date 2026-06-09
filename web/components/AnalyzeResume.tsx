@@ -159,6 +159,7 @@ interface AnalysisResult {
   analysisPersisted?: boolean;
   sourcePdfUrl?: string | null;
   sourceFilename?: string | null;
+  scanLimitStatus?: { limit: number; used: number; remaining: number; resetAt: string } | null;
 }
 
 
@@ -392,6 +393,7 @@ export default function AnalyzeResume() {
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState<string | null>(null);
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
+  const [scansRemaining, setScansRemaining] = useState<number | null>(null);
   const [result, setResult]             = useState<AnalysisResult | null>(null);
   const [jd, setJd]                     = useState("");
   const [loadingMsg, setLoadingMsg]     = useState(0);
@@ -585,6 +587,15 @@ export default function AnalyzeResume() {
       const draftId = `local_${Date.now()}`;
       setActiveEditDraftId(draftId);
       setResult(resWithMeta);
+      if (res.scanLimitStatus) {
+        setScansRemaining(res.scanLimitStatus.remaining);
+        const { remaining, limit } = res.scanLimitStatus;
+        setFeedbackToast(
+          remaining === 0
+            ? `0 of ${limit} free scans remaining today · Resets at midnight UTC`
+            : `${remaining} of ${limit} free scan${limit !== 1 ? "s" : ""} remaining today`,
+        );
+      }
       persistResult(file.name.replace(/\.(pdf|docx)$/i, ""), resWithMeta, draftId);
     } catch (e: unknown) {
       setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Unknown error"));
@@ -2149,6 +2160,7 @@ export default function AnalyzeResume() {
             }}
             onBrowseClick={() => fileRef.current?.click()}
             error={error}
+            scansRemaining={scansRemaining}
           />
         )}
 

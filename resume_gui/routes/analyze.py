@@ -128,6 +128,17 @@ async def api_analyze_upload(request: Request):
                 },
                 status_code=429,
             )
+        # Compute post-scan remaining to return with the success response.
+        scan_limit_meta: dict | None = None
+        if scan_limit.get("reason") == "daily_free_tier_limit":
+            _limit = scan_limit.get("limit", 5)
+            _used = scan_limit.get("used", 0)
+            scan_limit_meta = {
+                "limit": _limit,
+                "used": _used + 1,
+                "remaining": max(0, _limit - _used - 1),
+                "resetAt": scan_limit.get("resetAt"),
+            }
 
         from resume_upload_parse import (  # type: ignore
             extract_upload_markdown,
@@ -309,6 +320,9 @@ async def api_analyze_upload(request: Request):
                 result["analysisPersisted"] = False
                 # Do not set analysisId when DB write failed — frontend must fall back to insertAnalysis.
 
+        if scan_limit_meta is not None and isinstance(result, dict):
+            result["scanLimitStatus"] = scan_limit_meta
+
         return JSONResponse(result)
     except Exception as exc:
         logger.exception("analyze_upload failed")
@@ -431,6 +445,16 @@ async def api_analyze(request: Request):
             },
             status_code=429,
         )
+    analyze_scan_limit_meta: dict | None = None
+    if scan_limit.get("reason") == "daily_free_tier_limit":
+        _limit = scan_limit.get("limit", 5)
+        _used = scan_limit.get("used", 0)
+        analyze_scan_limit_meta = {
+            "limit": _limit,
+            "used": _used + 1,
+            "remaining": max(0, _limit - _used - 1),
+            "resetAt": scan_limit.get("resetAt"),
+        }
 
     model = str(body.get("model") or "").strip() or primary_llm_model_for_resume_workloads()
     include_bullets = bool(body.get("include_bullet_analysis"))
@@ -537,6 +561,9 @@ async def api_analyze(request: Request):
         job_description,
     )
     payload.update(jd_scoring)
+
+    if analyze_scan_limit_meta is not None:
+        payload["scanLimitStatus"] = analyze_scan_limit_meta
 
     return JSONResponse(payload)
 

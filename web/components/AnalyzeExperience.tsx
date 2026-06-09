@@ -44,6 +44,7 @@ export function AnalyzeUploadLanding({
   onDrop,
   onBrowseClick,
   error,
+  scansRemaining,
 }: {
   jd: string;
   onJdChange: (v: string) => void;
@@ -53,6 +54,7 @@ export function AnalyzeUploadLanding({
   onDrop: (e: DragEvent) => void;
   onBrowseClick: () => void;
   error: string | null;
+  scansRemaining?: number | null;
 }) {
   return (
     <div className="az-upload-landing">
@@ -114,6 +116,20 @@ export function AnalyzeUploadLanding({
           🔒 Privacy guaranteed · text is saved to your account, not the file
         </p>
       </div>
+
+      {scansRemaining !== null && scansRemaining !== undefined && (
+        <p style={{
+          textAlign: "center",
+          fontSize: 12,
+          color: scansRemaining === 0 ? "var(--red-ink, #dc2626)" : "var(--muted)",
+          marginTop: 8,
+          marginBottom: 0,
+        }}>
+          {scansRemaining === 0
+            ? "No free scans remaining today · Resets at midnight UTC"
+            : `${scansRemaining} free scan${scansRemaining !== 1 ? "s" : ""} remaining today`}
+        </p>
+      )}
 
       <ApiErrorBanner error={error} className="az-analyze-upload-error" style={{ marginTop: 14, marginBottom: 0 }} />
 
