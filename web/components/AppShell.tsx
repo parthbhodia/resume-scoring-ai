@@ -269,6 +269,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               onBugReport={() => setMobileBugReportOpen(true)}
               onSignOut={onSignOut}
               userInitial={initial}
+              advisorAllowed={advisorAllowed}
             />
             <BugReportDialog open={mobileBugReportOpen} onOpenChange={setMobileBugReportOpen} />
 
