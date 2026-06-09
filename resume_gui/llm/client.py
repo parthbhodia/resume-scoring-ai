@@ -39,6 +39,9 @@ def _llm_json_call(
     model_override: Optional[str] = None,
     temperature: float = 0.2,
     schema: Optional[dict] = None,
+    _log_user_id: Optional[str] = None,
+    _log_email: Optional[str] = None,
+    _log_tool: Optional[str] = None,
 ) -> Optional[dict]:
     """Call Grok (primary when configured) or Gemini for a JSON response.
 
@@ -52,8 +55,8 @@ def _llm_json_call(
     removes the need for a verbose JSON block in the prompt — the model is
     constrained to match the shape at the API level instead.
     """
-    import time
     selected_model = (model_override or primary_llm_model_for_resume_workloads()).strip()
+    _usage: dict = {}  # filled by whichever inner fn succeeds first
 
     def _is_grok_model(model_name: str) -> bool:
         return (model_name or "").strip().lower().startswith("grok")
@@ -80,7 +83,14 @@ def _llm_json_call(
             text = (r.choices[0].message.content or "").strip()
             text = re.sub(r"^```[a-z]*\n?", "", text)
             text = re.sub(r"\n?```$", "", text)
-            return json.loads(text)
+            result = json.loads(text)
+            if not _usage and r.usage:
+                _usage.update({
+                    "model": model,
+                    "prompt_tokens": getattr(r.usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(r.usage, "completion_tokens", None),
+                })
+            return result
         except Exception as exc:
             logger.warning(f"Grok analysis failed: {exc}")
         return None
@@ -97,36 +107,55 @@ def _llm_json_call(
                 response_mime_type="application/json",
                 temperature=temperature,
             )
-            r = client.models.generate_content(
-                model=(model_name or primary_gemini_flash_model()).strip(),
-                contents=prompt,
-                config=cfg,
-            )
+            model = (model_name or primary_gemini_flash_model()).strip()
+            r = client.models.generate_content(model=model, contents=prompt, config=cfg)
             text = (r.text or "").strip()
             text = re.sub(r"^```[a-z]*\n?", "", text)
             text = re.sub(r"\n?```$", "", text)
-            return json.loads(text)
+            result = json.loads(text)
+            if not _usage:
+                meta = getattr(r, "usage_metadata", None)
+                if meta:
+                    _usage.update({
+                        "model": model,
+                        "prompt_tokens": getattr(meta, "prompt_token_count", None),
+                        "completion_tokens": getattr(meta, "candidates_token_count", None),
+                    })
+            return result
         except Exception as exc:
             logger.warning(f"Gemini analysis failed: {exc}")
         return None
 
+    def _maybe_log(out: Optional[dict]) -> Optional[dict]:
+        if out is not None and _log_tool and _usage:
+            try:
+                from resume_gui.services.usage import log_usage_event
+                log_usage_event(
+                    user_id=_log_user_id,
+                    user_email=_log_email,
+                    tool_name=_log_tool,
+                    model_used=_usage.get("model"),
+                    prompt_tokens=_usage.get("prompt_tokens"),
+                    completion_tokens=_usage.get("completion_tokens"),
+                )
+            except Exception:
+                pass
+        return out
+
     if _is_grok_model(selected_model):
         out = _grok_json(selected_model)
         if out is not None:
-            return out
-        # Cross-provider fallback. When we were forced onto a reasoning tier
-        # and it failed, try the reasoning-tier Gemini equivalent before the
-        # default flash model.
+            return _maybe_log(out)
         if model_override:
             out = _gemini_json(_gemini_reasoning_model())
             if out is not None:
-                return out
-        return _gemini_json(primary_gemini_flash_model())
+                return _maybe_log(out)
+        return _maybe_log(_gemini_json(primary_gemini_flash_model()))
     out = _gemini_json(selected_model)
     if out is not None:
-        return out
+        return _maybe_log(out)
     if model_override:
         out = _grok_json(_grok_reasoning_model())
         if out is not None:
-            return out
-    return _grok_json(os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning"))
+            return _maybe_log(out)
+    return _maybe_log(_grok_json(os.environ.get("GROK_MODEL", "grok-4-1-fast-non-reasoning")))

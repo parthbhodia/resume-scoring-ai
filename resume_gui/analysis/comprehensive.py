@@ -904,6 +904,16 @@ Infer the field from the résumé text and score against that field's expectatio
   category; holistic scores must be justified. For scores 95-100 you may use a brief \
   one-sentence positive note or omit. Do not repeat generic rubric text — explain what you \
   actually saw.
+- SUMMARY ANALYSIS (populate summaryAnalysis when a professional summary / profile / objective \
+  paragraph exists): set summaryAnalysis.original to its EXACT text and summaryAnalysis.wordCount to \
+  its word count. List concrete problems in summaryAnalysis.issues — e.g. "78 words: condense to 25-75", \
+  "opens with filler instead of role + value", "vague buzzwords with no specifics", "no years of \
+  experience or domain". When the summary is too long (>75 words), rambling, or weak, set \
+  summaryAnalysis.improvedSummary to a tight 25-75-word rewrite that leads with role + years + domain, \
+  KEEPS every numeral and proper noun from the original, and cuts filler — same honesty rules as bullet \
+  rewrites (the server rejects any rewrite that drops a number or a proper noun). If the summary is \
+  already strong (25-75 words, specific, no filler), set issues to [] and omit improvedSummary. If there \
+  is NO summary section at all, omit summaryAnalysis entirely (do not invent one).
 {jd_section}
 
 STRUCTURAL SIGNALS (deterministic pre-scan — verify against RESUME TEXT; do not invent problems):
@@ -1059,6 +1069,15 @@ _ANALYSIS_SCHEMA = {
                     "suggestions":     {"type": "array", "items": {"type": "string"}},
                 },
             },
+            "summaryAnalysis": {
+                "type": "object",
+                "properties": {
+                    "original":        {"type": "string"},
+                    "wordCount":       {"type": "integer"},
+                    "issues":          {"type": "array", "items": {"type": "string"}},
+                    "improvedSummary": {"type": "string"},
+                },
+            },
             "bulletAnalysis": {
                 "type": "array",
                 "items": {
@@ -1075,6 +1094,7 @@ _ANALYSIS_SCHEMA = {
                             "properties": {
                                 "quantification":     {"type": "string"},
                                 "achievementQuality": {"type": "string"},
+                                "readability":        {"type": "string"},
                             },
                         },
                     },
@@ -1150,7 +1170,14 @@ def _analyze_resume_comprehensive(
     # Route the main analysis through the reasoning tier (default grok-4 —
     # same model used for vision-extract). Better quality on bullet-issue
     # tagging + rewrite generation, at ~8-10s extra latency per request.
-    raw = _llm_json_call(prompt, model_override=_analysis_model(), schema=_ANALYSIS_SCHEMA)
+    raw = _llm_json_call(
+        prompt,
+        model_override=_analysis_model(),
+        schema=_ANALYSIS_SCHEMA,
+        _log_user_id=_log_user_id,
+        _log_email=_log_email,
+        _log_tool="analyze",
+    )
     if raw and isinstance(raw, dict):
         # Strip bogus issues / recommendations that contradict the actual
         # résumé text BEFORE _normalize_analysis runs its score calibration —
