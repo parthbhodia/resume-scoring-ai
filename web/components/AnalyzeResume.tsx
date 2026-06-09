@@ -23,7 +23,7 @@ import { mergeAnalyzeApiJson } from "@/lib/mergeAnalyzeApiJson";
 import { stripResumeBulletPrefix } from "@/lib/stripResumeBulletPrefix";
 import { useResumeAnalyzeStore } from "@/store/resumeAnalyzeStore";
 import type { StructuredResume, BulletMapEntry } from "@/store/resumeAnalyzeStore";
-import { getSupabaseClient, fetchAnalyses, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
+import { getSupabaseClient, fetchAnalyses, fetchAnalysisById, insertAnalysis, deleteAnalysis } from "@/lib/supabase";
 import type { AnalyzeRecord } from "@/lib/supabase";
 import AnalyzePreviewPane from "@/components/AnalyzePreviewPane";
 import {
@@ -369,7 +369,7 @@ function Spinner({ size = 18 }: { size?: number }) {
 // Offline fallback: localStorage `rn_az_history_<userId>` (same AnalyzeRecord[]).
 
 const LS_KEY  = (uid: string) => `rn_az_history_${uid}`;
-const LS_MAX  = 20;
+const LS_MAX  = 10;
 
 function lsLoad(uid: string): AnalyzeRecord[] {
   try { const r = localStorage.getItem(LS_KEY(uid)); return r ? JSON.parse(r) : []; }
@@ -465,7 +465,7 @@ export default function AnalyzeResume() {
           .catch(() => { /* non-critical */ });
       });
       try {
-        const rows = await fetchAnalyses(20);
+        const rows = await fetchAnalyses(10);
         setAzHistory(rows);
         lsSave(user.id, rows);          // keep local cache in sync
       } catch {
@@ -649,18 +649,34 @@ export default function AnalyzeResume() {
     }
   }, [jd, persistResult, appShellSidebar]);
 
-  // Restore a cached result instantly — no re-analysis needed
-  const restoreRecord = useCallback((rec: AnalyzeRecord) => {
+  // Restore a cached result — lazy-fetches the full result blob if not already loaded
+  const restoreRecord = useCallback(async (rec: AnalyzeRecord) => {
     setActiveEditDraftId(rec.id);
-    const merged = mergeAnalyzeApiJson(rec.result as Record<string, unknown>) as unknown as AnalysisResult;
-    setResult(merged);
-    
-    setExpandedBullets({});
     setHistoryOpen(false);
+    setExpandedBullets({});
     setActiveCategory(null);
     setSelectedBulletIndex(null);
     setHistoryRestoreActive(true);
     setImprovementPlanVisible(true);
+
+    let fullRec = rec;
+    if (!rec.result && !rec.id.startsWith("local_")) {
+      setLoading(true);
+      try {
+        fullRec = (await fetchAnalysisById(rec.id)) ?? rec;
+        // Cache the result back into azHistory so subsequent clicks are instant
+        setAzHistory(prev => prev.map(r => r.id === rec.id ? { ...r, result: fullRec.result } : r));
+      } catch {
+        // fall through — will show empty result
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (fullRec.result) {
+      const merged = mergeAnalyzeApiJson(fullRec.result as Record<string, unknown>) as unknown as AnalysisResult;
+      setResult(merged);
+    }
   }, []);
 
   useEffect(() => {

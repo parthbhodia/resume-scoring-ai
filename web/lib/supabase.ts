@@ -361,15 +361,15 @@ export async function updateResumeShareSettings(
 
 /* ── Analyze history CRUD ────────────────────────────────────── */
 
-/** Fetch a user's analysis history, newest first. Returns [] if unauthenticated. */
-export async function fetchAnalyses(limit = 20): Promise<AnalyzeRecord[]> {
+/** Fetch a user's analysis history (metadata only, no result blob), newest first. */
+export async function fetchAnalyses(limit = 10): Promise<AnalyzeRecord[]> {
   const db = getSupabaseClient();
   const { data: { session } } = await db.auth.getSession();
   if (!session?.user?.id) return [];
 
   const { data, error } = await db
     .from("resume_analyses")
-    .select("id, label, score, result, created_at, source_pdf_url, source_filename")
+    .select("id, label, score, created_at, source_pdf_url, source_filename")
     .eq("user_id", session.user.id)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -383,8 +383,34 @@ export async function fetchAnalyses(limit = 20): Promise<AnalyzeRecord[]> {
     createdAt: row.created_at as string,
     sourcePdfUrl: (row.source_pdf_url as string | null) ?? null,
     sourceFilename: (row.source_filename as string | null) ?? null,
-    result:    row.result,
+    result:    null,
   }));
+}
+
+/** Fetch the full result for a single analysis row (lazy-loaded on click). */
+export async function fetchAnalysisById(id: string): Promise<AnalyzeRecord | null> {
+  const db = getSupabaseClient();
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.user?.id) return null;
+
+  const { data, error } = await db
+    .from("resume_analyses")
+    .select("id, label, score, result, created_at, source_pdf_url, source_filename")
+    .eq("id", id)
+    .eq("user_id", session.user.id)
+    .single();
+
+  if (error || !data) return null;
+
+  return {
+    id:        data.id as string,
+    label:     data.label as string,
+    score:     data.score as number,
+    createdAt: data.created_at as string,
+    sourcePdfUrl: (data.source_pdf_url as string | null) ?? null,
+    sourceFilename: (data.source_filename as string | null) ?? null,
+    result:    data.result,
+  };
 }
 
 /** Insert a new analysis row. Returns the new row id. */
