@@ -452,6 +452,18 @@ export default function AnalyzeResume() {
       setUserEmail(user.email ?? null);
       // Seed from localStorage immediately so UI isn't empty while fetching
       setAzHistory(lsLoad(user.id));
+      // Fetch scan quota so remaining count shows before the first scan
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        const authHeader = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+        fetch(apiUrl("/api/scan-limit-status"), { headers: authHeader })
+          .then(r => r.json())
+          .then((data: Record<string, unknown>) => {
+            if (data.enforced && !data.unlimited && typeof data.remaining === "number") {
+              setScansRemaining(data.remaining as number);
+            }
+          })
+          .catch(() => { /* non-critical */ });
+      });
       try {
         const rows = await fetchAnalyses(20);
         setAzHistory(rows);
