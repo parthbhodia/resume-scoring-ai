@@ -13,6 +13,7 @@ from resume_gui.routes.analyze import (
     api_analyze_upload,
     api_explain_category_score,
     api_my_analyses,
+    api_scan_limit_status,
 )
 from resume_gui.routes.export import (
     api_builder_export_docx,
@@ -73,6 +74,7 @@ def all_routes():
         Route("/api/storage-status", api_storage_status, methods=["GET"]),
         Route("/api/backfill-tex", api_backfill_tex, methods=["POST"]),
         Route("/api/analyze-upload", api_analyze_upload, methods=["POST"]),
+        Route("/api/scan-limit-status", api_scan_limit_status, methods=["GET"]),
         Route("/api/my-analyses", api_my_analyses, methods=["GET"]),
         Route("/api/advisor-access", api_advisor_access, methods=["GET"]),
         Route("/api/sync-institution-student", api_sync_institution_student, methods=["POST"]),

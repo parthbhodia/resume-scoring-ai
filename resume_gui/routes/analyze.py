@@ -328,6 +328,32 @@ async def api_analyze_upload(request: Request):
         logger.exception("analyze_upload failed")
         return JSONResponse({"error": str(exc)}, status_code=500)
 
+async def api_scan_limit_status(request: Request):
+    """GET /api/scan-limit-status — return remaining daily scan quota for the current user.
+
+    Returns { enforced, limit, used, remaining, resetAt } for free-tier users,
+    or { enforced: false } for anonymous users and { unlimited: true } for
+    institution users. Used by the frontend to show quota on page load.
+    """
+    auth_user_id, auth_user_email = _authenticated_supabase_user(request)
+    status = _scan_limit_status_for_user(auth_user_id, auth_user_email)
+    reason = status.get("reason")
+    if reason == "daily_free_tier_limit":
+        limit = status.get("limit", 5)
+        used = status.get("used", 0)
+        return JSONResponse({
+            "enforced": True,
+            "unlimited": False,
+            "limit": limit,
+            "used": used,
+            "remaining": max(0, limit - used),
+            "resetAt": status.get("resetAt"),
+        })
+    if reason == "unlimited_institution":
+        return JSONResponse({"enforced": True, "unlimited": True})
+    return JSONResponse({"enforced": False, "unlimited": False})
+
+
 async def api_my_analyses(request: Request):
     """GET /api/my-analyses — return current user's analysis history (latest 50)."""
     user_id = (request.query_params.get("user_id") or "").strip()
