@@ -348,7 +348,7 @@ export default function LandingPage() {
           {/* CTA row */}
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 40 }}>
             <Button onClick={signIn} disabled={loading}
-              className="inline-flex items-center gap-2.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold shadow-[0_4px_16px_rgba(37,99,235,0.22)] border-0 px-6 py-3 text-[15px] rounded-[10px]"
+              className="inline-flex items-center gap-2.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold shadow-[0_6px_24px_rgba(37,99,235,0.38)] border-0 px-8 py-3.5 text-[16px] rounded-xl"
             >
               <GoogleG /> Get started — it&apos;s free
             </Button>
@@ -580,21 +580,21 @@ export default function LandingPage() {
           </p>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 56, flexWrap: "wrap" }}>
             {/* Google */}
-            <svg height="24" viewBox="0 0 74 24" fill="none" aria-label="Google" style={{ opacity: dark ? 0.3 : 0.22 }}>
+            <svg height="24" viewBox="0 0 74 24" fill="none" aria-label="Google" style={{ opacity: dark ? 0.55 : 0.5 }}>
               <path d="M9.24 8.19v2.46h5.88c-.26 1.57-1.67 4.22-5.88 4.22-3.54 0-6.43-2.93-6.43-6.54S5.7 1.79 9.24 1.79c2.03 0 3.39.86 4.16 1.61l2.84-2.73C14.45.5 12.03-.5 9.24-.5 4.13-.5.01 3.63.01 8.73s4.12 9.23 9.23 9.23c5.33 0 8.86-3.75 8.86-9.03 0-.6-.07-1.07-.16-1.53L9.24 8.19z" fill="currentColor" transform="translate(0,6)" style={{ color: dark ? "#e6edf3" : "#57606a" }} />
               <text x="22" y="19" fontFamily="-apple-system,sans-serif" fontSize="18" fontWeight="500" fill={dark ? "#8b949e" : "#57606a"}>Google</text>
             </svg>
             {/* Meta */}
-            <svg height="22" viewBox="0 0 80 22" aria-label="Meta" style={{ opacity: dark ? 0.3 : 0.22 }}>
+            <svg height="22" viewBox="0 0 80 22" aria-label="Meta" style={{ opacity: dark ? 0.55 : 0.5 }}>
               <text x="0" y="17" fontFamily="-apple-system,sans-serif" fontSize="20" fontWeight="700" letterSpacing="-0.5" fill={dark ? "#8b949e" : "#57606a"}>Meta</text>
             </svg>
             {/* Amazon */}
-            <svg height="26" viewBox="0 0 90 26" aria-label="Amazon" style={{ opacity: dark ? 0.3 : 0.22 }}>
+            <svg height="26" viewBox="0 0 90 26" aria-label="Amazon" style={{ opacity: dark ? 0.55 : 0.5 }}>
               <text x="0" y="18" fontFamily="-apple-system,sans-serif" fontSize="18" fontWeight="500" fill={dark ? "#8b949e" : "#57606a"}>amazon</text>
               <path d="M2 23 Q22 29 46 23" stroke={dark ? "#8b949e" : "#57606a"} strokeWidth="2" fill="none" strokeLinecap="round"/>
             </svg>
             {/* Microsoft */}
-            <svg height="22" viewBox="0 0 110 22" aria-label="Microsoft" style={{ opacity: dark ? 0.3 : 0.22 }}>
+            <svg height="22" viewBox="0 0 110 22" aria-label="Microsoft" style={{ opacity: dark ? 0.55 : 0.5 }}>
               <rect x="0" y="1" width="9" height="9" fill={dark ? "#8b949e" : "#57606a"} />
               <rect x="10" y="1" width="9" height="9" fill={dark ? "#8b949e" : "#57606a"} />
               <rect x="0" y="11" width="9" height="9" fill={dark ? "#8b949e" : "#57606a"} />
@@ -602,11 +602,11 @@ export default function LandingPage() {
               <text x="24" y="16" fontFamily="-apple-system,sans-serif" fontSize="15" fontWeight="400" fill={dark ? "#8b949e" : "#57606a"}>Microsoft</text>
             </svg>
             {/* Apple */}
-            <svg height="24" viewBox="0 0 60 24" aria-label="Apple" style={{ opacity: dark ? 0.3 : 0.22 }}>
+            <svg height="24" viewBox="0 0 60 24" aria-label="Apple" style={{ opacity: dark ? 0.55 : 0.5 }}>
               <path d="M11.5 0C10.2 0 8.7.8 7.9 1.9 7.2 2.9 6.6 4.4 6.8 5.9c1.4.1 2.9-.7 3.7-1.8C11.3 3 11.9 1.5 11.5 0zm3.4 6c-1.9 0-3.5 1.1-4.4 1.1-.9 0-2.4-1-4-1-2 0-4 1.2-5 3-2.2 3.8-.6 9.4 1.6 12.5 1 1.5 2.3 3.1 3.9 3.1 1.6 0 2.2-1 4.1-1 1.9 0 2.4 1 4.1 1 1.7 0 2.8-1.5 3.9-3 1.2-1.7 1.7-3.4 1.7-3.5-.1 0-3.2-1.2-3.2-4.7 0-3 2.4-4.4 2.5-4.5C18.7 6.5 16.6 6 14.9 6z" fill={dark ? "#8b949e" : "#57606a"} />
             </svg>
             {/* Stripe */}
-            <svg height="22" viewBox="0 0 52 22" aria-label="Stripe" style={{ opacity: dark ? 0.3 : 0.22 }}>
+            <svg height="22" viewBox="0 0 52 22" aria-label="Stripe" style={{ opacity: dark ? 0.55 : 0.5 }}>
               <text x="0" y="17" fontFamily="-apple-system,sans-serif" fontSize="20" fontWeight="600" fill={dark ? "#8b949e" : "#57606a"}>Stripe</text>
             </svg>
           </div>
@@ -653,7 +653,7 @@ export default function LandingPage() {
               </p>
             </div>
 
-            <nav className="lp-footer-nav" aria-label="Footer">
+            <nav className="lp-footer-nav" aria-label="Footer" style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
               {[
                 ["Blog", "/blog"],
                 ["Contact", "/contact"],
@@ -718,8 +718,13 @@ export default function LandingPage() {
         }
         @media (max-width: 640px) {
           .lp-footer-top { flex-direction: column !important; gap: 24px !important; }
-          .lp-footer-nav { width: 100%; }
+          .lp-footer-nav { width: 100%; gap: 16px !important; }
           .lp-footer-bottom { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+        }
+        @media (max-width: 600px) {
+          .lp-header { padding: 0 16px !important; }
+          .lp-nav { gap: 10px !important; }
+          .lp-nav-section { display: none !important; }
         }
         @media (max-width: 540px) {
           .lp-feat-grid { grid-template-columns: 1fr !important; }
