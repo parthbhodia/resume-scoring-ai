@@ -1230,3 +1230,32 @@ class TestFallbackRewrites:
         ba = bullets[0]
         assert not (ba.get("improvedBullet") or "").strip()   # no crude fallback
         assert not ba.get("categoryRewrites")
+
+
+class TestCondensingRewriteRelaxation:
+    """The honesty filter was rejecting good condensing rewrites (collapse a duty
+    list, drop a descriptive proper-noun aside) — so the LLM's real rewrites got
+    dropped and bullets came back empty. Relaxed for condensing; numerals stay
+    strict. (Lets the comprehensive analysis ship a rewrite for ~every flagged
+    bullet instead of 1 in 7.)"""
+
+    def test_condensing_may_drop_one_descriptive_name(self):
+        # 4 names, drop 1 (75% kept ≥ 60%) → allowed for a readability condense
+        orig = "Integrated with KFC, Pizza Hut, Taco Bell and Yum to launch the platform."
+        rw = "Integrated with KFC, Pizza Hut, and Taco Bell to launch the platform nationwide."
+        ok, why = _validate_rewrite_against_original(orig, rw, category="readability")
+        assert ok, why
+
+    def test_dropping_a_numeral_still_rejected(self):
+        # the hard-fact guard stays strict — a number can never be dropped
+        orig = "Reduced latency by 40% across 5 services."
+        rw = "Reduced latency across services significantly."
+        ok, why = _validate_rewrite_against_original(orig, rw, category="readability")
+        assert not ok and "numeral" in why
+
+    def test_dropping_most_names_still_rejected(self):
+        # wholesale name-stripping (keep < 60%) is still caught as dishonest
+        orig = "Integrated with KFC, Pizza Hut, Taco Bell and Wendy to launch."
+        rw = "Integrated with KFC to launch the platform nationwide across regions."
+        ok, _why = _validate_rewrite_against_original(orig, rw, category="readability")
+        assert not ok

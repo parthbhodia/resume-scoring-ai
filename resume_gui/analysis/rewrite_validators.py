@@ -71,11 +71,13 @@ def _substantive_preservation_ok(original: str, rewrite: str, *, category: str) 
     rev = _substantive_tokens(rewrite)
     kept = len(orig & rev)
     keep_ratio = kept / len(orig)
-    # Achievement rewrites intentionally collapse duty-lists into a single owned
-    # outcome — they SHOULD drop many enumerated activities. Only require that
-    # numerals/proper nouns survive (checked upstream). For other categories,
-    # dense legal/intern bullets often enumerate 3+ deliverables — do not merge them away.
-    if cat == "achievementquality":
+    # Achievement AND quantification rewrites intentionally collapse duty-lists
+    # into a single owned/measured outcome — they SHOULD drop many enumerated
+    # activities (the quant fix adds a [~N]/[X%] placeholder while tightening the
+    # line). Only require that numerals survive (checked upstream). For other
+    # categories, dense legal/intern bullets often enumerate 3+ deliverables —
+    # do not merge them away.
+    if cat in ("achievementquality", "quantification", "quantify_impact"):
         min_keep = 0.40
     else:
         min_keep = 0.72 if len(orig) >= 12 else 0.65
@@ -158,7 +160,14 @@ def _validate_rewrite_against_original(
     new_props = _rewrite_proper_nouns(r)
     dropped_props = orig_props - new_props
     if dropped_props:
-        return False, f"dropped proper nouns: {sorted(dropped_props)[:5]}"
+        # A condensing rewrite legitimately drops a descriptive proper-noun aside
+        # (e.g. "Yum! operates the brands KFC…" → "…across KFC, Pizza Hut, Taco
+        # Bell"). Reject only WHOLESALE name-stripping: when the original has just
+        # 1-2 names keep them all; otherwise keep ≥ 60% of them. Numerals are still
+        # protected strictly above — the hard facts can never be dropped.
+        kept_ratio = len(orig_props & new_props) / len(orig_props) if orig_props else 1.0
+        if len(orig_props) <= 2 or kept_ratio < 0.6:
+            return False, f"dropped proper nouns: {sorted(dropped_props)[:5]}"
 
     # Readability / structure fixes condense run-on bullets, so a big word-count
     # drop is the goal — not dishonesty (facts are already protected above).

@@ -857,13 +857,24 @@ Infer the field from the résumé text and score against that field's expectatio
   CI/CD, AWS Lambda, gRPC) that appeared in the originalBullet. Removing "5 refinement cycles", \
   "3 retries", "PostgreSQL", or "AWS Lambda" while calling the change "readability" or \
   "language quality" is a lie — the rewrite must add JD vocabulary, not strip the original's content. \
-  Rewrites should be the same length or longer than the original.
-- SUBSTANTIVE REWRITES ONLY: a rewrite that only changes tense, plurality, punctuation, or one weak \
-  verb form is NOT an improvedBullet. "Conduct price verification..." → "Conducted price verification..." \
-  is invalid. For duty phrasing / achievementQuality / languageQuality, rewrite the bullet into \
-  ownership + scope + outcome, e.g. "Verified Bloomberg and market pricing data across $500M+ AUM \
-  hedge-fund portfolios, improving NAV precision and valuation accuracy." If you cannot improve \
-  substance, omit improvedBullet/categoryRewrites for that category.
+  Keep every fact; achievement/quantification rewrites stay the same length or longer, while \
+  readability/languageQuality fixes may be SHORTER (condensing is the point there).
+- EVERY FLAGGED BULLET MUST CARRY A REWRITE: each entry you place in bulletAnalysis MUST have a \
+  non-empty improvedBullet that is MATERIALLY DIFFERENT from originalBullet and fixes its \
+  primaryCategory weakness. Never echo the original, never leave improvedBullet blank, never change \
+  only tense/punctuation/one verb form ("Conduct price verification..." → "Conducted price \
+  verification..." is invalid). If you genuinely cannot improve a bullet, DROP it from bulletAnalysis \
+  entirely — do NOT list a bullet you will not rewrite. 5 bullets each with a strong, specific rewrite \
+  beats 12 bullets half of which are blank. \
+- REWRITE RECIPE BY primaryCategory (you ALWAYS have a concrete move, so blanks are never justified): \
+  quantification → add a [X%]/[$Y]/[~N]/[N×] placeholder for the missing metric (a placeholder the user \
+  fills in is fine — never invent a fake number); \
+  achievementQuality → lead with a strong ownership verb + scope + measurable outcome, collapsing a \
+  duty list into one owned result, e.g. "Verified Bloomberg and market pricing data across $500M+ AUM \
+  hedge-fund portfolios, improving NAV precision."; \
+  readability → condense the run-on into ONE tight, skimmable line (shorter is correct here); \
+  languageQuality → remove first-person pronouns (I / we / my / our) and fix grammar/tense; \
+  sectionStructure → tighten into a single clean line.
 - QUANTIFICATION REWRITES (required for quant bullets): when primaryCategory is "quantification" \
   (or issueCategories includes it and the bullet lacks metrics), you MUST include \
   categoryRewrites.quantification with at least one new metric or bracket placeholder ([X%], [$Y], \
@@ -922,9 +933,11 @@ STRUCTURAL SIGNALS (deterministic pre-scan — verify against RESUME TEXT; do no
 RESUME TEXT:
 {resume_text}
 
-IMPORTANT: bulletAnalysis MUST contain the {bullet_analysis_max} weakest bullets from the resume. \
-Do NOT return fewer than the actual number of weak bullets up to the {bullet_analysis_max} limit. \
-Returning only 2-3 bullets when the resume clearly has more weak ones is an under-report and the user notices.
+IMPORTANT: bulletAnalysis should include the weakest bullets from the resume (up to \
+{bullet_analysis_max}), and EACH one MUST carry a non-empty, substantively-different improvedBullet \
+(see REWRITE RECIPE above). Be thorough — most weak bullets CAN be rewritten via the recipe, so don't \
+under-report; but never list a bullet with a blank or echoed rewrite. Quality first: a flagged bullet \
+without a real rewrite is worse than not flagging it.
 
 Return a JSON object matching the provided schema. No markdown fences, no prose outside the JSON.
 """
