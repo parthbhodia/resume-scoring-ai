@@ -30,6 +30,17 @@ _MONTH_YEAR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# "January- February 2023" / "June- July 2019" — two months sharing a single year
+_SHARED_YEAR_MONTH_RANGE_RE = re.compile(
+    r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    r"\.?\s*[-–—/]\s*"
+    r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    r"\.?\s+((?:19|20)\d{2})\b",
+    re.IGNORECASE,
+)
+
 _YEAR_RANGE_RE = re.compile(
     r"\b((?:19|20)\d{2})\s*[-–—/]\s*((?:19|20)\d{2}|Present|Current|Now|Ongoing)\b",
     re.IGNORECASE,
@@ -76,6 +87,15 @@ def _parse_date_range(dates: str, *, today: Optional[date] = None) -> Optional[T
         return None
     today = today or date.today()
 
+    # "January- February 2023" — two months sharing one year (no year after start month)
+    shared = _SHARED_YEAR_MONTH_RANGE_RE.search(raw)
+    if shared:
+        start_m = _month_from_token(shared.group(1))
+        end_m = _month_from_token(shared.group(2))
+        year = int(shared.group(3))
+        if start_m and end_m:
+            return date(year, start_m, 1), _end_of_month(year, end_m)
+
     # Month-year range: Jan 2020 – Mar 2023 / Present
     starts = list(_MONTH_YEAR_RE.finditer(raw))
     if starts:
@@ -95,8 +115,8 @@ def _parse_date_range(dates: str, *, today: Optional[date] = None) -> Optional[T
                 return start, today
         if any(_is_present(tok) for tok in re.split(r"[-–—/]", raw)[1:]):
             return start, today
-        # Single month-year only — assume current month if no end
-        return start, today
+        # Single month-year only — treat as that calendar month (1-month role), not open-ended
+        return start, _end_of_month(start_y, start_m)
 
     # Year-only range: 2020 – 2023 / Present
     yr = _YEAR_RANGE_RE.search(raw)

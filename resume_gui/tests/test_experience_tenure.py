@@ -64,3 +64,28 @@ def test_missing_dates_skipped():
     )
     assert summary["totalMonths"] == 0
     assert summary["datedRoleCount"] == 0
+
+
+def test_shared_year_month_range():
+    """'January- February 2023' should be 2 months, not extend to today."""
+    parsed = _parse_date_range("January- February 2023", today=date(2026, 6, 10))
+    assert parsed is not None
+    start, end = parsed
+    assert start == date(2023, 1, 1)
+    assert end == date(2023, 2, 28)
+
+
+def test_shared_year_month_range_variants():
+    """Slash and en-dash variants of the shared-year pattern."""
+    for fmt in ["June- July 2019", "June – July 2019", "June/July 2019"]:
+        parsed = _parse_date_range(fmt, today=date(2026, 6, 10))
+        assert parsed is not None, f"failed for: {fmt!r}"
+        start, end = parsed
+        assert start == date(2019, 6, 1)
+        assert end == date(2019, 7, 31), f"wrong end for: {fmt!r}"
+
+
+def test_single_month_year_no_end_is_bounded():
+    """'December 2022' alone should be 1 month, not open-ended to today."""
+    parsed = _parse_date_range("December 2022", today=date(2026, 6, 10))
+    assert parsed == (date(2022, 12, 1), date(2022, 12, 31))

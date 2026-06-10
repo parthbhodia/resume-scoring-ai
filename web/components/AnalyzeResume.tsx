@@ -426,6 +426,7 @@ export default function AnalyzeResume() {
   /** Keys local preview-edit drafts (`rn_az_edit_v1_*` in localStorage); set to history row id or optimistic `local_*` id. */
   const [activeEditDraftId, setActiveEditDraftId] = useState<string | null>(null);
   const [editDraftStatus, setEditDraftStatus] = useState<string | null>(null);
+  const [aiRewritingIdx, setAiRewritingIdx] = useState<number | null>(null);
   const [azHistory, setAzHistory]           = useState<AnalyzeRecord[]>([]);
   const [userId, setUserId]                 = useState<string | null>(null);
   const [userEmail, setUserEmail]           = useState<string | null>(null);
@@ -615,7 +616,9 @@ export default function AnalyzeResume() {
             : `${remaining} of ${limit} free scan${limit !== 1 ? "s" : ""} remaining today`,
         );
       }
-      persistResult(file.name.replace(/\.(pdf|docx)$/i, ""), resWithMeta, draftId);
+      const candidateName = res.resumeHeader?.[0]?.trim() || res.structuredResume?.full_name?.trim();
+      const label = candidateName || file.name.replace(/\.(pdf|docx)$/i, "");
+      persistResult(label, resWithMeta, draftId);
     } catch (e: unknown) {
       setError(toUserFriendlyErrorMessage(e instanceof Error ? e.message : "Unknown error"));
     } finally {
@@ -1047,6 +1050,31 @@ export default function AnalyzeResume() {
   const patchBulletRewrite = useCallback((index: number, value: string | null) => {
     patchRewrite(index, value);
   }, [patchRewrite]);
+
+  const requestAiRewrite = useCallback(async (idx: number, originalBullet: string, category: string) => {
+    setAiRewritingIdx(idx);
+    try {
+      const supabase = getSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
+      const resp = await fetch(apiUrl("/api/rewrite-bullet"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ bullet: originalBullet, rewrite: true, instruction: category }),
+      });
+      if (!resp.ok) throw new Error("rewrite failed");
+      const json = await resp.json() as { improved?: string | null };
+      const improved = (json.improved ?? "").trim();
+      if (improved && improved !== originalBullet) {
+        patchBulletRewrite(idx, improved);
+      }
+    } catch {
+      // silently ignore — button will re-enable
+    } finally {
+      setAiRewritingIdx(null);
+    }
+  }, [patchBulletRewrite]);
 
   const patchPreviewLine = useCallback((index: number, value: string | null) => {
     if (value === null || value === "") {
@@ -2697,6 +2725,46 @@ export default function AnalyzeResume() {
                           <span style={{ fontWeight: 700, color: "var(--accent)" }}>Why&nbsp;&nbsp;</span>
                           {coach.why}
                         </p>
+                      )}
+                      {!draft.trim() && rewriteEdits[safeIdx] === undefined && (
+                        <div style={{
+                          marginBottom: 10,
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          background: "var(--surface2)",
+                          border: "1px solid var(--border)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}>
+                          <span style={{ fontSize: 12.5, color: "var(--dim)", lineHeight: 1.45 }}>
+                            No auto-rewrite passed quality checks.
+                          </span>
+                          <button
+                            type="button"
+                            disabled={aiRewritingIdx === safeIdx}
+                            onClick={e => {
+                              e.stopPropagation();
+                              void requestAiRewrite(safeIdx, bullet.originalBullet, activeCategory ?? "achievementQuality");
+                            }}
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: 5,
+                              padding: "5px 11px", borderRadius: 7, flexShrink: 0,
+                              border: "1px solid rgba(139,92,246,0.4)",
+                              background: aiRewritingIdx === safeIdx ? "var(--surface2)" : "rgba(139,92,246,0.1)",
+                              color: aiRewritingIdx === safeIdx ? "var(--dim)" : "rgb(139,92,246)",
+                              fontSize: 11, fontWeight: 600, cursor: aiRewritingIdx === safeIdx ? "wait" : "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            {aiRewritingIdx === safeIdx
+                              ? <><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", border: "2px solid currentColor", borderTopColor: "transparent", animation: "spin 0.7s linear infinite" }} />Generating…</>
+                              : <>✦ Generate AI rewrite</>
+                            }
+                          </button>
+                        </div>
                       )}
                       <BulletImprovedEditor
                         variant="compact"

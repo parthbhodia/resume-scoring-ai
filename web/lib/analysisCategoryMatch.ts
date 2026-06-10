@@ -543,7 +543,7 @@ export function cleanAiArtifacts(
 /** Rewrite text for the active category. */
 export function buildFallbackRewrite(original: string, category: string): string {
   const o = (original || "").trim().replace(/\s+/g, " ");
-  if (!o) return o;
+  if (!o) return "";
   const sentences = o.split(/(?<=[.!?])\s+/).filter(Boolean);
   const structured =
     sentences.length >= 2
@@ -553,25 +553,33 @@ export function buildFallbackRewrite(original: string, category: string): string
         : `${o}.`;
 
   const cat = category.toLowerCase();
+  let result = structured;
   if (cat === "quantification") {
-    if (/\[[^\]]+\]|\d/.test(structured)) return structured;
-    return structured.replace(
-      /\b(cases|matters|briefs|agreements|contracts|filings|memos|documents|notices|properties|clients)\b/i,
-      "[~N] $1",
-    );
-  }
-  if (cat === "achievementquality") {
+    if (!/\[[^\]]+\]|\d/.test(structured)) {
+      result = structured.replace(
+        /\b(cases|matters|briefs|agreements|contracts|filings|memos|documents|notices|properties|clients)\b/i,
+        "[~N] $1",
+      );
+    }
+  } else if (cat === "achievementquality") {
     const led = structured.replace(
       /^(assisted in|helped with|worked on|responsible for|participated in|involved in|supported work on)\s+/i,
       "Delivered ",
     );
-    if (/\[[^\]]+\]|\d/.test(led)) return led;
-    return led.replace(
-      /\b(cases|matters|briefs|agreements|contracts|filings|memos|documents|notices|properties|clients)\b/i,
-      "[~N] $1",
-    );
+    if (!/\[[^\]]+\]|\d/.test(led)) {
+      result = led.replace(
+        /\b(cases|matters|briefs|agreements|contracts|filings|memos|documents|notices|properties|clients)\b/i,
+        "[~N] $1",
+      );
+    } else {
+      result = led;
+    }
   }
-  return structured;
+
+  // Don't show a fallback that's trivially the same as the original — return empty
+  // so the UI shows "No auto-rewrite for this one" instead of a misleading suggestion.
+  if (isTrivialRewrite(o, result)) return "";
+  return result;
 }
 
 export function getRewriteForCategory(

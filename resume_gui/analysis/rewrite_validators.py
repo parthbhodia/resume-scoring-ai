@@ -71,8 +71,14 @@ def _substantive_preservation_ok(original: str, rewrite: str, *, category: str) 
     rev = _substantive_tokens(rewrite)
     kept = len(orig & rev)
     keep_ratio = kept / len(orig)
-    # Dense legal/intern bullets often enumerate 3+ deliverables — do not merge them away.
-    min_keep = 0.72 if len(orig) >= 12 else 0.65
+    # Achievement rewrites intentionally collapse duty-lists into a single owned
+    # outcome — they SHOULD drop many enumerated activities. Only require that
+    # numerals/proper nouns survive (checked upstream). For other categories,
+    # dense legal/intern bullets often enumerate 3+ deliverables — do not merge them away.
+    if cat == "achievementquality":
+        min_keep = 0.40
+    else:
+        min_keep = 0.72 if len(orig) >= 12 else 0.65
     if keep_ratio < min_keep:
         dropped = sorted(orig - rev)[:8]
         return False, (
@@ -171,8 +177,11 @@ def _validate_rewrite_against_original(
     elif cat in ("quantification", "quantify_impact") and adds_example_scale:
         # Quant fixes add scale — they must not delete listed work to fit one line.
         shrink_floor = 0.75 if multi_clause else 0.65
-    elif cat == "achievementquality" and adds_example_scale:
-        shrink_floor = 0.65 if multi_clause else 0.5
+    elif cat == "achievementquality":
+        # Achievement rewrites condense duty-lists into owned outcomes — a multi-clause
+        # blob like "Maintained X, organized Y, wrote Z, conducted W" should become
+        # a focused 25-35 word line. Enforcing 80% word count kills every real rewrite.
+        shrink_floor = 0.45 if multi_clause else (0.55 if adds_example_scale else 0.65)
     else:
         shrink_floor = 0.8
     o_wc = len(o.split())

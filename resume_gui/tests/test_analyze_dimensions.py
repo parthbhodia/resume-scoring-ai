@@ -1094,10 +1094,17 @@ class TestReadabilityRewriteShortening:
         ok, why = _validate_rewrite_against_original(self.ORIG, self.SHORT, category="readability")
         assert ok, why
 
-    def test_same_shortening_rejected_for_non_conciseness_category(self):
-        # The strict ≥80% floor still applies to achievement rewrites that do
-        # not add example scale.
-        ok, _ = _validate_rewrite_against_original(self.ORIG, self.SHORT, category="achievementQuality")
+    def test_achievement_rewrite_allows_condensing_multi_clause_bullet(self):
+        # Achievement rewrites of multi-clause duty-lists should be allowed to
+        # condense significantly (floor is 0.45), because collapsing a wall of
+        # activities into a focused outcome IS the fix.
+        ok, why = _validate_rewrite_against_original(self.ORIG, self.SHORT, category="achievementQuality")
+        assert ok, why
+
+    def test_achievement_rewrite_rejects_excessive_shrink(self):
+        # Even with the relaxed floor, dropping to <45% of original words fails.
+        tiny = "Maintained website."
+        ok, _ = _validate_rewrite_against_original(self.ORIG, tiny, category="achievementQuality")
         assert not ok
 
     def test_quantification_placeholder_rewrite_rejects_dropped_responsibilities(self):
