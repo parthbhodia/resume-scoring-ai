@@ -461,7 +461,7 @@ export default function AnalyzeResume() {
       setAzHistory(lsLoad(user.id));
       // Fetch scan quota so remaining count shows before the first scan
       supabase.auth.getSession().then(({ data: { session } }) => {
-        const authHeader = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+        const authHeader: Record<string, string> = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
         fetch(apiUrl("/api/scan-limit-status"), { headers: authHeader })
           .then(r => r.json())
           .then((data: Record<string, unknown>) => {
