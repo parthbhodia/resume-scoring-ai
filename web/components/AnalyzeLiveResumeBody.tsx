@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResumeAnalyzeStore, type StructuredResume } from "@/store/resumeAnalyzeStore";
 import type { CSSProperties, ReactNode } from "react";
+import { apiUrl } from "@/lib/utils";
+import { getSupabaseClient } from "@/lib/supabase";
 import BulletImprovedEditor from "@/components/BulletImprovedEditor";
 import { highlightMetricSpans } from "@/lib/highlightResumeMetrics";
 import {
@@ -1076,6 +1078,7 @@ export default function AnalyzeLiveResumeBody({
     : (structuredResumeProp ?? structuredFromStore);
   const [popup, setPopup] = useState<PopupState | null>(null);
   const [popupDraft, setPopupDraft] = useState<string>("");
+  const [aiRewritingIdx, setAiRewritingIdx] = useState<number | null>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const popupDragOffsetRef = useRef<{ dx: number; dy: number } | null>(null);
 
@@ -1114,8 +1117,40 @@ export default function AnalyzeLiveResumeBody({
     if (popup == null) return;
     const bullet = bulletAnalysis[popup.bulletIdx];
     if (!bullet) return;
-    setPopupDraft(rewriteEdits[popup.bulletIdx] ?? bullet.improvedBullet ?? "");
-  }, [popup, rewriteEdits, bulletAnalysis]);
+    // Seed from the SAME resolved suggestion that gates the editor (not the raw
+    // improvedBullet) so the textarea is never rendered blank when a category
+    // rewrite resolves but improvedBullet is empty.
+    setPopupDraft(resolveBulletSuggestion(popup.bulletIdx));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [popup, rewriteEdits, bulletAnalysis, activeCategory, categoryAssignmentOpts]);
+
+  // On-demand LLM rewrite for the preview popup — same path as the sidebar card
+  // (POST /api/rewrite-bullet). Used when no rewrite passed the quality checks.
+  const requestPopupAiRewrite = useCallback(async (idx: number, originalBullet: string, category: string) => {
+    setAiRewritingIdx(idx);
+    try {
+      const supabase = getSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
+      const resp = await fetch(apiUrl("/api/rewrite-bullet"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ bullet: originalBullet, rewrite: true, instruction: category }),
+      });
+      if (!resp.ok) throw new Error("rewrite failed");
+      const json = await resp.json() as { improved?: string | null };
+      const improved = (json.improved ?? "").trim();
+      if (improved && improved !== originalBullet) {
+        patchBulletRewrite(idx, improved);   // → rewriteEdits → popup re-seeds with it
+        setPopupDraft(improved);
+      }
+    } catch {
+      /* silently ignore — button re-enables */
+    } finally {
+      setAiRewritingIdx(null);
+    }
+  }, [patchBulletRewrite]);
 
   useEffect(() => {
     if (!popup) return;
@@ -1786,7 +1821,36 @@ export default function AnalyzeLiveResumeBody({
                 )}
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div style={{ padding: "10px 12px 14px" }}>
+              <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>
+                No auto-rewrite passed quality checks for this bullet. Generate one with AI.
+              </div>
+              <button
+                type="button"
+                disabled={aiRewritingIdx === popup.bulletIdx}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestPopupAiRewrite(
+                    popup.bulletIdx,
+                    bulletAnalysis[popup.bulletIdx]?.originalBullet ?? "",
+                    activeCategory ?? "",
+                  );
+                }}
+                style={{
+                  width: "100%", padding: "8px 12px", borderRadius: 8,
+                  border: "1px solid rgba(139,92,246,0.4)",
+                  background: aiRewritingIdx === popup.bulletIdx ? "var(--surface2)" : "rgba(139,92,246,0.1)",
+                  color: aiRewritingIdx === popup.bulletIdx ? "var(--dim)" : "rgb(139,92,246)",
+                  fontSize: 12, fontWeight: 600,
+                  cursor: aiRewritingIdx === popup.bulletIdx ? "wait" : "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                {aiRewritingIdx === popup.bulletIdx ? "Generating…" : "✦ Generate AI rewrite"}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

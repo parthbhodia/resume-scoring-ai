@@ -1201,7 +1201,11 @@ class TestFallbackRewrites:
         assert "wills" in rewrite.lower()
         assert cr.get("readability") == rewrite
 
-    def test_normalize_backfills_empty_rewrite(self):
+    def test_no_crude_fallback_leaves_rewrite_empty(self):
+        """When no LLM rewrite survives the quality checks, improvedBullet stays
+        EMPTY — the crude regex fallback (synthesize_fallback_rewrite, which
+        produced mis-placed "[~N]" placeholders) is retired. The UI shows a
+        'Generate AI rewrite' button instead. (Replaces the old backfill test.)"""
         from resume_gui.analysis.normalize import _normalize_analysis
 
         raw = {
@@ -1212,7 +1216,7 @@ class TestFallbackRewrites:
             )},
             "bulletAnalysis": [{
                 "originalBullet": "Assisted in breach of contract cases. Analyzed consumer rights.",
-                "score": 38,
+                "score": 38,  # < 70 so the helpless-bullet prune keeps it
                 "primaryCategory": "readability",
                 "issueCategories": ["readability"],
                 "issues": ["run-on list"],
@@ -1221,6 +1225,8 @@ class TestFallbackRewrites:
             }],
         }
         result = _normalize_analysis(raw)
-        ba = result["bulletAnalysis"][0]
-        assert (ba.get("improvedBullet") or "").strip()
-        assert ba.get("categoryRewrites")
+        bullets = result["bulletAnalysis"]
+        assert bullets, "score<70 bullet should be kept"
+        ba = bullets[0]
+        assert not (ba.get("improvedBullet") or "").strip()   # no crude fallback
+        assert not ba.get("categoryRewrites")

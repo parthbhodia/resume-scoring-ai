@@ -554,30 +554,21 @@ export function buildFallbackRewrite(original: string, category: string): string
 
   const cat = category.toLowerCase();
   let result = structured;
-  if (cat === "quantification") {
-    if (!/\[[^\]]+\]|\d/.test(structured)) {
-      result = structured.replace(
-        /\b(cases|matters|briefs|agreements|contracts|filings|memos|documents|notices|properties|clients)\b/i,
-        "[~N] $1",
-      );
-    }
-  } else if (cat === "achievementquality") {
-    const led = structured.replace(
+  // The ONLY safe deterministic edit is swapping a duty-lead for an ownership
+  // verb. We deliberately do NOT insert "[~N]" metric placeholders: the regex
+  // mis-places them ("IP [~N] cases", "talent [~N] agreements") and reads wrong.
+  // Real metric/quantification rewrites come from the "Generate AI rewrite"
+  // button (POST /api/rewrite-bullet); when nothing safe applies here the
+  // trivial guard below returns "" so that button shows instead.
+  if (cat === "achievementquality") {
+    result = structured.replace(
       /^(assisted in|helped with|worked on|responsible for|participated in|involved in|supported work on)\s+/i,
       "Delivered ",
     );
-    if (!/\[[^\]]+\]|\d/.test(led)) {
-      result = led.replace(
-        /\b(cases|matters|briefs|agreements|contracts|filings|memos|documents|notices|properties|clients)\b/i,
-        "[~N] $1",
-      );
-    } else {
-      result = led;
-    }
   }
 
   // Don't show a fallback that's trivially the same as the original — return empty
-  // so the UI shows "No auto-rewrite for this one" instead of a misleading suggestion.
+  // so the UI shows the Generate-AI-rewrite affordance instead of a weak echo.
   if (isTrivialRewrite(o, result)) return "";
   return result;
 }
