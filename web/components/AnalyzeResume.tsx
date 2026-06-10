@@ -160,6 +160,13 @@ interface AnalysisResult {
   sourcePdfUrl?: string | null;
   sourceFilename?: string | null;
   scanLimitStatus?: { limit: number; used: number; remaining: number; resetAt: string } | null;
+  /** LLM analysis of the professional summary section. Present only when a summary section exists. */
+  summaryAnalysis?: {
+    original: string;
+    wordCount: number;
+    issues: string[];
+    improvedSummary?: string;
+  } | null;
 }
 
 
@@ -2468,6 +2475,63 @@ export default function AnalyzeResume() {
               </div>
             )}
 
+            {/* Summary rewrite card — shown under Readability when LLM produced one */}
+            {activeCategory === "readability" && result.summaryAnalysis?.improvedSummary && (
+              <div>
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", margin: "0 0 10px" }}>
+                  Summary Rewrite
+                </h3>
+                <div style={{
+                  border: "1px solid var(--border)", borderRadius: 12,
+                  padding: "14px 16px", background: "var(--surface)",
+                  display: "flex", flexDirection: "column", gap: 10,
+                }}>
+                  {result.summaryAnalysis.issues.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {result.summaryAnalysis.issues.map((iss, i) => (
+                        <span key={i} style={{
+                          fontSize: 11, fontWeight: 600, padding: "2px 9px",
+                          borderRadius: 20, background: "rgba(248,113,113,0.12)",
+                          color: "var(--red, #ef4444)", border: "1px solid rgba(248,113,113,0.25)",
+                        }}>{iss}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Original ({result.summaryAnalysis.wordCount} words)
+                  </div>
+                  <div style={{
+                    fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55,
+                    padding: "8px 12px", background: "var(--surface2)",
+                    borderRadius: 8, borderLeft: "3px solid var(--border)",
+                  }}>
+                    {result.summaryAnalysis.original}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Suggested rewrite
+                  </div>
+                  <div style={{
+                    fontSize: 12.5, color: "var(--text)", lineHeight: 1.55,
+                    padding: "8px 12px", background: "rgba(34,197,94,0.06)",
+                    borderRadius: 8, borderLeft: "3px solid rgba(34,197,94,0.4)",
+                  }}>
+                    {result.summaryAnalysis.improvedSummary}
+                  </div>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(result.summaryAnalysis!.improvedSummary!).catch(() => {})}
+                    style={{
+                      alignSelf: "flex-start", fontSize: 12, fontWeight: 600,
+                      padding: "5px 14px", borderRadius: 8, cursor: "pointer",
+                      background: "var(--surface2)", border: "1px solid var(--border)",
+                      color: "var(--text)",
+                    }}
+                  >
+                    Copy rewrite
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Affected bullets with rewrites */}
             {activeBullets.length > 0 && (
               <div>
@@ -2681,7 +2745,7 @@ export default function AnalyzeResume() {
             )}
 
             {/* If no related issues or bullets */}
-            {activeBullets.length === 0 && relatedTopIssues.length === 0 && (
+            {activeBullets.length === 0 && relatedTopIssues.length === 0 && !(activeCategory === "readability" && result.summaryAnalysis?.improvedSummary) && (
               <div style={{
                 padding: "32px", textAlign: "center",
                 border: "1px solid var(--border)", borderRadius: 14,

@@ -375,11 +375,8 @@ export function buildBlocksFromStructured(
           const para: string[] = [];
           if (head) para.push(head);
           if ((e.degree || "").trim()) para.push(e.degree.trim());
-          for (const b of e.bullets || []) {
-            const c = _cleanBullet(b);
-            if (c) para.push(`• ${c}`);
-          }
           if (para.length) blocks.push({ type: "paragraph", lines: para });
+          if ((e.bullets || []).length) pushBullets(e.bullets!);
         }
         return;
       }
