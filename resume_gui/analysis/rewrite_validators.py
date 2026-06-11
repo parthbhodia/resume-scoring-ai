@@ -14,6 +14,11 @@ from resume_gui.analysis.constants import (
 
 logger = logging.getLogger("resume_gui")
 
+# Word-bag similarity above this is treated as a near-no-op and dropped — unless
+# the rewrite adds quantification (bracket placeholder or new numeral), which is a
+# valid fix even when the prose barely changes.
+_NEAR_NO_OP_JACCARD = 0.94
+
 # Content words used to detect when a rewrite drops listed responsibilities.
 _SUBSTANTIVE_STOPWORDS = frozenset({
     "about", "across", "after", "also", "among", "been", "being", "both", "each",
@@ -78,9 +83,9 @@ def _substantive_preservation_ok(original: str, rewrite: str, *, category: str) 
     # categories, dense legal/intern bullets often enumerate 3+ deliverables —
     # do not merge them away.
     if cat in ("achievementquality", "quantification", "quantify_impact"):
-        min_keep = 0.40
+        min_keep = 0.30
     else:
-        min_keep = 0.72 if len(orig) >= 12 else 0.65
+        min_keep = 0.60 if len(orig) >= 12 else 0.55
     if keep_ratio < min_keep:
         dropped = sorted(orig - rev)[:8]
         return False, (
@@ -184,15 +189,15 @@ def _validate_rewrite_against_original(
     if is_conciseness:
         shrink_floor = 0.32
     elif cat in ("quantification", "quantify_impact") and adds_example_scale:
-        # Quant fixes add scale — they must not delete listed work to fit one line.
-        shrink_floor = 0.75 if multi_clause else 0.65
+        # Quant fixes add scale — allow condensing when a placeholder carries the metric.
+        shrink_floor = 0.50 if multi_clause else 0.40
     elif cat == "achievementquality":
         # Achievement rewrites condense duty-lists into owned outcomes — a multi-clause
         # blob like "Maintained X, organized Y, wrote Z, conducted W" should become
         # a focused 25-35 word line. Enforcing 80% word count kills every real rewrite.
-        shrink_floor = 0.45 if multi_clause else (0.55 if adds_example_scale else 0.65)
+        shrink_floor = 0.38 if multi_clause else (0.50 if adds_example_scale else 0.58)
     else:
-        shrink_floor = 0.8
+        shrink_floor = 0.70
     o_wc = len(o.split())
     r_wc = len(r.split())
     if o_wc >= 8 and r_wc < int(o_wc * shrink_floor):
@@ -216,6 +221,30 @@ def _normalize_for_rewrite_diff(s: str) -> str:
     t = re.sub(r"^[\s•\-\*▪▸●◦‧·・‣⁃►➤○⚫—–‑]+", "", s.strip())
     t = re.sub(r"\s+", " ", t)
     return t.lower().strip(" .,:;")
+
+
+def _should_drop_near_no_op(
+    original: str,
+    rewrite: str,
+    *,
+    category: Optional[str] = None,
+) -> bool:
+    """True when a rewrite is too similar to the original to surface as primary."""
+    text = (rewrite or "").strip()
+    if not text:
+        return False
+    if _normalize_for_rewrite_diff(original) == _normalize_for_rewrite_diff(text):
+        return True
+    if _is_morphology_only_rewrite(original, text):
+        return True
+    if _word_jaccard(original, text) < _NEAR_NO_OP_JACCARD:
+        return False
+    cat = (category or "").lower()
+    if cat in ("quantification", "quantify_impact") and _adds_quantification(original, text):
+        return False
+    if _adds_quantification(original, text):
+        return False
+    return True
 
 
 def _word_jaccard(a: str, b: str) -> float:
@@ -282,7 +311,9 @@ def _is_language_micro_edit(original: str, rewrite: str, orig_norm: str) -> bool
     ok, _ = _validate_rewrite_against_original(original, text)
     if not ok:
         return False
-    if _word_jaccard(original, text) >= 0.88:
+    if _adds_quantification(original, text):
+        return False
+    if _word_jaccard(original, text) >= _NEAR_NO_OP_JACCARD:
         return True
     if _is_morphology_only_rewrite(original, text):
         return True
@@ -323,8 +354,13 @@ def _validate_achievement_rewrite(original: str, rewrite: str) -> Tuple[bool, st
     o_first = _first_word_token(original)
     r_first = _first_word_token(rewrite)
     if o_first and r_first and o_first == r_first:
-        return False, "achievement rewrite must change opening word"
-    if not _bullet_leads_with_strong_ownership_verb(rewrite):
+        # Allow same opener when the body still changes materially (slight edits).
+        if _word_jaccard(original, rewrite) >= 0.92:
+            return False, "achievement rewrite must change opening word"
+    if (
+        not _bullet_leads_with_strong_ownership_verb(rewrite)
+        and _word_jaccard(original, rewrite) >= 0.85
+    ):
         return False, "achievement rewrite still uses participial duty-style lead"
     return True, ""
 
@@ -376,18 +412,21 @@ def _filter_bullet_rewrites(
             kept_improved = ""
         elif _reject_achievement(kept_improved, slot="improvedBullet"):
             kept_improved = ""
-        elif _normalize_for_rewrite_diff(kept_improved) == orig_norm:
-            logger.info(
-                "rewrite-validator dropped no-op improvedBullet (identical to original): %r",
-                original[:80],
-            )
-            kept_improved = ""
-        elif _word_jaccard(original, kept_improved) >= 0.88:
-            logger.info(
-                "rewrite-validator dropped near-no-op improvedBullet (jaccard=%.2f): orig=%r rewrite=%r",
-                _word_jaccard(original, kept_improved), original[:80], kept_improved[:80],
-            )
-            pending_lq_salvage = kept_improved
+        elif _should_drop_near_no_op(
+            original, kept_improved, category=primary_category,
+        ):
+            if _normalize_for_rewrite_diff(kept_improved) == orig_norm:
+                logger.info(
+                    "rewrite-validator dropped no-op improvedBullet (identical to original): %r",
+                    original[:80],
+                )
+            else:
+                logger.info(
+                    "rewrite-validator dropped near-no-op improvedBullet (jaccard=%.2f): orig=%r rewrite=%r",
+                    _word_jaccard(original, kept_improved), original[:80], kept_improved[:80],
+                )
+            if not _adds_quantification(original, kept_improved):
+                pending_lq_salvage = kept_improved
             kept_improved = ""
         elif _is_morphology_only_rewrite(original, kept_improved):
             logger.info(
@@ -422,20 +461,21 @@ def _filter_bullet_rewrites(
                     continue
                 kept_cr[str(cat)] = txt
                 continue
-            if _normalize_for_rewrite_diff(txt) == orig_norm:
-                logger.info(
-                    "rewrite-validator dropped no-op categoryRewrites.%s (identical to original): %r",
-                    cat, original[:80],
-                )
-                continue
-            if _word_jaccard(original, txt) >= 0.88:
-                logger.info(
-                    "rewrite-validator dropped near-no-op categoryRewrites.%s (jaccard=%.2f): %r",
-                    cat, _word_jaccard(original, txt), original[:80],
-                )
-                _salvage_language_quality_rewrite(
-                    original, txt, kept_cr, orig_norm, source=f"categoryRewrites.{cat}/jaccard",
-                )
+            if _should_drop_near_no_op(original, txt, category=cat_key):
+                if _normalize_for_rewrite_diff(txt) == orig_norm:
+                    logger.info(
+                        "rewrite-validator dropped no-op categoryRewrites.%s (identical to original): %r",
+                        cat, original[:80],
+                    )
+                else:
+                    logger.info(
+                        "rewrite-validator dropped near-no-op categoryRewrites.%s (jaccard=%.2f): %r",
+                        cat, _word_jaccard(original, txt), original[:80],
+                    )
+                if not _adds_quantification(original, txt):
+                    _salvage_language_quality_rewrite(
+                        original, txt, kept_cr, orig_norm, source=f"categoryRewrites.{cat}/jaccard",
+                    )
                 continue
             if _is_morphology_only_rewrite(original, txt):
                 logger.info(

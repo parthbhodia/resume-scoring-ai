@@ -209,11 +209,42 @@ function isMorphologyOnlyRewrite(original: string, rewrite: string): boolean {
   return changed > 0 && changed <= 2;
 }
 
-export function isTrivialRewrite(original: string, rewrite?: string | null): boolean {
+const REWRITE_PLACEHOLDER_RE = /\[[^\]]*\]/g;
+const REWRITE_NUMERAL_RE = /\d[\d,]*\.?\d*/g;
+const NEAR_NO_OP_JACCARD = 0.94;
+
+/** Mirror of backend `_adds_quantification` — bracket placeholders count too. */
+export function rewriteAddsQuantification(original: string, rewrite: string): boolean {
+  const origNums = new Set((original.match(REWRITE_NUMERAL_RE) ?? []).map((n) => n.trim()));
+  const newNums = new Set((rewrite.match(REWRITE_NUMERAL_RE) ?? []).map((n) => n.trim()));
+  for (const n of newNums) {
+    if (!origNums.has(n)) return true;
+  }
+  const origHoles = new Set(original.match(REWRITE_PLACEHOLDER_RE) ?? []);
+  const newHoles = new Set(rewrite.match(REWRITE_PLACEHOLDER_RE) ?? []);
+  for (const h of newHoles) {
+    if (!origHoles.has(h)) return true;
+  }
+  return false;
+}
+
+export function isTrivialRewrite(
+  original: string,
+  rewrite?: string | null,
+  category?: string,
+): boolean {
   const text = rewrite?.trim() ?? "";
   if (!text) return true;
   if (normalizeForRewriteDiff(original) === normalizeForRewriteDiff(text)) return true;
-  if (wordJaccard(original, text) >= 0.88) return true;
+  const cat = (category ?? "").toLowerCase();
+  if (
+    (cat === "quantification" || cat === "quantify_impact")
+    && rewriteAddsQuantification(original, text)
+  ) {
+    return false;
+  }
+  if (rewriteAddsQuantification(original, text)) return false;
+  if (wordJaccard(original, text) >= NEAR_NO_OP_JACCARD) return true;
   return isMorphologyOnlyRewrite(original, text);
 }
 
@@ -222,7 +253,8 @@ export function isLanguageQualityMicroRewrite(original: string, rewrite?: string
   const text = rewrite?.trim() ?? "";
   if (!text) return false;
   if (normalizeForRewriteDiff(original) === normalizeForRewriteDiff(text)) return false;
-  if (wordJaccard(original, text) >= 0.88) return true;
+  if (rewriteAddsQuantification(original, text)) return false;
+  if (wordJaccard(original, text) >= NEAR_NO_OP_JACCARD) return true;
   if (isMorphologyOnlyRewrite(original, text)) return true;
   const origWords = original.toLowerCase().match(/\b[a-zA-Z]+\b/g) ?? [];
   const rewriteWords = text.toLowerCase().match(/\b[a-zA-Z]+\b/g) ?? [];
@@ -240,9 +272,9 @@ function rewriteVisibleForCategory(original: string, rewrite: string, category: 
   const text = rewrite.trim();
   if (!text) return false;
   if (category === "languageQuality") {
-    return isLanguageQualityMicroRewrite(original, text) || !isTrivialRewrite(original, text);
+    return isLanguageQualityMicroRewrite(original, text) || !isTrivialRewrite(original, text, category);
   }
-  return !isTrivialRewrite(original, text);
+  return !isTrivialRewrite(original, text, category);
 }
 
 /** Priority score for adding metrics (higher = flag under Quantification first). */

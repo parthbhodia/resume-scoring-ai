@@ -155,6 +155,27 @@ class TestQuantificationDimension:
         assert "quantification" in kept_issues
         assert kept_imp == improved
 
+    def test_quant_placeholder_rewrite_kept_despite_high_jaccard(self):
+        """Adding [~N] is a valid quant fix even when the prose barely changes."""
+        orig = (
+            "Drafted legal memos on trademark distinctiveness, sand mining "
+            "compliance, and contractual clauses."
+        )
+        improved = (
+            "Drafted [~12] legal memos on trademark distinctiveness, sand mining "
+            "compliance, and contractual clauses."
+        )
+        kept_imp, kept_cr, kept_issues = _filter_bullet_rewrites(
+            orig,
+            improved,
+            {"quantification": improved},
+            ["quantification"],
+            primary_category="quantification",
+        )
+        assert kept_imp == improved
+        assert kept_cr.get("quantification") == improved
+        assert "quantification" in kept_issues
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DIMENSION 2 — Achievement Quality (strong-verb ownership vs duty-only)
@@ -211,7 +232,7 @@ class TestAchievementQualityDimension:
         assert not _is_participial_noun_phrase_lead(line)
         assert _bullet_leads_with_strong_ownership_verb(line)
 
-    def test_achievement_rewrite_same_opening_rejected(self):
+    def test_achievement_rewrite_same_opening_kept_when_body_changes(self):
         orig = (
             "Automated testing and feature deployments, ensuring reliable "
             "and efficient workflows."
@@ -227,7 +248,7 @@ class TestAchievementQualityDimension:
             ["duty phrasing"],
             primary_category="achievementQuality",
         )
-        assert kept_imp == ""
+        assert kept_imp == improved
         assert kept_cr == {}
 
     def test_achievement_rewrite_strong_opening_kept(self):
@@ -496,12 +517,12 @@ class TestLanguageQualityDimension:
         _, kept_cr, _ = _filter_bullet_rewrites(orig, "", category_rewrites, ["grammar"])
         assert kept_cr.get("languageQuality") == category_rewrites["languageQuality"]
 
-    def test_semicolon_tweak_salvaged_to_language_quality(self):
+    def test_semicolon_tweak_kept_as_primary_rewrite(self):
         orig = "Built APIs for internal tools; improved latency for dashboard queries."
         improved = "Built APIs for internal tools and improved latency for dashboard queries."
         kept_imp, kept_cr, _ = _filter_bullet_rewrites(orig, improved, {}, [])
-        assert kept_imp == ""
-        assert kept_cr.get("languageQuality") == improved
+        assert kept_imp == improved
+        assert "languageQuality" not in kept_cr
 
     def test_real_rewrite_kept(self):
         orig = "Designed the system."
