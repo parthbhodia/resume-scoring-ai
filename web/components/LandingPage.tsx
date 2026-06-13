@@ -683,7 +683,7 @@ export default function LandingPage() {
             </div>
 
             <button
-              onClick={() => { window.location.href = "/?view=analyze"; }}
+              onClick={() => { window.location.href = "/?view=jobs"; }}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 8,
                 padding: "14px 28px",
