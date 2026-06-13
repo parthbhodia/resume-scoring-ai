@@ -159,6 +159,15 @@ export default function LandingPage() {
   const [error,   setError]   = useState<string | null>(null);
   const [theme, toggleTheme]  = useLandingTheme();
   const dark = theme === "dark";
+  const [showBanner, setShowBanner] = useState(false);
+  useEffect(() => {
+    const dismissed = localStorage.getItem("rn-banner-v2");
+    if (!dismissed) setShowBanner(true);
+  }, []);
+  const dismissBanner = useCallback(() => {
+    setShowBanner(false);
+    localStorage.setItem("rn-banner-v2", "1");
+  }, []);
 
   const C = {
     bg:      dark ? T.dBg      : T.bg,
@@ -217,6 +226,47 @@ export default function LandingPage() {
 
   return (
     <div style={{ background: C.bg, color: C.ink, fontFamily: "'DM Sans', -apple-system, sans-serif", minHeight: "100vh" }}>
+
+      {/* ───────────── Announcement banner ──────────────────── */}
+      {showBanner && (
+        <div style={{
+          position: "relative", zIndex: 101,
+          background: "linear-gradient(90deg, #1e40af 0%, #2563eb 50%, #0ea5e9 100%)",
+          padding: "11px 48px 11px 20px",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          textAlign: "center",
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 500, color: "#fff", lineHeight: 1.4 }}>
+            <span style={{ marginRight: 8, fontSize: 15 }}>✨</span>
+            <strong style={{ fontWeight: 700 }}>New:</strong>
+            {" "}AI bullet rewrites + ATS scoring — scan your résumé free, no account needed.
+            {" "}
+            <button
+              onClick={() => { window.location.href = "/?view=analyze"; }}
+              style={{
+                background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.35)",
+                color: "#fff", borderRadius: 6, padding: "2px 10px",
+                fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                marginLeft: 6, transition: "background 0.15s",
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.28)"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.18)"; }}
+            >Try it free →</button>
+          </span>
+          <button
+            onClick={dismissBanner}
+            aria-label="Dismiss banner"
+            style={{
+              position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)",
+              background: "none", border: "none", color: "rgba(255,255,255,0.6)",
+              cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 4,
+              transition: "color 0.15s",
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.6)"; }}
+          >×</button>
+        </div>
+      )}
 
       {/* ───────────── Header ───────────────────────────────── */}
       <header className="lp-header" style={{
@@ -347,30 +397,79 @@ export default function LandingPage() {
           </h1>
 
           <p style={{ fontSize: "var(--font-size-xl)", color: C.muted, lineHeight: 1.72, maxWidth: 480, margin: "0 0 44px", letterSpacing: -0.15 }}>
-            Paste any job description and get an AI-tailored resume in 60 seconds — with a match score, gap analysis, and ATS-safe PDF.
-            {" "}
-            <strong style={{ color: C.ink, fontWeight: 600 }}>Built to get you interview callbacks</strong>
-            {" "}— recruiter screens and phone screens that get you in the door.
-            {" "}
-            <strong style={{ color: C.ink, fontWeight: 600 }}>Completely free</strong>
-            {" "}for students and the community, without paywalls or surprise charges.
-            {" "}Sign in with Google to save analyses — we only receive your email, name, and profile picture (
-            <Link href="/privacy/" prefetch={false} style={{ color: T.blue, textDecoration: "none", fontWeight: 600 }}>Privacy Policy</Link>
-            ).
+            Upload your résumé and get an 8-dimension score, bullet-by-bullet AI rewrites, and a tailored PDF — in under 60 seconds.{" "}
+            <strong style={{ color: C.ink, fontWeight: 600 }}>No account needed. Completely free.</strong>
           </p>
 
           {/* CTA row */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 40 }}>
-            <Button onClick={signIn} disabled={loading}
-              className="inline-flex items-center gap-2.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold shadow-[0_6px_24px_rgba(37,99,235,0.38)] border-0 px-8 py-3.5 text-[16px] rounded-xl"
-            >
-              <GoogleG /> Get started — it&apos;s free
-            </Button>
-            {SHOW_HOW_SECTION && (
-              <Button variant="outline" onClick={() => scrollTo("how")}
-                className="px-6 py-3 text-[15px] rounded-[10px] border-border text-[color:var(--muted)] hover:border-accent hover:text-accent bg-transparent"
-              >See how it works</Button>
-            )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 40, alignItems: "flex-start" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              {/* Primary — frictionless scan, no OAuth required */}
+              <button
+                onClick={() => { window.location.href = "/?view=analyze"; }}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 10,
+                  padding: "18px 36px",
+                  background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
+                  color: "#fff", border: "none", borderRadius: 14,
+                  fontSize: 18, fontWeight: 800, letterSpacing: -0.3,
+                  cursor: "pointer", fontFamily: "inherit",
+                  boxShadow: "0 8px 32px rgba(37,99,235,0.45), 0 2px 8px rgba(37,99,235,0.20)",
+                  transition: "transform 0.15s, box-shadow 0.15s",
+                  whiteSpace: "nowrap",
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.transform = "translateY(-2px)";
+                  el.style.boxShadow = "0 12px 40px rgba(37,99,235,0.55), 0 2px 8px rgba(37,99,235,0.20)";
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.transform = "";
+                  el.style.boxShadow = "0 8px 32px rgba(37,99,235,0.45), 0 2px 8px rgba(37,99,235,0.20)";
+                }}
+              >
+                Score my résumé free
+                <span style={{ fontSize: 20, lineHeight: 1 }}>→</span>
+              </button>
+
+              {/* Secondary — sign in to save */}
+              <button
+                onClick={signIn}
+                disabled={loading}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 9,
+                  padding: "17px 28px",
+                  background: dark ? "rgba(255,255,255,0.06)" : "#fff",
+                  color: dark ? "#e6edf3" : "#0d1117",
+                  border: `1.5px solid ${dark ? "rgba(255,255,255,0.14)" : "#d0d7de"}`,
+                  borderRadius: 14,
+                  fontSize: 16, fontWeight: 600, letterSpacing: -0.2,
+                  cursor: loading ? "wait" : "pointer", fontFamily: "inherit",
+                  boxShadow: dark ? "none" : "0 2px 8px rgba(13,17,23,0.06)",
+                  transition: "border-color 0.15s, box-shadow 0.15s",
+                  opacity: loading ? 0.7 : 1,
+                  whiteSpace: "nowrap",
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.borderColor = T.blue;
+                  el.style.boxShadow = `0 0 0 3px ${T.blueGlow}`;
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.borderColor = dark ? "rgba(255,255,255,0.14)" : "#d0d7de";
+                  el.style.boxShadow = dark ? "none" : "0 2px 8px rgba(13,17,23,0.06)";
+                }}
+              >
+                <GoogleG /> {loading ? "Loading…" : "Sign in with Google"}
+              </button>
+            </div>
+
+            {/* Trust micro-copy */}
+            <p style={{ fontSize: 13, color: C.muted, margin: 0, letterSpacing: -0.1 }}>
+              No account needed to score &nbsp;·&nbsp; Sign in to save your analysis &nbsp;·&nbsp; Always free
+            </p>
           </div>
 
           {error && <p style={{ fontSize: "var(--font-size-base)", color: "#f85149", marginBottom: 16 }}>{error}</p>}
@@ -457,6 +556,8 @@ export default function LandingPage() {
         C={C}
         wide
         animationOnly={!SHOW_LANDING_CARDS}
+        ctaLabel="Fix my bullets free"
+        ctaHref="/?view=analyze"
       >
         <VariantB embedded />
       </LandingPreviewSection>
@@ -490,6 +591,8 @@ export default function LandingPage() {
         C={C}
         wide
         animationOnly={!SHOW_LANDING_CARDS}
+        ctaLabel="Scan my résumé free"
+        ctaHref="/?view=analyze"
       >
         <VariantE embedded />
       </LandingPreviewSection>
@@ -526,6 +629,8 @@ export default function LandingPage() {
         bg={C.surface}
         wide
         animationOnly={!SHOW_LANDING_CARDS}
+        ctaLabel="Tailor my résumé now"
+        ctaHref="/?view=analyze"
       >
         <VariantD embedded />
       </LandingPreviewSection>
@@ -627,20 +732,112 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ───────────── Post-logos CTA nudge ─────────────────── */}
+      <div style={{ background: C.bg2, borderBottom: `1px solid ${C.border}`, padding: "36px 40px", textAlign: "center" }}>
+        <p style={{ fontSize: "var(--font-size-lg)", color: C.muted, margin: "0 0 18px", fontWeight: 500 }}>
+          Is your résumé ready for these companies?
+        </p>
+        <button
+          onClick={() => { window.location.href = "/?view=analyze"; }}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 8,
+            padding: "14px 32px",
+            background: T.blue, color: "#fff",
+            border: "none", borderRadius: 12,
+            fontSize: 16, fontWeight: 700, letterSpacing: -0.2,
+            cursor: "pointer", fontFamily: "inherit",
+            boxShadow: "0 4px 20px rgba(37,99,235,0.35)",
+            transition: "transform 0.15s, box-shadow 0.15s",
+          }}
+          onMouseEnter={e => {
+            const el = e.currentTarget as HTMLElement;
+            el.style.transform = "translateY(-2px)";
+            el.style.boxShadow = "0 8px 28px rgba(37,99,235,0.5)";
+          }}
+          onMouseLeave={e => {
+            const el = e.currentTarget as HTMLElement;
+            el.style.transform = "";
+            el.style.boxShadow = "0 4px 20px rgba(37,99,235,0.35)";
+          }}
+        >
+          Check my résumé score — it&apos;s free <span style={{ fontSize: 18 }}>→</span>
+        </button>
+      </div>
+
       {/* ───────────── Final CTA ────────────────────────────── */}
-      <section style={{ background: T.blue, padding: "100px 40px", textAlign: "center" }}>
+      <section style={{ background: "linear-gradient(135deg, #1e3a8a 0%, #2563eb 60%, #0ea5e9 100%)", padding: "100px 40px", textAlign: "center" }}>
         <h2 style={{ fontSize: "clamp(40px, 5.5vw, 68px)", fontWeight: 800, lineHeight: 1.06, letterSpacing: "-0.04em", color: "#fff", margin: "0 0 20px" }}>
           Your next interview<br />starts here.
         </h2>
-        <p style={{ fontSize: "var(--font-size-xl)", color: "rgba(255,255,255,0.78)", margin: "0 0 44px", lineHeight: 1.65, maxWidth: 560, marginLeft: "auto", marginRight: "auto" }}>
-          <strong style={{ color: "#fff", fontWeight: 600 }}>Completely free</strong>
-          {" "}— for students, lifelong learners, and anyone in the job-seeking community. No credit card, no hidden tiers. Tailor in 60 seconds and apply with a résumé built to earn interview callbacks.
+        <p style={{ fontSize: "var(--font-size-xl)", color: "rgba(255,255,255,0.82)", margin: "0 0 44px", lineHeight: 1.65, maxWidth: 560, marginLeft: "auto", marginRight: "auto" }}>
+          <strong style={{ color: "#fff", fontWeight: 700 }}>Completely free</strong>
+          {" "}— for students, lifelong learners, and anyone in the job-seeking community. No credit card, no hidden tiers. Tailor in 60 seconds and apply with a résumé built to earn callbacks.
         </p>
-        <Button onClick={signIn} disabled={loading}
-          className="inline-flex items-center gap-2.5 bg-white text-[#2563eb] hover:opacity-90 border-0 px-9 py-4 text-[18px] font-bold rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.18)] tracking-tight"
-        >
-          <GoogleG /> {loading ? "Loading…" : "Get started — it's free"}
-        </Button>
+
+        {/* Dual CTA */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
+          <button
+            onClick={() => { window.location.href = "/?view=analyze"; }}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 10,
+              padding: "18px 40px",
+              background: "#fff", color: T.blue,
+              border: "none", borderRadius: 14,
+              fontSize: 18, fontWeight: 800, letterSpacing: -0.3,
+              cursor: "pointer", fontFamily: "inherit",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.20)",
+              transition: "transform 0.15s, box-shadow 0.15s",
+              whiteSpace: "nowrap",
+            }}
+            onMouseEnter={e => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.transform = "translateY(-2px)";
+              el.style.boxShadow = "0 12px 40px rgba(0,0,0,0.28)";
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.transform = "";
+              el.style.boxShadow = "0 8px 32px rgba(0,0,0,0.20)";
+            }}
+          >
+            Score my résumé free <span style={{ fontSize: 20 }}>→</span>
+          </button>
+
+          <button
+            onClick={signIn}
+            disabled={loading}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 9,
+              padding: "17px 30px",
+              background: "rgba(255,255,255,0.12)",
+              color: "#fff",
+              border: "1.5px solid rgba(255,255,255,0.30)",
+              borderRadius: 14,
+              fontSize: 16, fontWeight: 600, letterSpacing: -0.2,
+              cursor: loading ? "wait" : "pointer", fontFamily: "inherit",
+              transition: "background 0.15s, border-color 0.15s",
+              whiteSpace: "nowrap",
+              opacity: loading ? 0.7 : 1,
+            }}
+            onMouseEnter={e => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.background = "rgba(255,255,255,0.22)";
+              el.style.borderColor = "rgba(255,255,255,0.50)";
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.background = "rgba(255,255,255,0.12)";
+              el.style.borderColor = "rgba(255,255,255,0.30)";
+            }}
+          >
+            <GoogleG /> {loading ? "Loading…" : "Sign in with Google"}
+          </button>
+        </div>
+
+        {/* Micro-copy */}
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", margin: 0 }}>
+          No credit card &nbsp;·&nbsp; No paywall &nbsp;·&nbsp; Cancel-nothing
+        </p>
       </section>
 
       {/* ───────────── Footer ───────────────────────────────── */}
@@ -769,6 +966,8 @@ function LandingPreviewSection({
   wide = false,
   bg,
   animationOnly = false,
+  ctaLabel,
+  ctaHref,
   C,
   children,
 }: {
@@ -780,6 +979,8 @@ function LandingPreviewSection({
   wide?: boolean;
   bg?: string;
   animationOnly?: boolean;
+  ctaLabel?: string;
+  ctaHref?: string;
   C: Record<string, string>;
   children: React.ReactNode;
 }) {
@@ -817,6 +1018,37 @@ function LandingPreviewSection({
           }}>{desc}</p>
         ) : null}
         {children}
+        {ctaLabel && ctaHref && (
+          <div style={{ marginTop: 36, textAlign: animationOnly ? "center" : undefined }}>
+            <button
+              onClick={() => { window.location.href = ctaHref; }}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 8,
+                padding: "13px 28px",
+                background: dark ? "rgba(255,255,255,0.10)" : T.blue,
+                color: "#fff",
+                border: dark ? "1.5px solid rgba(255,255,255,0.20)" : "none",
+                borderRadius: 12,
+                fontSize: 15, fontWeight: 700, letterSpacing: -0.2,
+                cursor: "pointer", fontFamily: "inherit",
+                boxShadow: dark ? "none" : "0 4px 20px rgba(37,99,235,0.35)",
+                transition: "transform 0.15s, box-shadow 0.15s",
+              }}
+              onMouseEnter={e => {
+                const el = e.currentTarget as HTMLElement;
+                el.style.transform = "translateY(-1px)";
+                el.style.boxShadow = dark ? "none" : "0 8px 28px rgba(37,99,235,0.45)";
+              }}
+              onMouseLeave={e => {
+                const el = e.currentTarget as HTMLElement;
+                el.style.transform = "";
+                el.style.boxShadow = dark ? "none" : "0 4px 20px rgba(37,99,235,0.35)";
+              }}
+            >
+              {ctaLabel} <span style={{ fontSize: 17 }}>→</span>
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );
