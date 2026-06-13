@@ -264,7 +264,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 a { cursor: pointer; }
 
 /* ── Form elements ────────────────────────────────────────── */
-input, textarea, select {
+input:not([type="checkbox"]):not([type="radio"]), textarea, select {
   font-family: inherit;
   font-size: 14px;
   letter-spacing: -0.1px;
@@ -277,12 +277,12 @@ input, textarea, select {
   width: 100%;
   transition: border-color var(--transition), box-shadow var(--transition);
 }
-input:hover, textarea:hover { border-color: var(--border-h); }
-input:focus, textarea:focus, select:focus {
+input:not([type="checkbox"]):not([type="radio"]):hover, textarea:hover { border-color: var(--border-h); }
+input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(47, 129, 247, 0.22);
 }
-input::placeholder, textarea::placeholder { color: var(--dim); }
+input:not([type="checkbox"]):not([type="radio"])::placeholder, textarea::placeholder { color: var(--dim); }
 textarea { resize: vertical; line-height: 1.6; }
 select { appearance: none; cursor: pointer; }
 select option { background: var(--surface); }
