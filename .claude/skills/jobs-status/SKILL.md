@@ -15,14 +15,17 @@ Produces an at-a-glance dashboard of the job-feed pipeline from **live data**, n
 
 ## Step 1 — Postings + extraction (one query)
 
+**`pending` must mean RECENT-eligible** (postered within `EXTRACT_MAX_AGE_DAYS`, default 30) — that's all the extractor ever works on. Old postings (>window) are intentionally never extracted, so counting them as "pending" overstates the real backlog ~3-4×. Report `recent_pending` as the headline; surface `old_skipped` separately so it's clear it's not a backlog.
+
 ```sql
 select
- (select count(*) from job_postings) as total_postings,
  (select count(*) from job_postings where is_active) as active_postings,
  (select count(*) from job_postings where is_active and requirement_concepts is not null) as extracted,
- (select count(*) from job_postings where is_active and requirement_concepts is null and jd_text is not null) as pending_extraction,
+ (select count(*) from job_postings where is_active and requirement_concepts is null and posted_at > now() - interval '30 days') as recent_pending,
+ (select count(*) from job_postings where is_active and requirement_concepts is null and (posted_at <= now() - interval '30 days' or posted_at is null)) as old_skipped,
  (select count(distinct company) from job_postings where is_active) as companies;
 ```
+When rendering, the "Pending extraction" KPI = `recent_pending`; note `old_skipped` as "(+N old, not extracted by design)" so the big number never reads as a backlog.
 
 Per-source breakdown:
 ```sql
