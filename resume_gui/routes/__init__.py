@@ -47,6 +47,7 @@ from resume_gui.routes.rewrite import api_rewrite_bullet, api_rewrite_role
 from resume_gui.routes.share import api_share_create, api_share_resolve, api_share_revoke
 from resume_gui.routes.static import api_health, homepage, serve_pdf
 from resume_gui.routes.suggest import api_suggest_changes_stream, api_suggest_gap_fix
+from resume_gui.routes.profile_dashboard import profile_dashboard_handler
 
 
 def all_routes():
@@ -76,6 +77,7 @@ def all_routes():
         Route("/api/analyze-upload", api_analyze_upload, methods=["POST"]),
         Route("/api/scan-limit-status", api_scan_limit_status, methods=["GET"]),
         Route("/api/my-analyses", api_my_analyses, methods=["GET"]),
+        Route("/api/profile-dashboard", profile_dashboard_handler, methods=["GET"]),
         Route("/api/advisor-access", api_advisor_access, methods=["GET"]),
         Route("/api/sync-institution-student", api_sync_institution_student, methods=["POST"]),
         Route("/api/cohort-stats", api_cohort_stats, methods=["GET"]),
