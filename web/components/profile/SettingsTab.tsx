@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { getSupabaseClient } from "@/lib/supabase";
+import { apiUrl } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,37 +52,98 @@ function saveLocal(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
+async function getAuthHeader(): Promise<Record<string, string>> {
+  const db = getSupabaseClient();
+  const { data } = await db.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function SettingsTab() {
   const router = useRouter();
 
-  // Notification prefs — persisted to localStorage
+  // Notification prefs — start from localStorage; hydrated from backend on mount
   const [notify, setNotify] = useState<NotifyPrefs>(() => loadLocal(NOTIFY_KEY, DEFAULT_NOTIFY));
 
-  // Display prefs — persisted to localStorage
+  // Display prefs — localStorage only (no backend sync needed)
   const [display, setDisplay] = useState<DisplayPrefs>(() => loadLocal(DISPLAY_KEY, DEFAULT_DISPLAY));
 
   // Real signed-in user email from Supabase
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
+  // "Saved" indicator state
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Delete account confirmation input
   const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
   const [signingOut, setSigningOut] = useState(false);
 
-  // Load user email on mount
+  // Track whether we've loaded from backend (prevents writing stale localStorage on first render)
+  const loadedFromBackend = useRef(false);
+
+  // Load user email + backend notify prefs on mount
   useEffect(() => {
     const db = getSupabaseClient();
     db.auth.getUser().then(({ data }) => {
       setUserEmail(data.user?.email ?? null);
     });
+
+    // Load notify prefs from backend (overrides localStorage with DB truth)
+    getAuthHeader().then(async (headers) => {
+      try {
+        const resp = await fetch(apiUrl("/api/profile/notify-prefs"), { headers });
+        if (resp.ok) {
+          const prefs: NotifyPrefs = await resp.json();
+          setNotify(prefs);
+          saveLocal(NOTIFY_KEY, prefs);
+          loadedFromBackend.current = true;
+        }
+      } catch {
+        // silently fall back to localStorage value already in state
+        loadedFromBackend.current = true;
+      }
+    });
   }, []);
 
-  // Persist notify prefs
-  useEffect(() => { saveLocal(NOTIFY_KEY, notify); }, [notify]);
-
-  // Persist display prefs
+  // Persist display prefs to localStorage
   useEffect(() => { saveLocal(DISPLAY_KEY, display); }, [display]);
+
+  // Sync notify prefs to backend (debounced 600ms) — skip the initial render
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFirstNotifyRender = useRef(true);
+
+  useEffect(() => {
+    if (isFirstNotifyRender.current) {
+      isFirstNotifyRender.current = false;
+      return;
+    }
+    saveLocal(NOTIFY_KEY, notify);
+    setSaveStatus("saving");
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(async () => {
+      try {
+        const headers = await getAuthHeader();
+        const resp = await fetch(apiUrl("/api/profile/notify-prefs"), {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(notify),
+        });
+        if (resp.ok) {
+          setSaveStatus("saved");
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = setTimeout(() => setSaveStatus("idle"), 2000);
+        } else {
+          setSaveStatus("idle");
+        }
+      } catch {
+        setSaveStatus("idle");
+      }
+    }, 600);
+    return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
+  }, [notify]);
 
   const toggleNotify = useCallback((key: keyof NotifyPrefs) => {
     setNotify(prev => ({ ...prev, [key]: !prev[key] }));
@@ -122,9 +184,17 @@ export function SettingsTab() {
 
       {/* ── Email Preferences ─────────────────────────────────────────────── */}
       <Card className="bg-white border border-[#e5e5e7] rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-[#141416] mb-1">
-          Email Preferences
-        </h3>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-lg font-semibold text-[#141416]">
+            Email Preferences
+          </h3>
+          {saveStatus === "saving" && (
+            <span className="text-xs text-[#99999e]">Saving…</span>
+          )}
+          {saveStatus === "saved" && (
+            <span className="text-xs text-[#33CC88] font-medium">✓ Saved</span>
+          )}
+        </div>
         <p className="text-xs text-[#99999e] mb-5">
           We&apos;ll send at most 1–2 emails per week.
         </p>
