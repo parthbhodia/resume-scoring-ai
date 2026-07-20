@@ -13,11 +13,11 @@ def _csv_set(raw: str) -> set[str]:
 
 
 def _daily_scan_limit() -> int:
-    raw = (os.environ.get("FREE_SCAN_DAILY_LIMIT") or "5").strip()
+    raw = (os.environ.get("FREE_SCAN_DAILY_LIMIT") or "10").strip()
     try:
         value = int(raw)
     except ValueError:
-        value = 5
+        value = 10
     return max(1, value)
 
 
